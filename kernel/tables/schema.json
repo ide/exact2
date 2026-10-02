@@ -648,6 +648,12 @@
       "_comment": "HTML `enterkeyhint` on a text field: what the keyboard's return key says (enter, done, go, next, previous, search, send). Absent: go when the field submits, else return."
     },
     {
+      "id": 230,
+      "name": "autocomplete",
+      "kind": "str",
+      "_comment": "HTML `autocomplete` on an `input`: what the field holds, so the platform can fill it (iOS: UITextContentType — `username`, `current-password`, `new-password`, `one-time-code`, `email`, `name`, `tel`, …; `off` names nothing)."
+    },
+    {
       "id": 214,
       "name": "scrollRestoration",
       "kind": "str"
