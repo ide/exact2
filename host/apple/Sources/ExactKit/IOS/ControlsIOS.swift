@@ -67,6 +67,8 @@ final class ControlHost: NSObject {
     var kinds: [UInt32: String] = [:]
     /// The size last reported per control, so each is published once.
     private var reported: [UInt32: CGSize] = [:]
+    /// Each control's accent as last written, by value: a new UIColor of the same colour is not a change.
+    private var accents: [UInt32: String] = [:]
     /// A select's menu as last built, so a batch that leaves it alone does not rebuild it.
     var menus: [UInt32: SelectMenu] = [:]
     /// A range's last reported value while it moves, so each is sent once.
@@ -99,6 +101,7 @@ final class ControlHost: NSObject {
         for id in Array(controls.keys) where !live.contains(id) {
             controls.removeValue(forKey: id)?.removeFromSuperview()
             reported.removeValue(forKey: id)
+            accents.removeValue(forKey: id)
             kinds.removeValue(forKey: id)
             menus.removeValue(forKey: id)
         }
@@ -113,26 +116,33 @@ final class ControlHost: NSObject {
             }
             if control.superview !== owner { owner.addSubview(control) }
             let on = owner.props["checked"].map { $0 == "true" }
-            let accent = owner.channels("accent_color").map { TextEngine.color($0) }
+            let channels = owner.channels("accent_color")
+            let accentChanged = accents[owner.id] != channels.map { "\($0)" } ?? ""
+            accents[owner.id] = channels.map { "\($0)" } ?? ""
+            let accent = channels.map { TextEngine.color($0) }
+            // UIKit treats a set as a change even to the same value: a
+            // Liquid Glass switch restarts its thumb's motion on each. Every
+            // batch passes here, so only a value that differs is written.
             if let s = control as? UISwitch {
-                if let on, s.isOn != on { s.setOn(on, animated: s.window != nil) }
-                s.onTintColor = accent
+                if let on, s.isOn != on, !s.isTracking { s.setOn(on, animated: s.window != nil) }
+                if accentChanged { s.onTintColor = accent }
             } else if let c = control as? ExactCheckbox {
                 if let on { c.isOn = on }
                 c.accent = accent
             } else {
                 configureValue(control, owner, accent: accent)
             }
-            control.isEnabled = !owner.disabled
-            control.accessibilityLabel = owner.props["accessibilityLabel"]
-            control.accessibilityIdentifier = owner.props["testId"]
+            if control.isEnabled == owner.disabled { control.isEnabled = !owner.disabled }
+            if control.accessibilityLabel != owner.props["accessibilityLabel"] { control.accessibilityLabel = owner.props["accessibilityLabel"] }
+            if control.accessibilityIdentifier != owner.props["testId"] { control.accessibilityIdentifier = owner.props["testId"] }
             let natural = naturalSize(control, owner)
             let box = owner.contentBox()
             // A slider's track spans its box, as the web's does; the others
             // keep their own size, centred.
             let width = control is UISlider ? box.width : natural.width
-            control.frame = CGRect(x: box.midX - width / 2, y: box.midY - natural.height / 2,
-                                   width: width, height: natural.height)
+            let frame = CGRect(x: box.midX - width / 2, y: box.midY - natural.height / 2,
+                               width: width, height: natural.height)
+            if control.frame != frame { control.frame = frame }
             if reported[owner.id] != natural {
                 reported[owner.id] = natural
                 sizes.append((owner.id, natural))
