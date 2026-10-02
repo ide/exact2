@@ -272,6 +272,20 @@ pub trait TextMeasurer {
     ) -> TextMetrics {
         self.measure(request)
     }
+
+    /// The size a system symbol draws at (an Apple system symbol name, as
+    /// `symbol:sf/<name>` or a portable role names it, at a point size and
+    /// CSS weight), measured in the layout that places it, as text is, so a
+    /// first frame has its real box. `None` when this host cannot say; the
+    /// image then waits for its host-reported size (LLP 1035.004.000 D2).
+    fn measure_symbol(
+        &mut self,
+        _name: &str,
+        _font_size: f32,
+        _font_weight: u16,
+    ) -> Option<(f32, f32)> {
+        None
+    }
 }
 
 /// Deterministic reference measurer: every glyph advances `advance_em` ems

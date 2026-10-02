@@ -14,7 +14,8 @@ use taffy::style::{AvailableSpace, BoxSizing};
 
 /// The content size of `slot` given what is `known` and the `space` offered,
 /// or `None` when it is not a replaced element. `inset` is its padding plus
-/// border.
+/// border. `measured` is a natural size the layout measured itself (a
+/// system symbol's), used when the host has reported none.
 pub(crate) fn measure(
     arena: &NodeArena,
     slot: u32,
@@ -22,12 +23,13 @@ pub(crate) fn measure(
     inset: Rect<f32>,
     known: Size<Option<f32>>,
     space: Size<AvailableSpace>,
+    measured: Option<(f32, f32)>,
 ) -> Option<Size<f32>> {
     let node_type = arena.node_type(slot);
     if !node_type.is_replaced() {
         return None;
     }
-    let natural = arena.intrinsic(slot);
+    let natural = arena.intrinsic(slot).or(measured);
     let default = node_type.default_object_size();
     // What the ratio relates: the content box, or the border box
     // (box-sizing, unless `auto <ratio>`).
@@ -91,4 +93,18 @@ pub(crate) fn measure(
         width: known.width.unwrap_or(iw),
         height: known.height.unwrap_or(ih),
     })
+}
+
+/// The Apple system symbol name an image's `symbol:` source draws — a raw
+/// `sf/<name>`, or a portable role's — or `None` for any other source.
+pub(crate) fn symbol_name(arena: &NodeArena, slot: u32) -> Option<&str> {
+    let role = arena
+        .props(slot)
+        .str(crate::PropId::ImageSource)?
+        .strip_prefix("symbol:")?;
+    Some(
+        role.strip_prefix("sf/")
+            .or_else(|| crate::generated::symbol(role).map(|s| s.0))
+            .unwrap_or(""),
+    )
 }
