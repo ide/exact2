@@ -14,17 +14,17 @@ row that only *closes* its popover or dialog is admitted. So any button whose
 job is to open something has to be a custom button, and loses the platform's
 look.
 
-Lexy has four such buttons, each one you would want native:
+The use cases, each a button you would want native:
 
-| Where | Today | Opens |
+| Use case | Written today | Opens |
 |---|---|---|
-| Status: Lock, Unlock, Start | `button commandfor=confirm-lock command="show-modal"` | a modal `dialog` with the action and Cancel |
-| Map: Open in Maps | `button popovertarget="maps-chooser"` | a popover `role="alertdialog"` with Apple Maps, Google Maps, Waze |
-| Settings: Maps app row | the same | the same, or the "no maps app" `dialog` |
-| Status: "synced…" and "checked…" lines | `button popovertarget="synced-at"` | a small content popover |
+| Confirm a consequential action (Delete, Sign Out, a remote command) | `button commandfor=confirm-delete command="show-modal"` | a modal `dialog` with the action and Cancel |
+| Choose a destination ("Open in…" Apple Maps, Google Maps, Waze) | `button popovertarget="open-in"` | a menu-shaped popover of choices |
+| The same choice from a settings row, or a "nothing installed" notice when there is no choice | the same, `commandfor` when there is no choice | the popover, or a `dialog` |
+| Explain a value inline ("Updated 2 min ago") | `button popovertarget="updated-at"` | a small content popover |
 
-Lexy also already opens three dialogs from state rather than from a button:
-`dialog open=(error != "")` for the map, climate and command failures.
+A related case is not opened by a button: an alert for an error the app
+learns about later, shown from state (`dialog open=(error != "")`).
 
 ## 2. What exists on main
 
@@ -57,8 +57,8 @@ presentation; that already exists for custom buttons.
 
 ## 3. The alternatives
 
-Each is shown on Lexy's two real cases: the Lock confirmation and the maps
-chooser.
+Each is shown on the two main use cases: confirming an action, and
+choosing a destination.
 
 ### A. Declarative, by reference (the HTML way, as main has it)
 
@@ -72,17 +72,17 @@ button appearance="auto" buttonStyle="filled" commandfor=`confirm-${command}` co
   image `symbol:sf/${symbol}`
   text label
 dialog id=`confirm-${command}` closedby="any"
-  text `${label} your ${car}?`
+  text `${label} ${item}?`
   button appearance="auto" destructive=destructive press=run(command) commandfor=`confirm-${command}` command="close"
     text label
   button appearance="auto" commandfor=`confirm-${command}` command="close"
     text "Cancel"
 
-button appearance="auto" buttonStyle="filled" popovertarget="maps-chooser"
+button appearance="auto" buttonStyle="filled" popovertarget="open-in"
   image "symbol:sf/map"
   text "Open in Maps"
-column id="maps-chooser" popover="auto" role="menu"
-  button press=pick("apple") popovertarget="maps-chooser" popovertargetaction="hide"
+column id="open-in" popover="auto" role="menu"
+  button press=pick("apple") popovertarget="open-in" popovertargetaction="hide"
     text "Apple Maps"
   …
 ```
@@ -97,8 +97,9 @@ column id="maps-chooser" popover="auto" role="menu"
   press**: no `press` of its own and none on an ancestor that would take its
   activation. Then the activation routine is only "open", and every blocker
   the reviews found (pressing before revalidating, pressing twice) cannot
-  arise. All four Lexy invokers have no `press`. An invoker that needs both
-  stays custom until the full routine is built.
+  arise. An invoker for any of the §1 use cases needs no `press`: opening is
+  its whole job. An invoker that needs both stays custom until the full
+  routine is built.
 
 ### B. Declarative, as a child of the button
 
@@ -119,7 +120,7 @@ button appearance="auto" buttonStyle="filled"
 button appearance="auto" buttonStyle="filled" aria-label=label
   image `symbol:sf/${symbol}`
   text label
-  confirm title=`${label} your ${car}?`
+  confirm title=`${label} ${item}?`
     button destructive=destructive press=run(command)
       text label
 ```
@@ -149,7 +150,7 @@ button appearance="auto" buttonStyle="filled"
   text "Open in Maps"
 
 button appearance="auto" buttonStyle="filled"
-  confirm={title: `${label} your ${car}?`, action: label, destructive: destructive, press: run(command)}
+  confirm={title: `${label} ${item}?`, action: label, destructive: destructive, press: run(command)}
   text label
 ```
 
@@ -168,13 +169,13 @@ The button only presses. Its action asks the host to present something and
 gets the choice back, as `fetch` or the share sheet (LLP 1069.003) do.
 
 ```
-button appearance="auto" buttonStyle="filled" press=lock
-  text "Lock"
+button appearance="auto" buttonStyle="filled" press=remove
+  text "Delete"
 
-action lock
-  choice = confirm(`Lock your ${car}?`, actions: [{title: "Lock", destructive: false}])
-  if choice == "Lock"
-    run("lock")
+action remove
+  choice = confirm(`Delete ${item}?`, actions: [{title: "Delete", destructive: true}])
+  if choice == "Delete"
+    run("delete")
 ```
 
 - **For:** it removes the ordering problem entirely. The press runs first,
@@ -194,13 +195,13 @@ action lock
 ### E. Declarative, from state (`open=`)
 
 The button presses and sets state; a `dialog` (or popover) is shown while its
-`open` expression holds. Lexy already does this for its error alerts, on this
-branch (`dialog open=`, 83ca7f34).
+`open` expression holds, as an error alert already is (`dialog open=` on
+this branch, 83ca7f34).
 
 ```
-button appearance="auto" buttonStyle="filled" press=ask("lock")
-  text "Lock"
-dialog closedby="any" open=(asking == "lock") close=cancelAsk
+button appearance="auto" buttonStyle="filled" press=ask("delete")
+  text "Delete"
+dialog closedby="any" open=(asking == "delete") close=cancelAsk
   …
 ```
 
@@ -233,7 +234,7 @@ dialog closedby="any" open=(asking == "lock") close=cancelAsk
    menu-shaped popover, and its primary action calls `openConfirmation` for a
    dialog or `alertdialog`. On macOS, the `NSButton`'s action opens the
    `NSMenu` or the dialog. No overlay over a native button. This covers all
-   of Lexy's invokers and is the platform's own idiom. The tests:
+   of §1's use cases and is the platform's own idiom. The tests:
    - one presentation per tap, key and agent `tap`
    - a menu that opens from the control on touch-down
    - an invoker with a `press` still refused, naming the custom button
@@ -249,10 +250,10 @@ dialog closedby="any" open=(asking == "lock") close=cancelAsk
 
 ## 6. Open questions
 
-- Should the maps chooser be a pull-down menu (`role="menu"`, opens from the
-  button) or a confirmation-style action sheet (`role="alertdialog"`, what
-  Lexy has now)? The HIG says a chooser of destinations is a pull-down;
-  Lexy's current markup asks for an action sheet.
+- Should a destination chooser be a pull-down menu (`role="menu"`, opens
+  from the button) or a confirmation-style action sheet
+  (`role="alertdialog"`)? The HIG says a chooser of destinations is a
+  pull-down; marking it `alertdialog` asks for an action sheet.
 - On macOS, should a native invoker with a menu be an `NSPopUpButton`
   (pull-down style) rather than an `NSButton` that opens an `NSMenu`?
 - Should the first slice's rule ("no press to run") be checked by Contract
