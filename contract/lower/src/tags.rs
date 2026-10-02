@@ -862,6 +862,7 @@ pub fn attr(name: &str) -> Option<AttrTarget> {
         "accent-color" => styles(&[StyleId::AccentColor]),
         "appearance" => styles(&[StyleId::Appearance]),
         "-exact-apple-button-style" => styles(&[StyleId::ExactAppleButtonStyle]),
+        "user-select" => styles(&[StyleId::UserSelect]),
         "-exact-apple-glass-container" => styles(&[StyleId::ExactAppleGlassContainer]),
         "tint-color" => styles(&[StyleId::TintColor]),
         "opacity" => styles(&[StyleId::Opacity]),

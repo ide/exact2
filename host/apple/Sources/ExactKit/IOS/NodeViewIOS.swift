@@ -1078,6 +1078,7 @@ final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, UIScrollV
         layer.mask = ClipPath.mask(clipPath, clipRule)
         applyFilter()
         updateMaterial()
+        TextCopy.apply(self)
         syncScroll()
         styleTextArea()
         if let f = field, let t = text {
