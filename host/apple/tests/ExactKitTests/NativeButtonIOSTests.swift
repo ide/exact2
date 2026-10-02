@@ -129,9 +129,11 @@ final class NativeButtonIOSTests: XCTestCase {
         let copy = try XCTUnwrap(box.textCopy)
         XCTAssertTrue(box.interactions.contains { $0 === copy.menu })
         XCTAssertEqual(TextCopy.text(of: box), "Order 1042")
+        XCTAssertEqual(box.accessibilityCustomActions?.count, 1, "VoiceOver can copy too")
         XCTAssertNil(plain.textCopy, "auto: a label is not copyable")
         p.apply(wireBatch([["op": "style", "id": 1, "style": ["user_select": "auto"]]]))
         XCTAssertNil(box.textCopy)
+        XCTAssertNil(box.accessibilityCustomActions)
         XCTAssertFalse(box.interactions.contains { $0 is UIEditMenuInteraction })
         // An author's contextmenu owns the long press.
         p.apply(wireBatch([["op": "style", "id": 1, "style": ["user_select": "text"]]]))
