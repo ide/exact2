@@ -19,6 +19,12 @@ final class TextCopy: NSObject, UIEditMenuInteractionDelegate {
         menu = UIEditMenuInteraction(delegate: self)
         owner.addGestureRecognizer(press)
         owner.addInteraction(menu)
+        // VoiceOver's way to the same Copy: a long press is not.
+        owner.accessibilityCustomActions = [UIAccessibilityCustomAction(name: String(localized: "Copy")) { [weak owner] _ in
+            guard let owner else { return false }
+            UIPasteboard.general.string = TextCopy.text(of: owner)
+            return true
+        }]
     }
 
     /// Installs or removes the menu as the node's `user-select` says.
@@ -28,6 +34,7 @@ final class TextCopy: NSObject, UIEditMenuInteractionDelegate {
         if !on, let copy = view.textCopy {
             view.removeGestureRecognizer(copy.press)
             view.removeInteraction(copy.menu)
+            view.accessibilityCustomActions = nil
             view.textCopy = nil
         }
     }
