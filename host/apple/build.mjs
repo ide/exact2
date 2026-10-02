@@ -565,6 +565,8 @@ export const infoPlist = (app, device = false, { executable = 'ExactIOS', id = a
     dict.NSLocalNetworkUsageDescription = typeof ios.localNetworking === 'string' ? ios.localNetworking : 'Connects to your dev server on the local network.';
   }
   if (ios.backgroundModes?.length) dict.UIBackgroundModes = ios.backgroundModes;
+  // URL schemes the app may ask `canOpenURL` about (another app's, to see it is installed).
+  if (ios.queriesSchemes?.length) dict.LSApplicationQueriesSchemes = ios.queriesSchemes;
   // The manifest's `file_handlers`, as on the Mac, opened in place from
   // Files ("Open in", LLP 1069.010 slice 4), and the non-system types they
   // name (Markdown) imported so Files can match them.

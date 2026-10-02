@@ -21,19 +21,29 @@ private final class ModalController: UIViewController, UIGestureRecognizerDelega
               let sheet = sheetPresentationController,
               detentValue != value || sheet.detents.isEmpty else { return }
         detentValue = value
+        // `navigationDetent`: resting heights, space-separated — `medium`,
+        // `large`, or points (authored points exclude the bottom safe area,
+        // which UIKit adds). The sheet opens at the last; several make it
+        // resizable, which shows UIKit's grabber (the HIG's resizable sheet).
+        let detents: [(UISheetPresentationController.Detent, UISheetPresentationController.Detent.Identifier)] =
+            (value ?? "").split(separator: " ").enumerated().compactMap { index, token in
+                switch token {
+                case "medium": return (.medium(), .medium)
+                case "large": return (.large(), .large)
+                default:
+                    guard let height = Double(token), height.isFinite, height > 0 else { return nil }
+                    let identifier = UISheetPresentationController.Detent.Identifier("authored-\(index)")
+                    return (.custom(identifier: identifier) { context in min(CGFloat(height), context.maximumDetentValue) }, identifier)
+                }
+            }
         let configure = {
-            if let value, let height = Double(value), height.isFinite, height > 0 {
-                // Authored points exclude the bottom safe area, which UIKit adds.
-                // One resting height leaves overscroll and dismissal with UIKit.
-                let identifier = UISheetPresentationController.Detent.Identifier("authored")
-                sheet.detents = [.custom(identifier: identifier) { context in
-                    min(CGFloat(height), context.maximumDetentValue)
-                }]
-                sheet.selectedDetentIdentifier = identifier
+            if let last = detents.last {
+                sheet.detents = detents.map(\.0)
+                sheet.selectedDetentIdentifier = last.1
             } else {
                 sheet.detents = [.large()]
             }
-            sheet.prefersGrabberVisible = false
+            sheet.prefersGrabberVisible = detents.count > 1
             sheet.prefersScrollingExpandsWhenScrolledToEdge = false
         }
         if viewIfLoaded?.window != nil { sheet.animateChanges(configure) }

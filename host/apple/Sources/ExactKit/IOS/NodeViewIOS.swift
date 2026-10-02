@@ -901,7 +901,7 @@ final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, UIScrollV
     func updateMaterial() {
         let kind = materialRequest
         let supported = kind != nil
-        let interactive = Materials.glass(kind) && handlers.contains("press") && !disabled
+        let interactive = Materials.glass(kind) && (handlers.contains("press") || invokesConfirmation) && !disabled
         if materialKind != (supported ? kind : nil) {
             let children = container.subviews.compactMap { $0 as? NodeView }
             materialView?.removeFromSuperview()
@@ -1303,6 +1303,11 @@ final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, UIScrollV
     // so a touch on a button's text reaches the button, as a DOM click
     // bubbles. A pan cancels it (the scroll view's `canCancelContentTouches`):
     // scroll always wins.
+    /// Whether this node opens a native confirmation (MenusIOS), which a
+    /// press presents: it is pressable without a press handler of its own.
+    var invokesConfirmation: Bool {
+        (!(props["popovertarget"] ?? "").isEmpty || !(props["commandfor"] ?? "").isEmpty) && presenter?.menus.confirmation(invokedBy: self) != nil
+    }
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
         if ((isSurfaceControl || ownsSurfaceControl) ? inputCanvas?.canvasInput : canvasInput)?.touches(touches, phase: "down", source: self) == true { return }
         guard !disabled else { pressed = false; return }
@@ -1312,7 +1317,7 @@ final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, UIScrollV
         if let touch = touches.first, let run = inlineActivationTarget(at: local(touch.location(in: nil))) {
             inlinePressed = run.id; return
         }
-        if handlers.contains("press") { pressed = true } else { super.touchesBegan(touches, with: event) }
+        if handlers.contains("press") || invokesConfirmation { pressed = true } else { super.touchesBegan(touches, with: event) }
     }
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
         inlinePressed = nil
@@ -1341,7 +1346,10 @@ final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, UIScrollV
         // loses it, as a click on a button blurs a page's input.
         let inside = touches.first.map(pressInside) ?? false
         if !isFirstResponder && presenter?.contextRetainsFocus(self) != true { presenter?.viewport.endEditing(true) }
-        if inside, presenter?.views[id] === self { presenter?.press(id); finishPointerPress() }
+        if inside, presenter?.views[id] === self {
+            if presenter?.menus.invokeConfirmation(self) != true { presenter?.press(id) }
+            finishPointerPress()
+        }
     }
     override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
         inlinePressed = nil; svgPressed = nil

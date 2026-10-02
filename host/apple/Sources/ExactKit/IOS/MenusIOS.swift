@@ -19,21 +19,25 @@ final class MenuHost {
     private var overlays: [UInt32: UIButton] = [:]
     private var confirmation: Confirmation?
 
-    /// An alertdialog-shaped popover has one action and one hide-only cancel.
+    /// A confirmation's rows are its actions (buttons that press) and at most
+    /// one hide-only cancel ("Cancel" when there is none). A modal `dialog` is UIKit's centred alert, its
+    /// first text the title; a popover is an action sheet anchored to its
+    /// invoker, titled by its `aria-label`.
     /// Retain this owner until native dismissal completes; ids alone are not
     /// enough because a restart can reuse them for unrelated controls.
     private final class Confirmation: NSObject, UIPopoverPresentationControllerDelegate {
         weak var host: MenuHost?
         weak var source: NodeView?
         weak var popover: NodeView?
-        weak var action: NodeView?
+        let actions: NSHashTable<NodeView> = .weakObjects()
         let route: String?
         let alert: UIAlertController
         var finishing = false
-        init(host: MenuHost, source: NodeView, popover: NodeView, action: NodeView, message: String) {
-            self.host = host; self.source = source; self.popover = popover; self.action = action
+        init(host: MenuHost, source: NodeView, popover: NodeView, actions: [NodeView], title: String?, message: String?, style: UIAlertController.Style) {
+            self.host = host; self.source = source; self.popover = popover
+            for action in actions { self.actions.add(action) }
             route = host.presenter?.navigation.routeKey(containing: source)
-            alert = UIAlertController(title: nil, message: message, preferredStyle: .actionSheet)
+            alert = UIAlertController(title: title, message: message, preferredStyle: style)
         }
         func adaptivePresentationStyle(for controller: UIPresentationController) -> UIModalPresentationStyle { .none }
         func popoverPresentationControllerDidDismissPopover(_ controller: UIPopoverPresentationController) {
@@ -51,8 +55,9 @@ final class MenuHost {
         isDialog(node) || node.props["accessibilityRole"] == "alertdialog"
     }
     private func target(of source: NodeView) -> String? {
-        if source.props["commandfor"] != nil { return source.props["commandfor"] }
-        return source.props["popovertarget"]
+        // An empty attribute names nothing, as a bound one may.
+        if let name = source.props["commandfor"], !name.isEmpty { return name }
+        return source.props["popovertarget"].flatMap { $0.isEmpty ? nil : $0 }
     }
     private func closes(_ source: NodeView, _ target: NodeView) -> Bool {
         if isDialog(target) {
@@ -86,27 +91,20 @@ final class MenuHost {
                   opens(v, pop)
             else { continue }
             live.insert(v.id)
-            if isConfirmation(pop) {
-                let button = overlays[v.id] ?? UIButton(type: .custom)
-                button.menu = nil
-                button.showsMenuAsPrimaryAction = false
-                button.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-                button.accessibilityLabel = v.props["accessibilityLabel"] ?? title(of: v)
-                button.accessibilityIdentifier = v.props["testId"] ?? v.props["id"]
-                button.isEnabled = !v.disabled
-                let actionId = UIAction.Identifier("exact.confirmation")
-                button.removeAction(identifiedBy: actionId, for: .touchUpInside)
-                button.addAction(UIAction(identifier: actionId) { [weak self, weak v, weak pop] _ in
-                    guard let self, let v, let pop else { return }
-                    _ = self.openConfirmation(from: v, popover: pop)
-                }, for: .touchUpInside)
-                v.addSubview(button); button.frame = v.bounds; overlays[v.id] = button
-                continue
-            }
+            // A confirmation's invoker is pressed as itself (its own touch
+            // feedback, its glass), and its press opens the confirmation
+            // (`invokeConfirmation`); only a menu needs UIKit's button.
+            if isConfirmation(pop) { live.remove(v.id); continue }
             let button = overlays[v.id] ?? {
                 let b = UIButton(type: .custom)
                 b.showsMenuAsPrimaryAction = true
                 b.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+                // The menu's button covers the invoker: carry its touch to
+                // the invoker's own press feedback.
+                for (events, down) in [(UIControl.Event([.touchDown, .touchDragEnter]), true),
+                                       (UIControl.Event([.touchUpInside, .touchUpOutside, .touchCancel, .touchDragExit, .menuActionTriggered]), false)] {
+                    b.addAction(UIAction { [weak b] _ in (b?.superview as? NodeView)?.pressed = down }, for: events)
+                }
                 overlays[v.id] = b
                 return b
             }()
@@ -153,13 +151,15 @@ final class MenuHost {
         }
         return true
     }
-    private func valid(_ owner: Confirmation) -> Bool {
-        guard let source = owner.source, let pop = owner.popover, let action = owner.action else { return false }
+    private func valid(_ owner: Confirmation, action: NodeView? = nil) -> Bool {
+        guard let source = owner.source, let pop = owner.popover else { return false }
         let modal = isDialog(pop)
-        return eligible(source, inertBoundary: modal ? source : nil) && live(pop)
-            && eligible(action, inertBoundary: modal ? pop.superview : nil) && source.window != nil
-            && opens(source, pop) && closes(action, pop)
-            && action.isDescendant(of: pop) && isConfirmation(pop)
+        if let action {
+            guard owner.actions.contains(action), eligible(action, inertBoundary: modal ? pop.superview : nil),
+                  closes(action, pop), action.isDescendant(of: pop) else { return false }
+        }
+        return eligible(source, inertBoundary: modal ? source : nil) && live(pop) && source.window != nil
+            && opens(source, pop) && isConfirmation(pop)
             && presenter?.navigation.routeKey(containing: source) == owner.route
     }
     private func cancelled(_ owner: Confirmation) {
@@ -169,7 +169,7 @@ final class MenuHost {
         owner.finishing = true
         confirmation = nil
     }
-    private func finish(_ owner: Confirmation, confirmed: Bool) {
+    private func finish(_ owner: Confirmation, chosen: NodeView?) {
         guard confirmation === owner, !owner.finishing else { return }
         owner.finishing = true
         owner.alert.dismiss(animated: !ExactEnv.agentFreezes) { [weak self, owner] in
@@ -180,7 +180,7 @@ final class MenuHost {
             // destroy the presenting editor or dismiss its parent sheet.
             DispatchQueue.main.async { [weak self, owner] in
                 guard let self, self.confirmation === owner else { return }
-                let action = confirmed && self.valid(owner) ? owner.action : nil
+                let action = chosen.flatMap { self.valid(owner, action: $0) ? $0 : nil }
                 self.confirmation = nil
                 if let action { self.presenter?.press(action.id) }
             }
@@ -223,19 +223,32 @@ final class MenuHost {
     func activate(_ node: NodeView) -> Bool? {
         if ownsConfirmationNode(node) {
             guard let owner = confirmation, !inTransition, valid(owner) else { return false }
-            if owner.action === node { finish(owner, confirmed: true); return true }
+            if owner.actions.contains(node) { finish(owner, chosen: node); return true }
             if let pop = owner.popover, node.isDescendant(of: pop), !node.disabled,
                closes(node, pop) {
-                finish(owner, confirmed: false); return true
+                finish(owner, chosen: nil); return true
             }
             return false
         }
-        guard let name = target(of: node), let pop = presenter?.views.values.first(where: {
-            $0.props["id"] == name && isConfirmation($0) && ($0.props["popover"] != nil || isDialog($0))
-        }) else { return nil }
-        guard opens(node, pop) else { return false }
+        guard let pop = confirmation(invokedBy: node) else { return nil }
         return openConfirmation(from: node, popover: pop)
     }
+    /// The confirmation `node` opens, when it is a confirmation's invoker.
+    func confirmation(invokedBy node: NodeView) -> NodeView? {
+        guard let name = target(of: node), let pop = presenter?.views.values.first(where: {
+            $0.props["id"] == name && isConfirmation($0) && ($0.props["popover"] != nil || isDialog($0))
+        }), opens(node, pop) else { return nil }
+        return pop
+    }
+
+    /// A touch's press on a confirmation's invoker: open it. True when `node`
+    /// invokes one, whether or not it could open now.
+    func invokeConfirmation(_ node: NodeView) -> Bool {
+        guard let pop = confirmation(invokedBy: node) else { return false }
+        _ = openConfirmation(from: node, popover: pop)
+        return true
+    }
+
     private func openConfirmation(from source: NodeView, popover pop: NodeView) -> Bool {
         guard confirmation == nil, eligible(source), live(pop), source.window != nil else { return false }
         if isDialog(pop) && pop.props["closedby"] != "any" {
@@ -247,36 +260,44 @@ final class MenuHost {
         // survived that action (no elapsed-time guess or successor id).
         if source.handlers.contains("press") { presenter?.press(source.id) }
         guard confirmation == nil, eligible(source), live(pop), source.window != nil else { return false }
+        let modal = isDialog(pop)
         let children = pop.container.subviews.compactMap { $0 as? NodeView }
         let actions = children.filter { $0.kind == "button" && $0.handlers.contains("press") }
         let cancels = children.filter { $0.kind == "button" && !$0.handlers.contains("press") && closes($0, pop) }
-        guard actions.count == 1, cancels.count == 1, let action = actions.first, let cancel = cancels.first,
-              children.allSatisfy({ $0.kind == "text" || $0 === action || $0 === cancel }),
-              [action, cancel].allSatisfy({ closes($0, pop) }),
-              eligible(action, inertBoundary: isDialog(pop) ? pop.superview : nil) else { return false }
+        // An alert may be a notice: no action, its one cancel acknowledging it.
+        guard !actions.isEmpty || cancels.count == 1, cancels.count <= 1,
+              children.allSatisfy({ $0.kind == "text" || actions.contains($0) || cancels.contains($0) }),
+              (actions + cancels).allSatisfy({ closes($0, pop) }),
+              actions.allSatisfy({ eligible($0, inertBoundary: modal ? pop.superview : nil) }) else {
+            presenter?.session?.log("confirmation refused: its rows are texts, actions that close it, and at most one cancel")
+            return false
+        }
         var responder: UIResponder? = source
         while responder != nil && !(responder is UIViewController) { responder = responder?.next }
         guard let controller = responder as? UIViewController, controller.presentedViewController == nil,
               !controller.isBeingDismissed, !controller.isBeingPresented else { return false }
-        let owner = Confirmation(host: self, source: source, popover: pop, action: action,
-                                 message: children.filter { $0.kind == "text" }.map(title(of:)).joined(separator: "\n"))
-        owner.alert.view.tintColor = action.color("text_color", .systemBlue)
-        let actionStyle: UIAlertAction.Style = action.props["destructive"] == "true" ? .destructive : .default
-        owner.alert.addAction(UIAlertAction(title: title(of: action), style: actionStyle) { [weak self, weak owner] _ in
-            if let owner { self?.finish(owner, confirmed: true) }
+        var texts = children.filter { $0.kind == "text" }.map(title(of:)).filter { !$0.isEmpty }
+        let heading = pop.props["accessibilityLabel"] ?? (modal && !texts.isEmpty ? texts.removeFirst() : nil)
+        let owner = Confirmation(host: self, source: source, popover: pop, actions: actions, title: heading,
+                                 message: texts.isEmpty ? nil : texts.joined(separator: "\n"),
+                                 style: modal ? .alert : .actionSheet)
+        for action in actions {
+            let style: UIAlertAction.Style = action.props["destructive"] == "true" ? .destructive : .default
+            owner.alert.addAction(UIAlertAction(title: title(of: action), style: style) { [weak self, weak owner, weak action] _ in
+                if let owner { self?.finish(owner, chosen: action) }
+            })
+        }
+        owner.alert.addAction(UIAlertAction(title: cancels.first.map(title(of:)) ?? "Cancel", style: .cancel) { [weak self, weak owner] _ in
+            if let owner { self?.finish(owner, chosen: nil) }
         })
-        owner.alert.addAction(UIAlertAction(title: title(of: cancel), style: .cancel) { [weak self, weak owner] _ in
-            if let owner { self?.finish(owner, confirmed: false) }
-        })
-        guard let presentation = owner.alert.popoverPresentationController else { return false }
-        presentation.sourceView = source
-        // A labelled row anchors at its text; an icon control uses its box.
-        let labels = source.container.subviews.compactMap { $0 as? NodeView }.filter { $0.kind == "text" }
-        let labelBox = labels.reduce(CGRect.null) { $0.union($1.convert($1.bounds, to: source)) }
-        presentation.sourceRect = labelBox.isNull ? source.bounds : CGRect(x: labelBox.minX, y: 0, width: labelBox.width, height: source.bounds.height)
-        presentation.permittedArrowDirections = []
-        presentation.canOverlapSourceViewRect = true
-        presentation.delegate = owner
+        if !modal {
+            guard let presentation = owner.alert.popoverPresentationController else { return false }
+            presentation.sourceView = source
+            presentation.sourceRect = source.bounds
+            presentation.delegate = owner
+        }
+        // An alert's presentation keeps its own delegate (UIKit asserts);
+        // it is dismissed only by its actions.
         confirmation = owner
         controller.present(owner.alert, animated: !ExactEnv.agentFreezes)
         return true

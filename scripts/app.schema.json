@@ -245,6 +245,13 @@
                 "type": "string"
               }
             },
+            "queriesSchemes": {
+              "description": "LSApplicationQueriesSchemes: URL schemes canOpenURL may ask about.",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
             "associatedDomains": {
               "oneOf": [
                 { "type": "boolean" },
