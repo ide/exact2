@@ -289,10 +289,15 @@ impl Store {
     }
 
     /// Keep `value` under `name`, replacing what was there; refused outside
-    /// the grant.
+    /// the grant. Keeping what is already kept changes nothing: no revision,
+    /// so a source that writes as it answers is not asked again for it (the
+    /// same answer would write again, and settlement would never converge).
     pub fn set(&mut self, name: &str, value: &str) -> Result<(), StoreError> {
         if !self.is_granted(name) {
             return Err(self.refused(name));
+        }
+        if self.values.get(name).map(String::as_str) == Some(value) {
+            return Ok(());
         }
         self.remember(name);
         self.values.insert(name.to_string(), value.to_string());
@@ -516,5 +521,17 @@ mod tests {
         });
         assert_eq!(parent.unparsed(), None);
         assert!(parent.set("a", "1").is_ok());
+    }
+
+    #[test]
+    fn keeping_what_is_kept_is_no_write() {
+        let mut store = Store::new("secret.keep token\n", [("token".into(), "same".into())]);
+        let before = store.revision();
+        store.set("token", "same").unwrap();
+        assert_eq!(store.revision(), before);
+        assert!(store.take_writes().is_empty());
+        store.set("token", "new").unwrap();
+        assert_eq!(store.revision(), before + 1);
+        assert_eq!(store.take_writes().len(), 1);
     }
 }
