@@ -608,6 +608,12 @@
       "_comment": "HTML `dialog open`: the dialog shows while true, as the state says, not only when an invoker opens it. The Apple hosts present a dialog of texts and buttons as their alert; a button's press (or the alert's cancel) is the app's to close it with."
     },
     {
+      "id": 236,
+      "name": "autocomplete",
+      "kind": "str",
+      "_comment": "HTML `autocomplete` on an `input`: what the field holds, so the platform can fill it (iOS: UITextContentType — `username`, `current-password`, `new-password`, `one-time-code`, `email`, `name`, `tel`, …; `off` names nothing)."
+    },
+    {
       "id": 214,
       "name": "scrollRestoration",
       "kind": "str"
