@@ -518,6 +518,7 @@ pub fn attr(name: &str) -> Option<AttrTarget> {
         // @ref LLP 1075.003.000 — the node the app's native code receives.
         "hook" => AttrTarget::Prop(p("hook")),
         "closedby" => AttrTarget::Prop(p("closedby")),
+        "open" => AttrTarget::Prop(p("open")),
         "contextTarget" => AttrTarget::Prop(p("contextTarget")),
         "contextMagnify" => AttrTarget::Prop(p("contextMagnify")),
         // @ref LLP 1021 §5.1 — the popover a node's context menu shows, and its preview row.

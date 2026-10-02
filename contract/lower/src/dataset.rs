@@ -78,6 +78,7 @@ const HOST_WORDS: [&str; 84] = [
     "navigationdetent",
     "navigationscroll",
     "num",
+    "open",
     "pressed",
     "quote",
     "refreshing",
