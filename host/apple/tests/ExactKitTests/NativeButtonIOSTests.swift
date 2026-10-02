@@ -133,6 +133,12 @@ final class NativeButtonIOSTests: XCTestCase {
         p.apply(wireBatch([["op": "style", "id": 1, "style": ["user_select": "auto"]]]))
         XCTAssertNil(box.textCopy)
         XCTAssertFalse(box.interactions.contains { $0 is UIEditMenuInteraction })
+        // An author's contextmenu owns the long press.
+        p.apply(wireBatch([["op": "style", "id": 1, "style": ["user_select": "text"]]]))
+        XCTAssertNotNil(box.textCopy)
+        XCTAssertTrue(box.textCopy?.press.delegate === box, "the node's own arbitration")
+        box.handlers = ["contextmenu"]; box.updateContextGestures()
+        XCTAssertNil(box.textCopy)
     }
 }
 #endif

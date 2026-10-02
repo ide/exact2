@@ -569,6 +569,8 @@ pub fn props_of(node: &NodeFacts<'_>) -> SortedMap<String, String> {
             PropId::Autocapitalize => "autocapitalize",
             PropId::Autocorrect => "autocorrect",
             PropId::Spellcheck => "spellcheck",
+            PropId::Autocomplete => "autocomplete",
+            PropId::Enterkeyhint => "enterkeyhint",
             PropId::Value => "value",
             PropId::ScrollTop => "scrollTop",
             PropId::ScrollLeft => "scrollLeft",

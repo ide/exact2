@@ -16,14 +16,18 @@ final class TextCopy: NSObject, UIEditMenuInteractionDelegate {
         super.init()
         press.addTarget(self, action: #selector(pressed(_:)))
         press.delaysTouchesEnded = false
+        // The node's own arbitration: a field or editor inside keeps its
+        // long press (loupe, selection), as `contextmenu`'s does.
+        press.delegate = owner
         menu = UIEditMenuInteraction(delegate: self)
         owner.addGestureRecognizer(press)
         owner.addInteraction(menu)
     }
 
-    /// Installs or removes the menu as the node's `user-select` says.
+    /// Installs or removes the menu as the node's `user-select` says. An
+    /// author's `contextmenu` handler owns the long press, so it wins.
     static func apply(_ view: NodeView) {
-        let on = ["text", "all"].contains(view.style["user_select"]?.string ?? "auto")
+        let on = ["text", "all"].contains(view.style["user_select"]?.string ?? "auto") && !view.handlers.contains("contextmenu")
         if on, view.textCopy == nil { view.textCopy = TextCopy(view) }
         if !on, let copy = view.textCopy {
             view.removeGestureRecognizer(copy.press)
@@ -32,8 +36,10 @@ final class TextCopy: NSObject, UIEditMenuInteractionDelegate {
         }
     }
 
-    /// What Copy writes: the node's text as it reads.
+    /// What Copy writes: the node's text as it reads, without the parts
+    /// that say `user-select: none` (CSS leaves those out of a copy).
     static func text(of view: NodeView) -> String {
+        if view.style["user_select"]?.string == "none" { return "" }
         if view.kind == "text" { return view.paragraphSpec().runs.map(\.text).joined() }
         return view.container.subviews
             .compactMap { ($0 as? NodeView).map(text(of:)) }
@@ -42,7 +48,7 @@ final class TextCopy: NSObject, UIEditMenuInteractionDelegate {
     }
 
     @objc private func pressed(_ g: UILongPressGestureRecognizer) {
-        guard g.state == .began, let owner, !TextCopy.text(of: owner).isEmpty else { return }
+        guard g.state == .began, let owner, !owner.disabled, !owner.inert, !TextCopy.text(of: owner).isEmpty else { return }
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
         let at = CGPoint(x: owner.bounds.midX, y: owner.bounds.minY)
         menu.presentEditMenu(with: UIEditMenuConfiguration(identifier: nil, sourcePoint: at))
@@ -50,7 +56,7 @@ final class TextCopy: NSObject, UIEditMenuInteractionDelegate {
 
     func editMenuInteraction(_ interaction: UIEditMenuInteraction, menuFor configuration: UIEditMenuConfiguration, suggestedActions: [UIMenuElement]) -> UIMenu? {
         guard let owner else { return nil }
-        let copy = UIAction(title: String(localized: "Copy"), image: UIImage(systemName: "document.on.document")) { _ in
+        let copy = UIAction(title: String(localized: "Copy"), image: UIImage(systemName: "doc.on.doc")) { _ in
             UIPasteboard.general.string = TextCopy.text(of: owner)
         }
         return UIMenu(children: [copy])

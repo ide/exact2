@@ -89,21 +89,32 @@ private final class RasterDownload: NSObject, URLSessionDataDelegate, @unchecked
     private var failure: Error?
     /// A download's file goes when its input does (`RasterInput.deinit`),
     /// which a process that is killed never reaches: every launch left one
-    /// behind. Before this process makes its first, the ones already there
-    /// are an earlier process's, so they go.
-    private static let sweptEarlierRuns: Void = {
-        let tmp = URL(fileURLWithPath: NSTemporaryDirectory())
-        for name in (try? FileManager.default.contentsOfDirectory(atPath: tmp.path)) ?? []
-        // Also the unprefixed `exact-raster-<uuid>` an earlier build left.
-        where name.hasPrefix(prefix) || (name.hasPrefix("exact-raster-") && UUID(uuidString: String(name.dropFirst(13))) != nil) {
-            try? FileManager.default.removeItem(at: tmp.appendingPathComponent(name))
+    /// behind. Each process downloads into its own folder, named by its pid
+    /// (the Mac's tmp is shared by every app); before its first, the folders
+    /// of processes no longer running go.
+    private static let folder: URL = {
+        let fm = FileManager.default
+        let root = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("exact-raster-downloads", isDirectory: true)
+        for name in (try? fm.contentsOfDirectory(atPath: root.path)) ?? [] {
+            guard let pid = pid_t(name), pid != getpid() else { continue }
+            if kill(pid, 0) != 0 && errno == ESRCH { try? fm.removeItem(at: root.appendingPathComponent(name)) }
         }
+        #if os(iOS)
+        // The loose `exact-raster-<uuid>` files an earlier build left (an iOS
+        // app's tmp is its own).
+        let tmp = URL(fileURLWithPath: NSTemporaryDirectory())
+        for name in (try? fm.contentsOfDirectory(atPath: tmp.path)) ?? []
+        where name.hasPrefix("exact-raster-") && UUID(uuidString: String(name.dropFirst(13))) != nil {
+            try? fm.removeItem(at: tmp.appendingPathComponent(name))
+        }
+        #endif
+        let mine = root.appendingPathComponent(String(getpid()), isDirectory: true)
+        try? fm.createDirectory(at: mine, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        return mine
     }()
-    static let prefix = "exact-raster-download-"
     init(url: URL) throws {
         self.url = url
-        _ = Self.sweptEarlierRuns
-        destination = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("\(Self.prefix)\(UUID().uuidString)")
+        destination = Self.folder.appendingPathComponent(UUID().uuidString)
         guard FileManager.default.createFile(atPath: destination.path, contents: nil, attributes: [.posixPermissions: 0o600]) else { throw RasterFailure.decode }
         file = try FileHandle(forWritingTo: destination)
         super.init()

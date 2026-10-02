@@ -158,6 +158,7 @@ final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, UIScrollV
             removeGestureRecognizer(g)
             contextRecognizer = nil
         }
+        TextCopy.apply(self)
         if handlers.contains("dblclick"), doubleRecognizer == nil {
             let g = UITapGestureRecognizer(target: self, action: #selector(doubleClicked(_:)))
             g.delegate = self

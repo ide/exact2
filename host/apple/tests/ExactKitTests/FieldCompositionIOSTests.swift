@@ -46,6 +46,8 @@ final class FieldCompositionIOSTests: XCTestCase {
         let field = try XCTUnwrap(node.field)
         node.applyProps(set: ["type": "email", "autocomplete": "username"], clear: [])
         XCTAssertEqual(field.textContentType, .username)
+        node.applyProps(set: ["autocomplete": "username webauthn"], clear: [])
+        XCTAssertEqual(field.textContentType, .username, "a passkey field still holds a username")
         node.applyProps(set: ["type": "text", "autocomplete": "one-time-code"], clear: [])
         XCTAssertEqual(field.textContentType, .oneTimeCode)
         node.applyProps(set: ["type": "password"], clear: ["autocomplete"])
