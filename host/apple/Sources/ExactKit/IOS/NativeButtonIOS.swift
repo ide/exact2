@@ -158,26 +158,30 @@ final class NativeButton: UIButton {
                    "\(a)", "\(b)", "\(owner.color("accent_color", .clear))"].joined(separator: "|")
         if key != signature {
             signature = key
-            configuration = NativeButton.configuration(style, owner: owner, text: text, symbol: symbol, title: title, radius: radius, symbolBox: a, textBox: b)
+            let rest = NativeButton.configuration(style, owner: owner, text: text, symbol: symbol, title: title, radius: radius, symbolBox: a, textBox: b)
             // SwiftUI's bordered styles dim the whole button while pressed,
             // its label too; UIKit's configurations darken only the fill.
-            let rest = configuration
             let tint = symbol?.color("tint_color", .label) ?? .label
-            let dimImage = rest?.image?.withTintColor(tint.withAlphaComponent(0.5), renderingMode: .alwaysOriginal)
-            let titleTransformer = rest?.titleTextAttributesTransformer
-            // A plain button's fade is UIKit's own.
+            let dimImage = rest.image?.withTintColor(tint.withAlphaComponent(0.5), renderingMode: .alwaysOriginal)
+            let titleTransformer = rest.titleTextAttributesTransformer
+            // The handler goes in before the configuration: assigning a
+            // configuration runs the handler installed then, and the old one
+            // put the old configuration back (a padding measured after the
+            // first layout stayed unshown until a trait change ran the new
+            // handler). A plain button's fade is UIKit's own.
             configurationUpdateHandler = style == "plain" ? nil : { button in
-                guard var config = rest else { return }
+                var config = rest
                 if button.isHighlighted {
                     config.image = dimImage ?? config.image
                     config.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { incoming in
                         var out = titleTransformer?(incoming) ?? incoming
-                        out.foregroundColor = (rest?.baseForegroundColor ?? .label).withAlphaComponent(0.5)
+                        out.foregroundColor = (rest.baseForegroundColor ?? .label).withAlphaComponent(0.5)
                         return out
                     }
                 }
                 button.configuration = config
             }
+            configuration = rest
         }
         configured = true
         drawn.filter { !nodes.contains($0) }.forEach { $0.isHidden = false }
