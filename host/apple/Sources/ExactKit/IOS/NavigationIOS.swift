@@ -40,6 +40,9 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
     private var presentedNavigations: [UINavigationController] = []
     private var modalNavigation: UINavigationController? { presentedNavigations.last }
     private var navigation: UINavigationController? { modalNavigation ?? primaryNavigation }
+    /// Whether native navigation holds the screens: the app root is then no
+    /// screen of its own, and never scrolls (each screen's root does).
+    var holdsScreens: Bool { primaryNavigation != nil || tabs != nil }
     private var syncing = false
     private var mounting = false
     private weak var container: NodeView?
