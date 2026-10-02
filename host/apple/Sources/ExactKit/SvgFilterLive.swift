@@ -56,11 +56,6 @@ final class SvgFilterLive {
     }
     /// The last input drawn, for the frames of its animations.
     private var last: Input?
-    /// Drives a draw a frame while the sub-scene holds a running animation
-    /// (iOS: the picture follows its content there; macOS draws islands).
-    #if os(iOS)
-    private var link: CADisplayLink?
-    #endif
     private var pending: Input?
     private var scheduled = false
     /// A draw off the main thread not yet shown (main thread only).
@@ -155,15 +150,15 @@ final class SvgFilterLive {
         return false
     }
 
+    /// A draw each frame of the app's clock while the sub-scene holds a
+    /// running animation (iOS: the picture follows its content there; macOS
+    /// draws islands).
     private func animate(_ on: Bool) {
         #if os(iOS)
-        if on, link == nil {
-            let l = CADisplayLink(target: LinkTarget(self), selector: #selector(LinkTarget.tick))
-            l.add(to: .main, forMode: .common)
-            link = l
-        } else if !on, let l = link {
-            l.invalidate()
-            link = nil
+        if on, !FrameClock.shared.wants(self) {
+            FrameClock.shared.want(self, .svgFilter) { [weak self] _ in self?.tick() }
+        } else if !on {
+            FrameClock.shared.drop(self)
         }
         #endif
     }
@@ -187,7 +182,7 @@ final class SvgFilterLive {
 
     deinit {
         #if os(iOS)
-        link?.invalidate()
+        FrameClock.shared.drop(self)
         #endif
     }
 
@@ -355,8 +350,3 @@ final class SvgFilterLive {
     }
 }
 /// The display link's target, holding its picture weakly.
-private final class LinkTarget: NSObject {
-    weak var owner: SvgFilterLive?
-    init(_ owner: SvgFilterLive) { self.owner = owner }
-    @objc func tick() { owner?.tick() }
-}
