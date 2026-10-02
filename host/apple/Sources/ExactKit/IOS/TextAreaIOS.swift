@@ -199,7 +199,9 @@ extension NodeView {
     var inputContentType: UITextContentType? {
         let type = (props["type"] ?? "").lowercased()
         let fallback: UITextContentType? = type == "password" ? .password : type == "email" ? .emailAddress : nil
-        guard let token = props["autocomplete"]?.lowercased().split(separator: " ").last else { return fallback }
+        // A trailing `webauthn` marks a passkey field; the token before it
+        // says what the field holds.
+        guard let token = props["autocomplete"]?.lowercased().split(separator: " ").filter({ $0 != "webauthn" }).last else { return fallback }
         switch token {
         case "off": return nil
         case "username": return .username

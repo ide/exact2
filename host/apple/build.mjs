@@ -422,7 +422,11 @@ export const infoPlist = (app, device = false, { executable = 'ExactIOS', id = a
   // The manifest's `orientation` (Web App Manifest) locks the iPhone's; iPad
   // keeps all four, as multitasking requires.
   const locked = phoneOrientations(app.manifest.orientation);
-  if (locked) dict.UISupportedInterfaceOrientations = locked;
+  if (locked) {
+    dict.UISupportedInterfaceOrientations = locked;
+    // Absent, iPad would read the phone's lock.
+    dict['UISupportedInterfaceOrientations~ipad'] = ['UIInterfaceOrientationPortrait', 'UIInterfaceOrientationPortraitUpsideDown', 'UIInterfaceOrientationLandscapeLeft', 'UIInterfaceOrientationLandscapeRight'];
+  }
   return plistFile(dict);
 };
 
