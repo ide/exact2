@@ -99,6 +99,20 @@
         "browser"
       ]
     },
+    "orientation": {
+      "type": "string",
+      "description": "The Web App Manifest's orientation lock. The iOS host locks the iPhone to it; iPad keeps every orientation.",
+      "enum": [
+        "any",
+        "natural",
+        "landscape",
+        "landscape-primary",
+        "landscape-secondary",
+        "portrait",
+        "portrait-primary",
+        "portrait-secondary"
+      ]
+    },
     "theme_color": {
       "type": "string"
     },
