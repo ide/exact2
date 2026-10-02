@@ -454,7 +454,8 @@ final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, UIScrollV
             let leaf = symbolView ?? UIImageView()
             if symbolView == nil { symbolView = leaf; addSubview(leaf) }
             showSymbol(image, on: leaf); leaf.isAccessibilityElement = false; leaf.isUserInteractionEnabled = false
-            presenter?.queueIntrinsicSize(self, generation: generation, (image?.size ?? (points > 0 ? CGSize(width: points, height: points) : nil)))
+            // The size layout measured already (SymbolMeasure): no move.
+            presenter?.queueIntrinsicSize(self, generation: generation, SymbolMeasure.size(name, points: points, weight: number("font_weight", 400)))
         }
         symbolView?.tintColor = symbolTint // `nil` inherits UIKit's live tint
         if let leaf = symbolView { applySymbolEffect(leaf) }

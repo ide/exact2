@@ -30,7 +30,7 @@
 #include <stdint.h>
 
 /* The ABI's version: part of the compatibility id (LLP 1030 D3a). */
-#define EXACT_ABI_VERSION 10
+#define EXACT_ABI_VERSION 11
 
 #ifdef __cplusplus
 extern "C" {
@@ -257,6 +257,12 @@ typedef struct ExactCanvasText {
 typedef struct ExactCanvasMetrics { double v[11]; } ExactCanvasMetrics;
 typedef ExactCanvasMetrics (*ExactCanvasTextFn)(void *ctx, const ExactCanvasText *run);
 void exact_set_canvas_text(ExactRuntime rt, ExactCanvasTextFn measure);
+/* LLP 1035.004.000: a system symbol's size, measured in layout as text is,
+ * so a first frame has its box. name: UTF-8, len bytes, for the call; writes
+ * out[0] width and out[1] height and returns 1, or 0 when it cannot say.
+ * Called on the runtime's thread with exact_set_measure's context. */
+typedef uint8_t (*ExactSymbolFn)(void *ctx, const uint8_t *name, size_t len, float size, uint16_t weight, float *out);
+void exact_set_symbol_measure(ExactRuntime rt, ExactSymbolFn measure);
 void exact_set_wake(ExactRuntime rt, ExactWakeFn wake, void *ctx);
 void exact_set_fonts(ExactRuntime rt, ExactFontsFn fonts, void *ctx);
 

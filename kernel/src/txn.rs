@@ -632,6 +632,12 @@ pub(crate) fn apply_document(
                     if prop.affects_measure() {
                         invalidate_text(arena, layout, slot);
                         receipt.layout_invalidated = true;
+                    } else if *prop == PropId::ImageSource
+                        && arena.node_type(slot) == NodeType::Image
+                    {
+                        // A symbol's box is measured in layout (LLP 1035.004.000).
+                        invalidate_measure(arena, layout, slot);
+                        receipt.layout_invalidated = true;
                     } else {
                         arena.revise_text(slot, false);
                         if *prop == PropId::Href {
@@ -1033,6 +1039,14 @@ fn count(entries: usize, attached: usize) {
     });
 }
 
+/// A replaced leaf whose measured size may differ (a symbol image's source
+/// or font): its layout is measured again.
+fn invalidate_measure(arena: &mut NodeArena, layout: &mut dyn LayoutMirror, slot: u32) {
+    if let Some(node) = arena.taffy(slot) {
+        layout.mark_dirty(node);
+    }
+}
+
 fn invalidate_text(arena: &mut NodeArena, layout: &mut dyn LayoutMirror, slot: u32) {
     let owner = arena.measure_owner(slot);
     arena.revise_text(owner, true);
@@ -1192,6 +1206,14 @@ fn inherited_changed(
         if let Some(node) = arena.taffy(slot) {
             layout.restyle(arena, slot, node);
         }
+        receipt.layout_invalidated = true;
+    }
+    // An inherited font size or weight re-measures a symbol image too.
+    if rows.intersects(StyleMask::TEXT)
+        && arena.node_type(slot) == NodeType::Image
+        && crate::replaced::symbol_name(arena, slot).is_some()
+    {
+        invalidate_measure(arena, layout, slot);
         receipt.layout_invalidated = true;
     }
     if rows.intersects(StyleMask::TEXT)
