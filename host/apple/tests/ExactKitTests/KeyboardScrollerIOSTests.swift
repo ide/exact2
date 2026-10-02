@@ -38,7 +38,7 @@ final class KeyboardScrollerIOSTests: XCTestCase {
         let field = try XCTUnwrap(p.views[3]?.field)
         XCTAssertTrue(field.becomeFirstResponder())
         p.applyKeyboard(top: 500, duration: 0, curve: 0)
-        XCTAssertEqual(screen.contentInset.bottom, 300, "the screen's scroller is inset by what the keyboard covers")
+        XCTAssertEqual(screen.contentInset.bottom, 300 - window.safeAreaInsets.bottom, "the screen's scroller is inset by what the keyboard covers past the bottom safe area")
         XCTAssertEqual(p.viewport.contentInset.bottom, 0, "the app root stays unscrollable")
         XCTAssertEqual(p.keyboardInset, 300, "the env value is still the overlap")
         XCTAssertEqual(screen.keyboardDismissMode, .interactive)
