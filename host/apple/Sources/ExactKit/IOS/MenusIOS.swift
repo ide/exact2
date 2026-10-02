@@ -92,6 +92,9 @@ final class MenuHost {
             init(_ node: NodeView, title: String, enabled: Bool) { self.node = node; self.title = title; self.enabled = enabled }
         }
         let actions: [Presented]
+        /// Shown because the dialog is `open`, not because an invoker
+        /// opened it: closed when the state closes it.
+        var held = false
         init(host: MenuHost, source: NodeView?, popover: NodeView, actions: [Presented], style: Style, title: String?, message: String?) {
             self.host = host; self.source = source; self.popover = popover; self.actions = actions; self.style = style
             sourced = source != nil
@@ -150,7 +153,10 @@ final class MenuHost {
             let observer = PopoverTouch(host: self)
             surface.addGestureRecognizer(observer); touchObserver = observer
         }
-        if let owner = confirmation, !valid(owner) { resetConfirmation() }
+        if let owner = confirmation, !owner.finishing, !valid(owner) { resetConfirmation() }
+        if confirmation == nil, let held = presenter.carrying("tag:dialog").first(where: { $0.props["open"] == "true" }) {
+            DispatchQueue.main.async { [weak self, weak held] in if let held { self?.presentHeld(held) } }
+        }
         var popovers: [String: NodeView] = [:]
         for (name, entry) in agentOpen {
             guard let pop = entry.popover, presenter.views[pop.id] === pop, pop.props["id"] == name,
@@ -294,6 +300,9 @@ final class MenuHost {
     }
     private func valid(_ owner: Confirmation) -> Bool {
         guard let pop = owner.popover else { return false }
+        if owner.held {
+            return live(pop) && pop.props["open"] == "true" && owner.actions.allSatisfy { presented(owner, $0) }
+        }
         guard owner.sourced else { return showable(pop) && presenter?.navigation.routeKey(containing: pop) == owner.route
             && owner.actions.allSatisfy { presented(owner, $0) } }
         guard let source = owner.source else { return false }
@@ -647,7 +656,14 @@ final class MenuHost {
     private func busy(_ controller: UIViewController) -> Bool {
         controller.presentedViewController != nil || controller.isBeingDismissed || controller.isBeingPresented
     }
-    private func openConfirmation(from source: NodeView?, popover pop: NodeView, dispatchPress: Bool = true) -> Bool {
+    /// A dialog the state holds `open` (HTML's attribute): presented with
+    /// no invoker while it is, over whatever this session already presents
+    /// (a sheet); its button presses are the app's to close it with.
+    private func presentHeld(_ pop: NodeView) {
+        guard confirmation == nil, isDialog(pop) else { return }
+        _ = openConfirmation(from: nil, popover: pop, dispatchPress: false, held: true)
+    }
+    private func openConfirmation(from source: NodeView?, popover pop: NodeView, dispatchPress: Bool = true, held: Bool = false) -> Bool {
         func openable() -> Bool {
             guard confirmation == nil else { return false }
             guard let source else { return showable(pop) }
@@ -681,7 +697,9 @@ final class MenuHost {
         guard actions.allSatisfy({ closes($0, pop) }) else { return refuse("each action must also hide it (popovertargetaction=hide)") }
         // A disabled choice shows dimmed; the others stay choosable.
         guard actions.contains(where: { eligible($0, inertBoundary: boundary) }) else { return refuse("every action is disabled") }
-        guard let controller = controller(for: source ?? pop), !busy(controller) else { return false }
+        guard var controller = controller(for: source ?? pop) else { return false }
+        if held { while let shown = controller.presentedViewController, !shown.isBeingDismissed { controller = shown } }
+        guard !busy(controller) else { return false }
         let presented = actions.map { Confirmation.Presented($0, title: title(of: $0), enabled: eligible($0, inertBoundary: boundary)) }
         let texts = children.filter { $0.kind == "text" }.map(title(of:)).filter { !$0.isEmpty }
         let label = pop.props["accessibilityLabel"].flatMap { $0.isEmpty ? nil : $0 }
@@ -694,6 +712,7 @@ final class MenuHost {
         if style == .alert, heading == nil, !lines.isEmpty { heading = lines.removeFirst() }
         let owner = Confirmation(host: self, source: source, popover: pop, actions: presented, style: style,
                                  title: heading, message: lines.isEmpty ? nil : lines.joined(separator: "\n"))
+        owner.held = held
         // A native action's tint is its accent (LLP 1069.011.000 D5); the
         // alert has one tint, the first action's. Unsaid, it is UIKit's
         // (LLP 1115 D4): a `color` the action only inherits is not its own.
