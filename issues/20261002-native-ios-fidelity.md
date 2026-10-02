@@ -1,7 +1,7 @@
 # Native iOS fidelity: what the `fetch-redirect` branch adds
 
 **Status:** this branch, all checks green (cargo build/test/clippy/fmt,
-caps, 111 UIKit XCTests). 2026-10-02.
+caps, boot, 113 UIKit XCTests). 2026-10-02.
 
 These changes came from building a production-style iOS app on Exact and
 comparing it, screen by screen, with the same app written natively. Each one
@@ -24,6 +24,12 @@ Plan and rationale: `issues/20261001-resource-with.md`.
 Tests:
 - `runner/tests/it/kept_identity.rs`
 - `contract/cli/tests/it/resource_with.rs`
+
+### A store write that changes nothing is no write (runner)
+`Store::set` with the value already kept bumps no revision and sends the
+host nothing. A data source that keeps something as it answers (a
+last-good reading, a folded history) used to make every store reader be
+asked again, which wrote again, until settlement refused with `Cycle`.
 
 ### `fetch` redirect mode (prelude, runner, Apple executor)
 `redirect: "manual"` now reaches the transport. Before, every native fetch
@@ -96,6 +102,13 @@ Diagnosis: `issues/20261001-simulator-builds-have-no-entitlements.md`.
   value is never written while it's being held.
 - **An empty `backgroundMaterial`, `commandfor` or `popovertarget` names
   nothing.**
+- **HTML `enterkeyhint`** is the return key (`returnKeyType`).
+- **HTML `autocomplete`** is the field's `UITextContentType` (`username`,
+  `current-password`, `new-password`, `one-time-code`, address parts, …),
+  so Password AutoFill and SMS codes fill it; `off` names nothing.
+- **CSS `user-select: text | all`** gives a long press the system edit
+  menu's Copy for the box's whole text, as SwiftUI's `textSelection` does on
+  iPhone (a label is never selected in place there).
 
 ## Rendering
 
@@ -106,6 +119,9 @@ Diagnosis: `issues/20261001-simulator-builds-have-no-entitlements.md`.
 - **Cached images:** a stored response within `stale-while-revalidate` is
   shown at once and refreshed in the background.
 - **`host.ios.queriesSchemes`** writes `LSApplicationQueriesSchemes`.
+- **The manifest's `orientation`** (Web App Manifest) locks the iPhone's
+  `UISupportedInterfaceOrientations`; iPad keeps all four, as multitasking
+  requires.
 - **Native module views** can size themselves (`sizes`) and take their box at
   every layout.
 
