@@ -76,6 +76,41 @@ pub enum HttpScheduling {
     },
 }
 
+/// What a redirect response does: the Fetch standard's `redirect` option.
+/// Native transports follow it in Rust, re-checking the grant on every hop;
+/// `Manual` hands the 3xx back (its `Location` readable), `Error` fails.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Redirect {
+    /// Follow to the final response.
+    #[default]
+    Follow,
+    /// Return the redirect response itself.
+    Manual,
+    /// Fail the request on a redirect.
+    Error,
+}
+
+impl Redirect {
+    /// The mode `fetch` names (absent is `follow`), refusing any other word.
+    pub fn parse(name: Option<&str>) -> Result<Redirect, String> {
+        match name.unwrap_or("follow") {
+            "follow" => Ok(Redirect::Follow),
+            "manual" => Ok(Redirect::Manual),
+            "error" => Ok(Redirect::Error),
+            other => Err(format!("redirect: follow, manual or error, not {other}")),
+        }
+    }
+
+    /// Its name as `fetch` spells it.
+    pub fn name(self) -> &'static str {
+        match self {
+            Redirect::Follow => "follow",
+            Redirect::Manual => "manual",
+            Redirect::Error => "error",
+        }
+    }
+}
+
 /// One host request, with ordered native execution unless explicitly opted in.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Request {
@@ -102,6 +137,8 @@ pub struct Request {
     /// message as an [`Outcome::Message`], and anything else ends it.
     /// Set by [`Answer::stream`].
     pub stream: bool,
+    /// What a redirect response does (`fetch`'s `redirect`).
+    pub redirect: Redirect,
 }
 
 /// The URL of a long native call (`native.later` in TypeScript): not HTTP.
@@ -127,6 +164,7 @@ impl Request {
             headers: Vec::new(),
             body,
             stream: false,
+            redirect: Redirect::Follow,
         }
     }
 
@@ -179,6 +217,7 @@ impl Request {
             headers: Vec::new(),
             body: Vec::new(),
             stream: false,
+            redirect: Redirect::Follow,
         }
     }
 
@@ -195,6 +234,7 @@ impl Request {
             headers: vec![("content-type".into(), "application/json".into())],
             body: json.as_bytes().to_vec(),
             stream: false,
+            redirect: Redirect::Follow,
         }
     }
 

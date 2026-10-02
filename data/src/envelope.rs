@@ -3,7 +3,9 @@
 //! runner to commit inside its transaction. Values cross; nothing else does.
 
 use exact_plan::Value;
-use exact_runner::{Answer, DataError, HttpScheduling, Outcome, Request, Response, Store};
+use exact_runner::{
+    Answer, DataError, HttpScheduling, Outcome, Redirect, Request, Response, Store,
+};
 use serde_json::{json, Value as Json};
 
 /// The header that marks a response as a turn's reply, not a host's.
@@ -147,6 +149,7 @@ fn request_json(request: &Request) -> Json {
         "headers": request.headers,
         "body": base64(&request.body),
         "stream": request.stream,
+        "redirect": request.redirect.name(),
     })
 }
 
@@ -190,6 +193,8 @@ fn request_from(json: &Json) -> Result<Request, DataError> {
         headers,
         body: json["body"].as_str().and_then(unbase64).unwrap_or_default(),
         stream: json["stream"].as_bool().unwrap_or(false),
+        redirect: Redirect::parse(json["redirect"].as_str())
+            .map_err(|_| unavailable("turn reply: an invalid redirect mode"))?,
     })
 }
 

@@ -515,7 +515,12 @@
     }
     if (signal && signal.aborted) return Promise.reject(signal.reason);
     var ticket = nextTicket++;
-    var error = host(1, String(ticket), JSON.stringify({ method: method, url: String(url), headers: headers, body: body, max_response_bytes: ceiling, stream: stream ? true : undefined }));
+    // `redirect` as the Fetch standard spells it; Rust owns following (each
+    // hop's grant is re-checked), so "manual" returns the 3xx with its Location.
+    var redirect = init && init.redirect !== undefined ? String(init.redirect) : undefined;
+    if (redirect !== undefined && redirect !== "follow" && redirect !== "manual" && redirect !== "error")
+      return Promise.reject(new TypeError("redirect must be follow, manual or error"));
+    var error = host(1, String(ticket), JSON.stringify({ method: method, url: String(url), headers: headers, body: body, max_response_bytes: ceiling, stream: stream ? true : undefined, redirect: redirect }));
     if (error !== undefined) return Promise.reject(new Error(error));
     call.tickets.push(ticket);
     if (stream) call.stream = stream;
