@@ -33,7 +33,8 @@ extension NodeView {
                 symbolClip = clip; symbolView = leaf; leaf.wantsLayer = true; clip.addSubview(leaf); addSubview(clip)
             }
             showSymbol(image, on: leaf); leaf.setAccessibilityElement(false)
-            let size = image?.size ?? (points > 0 ? CGSize(width: points, height: points) : nil)
+            // The size layout measured already (SymbolMeasure): no move.
+            let size = SymbolMeasure.size(name, points: points, weight: number("font_weight", 400))
             DispatchQueue.main.async { [weak self] in
                 guard let self, self.loadGeneration == generation, let presenter = self.presenter,
                       presenter.views[self.id] === self else { return }

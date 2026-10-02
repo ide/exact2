@@ -161,6 +161,8 @@ package final class Runtime {
     func canvasHeld(_ view: UInt32, _ held: Bool) { on { exact_canvas_held(rt, view, held ? 1 : 0) } }
     /// The Canvas 2D text measurer (LLP 1056 D8), with the measurer's context.
     func setCanvasText(_ measure: ExactCanvasTextFn?) { on { exact_set_canvas_text(rt, measure) } }
+    /// The system-symbol measurer (LLP 1035.004.000), with the measurer's context.
+    func setSymbolMeasure(_ measure: ExactSymbolFn?) { on { exact_set_symbol_measure(rt, measure) } }
     func boot(width: CGFloat, height: CGFloat) -> Batch { islands(on { read(exact_boot(rt, Float(width), Float(height))) }) }
     /// A plan that can show an SVG island opens the island module off the
     /// main thread now, before its first mask or filter needs it (LLP
