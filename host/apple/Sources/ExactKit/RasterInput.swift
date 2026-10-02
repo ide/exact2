@@ -95,6 +95,16 @@ private final class RasterDownload: NSObject, URLSessionDataDelegate, @unchecked
         super.init()
     }
     func run(_ cancellation: RasterCancellation) throws -> (URL, Int) {
+        // RFC 5861: a stored response within its stale-while-revalidate window
+        // is shown now and refreshed behind, as a browser does. URLCache keeps
+        // the bytes but knows only max-age, so a launch after ten minutes
+        // waited on the network for an image it already had.
+        if let (data, stale) = Self.storedWithinWindow(url) {
+            try file.write(contentsOf: data); count = data.count
+            try? file.close()
+            if stale { Self.revalidate(url) }
+            return (destination, count)
+        }
         let configuration = URLSessionConfiguration.default
         configuration.urlCache = Self.responseCache; configuration.requestCachePolicy = .useProtocolCachePolicy
         // Switching cache policy must not add ambient cookies or credentials.
@@ -114,6 +124,41 @@ private final class RasterDownload: NSObject, URLSessionDataDelegate, @unchecked
         guard count > 0 else { try? FileManager.default.removeItem(at: destination); throw RasterFailure.decode }
         return (destination, count)
     }
+    /// The stored body for `url` if it may be shown now: fresh, or stale
+    /// within `stale-while-revalidate` (then `stale` is true).
+    private static func storedWithinWindow(_ url: URL) -> (Data, Bool)? {
+        guard let stored = responseCache.cachedResponse(for: URLRequest(url: url)),
+              let http = stored.response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
+              !stored.data.isEmpty, stored.data.count <= RasterMetadata.encodedLimit else { return nil }
+        let directives = (http.value(forHTTPHeaderField: "Cache-Control") ?? "").lowercased()
+            .split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+        func seconds(_ name: String) -> Double? {
+            directives.first { $0.hasPrefix(name + "=") }.flatMap { Double($0.dropFirst(name.count + 1)) }
+        }
+        guard !directives.contains("no-store"), !directives.contains("no-cache"),
+              let maxAge = seconds("max-age") else { return nil }
+        let window = seconds("stale-while-revalidate") ?? 0
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(identifier: "GMT")
+        formatter.dateFormat = "EEE, dd MMM yyyy HH:mm:ss zzz"
+        guard let date = http.value(forHTTPHeaderField: "Date").flatMap(formatter.date(from:)) else { return nil }
+        let age = Date().timeIntervalSince(date) + (http.value(forHTTPHeaderField: "Age").flatMap(Double.init) ?? 0)
+        guard age <= maxAge + window else { return nil }
+        return (stored.data, age > maxAge)
+    }
+
+    /// Refresh the stored response for `url` behind the image already shown.
+    private static func revalidate(_ url: URL) {
+        let configuration = URLSessionConfiguration.default
+        configuration.urlCache = responseCache; configuration.requestCachePolicy = .reloadRevalidatingCacheData
+        configuration.httpCookieStorage = nil; configuration.httpShouldSetCookies = false
+        configuration.urlCredentialStorage = nil
+        configuration.timeoutIntervalForRequest = 15; configuration.timeoutIntervalForResource = 30
+        let session = URLSession(configuration: configuration)
+        session.dataTask(with: url) { _, _, _ in session.finishTasksAndInvalidate() }.resume()
+    }
+
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive response: URLResponse,
                     completionHandler: @escaping (URLSession.ResponseDisposition) -> Void) {
         guard response.expectedContentLength <= RasterMetadata.encodedLimit,
