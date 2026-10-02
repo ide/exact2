@@ -83,6 +83,32 @@ final class NativeButton: UIButton {
         }
     }
 
+    /// Recognizers already made to wait for their scroll view.
+    private var waiting = Set<ObjectIdentifier>()
+
+    /// Interactive glass answers a touch through its own recognizers, which
+    /// UIScrollView's `delaysContentTouches` does not hold back: in a scroll
+    /// view the glass would swell under every swipe. Each of them waits for
+    /// the scroll view's delayed-touch recognizer to fail — the moment the
+    /// scroll view has decided the touch is not a scroll, when an ordinary
+    /// button highlights too.
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        guard configured else { return }
+        var ancestor = superview
+        while let v = ancestor, !(v is UIScrollView) { ancestor = v.superview }
+        guard let scroll = ancestor as? UIScrollView, scroll.delaysContentTouches,
+              let delay = scroll.gestureRecognizers?.first(where: { NSStringFromClass(type(of: $0)).contains("DelayedTouchesBegan") })
+        else { return }
+        func walk(_ v: UIView) {
+            for g in v.gestureRecognizers ?? [] where waiting.insert(ObjectIdentifier(g)).inserted {
+                g.require(toFail: delay)
+            }
+            v.subviews.forEach(walk)
+        }
+        walk(self)
+    }
+
     func detach() {
         drawn.forEach { $0.isHidden = false }
         drawn = []
@@ -133,6 +159,25 @@ final class NativeButton: UIButton {
         if key != signature {
             signature = key
             configuration = NativeButton.configuration(style, owner: owner, text: text, symbol: symbol, title: title, radius: radius, symbolBox: a, textBox: b)
+            // SwiftUI's bordered styles dim the whole button while pressed,
+            // its label too; UIKit's configurations darken only the fill.
+            let rest = configuration
+            let tint = symbol?.color("tint_color", .label) ?? .label
+            let dimImage = rest?.image?.withTintColor(tint.withAlphaComponent(0.5), renderingMode: .alwaysOriginal)
+            let titleTransformer = rest?.titleTextAttributesTransformer
+            // A plain button's fade is UIKit's own.
+            configurationUpdateHandler = style == "plain" ? nil : { button in
+                guard var config = rest else { return }
+                if button.isHighlighted {
+                    config.image = dimImage ?? config.image
+                    config.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { incoming in
+                        var out = titleTransformer?(incoming) ?? incoming
+                        out.foregroundColor = (rest?.baseForegroundColor ?? .label).withAlphaComponent(0.5)
+                        return out
+                    }
+                }
+                button.configuration = config
+            }
         }
         configured = true
         drawn.filter { !nodes.contains($0) }.forEach { $0.isHidden = false }
@@ -161,17 +206,27 @@ final class NativeButton: UIButton {
             config.title = title
             let font = UIFont.systemFont(ofSize: text.number("font_size", 17), weight: weight(text.number("font_weight", 400)))
             let color = text.color("text_color", .label)
+            // The font only: the colour is the configuration's foreground,
+            // which UIKit itself fades while a plain button is held.
             config.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { incoming in
-                var out = incoming; out.font = font; out.foregroundColor = color; return out
+                var out = incoming; out.font = font; return out
             }
             config.titleLineBreakMode = .byTruncatingTail
             config.baseForegroundColor = color
         }
         if let symbol {
             let points = symbol.number("font_size", 17)
-            config.image = UIImage(systemName: symbol.props["symbolName"] ?? "",
-                                   withConfiguration: UIImage.SymbolConfiguration(pointSize: points, weight: symbolWeight(symbol.number("font_weight", 400))))?
-                .withTintColor(symbol.color("tint_color", .label), renderingMode: .alwaysOriginal)
+            let glyph = UIImage(systemName: symbol.props["symbolName"] ?? "",
+                                withConfiguration: UIImage.SymbolConfiguration(pointSize: points, weight: symbolWeight(symbol.number("font_weight", 400))))
+            let tint = symbol.color("tint_color", .label)
+            if text == nil { config.baseForegroundColor = tint }
+            // A symbol in the title's colour is a template UIKit tints and
+            // fades with it; one of its own colour is drawn in it.
+            let traits = owner.traitCollection
+            // Only plain tints its template with the foreground; the other
+            // styles draw the symbol in its own colour.
+            let same = style == "plain" && (config.baseForegroundColor.map { $0.resolvedColor(with: traits) == tint.resolvedColor(with: traits) } ?? false)
+            config.image = same ? glyph : glyph?.withTintColor(tint, renderingMode: .alwaysOriginal)
         }
         // Layout rows stay in the kernel: the boxes' frames say how the
         // symbol and the title stand, and how far apart.
