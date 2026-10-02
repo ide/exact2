@@ -1011,7 +1011,7 @@ final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, UIScrollV
         defer { syncGlassSlot(); syncGlassGroup(); settleVibrancy() }
         let kind = materialRequest
         let supported = kind != nil
-        let interactive = Materials.glass(kind) && handlers.contains("press") && !disabled
+        let interactive = Materials.glass(kind) && (handlers.contains("press") || invokesConfirmation) && !disabled
         if materialKind != (supported ? kind : nil) {
             let children = container.subviews.compactMap { $0 as? NodeView }
             materialView?.removeFromSuperview()
