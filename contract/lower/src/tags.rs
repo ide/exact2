@@ -620,6 +620,7 @@ pub fn attr(name: &str) -> Option<AttrTarget> {
         "hook" => AttrTarget::Prop(p("hook")),
         "closedby" => AttrTarget::Prop(p("closedby")),
         "open" => AttrTarget::Prop(p("open")),
+        "autocomplete" => AttrTarget::Prop(p("autocomplete")),
         "contextTarget" => AttrTarget::Prop(p("contextTarget")),
         "contextMagnify" => AttrTarget::Prop(p("contextMagnify")),
         "emojiPicker" => AttrTarget::Prop(p("emojiPicker")),

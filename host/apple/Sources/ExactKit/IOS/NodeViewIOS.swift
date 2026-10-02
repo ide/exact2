@@ -1071,7 +1071,7 @@ final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, UIScrollV
             // The web's `type` and `inputmode`, as UIKit spells them.
             let type = props["type"] ?? "text"
             f.isSecureTextEntry = type == "password"
-            f.textContentType = type == "password" ? .password : type == "email" ? .emailAddress : nil
+            f.textContentType = inputContentType
             let traitsChanged = f.autocapitalizationType != inputCapitalization || f.autocorrectionType != inputCorrection || f.spellCheckingType != inputSpellChecking
             f.autocapitalizationType = inputCapitalization
             f.autocorrectionType = inputCorrection

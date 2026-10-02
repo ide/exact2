@@ -40,5 +40,18 @@ final class FieldCompositionIOSTests: XCTestCase {
         XCTAssertEqual(field.text, "你好")
         XCTAssertNil(node.pendingValue)
     }
+
+    func testAutocompleteNamesWhatAutoFillFills() throws {
+        let node = NodeView(id: 1, kind: "input", presenter: Presenter())
+        let field = try XCTUnwrap(node.field)
+        node.applyProps(set: ["type": "email", "autocomplete": "username"], clear: [])
+        XCTAssertEqual(field.textContentType, .username)
+        node.applyProps(set: ["type": "text", "autocomplete": "one-time-code"], clear: [])
+        XCTAssertEqual(field.textContentType, .oneTimeCode)
+        node.applyProps(set: ["type": "password"], clear: ["autocomplete"])
+        XCTAssertEqual(field.textContentType, .password, "absent: the type says it")
+        node.applyProps(set: ["autocomplete": "off"], clear: [])
+        XCTAssertNil(field.textContentType)
+    }
 }
 #endif

@@ -191,6 +191,40 @@ extension NodeView {
         return (props["autocorrect"] ?? "").lowercased() == "off" ? .no : .default
     }
 
+    /// HTML `autocomplete`, as UIKit's content type, so AutoFill can fill
+    /// the field (its last token: `section-x shipping postal-code` is a
+    /// postal code). `off` names nothing; absent, a password or email field
+    /// says so by its type.
+    var inputContentType: UITextContentType? {
+        let type = (props["type"] ?? "").lowercased()
+        let fallback: UITextContentType? = type == "password" ? .password : type == "email" ? .emailAddress : nil
+        guard let token = props["autocomplete"]?.lowercased().split(separator: " ").last else { return fallback }
+        switch token {
+        case "off": return nil
+        case "username": return .username
+        case "current-password": return .password
+        case "new-password": return .newPassword
+        case "one-time-code": return .oneTimeCode
+        case "email": return .emailAddress
+        case "name": return .name
+        case "given-name": return .givenName
+        case "family-name": return .familyName
+        case "nickname": return .nickname
+        case "organization": return .organizationName
+        case "tel": return .telephoneNumber
+        case "street-address": return .fullStreetAddress
+        case "address-line1": return .streetAddressLine1
+        case "address-line2": return .streetAddressLine2
+        case "address-level2": return .addressCity
+        case "address-level1": return .addressState
+        case "postal-code": return .postalCode
+        case "country-name": return .countryName
+        case "url": return .URL
+        case "cc-number": return .creditCardNumber
+        default: return fallback
+        }
+    }
+
     var inputSpellChecking: UITextSpellCheckingType {
         switch props["spellcheck"] {
         case "false": return .no
