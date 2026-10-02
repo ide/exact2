@@ -603,6 +603,7 @@ pub fn attr(name: &str) -> Option<AttrTarget> {
         "navigationContainerProps" => AttrTarget::Prop(p("navigationContainerProps")),
         "navigationSource" => AttrTarget::Prop(p("navigationSource")),
         "closedby" => AttrTarget::Prop(p("closedby")),
+        "open" => AttrTarget::Prop(p("open")),
         "contextTarget" => AttrTarget::Prop(p("contextTarget")),
         "contextMagnify" => AttrTarget::Prop(p("contextMagnify")),
         "emojiPicker" => AttrTarget::Prop(p("emojiPicker")),

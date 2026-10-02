@@ -636,6 +636,12 @@
       "kind": "str"
     },
     {
+      "id": 228,
+      "name": "open",
+      "kind": "bool",
+      "_comment": "HTML `dialog open`: the dialog shows while true, as the state says, not only when an invoker opens it. The Apple hosts present a dialog of texts and buttons as their alert; a button's press (or the alert's cancel) is the app's to close it with."
+    },
+    {
       "id": 214,
       "name": "scrollRestoration",
       "kind": "str"
