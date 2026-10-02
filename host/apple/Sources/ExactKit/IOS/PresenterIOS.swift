@@ -275,6 +275,7 @@ final class Presenter {
                 let frame = parent.convert(self.viewport.frame, to: window)
                 let overlap = top.map { min(max(0, frame.maxY - max($0, frame.minY)), frame.height) } ?? 0
                 self.setKeyboardInset(overlap)
+                self.insetScreenScroller(top: top, window: window)
             }
             self.reveal(self.editing ?? self.views.values.first { $0.field?.isFirstResponder == true })
         }
@@ -286,14 +287,69 @@ final class Presenter {
         UIView.animate(withDuration: duration, delay: 0, options: [UIView.AnimationOptions(rawValue: curve << 16), .beginFromCurrentState], animations: change)
     }
 
+    /// The keyboard's overlap (`keyboardInset`, the env value), given to the
+    /// app root's scroller only when it is the screen's own — no native
+    /// navigation holds the screens and the field has no scroller of its
+    /// screen ("combined"). A screen's scroller takes it otherwise
+    /// (`insetScreenScroller`): the app root must not become scrollable
+    /// under a screen, or a drag goes to it rather than to the screen's
+    /// scroller, whose keyboard dismissal then never runs.
     func setKeyboardInset(_ h: CGFloat) {
         keyboardInset = h
+        let own = screenScroller(for: keyboardField) == nil && !navigation.holdsScreens ? h : 0
         var inset = viewport.contentInset
-        inset.bottom = h
+        inset.bottom = own
         viewport.contentInset = inset
         var indicators = viewport.verticalScrollIndicatorInsets
-        indicators.bottom = h
+        indicators.bottom = own
         viewport.verticalScrollIndicatorInsets = indicators
+        // The combined root sends the keyboard away as its root asks.
+        viewport.keyboardDismissMode = own > 0 ? Self.dismissal(root.subviews.first.flatMap { $0 as? NodeView }?.props["keyboardDismissMode"]) : .none
+    }
+
+    /// The field being edited.
+    var keyboardField: NodeView? { editing ?? views.values.first { $0.field?.isFirstResponder == true || $0.textArea?.isFirstResponder == true } }
+
+    /// The scroller of the field's screen: the innermost vertical scroll
+    /// container holding it, below the app root.
+    func screenScroller(for node: NodeView?) -> ScrollView? {
+        var v = node?.superview
+        while let cur = v, cur !== viewport {
+            if let sv = cur as? ScrollView, sv.scrollsY, sv.isScrollEnabled { return sv }
+            v = cur.superview
+        }
+        return nil
+    }
+
+    /// The screen scroller holding the keyboard's overlap, and the bottom
+    /// inset it had before.
+    private var keyboardScroller: (view: ScrollView, bottom: CGFloat)?
+
+    /// The field's screen scroller is inset by the part of it the keyboard
+    /// covers, as a UIKit screen's is, so it reveals the field and its own
+    /// `keyboardDismissMode` takes the drag; the last one given back.
+    func insetScreenScroller(top: CGFloat?, window: UIWindow) {
+        let target = top == nil ? nil : screenScroller(for: keyboardField)
+        if let held = keyboardScroller, held.view !== target {
+            held.view.contentInset.bottom = held.bottom
+            held.view.verticalScrollIndicatorInsets.bottom = held.bottom
+            keyboardScroller = nil
+        }
+        guard let target, let top else { return }
+        if keyboardScroller == nil { keyboardScroller = (target, target.contentInset.bottom) }
+        let frame = target.convert(target.bounds, to: window)
+        let overlap = min(max(0, frame.maxY - max(top, frame.minY)), frame.height)
+        let bottom = (keyboardScroller?.bottom ?? 0) + overlap
+        if target.contentInset.bottom != bottom { target.contentInset.bottom = bottom }
+        target.verticalScrollIndicatorInsets.bottom = bottom
+    }
+
+    static func dismissal(_ mode: String?) -> UIScrollView.KeyboardDismissMode {
+        switch mode {
+        case "interactive": return .interactive
+        case "on-drag": return .onDrag
+        default: return .none
+        }
     }
 
     /// Scroll a node into the part of the viewport the keyboard leaves —
@@ -936,6 +992,12 @@ final class Presenter {
         #if os(tvOS)
         menuKey.sync()
         #endif
+        // Under native navigation the app root is no screen: it never
+        // scrolls, each screen's root does.
+        if viewport.isScrollEnabled == navigation.holdsScreens {
+            viewport.isScrollEnabled = !navigation.holdsScreens
+            if navigation.holdsScreens { viewport.contentOffset = .zero }
+        }
         segments.sync()
         controls.sync()
         menus.sync()
