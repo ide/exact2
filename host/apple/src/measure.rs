@@ -206,6 +206,33 @@ pub fn install_fonts(plan: &Plan, callback: FontsFn, ctx: *mut c_void) {
     callback(ctx, &catalog);
 }
 
+/// The size a system symbol draws at (LLP 1035.004.000): its name (UTF-8),
+/// point size and CSS weight; writes width and height and answers 1, or 0
+/// when it cannot say. Called on the runtime's thread with the context
+/// `exact_set_measure` was given.
+pub type SymbolFn = extern "C" fn(
+    ctx: *mut c_void,
+    name: *const u8,
+    len: usize,
+    font_size: f32,
+    font_weight: u16,
+    out: *mut f32,
+) -> u8;
+
+/// The kernel's measurer for a runtime's hooks: the app's callbacks, or the
+/// monospace reference measurer when it set none.
+pub fn from_hooks(
+    measure: Option<MeasureFn>,
+    ctx: *mut c_void,
+    lines: Option<LinesFn>,
+    symbol: Option<SymbolFn>,
+) -> Box<dyn TextMeasurer> {
+    match measure {
+        Some(f) => Box::new(CallbackMeasurer::new(f, ctx, lines).with_symbol(symbol)),
+        None => Box::new(exact_kernel::MonospaceMeasurer::default()),
+    }
+}
+
 /// A kernel measurer backed by the app's callback.
 pub struct CallbackMeasurer {
     f: MeasureFn,
@@ -214,6 +241,10 @@ pub struct CallbackMeasurer {
     memo: identified::Memo,
     /// The document language (`TextMeasurer::set_language`), for `hyphens: auto`.
     language: String,
+    symbol: Option<SymbolFn>,
+    /// Each symbol's answer by name, point size and weight: a glyph's box
+    /// does not change for the life of a catalog.
+    symbols: std::collections::HashMap<(String, u32, u16), Option<(f32, f32)>>,
 }
 
 impl CallbackMeasurer {
@@ -227,7 +258,15 @@ impl CallbackMeasurer {
             ctx,
             memo: identified::Memo::default(),
             language: String::new(),
+            symbol: None,
+            symbols: Default::default(),
         }
+    }
+
+    /// Measure system symbols with `f` too (LLP 1035.004.000).
+    pub fn with_symbol(mut self, f: Option<SymbolFn>) -> CallbackMeasurer {
+        self.symbol = f;
+        self
     }
 }
 
@@ -393,6 +432,32 @@ impl TextMeasurer for CallbackMeasurer {
         if out.iter().all(|b| b.is_finite()) {
             bottoms.extend(out);
         }
+    }
+
+    fn measure_symbol(
+        &mut self,
+        name: &str,
+        font_size: f32,
+        font_weight: u16,
+    ) -> Option<(f32, f32)> {
+        let f = self.symbol?;
+        let key = (name.to_string(), font_size.to_bits(), font_weight);
+        if let Some(known) = self.symbols.get(&key) {
+            return *known;
+        }
+        let mut out = [0f32; 2];
+        let ok = f(
+            self.ctx,
+            name.as_ptr(),
+            name.len(),
+            font_size,
+            font_weight,
+            out.as_mut_ptr(),
+        ) == 1;
+        let size =
+            (ok && out.iter().all(|v| v.is_finite() && *v >= 0.0)).then_some((out[0], out[1]));
+        self.symbols.insert(key, size);
+        size
     }
 
     fn measure_identified(
