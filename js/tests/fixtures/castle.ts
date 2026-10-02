@@ -126,6 +126,9 @@ function answer(source: string, args: unknown[], store: Store): unknown {
       method: "POST",
       ...(args[2] ? { exactIndependentHttp: { maxResponseBytes: args[1] } } : {}),
     }).then(r => r.text());
+    case "redirected": return fetch("https://api.castle.xyz/moved", {
+      ...(args[0] === "" ? {} : { redirect: args[0] }),
+    }).then(r => r.status + " " + (r.headers.get("location") ?? ""));
     default: throw new DataError("UnknownSource", source);
   }
 }
