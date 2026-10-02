@@ -88,7 +88,7 @@ class ScrollView: UIScrollView {
                 let (at, low, high, scrolls) = horizontal
                     ? (outer.contentOffset.x, -o.left, outer.contentSize.width + o.right - outer.bounds.width, outer.scrollsX)
                     : (outer.contentOffset.y, -o.top, outer.contentSize.height + o.bottom - outer.bounds.height, outer.scrollsY)
-                if scrolls && high > low && (toward > 0 ? at > low + 0.5 : at < high - 0.5) { return true }
+                if outer.isScrollEnabled && scrolls && high > low && (toward > 0 ? at > low + 0.5 : at < high - 0.5) { return true }
             }
             up = current.superview
         }
