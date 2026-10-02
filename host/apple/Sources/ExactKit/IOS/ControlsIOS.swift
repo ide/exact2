@@ -179,7 +179,8 @@ final class ControlHost: NSObject {
             if let b = control as? NativeButtonIOS {
                 configureNative(b, owner, accent: accent)
             } else if let s = control as? UISwitch {
-                if let on, s.isOn != on { s.setOn(on, animated: s.window != nil) }
+                // Never while it is held: a set restarts a Liquid Glass thumb's motion.
+                if let on, s.isOn != on, !s.isTracking { s.setOn(on, animated: s.window != nil) }
                 assign(s, \.onTintColor, accent)
             } else if let c = control as? ExactCheckbox {
                 if let on { c.isOn = on }
