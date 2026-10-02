@@ -220,9 +220,7 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
             let controller = UITabBarController()
             controller.delegate = self
             parent.addChild(controller)
-            root.addSubview(controller.view)
-            controller.view.frame = root.bounds
-            controller.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+            attach(controller.view, root: root)
             controller.didMove(toParent: parent)
             tabs = controller
         }
@@ -322,6 +320,24 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
         return false
     }
 
+    /// The app's root container (its tab bar controller, or its navigation
+    /// controller) is the host's own child, its view beside the session's —
+    /// over it, at its frame — never a view inside the viewport's scroller.
+    private func attach(_ view: UIView, root: NodeView) {
+        var current: UIView? = root
+        while let v = current, !(v is ExactView) { current = v.superview }
+        guard let session = current, let stage = session.superview else {
+            if view.superview !== root { root.addSubview(view) }
+            view.frame = root.bounds
+            view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+            root.bringSubviewToFront(view)
+            return
+        }
+        if view.superview !== stage { stage.insertSubview(view, aboveSubview: session) }
+        if view.frame != session.frame { view.frame = session.frame }
+        view.autoresizingMask = session.autoresizingMask
+    }
+
     private func installPrimary(root: NodeView, wanted: [RouteController]) {
         if let selectedTab { installTabs(root: root, selected: selectedTab, wanted: wanted); return }
         guard primaryNavigation == nil else { return }
@@ -334,9 +350,7 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
         nav.navigationBar.prefersLargeTitles = true
         nav.delegate = self
         parent.addChild(nav)
-        root.addSubview(nav.view)
-        nav.view.frame = root.bounds
-        nav.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        attach(nav.view, root: root)
         nav.didMove(toParent: parent)
         primaryNavigation = nav
         nav.setViewControllers(wanted, animated: false)
@@ -431,12 +445,13 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
                                      preceding: preceding, owner: owner)
         }
         if let tabs, presentedNavigations.isEmpty {
-            tabs.view.frame = root.bounds
-            root.bringSubviewToFront(tabs.view)
+            attach(tabs.view, root: root)
             tabs.view.layoutIfNeeded()
         } else if let nav = navigation {
-            nav.view.frame = root.bounds
-            root.bringSubviewToFront(nav.view)
+            if nav === primaryNavigation { attach(nav.view, root: root) } else {
+                nav.view.frame = root.bounds
+                root.bringSubviewToFront(nav.view)
+            }
             nav.view.layoutIfNeeded()
         }
         controllers = controllers.filter { routeIDs.contains($0.key) }
