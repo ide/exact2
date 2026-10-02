@@ -36,7 +36,10 @@ enum Materials {
     #endif
 
     /// Whether `name` is a glass effect (`UIGlassEffect`, `NSGlassEffectView`).
-    static func glass(_ name: String?) -> Bool { name == "glass" || name == "glass-clear" }
+    static func glass(_ name: String?) -> Bool { name == "glass" || name == "glass-clear" || name == containerKind }
+    /// `-exact-apple-glass-container`'s material: an effect view whose content
+    /// view holds the children, so their glass blends (UIGlassContainerEffect).
+    static let containerKind = "exact-glass-container"
 
     /// The schema's name on this platform for `name`, and whether that is a
     /// stand-in for a material this platform lacks; nil for no such name.
@@ -125,6 +128,9 @@ extension NodeView {
     /// The material this node asks for: the host-policy prop, else a
     /// backdrop blur, else none.
     var materialRequest: String? {
+        #if os(iOS)
+        if number("exact_apple_glass_container", -1) >= 0 { return Materials.containerKind }
+        #endif
         // An empty value (a bound one turned off) asks for none.
         if let material = props["backgroundMaterial"], !material.isEmpty { return material }
         return number("backdrop_blur") > 0 ? "backdrop" : nil
@@ -146,6 +152,11 @@ extension NodeView {
     /// The effect for material `kind` (LLP 1053.000 D4): a glass effect on
     /// iOS 26 (else ultra-thin), otherwise the table's blur style.
     func materialEffect(_ kind: String, interactive: Bool) -> UIVisualEffect {
+        if kind == Materials.containerKind, #available(iOS 26.0, *) {
+            let group = UIGlassContainerEffect()
+            group.spacing = number("exact_apple_glass_container", 0)
+            return group
+        }
         let apple = Materials.resolve(kind) { [weak self] in self?.presenter?.session?.log($0) }
         if apple == "glass" || apple == "glassClear" {
             if #available(iOS 26.0, *) {
