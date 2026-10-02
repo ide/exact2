@@ -419,8 +419,21 @@ export const infoPlist = (app, device = false, { executable = 'ExactIOS', id = a
   Object.assign(dict, usageKeys(reach));
   Object.assign(dict, icon);
   if (distribution) Object.assign(dict, distribution);
+  // The manifest's `orientation` (Web App Manifest) locks the iPhone's; iPad
+  // keeps all four, as multitasking requires.
+  const locked = phoneOrientations(app.manifest.orientation);
+  if (locked) dict.UISupportedInterfaceOrientations = locked;
   return plistFile(dict);
 };
+
+/** The iPhone orientations a manifest `orientation` allows, or null for
+ * `any`/`natural`/absent (what iOS assumes). `-primary` is the device's own
+ * way up, so `landscape-primary` is the Home indicator on the right. */
+export function phoneOrientations(orientation) {
+  const P = 'UIInterfaceOrientationPortrait', U = 'UIInterfaceOrientationPortraitUpsideDown';
+  const R = 'UIInterfaceOrientationLandscapeRight', L = 'UIInterfaceOrientationLandscapeLeft';
+  return { portrait: [P], 'portrait-primary': [P], 'portrait-secondary': [U], landscape: [L, R], 'landscape-primary': [R], 'landscape-secondary': [L] }[orientation] ?? null;
+}
 
 /** What App Store Connect reads from a distributed bundle and Xcode would
  * have written (`--archive`): the build's toolchain (DT* keys) and the store's
