@@ -94,7 +94,10 @@ final class NodeView: NSView, NSTextViewDelegate, NSTextFieldDelegate {
     var boxGradient: CAGradientLayer?
     var imageLayer: CALayer?
     var materialView: NSView?
-    private var materialContent: NSView?
+    /// `glassGroup`'s view and a grouped glass's isolation (`GlassGroup.swift`).
+    var glassGroupView: NSView?
+    var glassIsolation: NSView?
+    var materialContent: NSView?
     private var materialKind: String?
     /// Natural extent from the kernel, before the CSS client-size minimum.
     var content = CGSize.zero
@@ -131,6 +134,7 @@ final class NodeView: NSView, NSTextViewDelegate, NSTextFieldDelegate {
     /// the source it came from, and which load is current: a completion
     /// from an older load, or for a view that was destroyed, is dropped.
     var symbolView: NSImageView? { didSet { layerPaintCache = nil } }
+    var symbolFound = false
     var symbolKey: String?
     var symbolRefusal: String?
     var symbolClip: NSView?
@@ -396,6 +400,7 @@ final class NodeView: NSView, NSTextViewDelegate, NSTextFieldDelegate {
         loadGeneration += 1
         if source.hasPrefix("symbol:") { presenter?.session?.rasters.cancel(id); raster = nil; updateSymbol(); return }
         clearSymbol(); image = nil
+        if previousSource?.hasPrefix("symbol:") == true { presenter?.intrinsic(id, nil) }
         guard let session = presenter?.session else { return }
         if !session.rasters.load(self, source: source, resolver: session.app.resolver) {
             imageSource = previousSource; loadGeneration = previousGeneration
@@ -414,7 +419,7 @@ final class NodeView: NSView, NSTextViewDelegate, NSTextFieldDelegate {
 
     // A symbol remains an image leaf; AppKit owns glyph rendering and tint.
     func clearSymbol() {
-        symbolClip?.removeFromSuperview(); symbolClip = nil; symbolView = nil; symbolKey = nil
+        symbolClip?.removeFromSuperview(); symbolClip = nil; symbolView = nil; symbolKey = nil; symbolFound = false
     }
     func updateSymbol() {
         guard kind == "image", let source = imageSource, source.hasPrefix("symbol:") else { return }
@@ -426,16 +431,17 @@ final class NodeView: NSView, NSTextViewDelegate, NSTextFieldDelegate {
         if symbolKey != key {
             symbolKey = key; loadGeneration += 1
             let generation = loadGeneration
-            image = name.isEmpty || points <= 0 ? nil : NSImage(systemSymbolName: name, accessibilityDescription: nil)?.withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: points, weight: weights[index]))
-            if name.isEmpty, symbolRefusal != source { symbolRefusal = source; presenter?.session?.log("image \(source) refused: unknown symbol role") }
-            if !name.isEmpty { symbolRefusal = nil }
+            image = name.isEmpty ? nil : NSImage(systemSymbolName: name, accessibilityDescription: nil)?.withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: points > 0 ? points : 1, weight: weights[index]))
+            symbolFound = image != nil; if points <= 0 { image = nil }
+            if name.isEmpty, !source.hasPrefix("symbol:sf/"), symbolRefusal != source { symbolRefusal = source; presenter?.session?.log("image \(source) refused: unknown symbol role") }
+            if !name.isEmpty || source.hasPrefix("symbol:sf/") { symbolRefusal = nil }
             let leaf = symbolView ?? NSImageView()
             if symbolView == nil {
                 let clip = SymbolClip(); clip.wantsLayer = true; clip.layer?.masksToBounds = true
                 symbolClip = clip; symbolView = leaf; leaf.wantsLayer = true; clip.addSubview(leaf); addSubview(clip)
             }
             leaf.image = image; leaf.setAccessibilityElement(false)
-            let size = image?.size
+            let size = image?.size ?? (points > 0 ? CGSize(width: points, height: points) : nil)
             DispatchQueue.main.async { [weak self] in
                 guard let self, self.loadGeneration == generation, let presenter = self.presenter,
                       presenter.views[self.id] === self else { return }
@@ -517,14 +523,15 @@ final class NodeView: NSView, NSTextViewDelegate, NSTextFieldDelegate {
     required init?(coder: NSCoder) { nil }
     override var isFlipped: Bool { true }
 
-    /// Where children go: the scroll document view, or this view.
-    var container: NSView { scroll?.documentView ?? overlay ?? materialContent ?? clipBox ?? self }
+    /// Where children go: the scroll document view, or this view; a glass
+    /// group innermost (`GlassGroup.swift`).
+    var container: NSView { glassGroupContent ?? baseContainer }
 
     // @ref LLP 1001 §1 — two semantic materials, not sampled blur constants.
     // AppKit owns accessibility/appearance adaptation, including Reduce
     // Transparency and Increase Contrast; do not freeze the effective appearance.
     var appliedMaterial: String {
-        guard let materialView, materialView.superview === self else {
+        guard let materialView, materialView.superview === self || (glassIsolation != nil && materialView.superview?.superview === glassIsolation) else {
             if (layer?.backgroundFilters?.count ?? 0) > 0 { return "backgroundFilters(CIGaussianBlur)" }
             return props["backgroundMaterial"] == nil ? "none" : "unsupported"
         }
@@ -534,9 +541,10 @@ final class NodeView: NSView, NSTextViewDelegate, NSTextFieldDelegate {
 
     func updateMaterial() {
         let requested = props["backgroundMaterial"]
-        defer { applyBackdrop() }
+        defer { applyBackdrop(); syncGlassSlot(); syncGlassGroup() }
         let kind = requested
         if materialKind != kind {
+            releaseGlassIsolation()
             let children = container.subviews.compactMap { $0 as? NodeView }
             let old = materialView
             materialView = nil
@@ -1051,15 +1059,19 @@ final class NodeView: NSView, NSTextViewDelegate, NSTextFieldDelegate {
             sv.contentView.postsBoundsChangedNotifications = true
             NotificationCenter.default.addObserver(self, selector: #selector(clipScrolled), name: NSView.boundsDidChangeNotification, object: sv.contentView)
             sv.autoresizingMask = [.width, .height]
-            for child in container.subviews where child is NodeView { child.removeFromSuperview(); sv.documentView?.addSubview(child) }
-            addSubview(sv)
+            GlassGroups.moving(in: self) {
+                for child in container.subviews where child is NodeView { child.removeFromSuperview(); sv.documentView?.addSubview(child) }
+                addSubview(sv)
+            }
             scroll = sv
             presenter?.scrollers.insert(id)
         }
         if ox != "scroll" && oy != "scroll", let sv = scroll {
             // Neither axis scrolls any more: the children come back out.
-            for child in sv.documentView?.subviews ?? [] where child is NodeView { child.removeFromSuperview(); (overlay ?? materialContent ?? self).addSubview(child) }
-            sv.removeFromSuperview()
+            GlassGroups.moving(in: self) {
+                for child in sv.documentView?.subviews ?? [] where child is NodeView { child.removeFromSuperview(); (overlay ?? materialContent ?? self).addSubview(child) }
+                sv.removeFromSuperview()
+            }
             scroll = nil
             presenter?.scrollers.remove(id)
         }
@@ -1080,6 +1092,7 @@ final class NodeView: NSView, NSTextViewDelegate, NSTextFieldDelegate {
         if clipsToBounds != clipped { clipsToBounds = clipped }
         applyClipRadius()
         applyShadow()
+        syncGlassGroup()
         // `overscroll-behavior` (CSS): `auto` chains, `contain` keeps the
         // gesture and bounces, `none` keeps it and does not.
         let bx = s["overscroll_behavior_x"]?.string ?? "auto"
@@ -1211,6 +1224,7 @@ final class NodeView: NSView, NSTextViewDelegate, NSTextFieldDelegate {
         presenter?.videoVisibility?.changed()
         if field != nil { field?.frame = contentBox() }
         video?.layout()
+        if kind == "native" { presenter?.session?.natives.laidOut(self) }
         layoutTextArea()
         layoutSymbol()
     }

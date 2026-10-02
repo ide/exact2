@@ -4,8 +4,7 @@ import XCTest
 @testable import ExactKit
 
 /// Every button is a UIButton (NativeButtonIOS); `-exact-apple-button-style`
-/// draws it in a system style from its text and symbol; and
-/// `-exact-apple-glass-container` groups descendants' glass.
+/// draws it in a system style from its text and symbol.
 ///   bun host/apple/build.mjs --test --ios
 final class NativeButtonIOSTests: XCTestCase {
     private var window: UIWindow!
@@ -57,41 +56,6 @@ final class NativeButtonIOSTests: XCTestCase {
             ["op": "frame", "id": 1, "x": 0.0, "y": 0.0, "w": 120.0, "h": 44.0],
         ])
         XCTAssertFalse(try XCTUnwrap(button(try XCTUnwrap(p.views[1]))).isEnabled)
-    }
-
-    func testAGlassContainerHoldsItsChildrenInOneGroup() throws {
-        guard #available(iOS 26.0, *) else { throw XCTSkip("Liquid Glass") }
-        let p = presenter([
-            ["op": "create", "id": 1, "kind": "view", "style": ["exact_apple_glass_container": 8.0]],
-            // A button: a childless plain box would be a flat leaf, not a view.
-            ["op": "create", "id": 2, "kind": "button", "handlers": ["press"]],
-            ["op": "children", "id": 1, "ids": [2]],
-            ["op": "roots", "ids": [1]],
-            ["op": "frame", "id": 1, "x": 0.0, "y": 0.0, "w": 300.0, "h": 80.0],
-            ["op": "frame", "id": 2, "x": 0.0, "y": 0.0, "w": 100.0, "h": 80.0],
-        ])
-        let row = try XCTUnwrap(p.views[1]), child = try XCTUnwrap(p.views[2])
-        let effect = try XCTUnwrap(row.materialView)
-        XCTAssertEqual(row.materialKind, Materials.containerKind)
-        XCTAssertNotNil(effect.effect, "a UIGlassContainerEffect (UIKit hands back its own copy)")
-        XCTAssertTrue(child.superview === effect.contentView)
-    }
-
-    func testAnAutoGlassContainerMergesAcrossItsOwnGap() throws {
-        guard #available(iOS 26.0, *) else { throw XCTSkip("Liquid Glass") }
-        let p = presenter([
-            ["op": "create", "id": 1, "kind": "view", "style": ["exact_apple_glass_container": Double(Materials.containerAuto)]],
-            ["op": "create", "id": 2, "kind": "button", "handlers": ["press"]],
-            ["op": "create", "id": 3, "kind": "button", "handlers": ["press"]],
-            ["op": "children", "id": 1, "ids": [2, 3]],
-            ["op": "roots", "ids": [1]],
-            ["op": "frame", "id": 1, "x": 0.0, "y": 0.0, "w": 300.0, "h": 80.0],
-            ["op": "frame", "id": 2, "x": 0.0, "y": 0.0, "w": 100.0, "h": 80.0],
-            ["op": "frame", "id": 3, "x": 108.0, "y": 0.0, "w": 100.0, "h": 80.0],
-        ])
-        let row = try XCTUnwrap(p.views[1])
-        XCTAssertEqual(row.materialKind, Materials.containerKind)
-        XCTAssertEqual(row.glassGroupSpacing, 8, accuracy: 0.001)
     }
 
     func testAPopoverOfContentIsUIKitsPopoverAndOneOfRowsIsAMenu() throws {

@@ -30,6 +30,7 @@ mod media;
 mod native;
 mod routes;
 mod sites;
+mod stmts;
 mod strings;
 mod svg;
 pub mod tags;
@@ -41,7 +42,7 @@ pub use native::{is_module_tag, module_tags};
 pub use sites::{Declared, NodeSite, Origin, Sites};
 
 use contract_analyze::Analysis;
-use contract_syntax::{Attr, Expr, File, FnDecl, Node, Span, Stmt, TaskKind};
+use contract_syntax::{Attr, Expr, File, FnDecl, Node, Span, TaskKind};
 use contract_types::{Checked, Ref, Scope, Ty, Types};
 use exact_kernel::{NodeType, StyleId};
 use exact_plan::asm::Asm;
@@ -354,18 +355,11 @@ fn lower_with_sites(
             .collect::<Result<_, LowerError>>()?;
         let params_ref: Vec<(&str, TypesId)> =
             params.iter().map(|(n, t)| (n.as_str(), *t)).collect();
-        let writes: Vec<exact_plan::SlotsId> = a
-            .writes
-            .iter()
-            .map(
-                |(w, _)| match root.states.iter().position(|s| &s.name == w) {
-                    Some(si) => l.slots[si],
-                    None => {
-                        l.mutation_slots[root.mutations.iter().position(|m| &m.name == w).unwrap()]
-                    }
-                },
-            )
-            .collect();
+        // @ref LLP 1035.005.000 D1 — the VM's allowlist is exactly what the
+        // body assigns or sends through every branch, in slot order.
+        let mut writes: Vec<_> = a.effects().iter().map(|e| l.slot_named(e.target)).collect();
+        writes.sort_unstable_by_key(|slot| slot.0);
+        writes.dedup();
         let id = l.b.action(&a.name, &params_ref, &writes, placeholder);
         l.actions.push(id);
     }
@@ -441,9 +435,7 @@ fn lower_with_sites(
         );
         let mut asm = Asm::new();
         let mut locals = 0u16;
-        for stmt in &a.body {
-            l.stmt(&mut asm, stmt, &inner, &mut locals)?;
-        }
+        l.block(&mut asm, &a.body, &inner, &mut locals)?;
         let code = l.b.code(asm);
         l.b.set_action_body(l.actions[i], code);
     }
@@ -737,8 +729,10 @@ impl<'a> Lowerer<'a> {
                     in_svg,
                     *span,
                     self.host_transforms.contains(&(*span, *instance)),
+                    !self.may_hold_absolute(children),
                 )?;
                 let expanded = relative.as_deref().unwrap_or(expanded);
+                values::check_glass_group(&t, expanded)?;
                 let has =
                     |names: &[&str]| expanded.iter().any(|a| names.contains(&a.name.as_str()));
                 let parent_stacks = !matches!(parent_tag, Some("row") | Some("canvas"));
@@ -1016,9 +1010,9 @@ impl<'a> Lowerer<'a> {
                 format!("component `{name}` was not inlined"),
                 *span,
             ),
-            Node::Provide { span, .. } | Node::Children { span } => err(
+            Node::Children { span } => err(
                 "lower-uninlined-use",
-                "`provide` and `children` are inlined away before lowering",
+                "`children` is inlined away before lowering",
                 *span,
             ),
             Node::When {
@@ -1091,123 +1085,6 @@ impl<'a> Lowerer<'a> {
                 self.nodes(none, None, Some(arms[1]), &none_scope, locals, parent_tag)
             }
         }
-    }
-
-    /// Lower one statement of an action body: assignments, commands, `send`,
-    /// `refresh`, and — LLP 1017 P2 — `if`/`else` and `match`, as the
-    /// ternary and the inline `match` are lowered in `expr.rs`: a forward
-    /// jump over the arm not taken, the `match` binding a local for its
-    /// `some` block. Still no loops; a body always terminates (LLP 1005 §2).
-    fn stmt(
-        &mut self,
-        asm: &mut Asm,
-        stmt: &Stmt,
-        scope: &Scope,
-        locals: &mut u16,
-    ) -> Result<(), LowerError> {
-        let root = self.root;
-        match stmt {
-            Stmt::Assign { target, expr, .. } => {
-                expr::compile(self, asm, expr, scope, locals)?;
-                let slot = match root.states.iter().position(|s| &s.name == target) {
-                    Some(si) => self.slots[si],
-                    None => {
-                        self.mutation_slots[root
-                            .mutations
-                            .iter()
-                            .position(|m| &m.name == target)
-                            .unwrap()]
-                    }
-                };
-                asm.store_slot(slot);
-            }
-            Stmt::Send {
-                target,
-                source,
-                args,
-                ..
-            } => {
-                for arg in args {
-                    expr::compile(self, asm, arg, scope, locals)?;
-                }
-                let m = self.mutations[root
-                    .mutations
-                    .iter()
-                    .position(|m| &m.name == target)
-                    .unwrap()];
-                let source = self.b.str(source);
-                asm.send(m, source, args.len() as u16);
-            }
-            Stmt::Refresh { target, .. } => {
-                let r = self.resources[root
-                    .resources
-                    .iter()
-                    .position(|r| &r.name == target)
-                    .unwrap()];
-                asm.refresh(r);
-            }
-            Stmt::Command { name, args, .. } => {
-                let args = expr::command_args(name, args);
-                for arg in &args {
-                    expr::compile_or_none(self, asm, *arg, scope, locals)?;
-                }
-                let name = self.b.str(name);
-                asm.command(name, args.len() as u16);
-            }
-            Stmt::If {
-                cond,
-                then,
-                otherwise,
-                ..
-            } => {
-                expr::compile(self, asm, cond, scope, locals)?;
-                let els = asm.label();
-                let end = asm.label();
-                asm.jump_if_false(els);
-                for s in then {
-                    self.stmt(asm, s, scope, locals)?;
-                }
-                asm.jump(end);
-                asm.place(els);
-                for s in otherwise {
-                    self.stmt(asm, s, scope, locals)?;
-                }
-                asm.place(end);
-            }
-            Stmt::Match {
-                subject,
-                some,
-                none,
-                ..
-            } => {
-                let bound_ty = match expr::compile(self, asm, subject, scope, locals)? {
-                    Ty::Option(t) => *t,
-                    _ => Ty::Unknown,
-                };
-                let is_none = asm.label();
-                let end = asm.label();
-                asm.jump_if_none(is_none);
-                asm.simple(exact_plan::Opcode::Unwrap);
-                asm.bind_local();
-                let index = *locals;
-                *locals += 1;
-                let mut inner = scope.clone();
-                inner.push(vec![(some.0.clone(), Ref::Local(index as u32), bound_ty)]);
-                for s in &some.1 {
-                    self.stmt(asm, s, &inner, locals)?;
-                }
-                *locals -= 1;
-                asm.drop_local();
-                asm.jump(end);
-                asm.place(is_none);
-                asm.simple(exact_plan::Opcode::Pop);
-                for s in none {
-                    self.stmt(asm, s, scope, locals)?;
-                }
-                asm.place(end);
-            }
-        }
-        Ok(())
     }
 
     #[allow(clippy::too_many_arguments)]

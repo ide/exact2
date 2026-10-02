@@ -10,9 +10,11 @@ use std::io::{Read, Write};
 use std::path::Path;
 use std::time::{Duration, Instant};
 
+mod boot;
 mod direct;
 mod overload;
 mod serve;
+mod viewport;
 
 /// How the fixture's `post` source answers later.
 #[derive(Clone, Copy, Default)]

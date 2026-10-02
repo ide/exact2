@@ -381,6 +381,7 @@ final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, UIScrollV
         loadGeneration += 1
         if source.hasPrefix("symbol:") { presenter?.session?.rasters.cancel(id); raster = nil; updateSymbol(); return }
         clearSymbol(); image = nil
+        if previousSource?.hasPrefix("symbol:") == true { presenter?.queueIntrinsicSize(self, generation: loadGeneration, nil) }
         guard let session = presenter?.session else { return }
         if !session.rasters.load(self, source: source, resolver: session.app.resolver) {
             imageSource = previousSource; loadGeneration = previousGeneration
@@ -399,7 +400,7 @@ final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, UIScrollV
 
     // A symbol's box is Exact's; UIKit renders its glyph, including pixel alignment.
     func clearSymbol() {
-        symbolView?.removeFromSuperview(); symbolView = nil; symbolKey = nil
+        symbolView?.removeFromSuperview(); symbolView = nil; symbolKey = nil; symbolFound = false
     }
     func updateSymbol() {
         guard kind == "image", let source = imageSource, source.hasPrefix("symbol:") else { return }
@@ -411,13 +412,14 @@ final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, UIScrollV
         if symbolKey != key {
             symbolKey = key; loadGeneration += 1
             let generation = loadGeneration
-            image = name.isEmpty || points <= 0 ? nil : UIImage(systemName: name, withConfiguration: UIImage.SymbolConfiguration(pointSize: points, weight: weights[index]))
-            if name.isEmpty, symbolRefusal != source { symbolRefusal = source; presenter?.session?.log("image \(source) refused: unknown symbol role") }
-            if !name.isEmpty { symbolRefusal = nil }
+            image = name.isEmpty ? nil : UIImage(systemName: name, withConfiguration: UIImage.SymbolConfiguration(pointSize: points > 0 ? points : 1, weight: weights[index]))
+            symbolFound = image != nil; if points <= 0 { image = nil }
+            if name.isEmpty, !source.hasPrefix("symbol:sf/"), symbolRefusal != source { symbolRefusal = source; presenter?.session?.log("image \(source) refused: unknown symbol role") }
+            if !name.isEmpty || source.hasPrefix("symbol:sf/") { symbolRefusal = nil }
             let leaf = symbolView ?? UIImageView()
             if symbolView == nil { symbolView = leaf; addSubview(leaf) }
             leaf.image = image; leaf.isAccessibilityElement = false; leaf.isUserInteractionEnabled = false
-            presenter?.queueIntrinsicSize(self, generation: generation, image?.size)
+            presenter?.queueIntrinsicSize(self, generation: generation, (image?.size ?? (points > 0 ? CGSize(width: points, height: points) : nil)))
         }
         symbolView?.tintColor = color("tint_color", .black)
         layoutSymbol()
@@ -520,8 +522,9 @@ final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, UIScrollV
     }
 
     /// Glass content participates in UIKit's interactive effect. Other
-    /// materials remain background siblings of the authored children.
-    var container: UIView { scroll ?? overlay ?? (Materials.glass(materialKind) ? materialView?.contentView : nil) ?? clipBox ?? self }
+    /// materials remain background siblings of the authored children. A
+    /// glass group is innermost (`GlassGroup.swift`).
+    var container: UIView { glassGroupView?.contentView ?? baseContainer }
 
     /// The canvas this node is painted through, if any: the nearest canvas
     /// above whose overlay holds it.
@@ -691,7 +694,7 @@ final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, UIScrollV
             if outsideX && (style["overflow_x"]?.string ?? "visible") != "visible" { return nil }
             if outsideY && (style["overflow_y"]?.string ?? "visible") != "visible" { return nil }
             for child in subviews.reversed() {
-                if child === materialView, Materials.glass(materialKind), let contentView = materialView?.contentView {
+                if child === (glassSlot ?? materialView), Materials.glass(materialKind), let contentView = materialView?.contentView {
                     // The effect's UIKit bounds check must not hide authored
                     // children in CSS visible overflow. They remain descendants
                     // of the effect, so its recognizers still see their touches.
@@ -904,6 +907,7 @@ final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, UIScrollV
         }
     }
     func updateMaterial() {
+        defer { syncGlassSlot(); syncGlassGroup() }
         let kind = materialRequest
         let supported = kind != nil
         let interactive = Materials.glass(kind) && (handlers.contains("press") || invokesConfirmation) && !disabled
@@ -917,11 +921,12 @@ final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, UIScrollV
                 effect.isUserInteractionEnabled = Materials.glass(kind)
                 effect.frame = bounds
                 effect.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-                insertSubview(effect, at: 0)
+                (glassSlot?.contentView ?? self).insertSubview(effect, at: 0)
                 materialView = effect
                 materialKind = kind
             }
             for (index, child) in children.enumerated() { container.insertSubview(child, at: index) }
+            presenter?.flats.containerChanged(id)
         }
         guard let materialView else { return }
         if materialView.effect == nil || materialInteractive != interactive || backdropStale {
@@ -1106,15 +1111,19 @@ final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, UIScrollV
             sv.contentInsetAdjustmentBehavior = .never
             sv.delegate = self
             sv.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-            for child in subviews where child is NodeView { child.removeFromSuperview(); sv.addSubview(child) }
-            addSubview(sv)
+            GlassGroups.moving(in: self) {
+                for child in subviews where child is NodeView { child.removeFromSuperview(); sv.addSubview(child) }
+                addSubview(sv)
+            }
             scroll = sv
             updateRefresh()
         }
         if !scrolls, let sv = scroll {
             // Neither axis scrolls any more: the children come back out.
-            for child in sv.subviews where child is NodeView { child.removeFromSuperview(); addSubview(child) }
-            sv.removeFromSuperview()
+            GlassGroups.moving(in: self) {
+                for child in sv.subviews where child is NodeView { child.removeFromSuperview(); addSubview(child) }
+                sv.removeFromSuperview()
+            }
             scroll = nil
         }
         scroll?.decelerationRate = (style["scroll_snap_type"]?.string) == "x mandatory" ? .fast : .normal
@@ -1132,6 +1141,7 @@ final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, UIScrollV
         // A paragraph paints its own text, which a box would not clip.
         syncClipBox(clips && kind != "text" && shadowColor != nil && scroll == nil && overlay == nil && materialKind != "glass")
         clipsToBounds = clips && clipBox == nil
+        syncGlassGroup()
     }
 
     /// A native swipe row's scroll container (`swipeContent`, LLP 1008 §9)
@@ -1206,17 +1216,6 @@ final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, UIScrollV
         video?.layout()
         if kind == "native" { presenter?.session?.natives.laidOut(self) }
         for case let button as NativeButton in subviews where button.frame != bounds { button.frame = bounds }
-        // `-exact-apple-glass-container: auto` follows the laid-out gap.
-        if materialKind == Materials.containerKind, number("exact_apple_glass_container", -1) == Materials.containerAuto,
-           let effect = materialView, #available(iOS 26.0, *) {
-            let spacing = glassGroupSpacing, mark = Int((spacing * 100).rounded()) + 1
-            if effect.tag != mark {
-                effect.tag = mark
-                let group = UIGlassContainerEffect()
-                group.spacing = spacing
-                effect.effect = group
-            }
-        }
         layoutTextArea()
         layoutSymbol()
     }

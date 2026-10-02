@@ -7,10 +7,9 @@ use crate::id::ViewId;
 
 impl Kernel {
     /// Host intrinsic size (`None` to forget it). Replaced elements keep
-    /// their natural ratio; a projected tablist and a native module view that
-    /// sizes itself use the height as their automatic minimum (LLP 1059,
-    /// LLP 1024); a form control takes it as its size, with no ratio
-    /// (LLP 1069.001 D3). Other nodes and nonpositive/nonfinite sizes are refused.
+    /// their natural ratio; a projected tablist uses the height as its automatic
+    /// minimum (LLP 1059); a form control takes it as its size, with no ratio
+    /// (LLP 1069.001 D3), as does a native module (LLP 1024 D4). Other nodes and nonpositive/nonfinite sizes are refused.
     pub fn set_intrinsic_size(
         &mut self,
         view: ViewId,
@@ -30,13 +29,11 @@ impl Kernel {
             .and_then(|v| v.as_str())
             == Some("tablist");
         let clearing_projection = size.is_none() && self.arena.intrinsic(slot).is_some();
-        let control = self.arena.node_type(slot) == crate::NodeType::Control;
-        let native = self.arena.node_type(slot) == crate::NodeType::NativeView;
-        if !self.arena.node_type(slot).is_replaced()
-            && !control
-            && !tablist
-            && !native
-            && !clearing_projection
+        let control = matches!(
+            self.arena.node_type(slot),
+            crate::NodeType::Control | crate::NodeType::NativeView
+        );
+        if !self.arena.node_type(slot).is_replaced() && !control && !tablist && !clearing_projection
         {
             return Err(LayoutError::NotAnImage(view).into());
         }

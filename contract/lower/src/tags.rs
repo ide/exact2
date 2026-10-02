@@ -93,6 +93,7 @@ pub(crate) fn positioned(
     in_svg: bool,
     span: contract_syntax::Span,
     host_transform: bool,
+    holds_nothing: bool,
 ) -> Result<Option<Vec<contract_syntax::Attr>>, crate::LowerError> {
     use contract_syntax::Expr;
     let literal =
@@ -123,6 +124,33 @@ pub(crate) fn positioned(
         ),
         Some(_) => Ok(None),
         None if tag.fixed_styles.iter().any(|(id, _)| *id == StyleId::PositionType) => Ok(None),
+        // Only its own rows (it clips, transforms or animates) and nothing
+        // absolute can be under it (`Lowerer::may_hold_absolute`): it is the
+        // containing block of nothing, and a positioned box costs a host a
+        // layer to paint and hit-test (10,000 grid rows' clipping cells: a
+        // 25 ms hit test a pointer event).
+        None if holds_nothing
+            && !host_transform
+            && !tag.node_type.scrolls_by_default()
+            && tag.node_type != NodeType::Canvas
+            && !attrs.iter().any(|a| {
+                (a.name == "markup" && literal(a, "markdown"))
+                    || matches!(
+                        a.name.as_str(),
+                        "backgroundMaterial"
+                            | "navigationKey"
+                            | "navigationPresentation"
+                            | "contextTarget"
+                            | "z-index"
+                            | "top"
+                            | "right"
+                            | "bottom"
+                            | "left"
+                    )
+            }) =>
+        {
+            Ok(None)
+        }
         None => {
             let mut attrs = attrs.to_vec();
             attrs.push(contract_syntax::Attr {
@@ -610,6 +638,7 @@ pub fn attr(name: &str) -> Option<AttrTarget> {
         "contextMagnify" => AttrTarget::Prop(p("contextMagnify")),
         "emojiPicker" => AttrTarget::Prop(p("emojiPicker")),
         "backgroundMaterial" => AttrTarget::Prop(p("backgroundMaterial")),
+        "glassGroup" => AttrTarget::Prop(p("glassGroup")),
         "toolbarPlacement" => AttrTarget::Prop(p("toolbarPlacement")),
         "retainFocus" => AttrTarget::Prop(p("retainFocus")),
         "swipeIndicator" => AttrTarget::Prop(p("swipeIndicator")),
@@ -864,7 +893,6 @@ pub fn attr(name: &str) -> Option<AttrTarget> {
         "appearance" => styles(&[StyleId::Appearance]),
         "-exact-apple-button-style" => styles(&[StyleId::ExactAppleButtonStyle]),
         "user-select" => styles(&[StyleId::UserSelect]),
-        "-exact-apple-glass-container" => styles(&[StyleId::ExactAppleGlassContainer]),
         "tint-color" => styles(&[StyleId::TintColor]),
         "opacity" => styles(&[StyleId::Opacity]),
         // @ref LLP 1064 D1 — one value, each row takes its part of the parse.
@@ -1360,7 +1388,6 @@ pub(crate) fn host_transform_recipients(
                     collect(lower, otherwise, parent, repeated, boxes);
                 }
                 Node::Each { body, .. } => collect(lower, body, parent, true, boxes),
-                Node::Provide { body, .. } => collect(lower, body, parent, repeated, boxes),
                 Node::Match { some, none, .. } => {
                     collect(lower, &some.1, parent, repeated, boxes);
                     collect(lower, none, parent, repeated, boxes);

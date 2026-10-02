@@ -590,6 +590,8 @@ pub fn props_of(node: &NodeFacts<'_>) -> SortedMap<String, String> {
             PropId::Destructive => "data-destructive",
             PropId::EmojiPicker => "emojiPicker",
             PropId::BackgroundMaterial => "backgroundMaterial",
+            // LLP 1053.000.000 D1: written, read by no rule, drawn nowhere.
+            PropId::GlassGroup => "glassGroup",
             PropId::RetainFocus => "retainFocus",
             PropId::SwipeIndicator => "swipeIndicator",
             PropId::Href if text.is_empty() => continue,
@@ -735,6 +737,7 @@ pub fn props_of(node: &NodeFacts<'_>) -> SortedMap<String, String> {
             .and_then(|s| s.strip_prefix("symbol:"))
         {
             let symbol = exact_kernel::generated::symbol(role);
+            out.insert("data-symbol-source".into(), format!("symbol:{role}"));
             out.insert(
                 "data-symbol-path".into(),
                 symbol.map(|s| s.1).unwrap_or("").into(),

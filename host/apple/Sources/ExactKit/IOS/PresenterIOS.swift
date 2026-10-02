@@ -32,6 +32,7 @@ final class Presenter {
     var materialNodes: Set<UInt32> = []
     /// Every `button`, which NativeButtonIOS makes a UIButton.
     var buttonNodes: Set<UInt32> = []
+    let glassGroups = GlassGroups()
     var contextNodes: Set<UInt32> = []
     var inlineOwners: [UInt32: (owner: UInt32, index: Int)] = [:]
     var heightBindings: [UInt32: HeightDragBinding] = [:]
@@ -802,7 +803,7 @@ final class Presenter {
                 if node.pendingScrollTop != nil || node.pendingScrollLeft != nil { collections.userIntent(node.id) }
                 node.applyPendingScroll()
             }
-            if let material = node.materialView { node.sendSubviewToBack(material) }
+            if let material = node.materialView { node.sendSubviewToBack(node.glassSlot ?? material) }
         }
         pendingScrolls = pendingScrolls.filter { views[$0]?.pendingScrollTop != nil || views[$0]?.pendingScrollLeft != nil }
         navigation.sync(batch)
@@ -810,6 +811,7 @@ final class Presenter {
         controls.sync()
         menus.sync()
         nativeButtons.sync()
+        glassGroups.reconcile()
         let changed = touchedAndAbove(touchedIDs)
         swipeActions.sync(changed: changed)
         positionContexts()

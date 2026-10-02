@@ -494,18 +494,22 @@ pub(crate) fn check_prop_value(
             }
         }
     }
+    // @ref LLP 1053.000.000 D1 — a glass group's spacing: 0 to 10,000 points.
+    if prop == PropId::GlassGroup {
+        if let Some(spacing) = numeric_literal(value) {
+            if !(0.0..=10_000.0).contains(&spacing) {
+                return err(
+                    "lower-attr-value",
+                    format!("`glassGroup` takes a spacing from 0 to 10000 points; given {spacing}"),
+                    span,
+                );
+            }
+        }
+    }
     if prop == PropId::ImageSource {
         if let Expr::Str(source, _) = value {
             if let Some(role) = source.strip_prefix("symbol:") {
-                if let Some(name) = role.strip_prefix("apple:") {
-                    if !apple_symbol_name(name) {
-                        return err(
-                            "lower-attr-value",
-                            format!("`symbol:apple:{name}` is not an Apple system symbol name (lowercase letters, digits and dots, as `car.fill`)"),
-                            span,
-                        );
-                    }
-                } else if exact_kernel::generated::symbol(role).is_none() {
+                if !role.starts_with("sf/") && exact_kernel::generated::symbol(role).is_none() {
                     return err(
                         "lower-attr-value",
                         format!(
@@ -564,36 +568,39 @@ pub(crate) fn check_prop_value(
     Ok(())
 }
 
-/// An Apple system symbol name, as `symbol:apple:<name>` carries it: dotted
-/// lowercase words and digits (`car.fill`, `thermometer.medium`).
-fn apple_symbol_name(name: &str) -> bool {
-    !name.is_empty()
-        && name.split('.').all(|w| {
-            !w.is_empty()
-                && w.bytes()
-                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
-        })
-}
-
-#[cfg(test)]
-mod apple_symbol_tests {
-    use super::apple_symbol_name;
-
-    #[test]
-    fn apple_symbol_names_are_dotted_lowercase_words() {
-        for name in ["car.fill", "power", "gauge.with.dots.needle.67percent"] {
-            assert!(apple_symbol_name(name), "{name}");
-        }
-        for name in [
-            "",
-            "car.",
-            ".fill",
-            "Car.fill",
-            "car fill",
-            "car/fill",
-            "car..fill",
-        ] {
-            assert!(!apple_symbol_name(name), "{name}");
-        }
+/// @ref LLP 1053.000.000 D6 — where a glass group cannot be: beside the
+/// element's own material (the group's glass would fuse with it), on a
+/// scroll (its content belongs to the scroll and its rows), on a canvas
+/// (whose overlay's direct children are captured and placed).
+pub(crate) fn check_glass_group(tag: &tags::Tag, attrs: &[Attr]) -> Result<(), LowerError> {
+    let Some(group) = attrs.iter().find(|a| a.name == "glassGroup") else {
+        return Ok(());
+    };
+    let refuse = |why: &str| {
+        err(
+            "lower-glass-group",
+            format!("`glassGroup` {why}"),
+            group.span,
+        )
+    };
+    if let Some(m) = attrs
+        .iter()
+        .find(|a| a.name == "backgroundMaterial" || a.name == "backdrop-filter")
+    {
+        return refuse(&format!(
+            "and `{}` on one element: the group's glass would fuse with the element's own; put the group on the parent",
+            m.name
+        ));
     }
+    let scrolls = attrs.iter().any(|a| {
+        matches!(a.name.as_str(), "overflow" | "overflow-x" | "overflow-y")
+            && matches!(&a.value, Expr::Str(v, _) if v == "scroll")
+    });
+    if tag.node_type.scrolls_by_default() || scrolls {
+        return refuse("on an element that scrolls: put the group on a child inside the scroll");
+    }
+    if tag.node_type == exact_kernel::NodeType::Canvas {
+        return refuse("on a `canvas`: put the group on a child of the canvas");
+    }
+    Ok(())
 }

@@ -28,6 +28,7 @@ export function install(exact) {
   const record = (el, depth) => {
     const props = {};
     if (el.dataset.testid) props.testId = el.dataset.testid;
+    if (el.tagName === 'IMG') props.imageSource = el.dataset.symbolSource ?? el.getAttribute('src') ?? '';
     if (el.hasAttribute('aria-label')) props.accessibilityLabel = el.getAttribute('aria-label');
     else if (el.tagName === 'IMG' && el.getAttribute('alt')) props.accessibilityLabel = el.getAttribute('alt');
     // A paragraph of runs has no text of its own: its runs carry it.
@@ -120,7 +121,10 @@ export function install(exact) {
       space: { viewport: rect(r), local: { w: r2(el.clientWidth), h: r2(el.clientHeight) }, capture: { scale: devicePixelRatio } },
       scroll, clip,
       visible: { hidden: el.checkVisibility ? !el.checkVisibility({ visibilityProperty: true }) : false, inert: !!el.closest('[inert]'), inViewport: r.right > 0 && r.bottom > 0 && r.left < innerWidth && r.top < innerHeight, clipped },
-      native: { element: el.localName },
+      native: { element: el.localName, ...(el.hasAttribute('data-symbol-source') ? { symbol: {
+        source: el.dataset.symbolSource, name: el.dataset.symbolSource.slice(el.dataset.symbolSource.startsWith('symbol:sf/') ? 10 : 7), found: !!el.dataset.symbolPath,
+        ...(!el.dataset.symbolPath ? { reason: el.dataset.symbolSource === 'symbol:sf/' ? 'empty' : el.dataset.symbolSource.startsWith('symbol:sf/') ? 'platform' : 'role' } : {}),
+      } } : {}) },
       browser: Object.fromEntries(Object.entries(INHERITED).map(([row, prop]) => [row, cs.getPropertyValue(prop)])),
       observed: { clock: exact.clock.now, wall: Date.now() },
     };
@@ -241,10 +245,23 @@ export function install(exact) {
             await exact.flowSettle?.();
             if (exact.lists) exact.lists.settle();
             if (exact.inflight.n > holds().length) continue;
-            // Animations (and springs, `settleAt`) that end later move the clock there.
-            const to = anim.settle();
-            if (!(to > exact.clock.now)) break;
-            exact.advance(to); seek();
+            // Animations (and springs, `settleAt`) that end later move the clock there; an
+            // armed `then` runs now, and what it starts is settled in the next round.
+            // What is in flight lands before the next timer or `then` fires, as in a
+            // jump (below; glue.js's clock, the Linux agent's): the advance stops
+            // after each commit that sends and waits for its reply, within this
+            // round, so a run of sends never spends the rounds. Past the deadline,
+            // or 4096 stops, the rest is one advance.
+            const at = exact.clock.now, epoch = exact.clock.epoch, to = anim.settle();
+            for (let stops = 0; ; stops++) {
+              const before = exact.inflight.n, held = stops < 4096 && performance.now() < end;
+              const stopped = exact.advance(to, false, held ? () => exact.inflight.n > before : undefined);
+              if (typeof stopped === 'string') { retime(); seek(); return { error: `clock: ${stopped}`, clock: exact.clock.now }; }
+              if (!stopped) break;
+              while (exact.inflight.n > holds().length && performance.now() < end) await new Promise(r => setTimeout(r, 1));
+            }
+            if (!(to > at) && exact.clock.epoch === epoch) break;
+            seek();
             await new Promise(r => requestAnimationFrame(() => r()));
           }
           retime();
@@ -259,8 +276,10 @@ export function install(exact) {
         // A jump that fires timers which send nothing is one advance (one
         // journal line), as the runner's is.
         for (const end = performance.now() + 20000; ;) {
-          const before = exact.inflight.n;
-          if (!exact.advance(req.to, false, () => exact.inflight.n > before)) break;
+          const before = exact.inflight.n, stopped = exact.advance(req.to, false, () => exact.inflight.n > before);
+          // A refusal stops the jump at its time: the runner's error (a timer's, a `then`'s).
+          if (typeof stopped === 'string') { retime(); seek(); return { error: `clock: ${stopped}`, clock: exact.clock.now }; }
+          if (!stopped) break;
           // A reply is usually a task or two away: poll at the browser's
           // shortest timer, not a frame's worth (a 300 ms timer's minute
           // is 200 of these).

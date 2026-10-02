@@ -576,79 +576,79 @@
       "kind": "float"
     },
     {
-      "id": 216,
+      "id": 217,
       "name": "navigationTitle",
       "kind": "str"
     },
     {
-      "id": 217,
+      "id": 218,
       "name": "navigationLargeTitle",
       "kind": "str"
     },
     {
-      "id": 218,
+      "id": 219,
       "name": "navigationTrailing",
       "kind": "str"
     },
     {
-      "id": 219,
+      "id": 220,
       "name": "navigationTrailingSymbol",
       "kind": "str"
     },
     {
-      "id": 220,
+      "id": 221,
       "name": "navigationBackButton",
       "kind": "str"
     },
     {
-      "id": 221,
+      "id": 222,
       "name": "navigationTab",
       "kind": "str"
     },
     {
-      "id": 222,
+      "id": 223,
       "name": "navigationTabTitle",
       "kind": "str"
     },
     {
-      "id": 223,
+      "id": 224,
       "name": "navigationTabSymbol",
       "kind": "str"
     },
     {
-      "id": 224,
+      "id": 225,
       "name": "navigationTabSelectedSymbol",
       "kind": "str"
     },
     {
-      "id": 225,
+      "id": 226,
       "name": "navigationTabControl",
       "kind": "str"
     },
     {
-      "id": 226,
+      "id": 227,
       "name": "navigationContainer",
       "kind": "str"
     },
     {
-      "id": 227,
+      "id": 228,
       "name": "navigationContainerProps",
       "kind": "str"
     },
     {
-      "id": 228,
+      "id": 229,
       "name": "open",
       "kind": "bool",
       "_comment": "HTML `dialog open`: the dialog shows while true, as the state says, not only when an invoker opens it. The Apple hosts present a dialog of texts and buttons as their alert; a button's press (or the alert's cancel) is the app's to close it with."
     },
     {
-      "id": 229,
+      "id": 230,
       "name": "enterkeyhint",
       "kind": "str",
       "_comment": "HTML `enterkeyhint` on a text field: what the keyboard's return key says (enter, done, go, next, previous, search, send). Absent: go when the field submits, else return."
     },
     {
-      "id": 230,
+      "id": 231,
       "name": "autocomplete",
       "kind": "str",
       "_comment": "HTML `autocomplete` on an `input`: what the field holds, so the platform can fill it (iOS: UITextContentType — `username`, `current-password`, `new-password`, `one-time-code`, `email`, `name`, `tel`, …; `off` names nothing)."
@@ -1312,6 +1312,12 @@
       "name": "step",
       "kind": "str",
       "_comment": "@ref LLP 1069.001 D1: HTML's `step` on `input type=range` (a number, or `any`)."
+    },
+    {
+      "id": 216,
+      "name": "glassGroup",
+      "kind": "float",
+      "_comment": "@ref LLP 1053.000.000 D1: the element's subtree is one Liquid Glass group whose glass begins to merge this many points apart (UIGlassContainerEffect, NSGlassEffectContainerView). Layout-neutral; drawn only on Apple 26+."
     }
   ],
   "_enums": "Wire discriminant is the 0-based index. An unknown discriminant is a typed decode rejection, never a fallback.",
@@ -2839,13 +2845,6 @@
     },
     {
       "bit": 155,
-      "field": "exact_apple_glass_container",
-      "codec": "f32",
-      "default": -1,
-      "_comment": "`-exact-apple-glass-container`, a vendor property only the Apple hosts read: the box groups its descendants' Liquid Glass (UIGlassContainerEffect), which blends shapes nearer each other than this many points; negative (the default) is no group. Layout never sees it. Not inherited."
-    },
-    {
-      "bit": 156,
       "field": "user_select",
       "codec": "enum:UserSelect",
       "_comment": "CSS `user-select`. The web's own; on iOS, where a label is never selected in place, `text` or `all` makes a long press offer the system Copy for the box's whole text (SwiftUI's `textSelection` there). Not inherited, as in CSS."
@@ -3191,7 +3190,7 @@
       "M4 10v4M8 7v10M12 4v16M16 7v10M20 10v4"
     ]
   ],
-  "_symbols": "[role, Apple system symbol name, browser SVG path in a 24-unit box]. The path is stroked; a filled state is its own role, `<role>-fill` for Apple's `<name>.fill`, whose path is a filled silhouette (even-odd, so a cutout is a subpath). Generated once; hosts never admit platform names directly, except `symbol:apple:<name>`, an Apple system symbol an Apple-only app names itself (drawn by the Apple hosts like a role, empty elsewhere).",
+  "_symbols": "[role, Apple system symbol name, browser SVG path in a 24-unit box]. The path is stroked; a filled state is its own role, `<role>-fill` for Apple's `<name>.fill`, whose path is a filled silhouette (even-odd, so a cutout is a subpath). Portable roles only; symbol:sf/<name> passes an opaque name directly to Apple (LLP 1035.004.000), without a table entry. The sf namespace is reserved.",
   "_materials": "[name, iOS UIBlurEffect.Style (or glass / glassClear: UIGlassEffect), macOS NSVisualEffectView.Material (or glass / glassClear: NSGlassEffectView), web and Linux blur px, web saturate %, light tint, dark tint]. @ref LLP 1053.000 D4: `backgroundMaterial`'s whole vocabulary, one row per platform material, kebab-case one-to-one. A `~` marks a platform without that material: it draws the one named instead and logs so once. The web and Linux columns are stated approximations of Apple's look, not parity. Hosts never admit a platform name directly.",
   "materials": [
     ["ultra-thin", "systemUltraThinMaterial", "~popover", "20", "180", "#ffffff80", "#20202080"],

@@ -14,10 +14,21 @@ fn a_socket_grant_is_a_connect_source() {
 }
 
 #[test]
+fn the_boot_swap_script_is_admitted_by_its_hash() {
+    // @ref LLP 1048.005 — the one inline script a boot document's page adds.
+    let policy = csp("", Path::new("/nonexistent"));
+    use sha2::{Digest, Sha256};
+    let digest = Sha256::digest(crate::direct::boot_swap_js().as_bytes());
+    let admitted = format!("'sha256-{}'", exact_data::envelope::base64(&digest));
+    assert!(policy.contains(&admitted), "{policy}");
+}
+
+#[test]
 fn the_cache_budget_counts_each_page_s_variants() {
     let page = |body: usize| {
         CachedPage {
             target: "/p".into(),
+            class: String::new(),
             created: Instant::now(),
             response: Response::text(200, "").header("ETag", "\"t\""),
             best: Arc::new(OnceLock::new()),
@@ -81,7 +92,8 @@ fn a_page_carries_the_permissions_policy_its_grants_derive() {
         let (mut server, _) = listener.accept().unwrap();
         let mut page = Response::text(200, "<p>");
         page.headers[0].1 = content_type.into();
-        page.write(&mut server, false, "default-src 'self'", &policy, false);
+        let lines = format!("Permissions-Policy: {policy}\r\n");
+        page.write(&mut server, false, "default-src 'self'", &lines, false);
         server.shutdown(std::net::Shutdown::Write).unwrap();
         let mut received = String::new();
         client.read_to_string(&mut received).unwrap();
