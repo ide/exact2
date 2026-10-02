@@ -227,7 +227,12 @@ impl Lexer {
                 // some (`-webkit-text-stroke`, LLP 1077 D7): the two
                 // prefixes only, and only as an attribute's name (followed
                 // by `=`), so `-webkit-x` in an expression stays a negation.
-                let vendor = ["-webkit-", "-apple-"].iter().any(|p| {
+                // Exact's own (`-exact-apple-button-style`), after a space,
+                // so a negated name (`-x`) is never one, and the Compat ones:
+                let vendor = (c == '-'
+                    && trimmed[pos..].starts_with("-exact-")
+                    && (pos == 0 || bytes[pos - 1] == b' '))
+                    || ["-webkit-", "-apple-"].iter().any(|p| {
                     trimmed[pos..].starts_with(p)
                         && bytes
                             .get(pos + p.len())
