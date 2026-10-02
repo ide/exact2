@@ -66,6 +66,9 @@ final class MenuHost {
         let route: String?
         let alert: UIAlertController
         var finishing = false
+        /// Shown because the dialog is `open`, not because an invoker
+        /// opened it: closed when the state closes it.
+        var held = false
         /// An action as presented: the node, the title the sheet shows for
         /// it, and whether it could be chosen.
         final class Presented {
@@ -120,7 +123,10 @@ final class MenuHost {
         // Ordinary menus retain LLP 1021 D4's existing agent presentation.
         // Confirmations use the same UIKit owner under either input carrier.
         guard let presenter else { return }
-        if let owner = confirmation, !valid(owner) { resetConfirmation() }
+        if let owner = confirmation, !owner.finishing, !valid(owner) { resetConfirmation() }
+        if confirmation == nil, let held = presenter.carrying("tag:dialog").first(where: { $0.props["open"] == "true" }) {
+            DispatchQueue.main.async { [weak self, weak held] in if let held { self?.presentHeld(held) } }
+        }
         var popovers: [String: NodeView] = [:]
         for (name, entry) in agentOpen {
             guard let pop = entry.popover, presenter.views[pop.id] === pop, pop.props["id"] == name,
@@ -229,6 +235,9 @@ final class MenuHost {
     }
     private func valid(_ owner: Confirmation) -> Bool {
         guard let source = owner.source, let pop = owner.popover else { return false }
+        if owner.held {
+            return live(pop) && pop.props["open"] == "true" && owner.actions.allSatisfy { presented(owner, $0) }
+        }
         let modal = isDialog(pop)
         return eligible(source, inertBoundary: modal ? source : nil) && live(pop) && source.window != nil
             && opens(source, pop) && isConfirmation(pop)
@@ -471,6 +480,16 @@ final class MenuHost {
         }
         finish(owner, chosen: node)
     }
+    /// A dialog the state holds `open` (HTML's attribute): presented as
+    /// UIKit's alert while it is, its button presses the app's to close it.
+    private func presentHeld(_ pop: NodeView) {
+        guard confirmation == nil, live(pop), pop.window != nil else { return }
+        if let owner = build(source: pop, pop: pop, modal: true) {
+            owner.held = true
+            present(owner, from: pop)
+        }
+    }
+
     private func openConfirmation(from source: NodeView, popover pop: NodeView) -> Bool {
         guard confirmation == nil, eligible(source), live(pop), source.window != nil else { return false }
         if isDialog(pop) && pop.props["closedby"] != "any" {
@@ -481,16 +500,22 @@ final class MenuHost {
         // fire, as on the web; read the updated rows only if these identities
         // survived that action (no elapsed-time guess or successor id).
         if source.handlers.contains("press") { presenter?.press(source.id) }
-        guard confirmation == nil, eligible(source), live(pop), source.window != nil else { return false }
-        let modal = isDialog(pop)
+        guard confirmation == nil, eligible(source), live(pop), source.window != nil,
+              let owner = build(source: source, pop: pop, modal: isDialog(pop)) else { return false }
+        return present(owner, from: source)
+    }
+
+    /// The alert for a dialog or confirmation popover's rows, or nil (and a
+    /// log line) when they are not texts, actions and at most one cancel.
+    private func build(source: NodeView, pop: NodeView, modal: Bool) -> Confirmation? {
         let children = pop.container.subviews.compactMap { $0 as? NodeView }
         let actions = children.filter { $0.isButton && $0.handlers.contains("press") }
         let cancels = children.filter { $0.isButton && !$0.handlers.contains("press") && closes($0, pop) }
         let boundary = isDialog(pop) ? pop.superview : nil
         // Refused shapes are said, never silently dropped: the tap opens nothing.
-        func refuse(_ why: String) -> Bool {
+        func refuse(_ why: String) -> Confirmation? {
             presenter?.session?.log("confirmation \(pop.props["id"] ?? "?") refused: \(why)")
-            return false
+            return nil
         }
         // An alert may be a notice: no action, its one cancel acknowledging it.
         guard !actions.isEmpty || cancels.count == 1 else { return refuse("no action (a button with press) and no one cancel") }
@@ -501,10 +526,6 @@ final class MenuHost {
         guard actions.allSatisfy({ closes($0, pop) }) else { return refuse("each action must also hide it (popovertargetaction=hide)") }
         // A disabled choice shows dimmed; the others stay choosable.
         guard actions.isEmpty || actions.contains(where: { eligible($0, inertBoundary: boundary) }) else { return refuse("every action is disabled") }
-        var responder: UIResponder? = source
-        while responder != nil && !(responder is UIViewController) { responder = responder?.next }
-        guard let controller = responder as? UIViewController, controller.presentedViewController == nil,
-              !controller.isBeingDismissed, !controller.isBeingPresented else { return false }
         let presented = actions.map { Confirmation.Presented($0, title: title(of: $0), enabled: eligible($0, inertBoundary: boundary)) }
         var texts = children.filter { $0.kind == "text" }.map(title(of:))
         // A chooser (several actions, no explanatory text) is titled by its
@@ -541,7 +562,7 @@ final class MenuHost {
         // An alert's presentation keeps its own delegate (UIKit asserts);
         // it is dismissed only by its actions.
         if !modal {
-            guard let presentation = owner.alert.popoverPresentationController else { return false }
+            guard let presentation = owner.alert.popoverPresentationController else { return nil }
             presentation.sourceView = source
             // A labelled row anchors at its text; an icon control uses its box.
             let labels = source.container.subviews.compactMap { $0 as? NodeView }.filter { $0.kind == "text" }
@@ -553,6 +574,20 @@ final class MenuHost {
             presentation.delegate = owner
         }
         #endif
+        return owner
+    }
+
+    @discardableResult
+    private func present(_ owner: Confirmation, from source: NodeView) -> Bool {
+        var responder: UIResponder? = source
+        while responder != nil && !(responder is UIViewController) { responder = responder?.next }
+        guard var controller = responder as? UIViewController else { return false }
+        // A held dialog shows over whatever this session's controller
+        // already presents (a sheet); an invoker's, only over nothing.
+        if owner.held {
+            while let presented = controller.presentedViewController, !presented.isBeingDismissed { controller = presented }
+        } else if controller.presentedViewController != nil { return false }
+        guard !controller.isBeingDismissed, !controller.isBeingPresented else { return false }
         confirmation = owner
         controller.present(owner.alert, animated: !ExactEnv.agentFreezes)
         return true

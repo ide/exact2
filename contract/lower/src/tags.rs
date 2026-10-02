@@ -619,6 +619,7 @@ pub fn attr(name: &str) -> Option<AttrTarget> {
         // @ref LLP 1075.003.000 — the node the app's native code receives.
         "hook" => AttrTarget::Prop(p("hook")),
         "closedby" => AttrTarget::Prop(p("closedby")),
+        "open" => AttrTarget::Prop(p("open")),
         "contextTarget" => AttrTarget::Prop(p("contextTarget")),
         "contextMagnify" => AttrTarget::Prop(p("contextMagnify")),
         "emojiPicker" => AttrTarget::Prop(p("emojiPicker")),
