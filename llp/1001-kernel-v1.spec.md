@@ -66,6 +66,16 @@ default left grid auto columns at content width (`auto auto` in 400px: 0
 wide, Chrome 200 each). `kernel/tests/it/browser_cases.rs` holds the
 literal-Chrome cases. `align-self` keeps `auto` and has no `normal`.
 
+**Corner percentages (2026-10-02):** the four `border_radius_*` rows store
+lengths or percentages. A single `border-radius="50%"` sets each corner;
+percentages resolve independently against the border box's width and height,
+then CSS's common overlap reduction applies. Web keeps the authored percentage;
+Apple and Linux paint elliptical corners, including after a resize. Negative
+literal lengths and percentages and `auto` are refused. Each corner still takes
+one length or percentage; paired horizontal/vertical radii and the slash-separated
+`border-radius` shorthand are not implemented. Percentage ellipses do not require
+that separate value-pair syntax.
+
 **Border semantics (Codex, 2026-09-11):** four `border_style_*` rows
 (bits 91–94) accept `none | hidden | solid`, initially `none`. Contract's
 single-value `border-style` sets all four; `border-<side>-style` sets one.
@@ -311,17 +321,59 @@ with PR #47, with Charlie's rulings of 2026-09-27 where he made them; the
   animation ends. CSS's `animation` does not itself defer destruction. Linux
   refuses it and removes the node immediately, with a journal entry, because
   its painter walks the live kernel tree and has no retained destroyed subtree.
-- **`box-shadow`** ([LLP 1064 D1](1064-box-shadow-and-text-transform.rfc.md))
-  accepts one outer shadow with zero spread, not `inset`, nonzero spread or a
-  list. A missing colour is refused instead of using CSS `currentcolor`.
-  The implementation reuses four scalar shadow rows and one native layer
-  shadow; those rows cannot store current colour, a spread or multiple shadows.
-  These are implementation limits awaiting Charlie's ruling, not CSS semantics.
+- **`box-shadow`** ([LLP 1064 D1](1064-box-shadow-and-text-transform.rfc.md),
+  [LLP 1077 D4](1077-css-visual-properties-native-draws-cheaply.rfc.md)) is
+  one row holding CSS's list (at most eight), outer and inset, with spread. A
+  missing colour is still refused instead of using CSS `currentcolor`. A
+  transition or keyframes move the list's first shadow's offset, blur and
+  colour; the other shadows, and a spread, change at once, where CSS
+  interpolates the lists pairwise.
+- **`background-image` layers** ([LLP 1077 D5](1077-css-visual-properties-native-draws-cheaply.rfc.md))
+  are at most four. Apple draws a conic gradient, and more than one layer,
+  through the box's `draw(_:)` (Core Animation's conic gradient bends CSS's
+  angles in a box that is not square), and a conic `mask-image` as pixels.
 - **Gradient paint under borders** ([LLP 1066 D5](1066-gradients.rfc.md)):
   native hosts extend end colours outside the padding box instead of repeating
   the gradient image as CSS's initial `background-repeat` does. Their gradient
   shaders/layers extend one gradient rather than tiling a padding-box image;
   translucent borders expose the difference.
+- **`corner-shape: -apple-continuous`**, bit 156 ([LLP 1077 D1](1077-css-visual-properties-native-draws-cheaply.rfc.md)),
+  is not a CSS keyword. It names Apple's continuous corner curve, one shape on
+  every host: UIKit and AppKit draw it with `cornerCurve = .continuous` where
+  the box has one radius, and the kernel's outline (`corner::outline`, fitted
+  to UIKit's curve; Linux against the iOS simulator: mean 0.57/255) everywhere
+  else. The web draws `superellipse(1.6)` over the radius scaled by 1.52, the
+  closest CSS shape (2.5% of the radius at worst; a bordered box measured mean
+  6.5/255 against UIKit), and a bound (dynamic) `corner-shape` is not rescaled.
+  CSS's own keywords are CSS's on every host. The inner border edge of any
+  shaped corner is the same shape over the padding box's radii, CSS's rule for
+  round corners.
+- **`mask-image` on a material** ([LLP 1077 D2](1077-css-visual-properties-native-draws-cheaply.rfc.md)):
+  UIKit and AppKit mask the effect view itself (`mask` / `maskImage`), as they
+  require of a visual effect view, so the blur fades and the node's children
+  do not; CSS masks the element and its children together.
+- **`text-shadow`** ([LLP 1077 D3](1077-css-visual-properties-native-draws-cheaply.rfc.md))
+  takes one shadow, not a list, and no spread (CSS has none). On Apple a
+  paragraph drawn without a raster clips its shadow to the view's bounds.
+- **`-webkit-text-stroke`** ([LLP 1077 D7](1077-css-visual-properties-native-draws-cheaply.rfc.md))
+  on Linux is a band of the glyphs' coverage (dilated less eroded), not a
+  stroke of their outlines, so a glyph's overlapping contours show no inner
+  lines as Chrome's and Core Text's do. `background-clip: text` clips to the
+  node's own paragraph, not to text in its descendants.
+- **3D transforms** ([LLP 1077 D8](1077-css-visual-properties-native-draws-cheaply.rfc.md))
+  flatten every box into its parent's plane (`transform-style: preserve-3d`
+  is refused), and a transition between two different `rotate` axes changes
+  the axis at once where CSS slerps. Linux draws a 3D box as a picture warped
+  on the CPU.
+- **Apple's affordances** ([LLP 1077 §5](1077-css-visual-properties-native-draws-cheaply.rfc.md)),
+  rows 162–170, are not CSS: `symbol-rendering`, `symbol-palette`,
+  `symbol-value`, `symbol-effect` (with the `symbolEffectValue` prop),
+  `press-haptic` (host-owned as `press-scale`), `content-transition`,
+  `scroll-edge-effect`, `hover-effect` and `smart-invert`. Each draws on the
+  platform that has it; the web writes no declaration for them and draws a
+  symbol monochrome. The `-apple-system-*` label, fill and separator colours
+  are WebKit's names, resolved on every host as `light-dark()` pairs of
+  UIKit's values.
 - **Raster `tint-color`** ([LLP 1011 §3](1011-image-v1.spec.md)) is a template
   image operation without a CSS property of that name. On the web the tint is
   a `mask-image` on the `<img>` itself, so it also masks the element's own
@@ -832,7 +884,8 @@ material; this is a semantic floating-surface fallback, not pixel parity. Author
 children use the glass content view unless a scroll/canvas already owns their
 container. AppKit supplies appearance and accessibility adaptation. Glass grouping
 is the `glassGroup` prop (LLP 1053.000.000): its value is the spacing in
-points at which the subtree's glass merges, through `UIGlassContainerEffect`
+points at which the subtree's glass merges (or `"auto"`, the element's gap
+along its main axis, LLP 1053.000.000.000), through `UIGlassContainerEffect`
 or `NSGlassEffectContainerView` as the node's innermost view; it is
 layout-neutral and draws nothing on the web or Linux, and is refused beside a
 material, on a scroll or on a canvas. Declared deviations, measured: inside a
@@ -849,6 +902,26 @@ host policy stays the Apple-policy spelling beside CSS `backdrop-filter` (LLP
 1053.000 D3): it is not sugar for a blur, and where a node has both the material
 wins on every host (the web's material rule is `!important` over the inline
 blur).
+
+### Native buttons
+
+Exact's `button` is the author's box: its UA sheet is `appearance: none`
+(a fixed row, which `layout` reports), where a browser's is `auto`. An
+`appearance` that is the literal `auto` after class merging makes it the
+platform's own button (LLP 1069.011): a `Control` of type `button`, UIKit's
+`UIButton` with the `UIButton.Configuration` its `buttonStyle` names,
+AppKit's `NSButton`, the browser's own `<button>`, a painted button on Linux.
+Its `text` and symbol `image` children are its title and image, read from the
+kernel, never laid out. Declared: its box is `border-box` on every host with
+the platform's chrome inside it; its box refuses `padding`, `border`,
+`background`, `box-shadow`, `filter`, `overflow`, colour and typography,
+which LLP 1069.001 D6 lets other controls' boxes take, because a browser
+drops a native button's look under them; it refuses `direction` and
+`pointer-events` too (its face's order is its children's, and the platform
+hit-tests its own control); `accent-color` colours what the platform colours
+with its tint, as iOS does on the web and Linux; inherited typography is
+reset on the web's native face; Linux draws no symbol. Its size is the
+platform's, as any control's is.
 
 ### Window toolbars
 

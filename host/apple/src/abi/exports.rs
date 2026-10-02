@@ -22,6 +22,7 @@ macro_rules! host {
         $crate::collapse_exports!();
         $crate::app_module_exports!();
         $crate::material_exports!();
+        $crate::corner_exports!();
         thread_local! {
             static EXACT_RUNTIMES: ::std::cell::RefCell<$crate::abi::Registry<$data>> = ::std::cell::RefCell::new($crate::abi::Registry::default());
         }
@@ -531,6 +532,13 @@ macro_rules! host {
         #[no_mangle]
         pub extern "C" fn exact_auth(rt: u32, len: usize) -> u32 {
             $crate::abi::with_runtime(&EXACT_RUNTIMES, rt, true, |b, _| b.auth(len), |_| 0)
+        }
+
+        /// A native button's title and symbol (LLP 1069.011 D5), JSON;
+        /// returns its length.
+        #[no_mangle]
+        pub extern "C" fn exact_press_face(rt: u32, view: u32) -> u32 {
+            $crate::abi::with_runtime(&EXACT_RUNTIMES, rt, false, |b, _| b.press_face(view), |n| n)
         }
 
         /// A select's options and the one it shows (LLP 1069.001 D5), JSON;

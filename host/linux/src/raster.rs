@@ -5,6 +5,7 @@
 //! @ref LLP 1015 §2
 
 mod backdrop;
+mod mask;
 
 use crate::image::Bitmap;
 use crate::paint::border::{BorderFill, PathOp};
@@ -27,7 +28,7 @@ struct ClipKey {
     width: u32,
     height: u32,
     scale: u32,
-    shape: [u32; 8],
+    shape: [u32; 12],
     transform: [u32; 6],
 }
 
@@ -101,10 +102,14 @@ impl Raster {
             || dev.sx == 0.0
             || dev.sy == 0.0
             || ![x, y, w, h].iter().all(|v| v.is_finite())
-            || !shape
-                .radii
-                .iter()
-                .all(|r| r.is_finite() && *r >= 0.0 && *r <= w.min(h) / 2.0)
+            || !shape.radii.iter().all(|r| {
+                r.0.is_finite()
+                    && r.1.is_finite()
+                    && r.0 >= 0.0
+                    && r.1 >= 0.0
+                    && r.0 <= w / 2.0
+                    && r.1 <= h / 2.0
+            })
         {
             return None;
         }
@@ -126,8 +131,8 @@ impl Raster {
         }
         let [tl, tr, br, bl] = shape.radii;
         for strip in [
-            [x + tl.max(bl), y, x + w - tr.max(br), y + h],
-            [x, y + tl.max(tr), x + w, y + h - bl.max(br)],
+            [x + tl.0.max(bl.0), y, x + w - tr.0.max(br.0), y + h],
+            [x, y + tl.1.max(tr.1), x + w, y + h - bl.1.max(br.1)],
         ] {
             let [left, top, right, bottom] = bounds(strip);
             // Keep two device pixels away from scan-conversion and AA edges.
@@ -149,10 +154,14 @@ impl Raster {
             shape.rect.1,
             shape.rect.2,
             shape.rect.3,
-            shape.radii[0],
-            shape.radii[1],
-            shape.radii[2],
-            shape.radii[3],
+            shape.radii[0].0,
+            shape.radii[0].1,
+            shape.radii[1].0,
+            shape.radii[1].1,
+            shape.radii[2].0,
+            shape.radii[2].1,
+            shape.radii[3].0,
+            shape.radii[3].1,
         ];
         let transform = [ts.sx, ts.kx, ts.ky, ts.sy, ts.tx, ts.ty];
         if bytes > CLIP_CACHE_BYTES
@@ -361,52 +370,12 @@ pub fn rounded_rect(shape: &Shape) -> Option<Path> {
     if w <= 0.0 || h <= 0.0 {
         return None;
     }
-    let [tl, tr, br, bl] = shape.radii;
     if !shape.rounded() {
         return Some(PathBuilder::from_rect(Rect::from_xywh(x, y, w, h)?));
     }
-    const K: f32 = 0.552_284_8;
-    let mut pb = PathBuilder::new();
-    pb.move_to(x + tl, y);
-    pb.line_to(x + w - tr, y);
-    if tr > 0.0 {
-        pb.cubic_to(
-            x + w - tr + tr * K,
-            y,
-            x + w,
-            y + tr - tr * K,
-            x + w,
-            y + tr,
-        );
-    }
-    pb.line_to(x + w, y + h - br);
-    if br > 0.0 {
-        pb.cubic_to(
-            x + w,
-            y + h - br + br * K,
-            x + w - br + br * K,
-            y + h,
-            x + w - br,
-            y + h,
-        );
-    }
-    pb.line_to(x + bl, y + h);
-    if bl > 0.0 {
-        pb.cubic_to(
-            x + bl - bl * K,
-            y + h,
-            x,
-            y + h - bl + bl * K,
-            x,
-            y + h - bl,
-        );
-    }
-    pb.line_to(x, y + tl);
-    if tl > 0.0 {
-        pb.cubic_to(x, y + tl - tl * K, x + tl - tl * K, y, x + tl, y);
-    }
-    pb.close();
-    pb.finish()
+    let mut ops = Vec::new();
+    crate::paint::border::shape_path(&mut ops, shape);
+    tiny_path(&ops)
 }
 
 /// The largest frame side, in device pixels, either painter draws.
@@ -801,6 +770,17 @@ impl Backend for Raster {
                 SpreadMode::Pad,
                 Transform::from_row(radii.0, 0.0, 0.0, radii.1, center.0, center.1),
             ),
+            // A whole turn from +x, clockwise, turned so it starts where
+            // CSS's `from` does (0 is up): turned rather than started
+            // there, so the turn never wraps mid-sweep (LLP 1077 D5).
+            Geometry::Conic { center, from } => tiny_skia::SweepGradient::new(
+                Point::from_xy(center.0, center.1),
+                0.0,
+                360.0,
+                stops,
+                SpreadMode::Pad,
+                Transform::from_rotate_at(from - 90.0, center.0, center.1),
+            ),
         };
         let Some(shader) = shader else {
             return;
@@ -1143,6 +1123,14 @@ impl Backend for Raster {
         }
     }
 
+    fn push_mask(&mut self, _shape: &Shape, _ts: Transform) {
+        self.push_opacity(1.0);
+    }
+
+    fn pop_mask(&mut self, shape: &Shape, mask: &Result<GradientPaint, [u8; 4]>, ts: Transform) {
+        self.pop_masked(shape, mask, ts);
+    }
+
     fn pop_opacity(&mut self) {
         let Some((mut below, alpha)) = self.layers.pop() else {
             return;
@@ -1226,13 +1214,14 @@ fn rounded_damage_proof_rejects_invalid_radii() {
     assert!(raster.damage(&previous, &[(24.0, 8.0, 40.0, 64.0)]));
     let mut shape = Shape {
         rect: (0.0, 0.0, 96.0, 80.0),
-        radii: [4.0; 4],
+        radii: [(4.0, 4.0); 4],
+        corners: None,
     };
     assert!(raster
         .covered_damage(&shape, Transform::identity())
         .is_some());
     for radius in [f32::NAN, f32::INFINITY, -1.0, 41.0] {
-        shape.radii[1] = radius;
+        shape.radii[1] = (radius, radius);
         assert!(raster
             .covered_damage(&shape, Transform::identity())
             .is_none());

@@ -345,8 +345,8 @@ final class MenuHost {
     /// log line) when they are not texts, actions and at most one cancel.
     private func build(source: NodeView, pop: NodeView, modal: Bool) -> Confirmation? {
         let children = pop.container.subviews.compactMap { $0 as? NodeView }
-        let actions = children.filter { $0.kind == "button" && $0.handlers.contains("press") }
-        let cancels = children.filter { $0.kind == "button" && !$0.handlers.contains("press") && closes($0, pop) }
+        let actions = children.filter { $0.isButton && $0.handlers.contains("press") }
+        let cancels = children.filter { $0.isButton && !$0.handlers.contains("press") && closes($0, pop) }
         // An alert may be a notice: no action, its one cancel acknowledging it.
         guard !actions.isEmpty || cancels.count == 1, cancels.count <= 1,
               children.allSatisfy({ $0.kind == "text" || actions.contains($0) || cancels.contains($0) }),
@@ -360,6 +360,12 @@ final class MenuHost {
         let owner = Confirmation(host: self, source: source, popover: pop, actions: actions, title: heading,
                                  message: texts.isEmpty ? nil : texts.joined(separator: "\n"),
                                  style: modal ? .alert : .actionSheet)
+        // A native action's tint is its accent (LLP 1069.011.000 D5).
+        if let action = actions.first {
+            owner.alert.view.tintColor = action.isNativeButton
+                ? action.channels("accent_color").map { TextEngine.color($0) } ?? .systemBlue
+                : action.color("text_color", .systemBlue)
+        }
         for action in actions {
             let style: UIAlertAction.Style = action.props["destructive"] == "true" ? .destructive : .default
             owner.alert.addAction(UIAlertAction(title: title(of: action), style: style) { [weak self, weak owner, weak action] _ in
@@ -375,7 +381,12 @@ final class MenuHost {
         if !modal {
             guard let presentation = owner.alert.popoverPresentationController else { return nil }
             presentation.sourceView = source
-            presentation.sourceRect = source.bounds
+            // A labelled row anchors at its text; an icon control uses its box.
+            let labels = source.container.subviews.compactMap { $0 as? NodeView }.filter { $0.kind == "text" }
+            let labelBox = labels.reduce(CGRect.null) { $0.union($1.convert($1.bounds, to: source)) }
+            presentation.sourceRect = labelBox.isNull ? source.bounds : CGRect(x: labelBox.minX, y: 0, width: labelBox.width, height: source.bounds.height)
+            presentation.permittedArrowDirections = []
+            presentation.canOverlapSourceViewRect = true
             presentation.delegate = owner
         }
         return owner
@@ -398,12 +409,14 @@ final class MenuHost {
 
     /// The menu grammar, extracted (LLP 1021 D3): button rows become
     /// actions; any other row is a section boundary.
-    private func items(of pop: NodeView) -> [UIMenuElement] {
+    func items(of pop: NodeView) -> [UIMenuElement] {
         var sections: [[UIMenuElement]] = [[]]
         for case let row as NodeView in pop.container.subviews {
             if row.handlers.contains("press") {
                 let id = row.id
-                let action = UIAction(title: title(of: row)) { [weak self] _ in
+                // A row's symbol is its item's image, custom or native (LLP 1069.011.000 D5).
+                let image = row.isButton ? row.face?.symbol.flatMap { UIImage(systemName: $0) } : nil
+                let action = UIAction(title: title(of: row), image: image) { [weak self] _ in
                     self?.presenter?.press(id)
                 }
                 if row.props["accessibilityChecked"] == "true" { action.state = .on }
@@ -421,6 +434,11 @@ final class MenuHost {
 
     private func title(of v: NodeView) -> String {
         if v.kind == "text" { return v.paragraphSpec().runs.map(\.text).joined() }
+        // A native button's children are its face, not views: its title, else its label.
+        if v.isNativeButton { return v.face?.shown ?? "" }
+        // A custom button whose face fits shows it too: a symbol-only row its
+        // label (LLP 1069.011.000 D5); other content keeps its text.
+        if v.isButton, let face = v.face, face.fits, let shown = face.shown { return shown }
         return v.container.subviews
             .compactMap { ($0 as? NodeView).map(title(of:)) }
             .filter { !$0.isEmpty }

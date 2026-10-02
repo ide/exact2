@@ -171,6 +171,16 @@ public final class ExactNativeEvents: @unchecked Sendable {
     }
 }
 
+/// Agent-only input. Text replaces the widget's value, as standard `type`
+/// does; keys use the agent's web-named chord and optional down/up phase.
+/// A nil phase is one complete key press (down followed by up).
+/// Throw before changing anything for an unsupported input. Human input and
+/// IME continue through the platform responder, never through this hook.
+public enum ExactNativeInput {
+    case text(String)
+    case key(String, phase: String?)
+}
+
 /// One instance of a module tag.
 open class ExactNativeInstance {
     public let events: ExactNativeEvents
@@ -178,6 +188,14 @@ open class ExactNativeInstance {
     /// The view the host puts in the node's box; it fills the box, and
     /// observes its own bounds.
     open var view: ExactNativeView { fatalError("\(type(of: self)) has no view") }
+    /// Optional focus destination: the view itself or an attached descendant.
+    /// The host owns first-responder changes; return nil to refuse focus.
+    open var focusTarget: ExactNativeView? { nil }
+    /// Synchronous, main-thread agent input, after the host focuses this view.
+    /// Return only after delivery; do not retain a request for later delivery.
+    open func agentInput(_ input: ExactNativeInput) throws {
+        throw ExactNativeRefusal("native view does not support agent input")
+    }
     /// The whole props object, replaced; throw to refuse it.
     open func setProps(_ props: [String: String]) throws {}
     /// PNG bytes of the view, for a tag whose factory sets `snapshot`.
@@ -313,6 +331,27 @@ private let setProps: @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<UI
     }
 }
 
+private let focusTarget: @convention(c) (UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? = { raw in
+    handle(raw)?.instance.focusTarget.map { Unmanaged.passUnretained($0).toOpaque() }
+}
+
+private let agentInput: @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<UInt8>?, UInt32, UnsafeMutablePointer<UInt8>?, UInt32) -> Int32 = { raw, json, length, out, capacity in
+    do {
+        guard let h = handle(raw) else { throw ExactNativeRefusal("no native instance") }
+        let request = try props(json, length)
+        let input: ExactNativeInput
+        if let key = request["key"], request["text"] == nil {
+            let phase = request["phase"]
+            guard phase == nil || phase == "down" || phase == "up" else { throw ExactNativeRefusal("invalid key phase") }
+            input = .key(key, phase: phase)
+        } else if let text = request["text"], request["key"] == nil, request["phase"] == nil {
+            input = .text(text)
+        } else { throw ExactNativeRefusal("expected text or key") }
+        try h.instance.agentInput(input)
+        return 0
+    } catch { write(String(describing: error), out, capacity); return 1 }
+}
+
 private let snapshot: @convention(c) (UnsafeMutableRawPointer?, UInt32) -> Void = { raw, token in
     guard let h = handle(raw), let reply = h.reply else { return }
     do {
@@ -377,7 +416,7 @@ private let moduleCall: @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<
     }
 }
 
-// Screen containers (size ≥ 144): create, the controller, its screens, destroy.
+// Screen containers (size ≥ 152): create, the controller, its screens, destroy.
 private let controllerCreate: @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<UInt8>?, UInt32, UnsafePointer<UInt8>?, UInt32, UnsafeMutablePointer<UInt8>?, UInt32) -> UnsafeMutableRawPointer? = { owner, name, nameLength, json, jsonLength, out, capacity in
     let key = name.map { String(decoding: UnsafeBufferPointer(start: $0, count: Int(nameLength)), as: UTF8.self) } ?? ""
     guard let factory = containers[key] else { write("no controller for \(key)", out, capacity); return nil }
@@ -418,9 +457,9 @@ private let major: UInt32 = 3
 
 private let table: UnsafeMutableRawPointer = {
     let text = "{" + (roster.keys.sorted().map { tag in
-        "\"\(tag)\":{\"snapshot\":\(roster[tag]!.snapshot),\"reuse\":\(roster[tag]!.reuse),\"sizes\":\(roster[tag]!.sizes)}"
+        "\"\(tag)\":{\"snapshot\":\(roster[tag]!.snapshot),\"reuse\":\(roster[tag]!.reuse)}"
     } + containers.keys.sorted().map { "\"\($0)\":{\"controller\":true}" }).joined(separator: ",") + "}"
-    let size = 144
+    let size = 152
     let t = UnsafeMutableRawPointer.allocate(byteCount: size, alignment: 8)
     t.initializeMemory(as: UInt8.self, repeating: 0, count: size)
     t.storeBytes(of: major, as: UInt32.self)
@@ -431,15 +470,17 @@ private let table: UnsafeMutableRawPointer = {
     t.storeBytes(of: unsafeBitCast(setProps, to: UnsafeRawPointer.self), toByteOffset: 32, as: UnsafeRawPointer.self)
     t.storeBytes(of: unsafeBitCast(snapshot, to: UnsafeRawPointer.self), toByteOffset: 40, as: UnsafeRawPointer.self)
     t.storeBytes(of: unsafeBitCast(destroy, to: UnsafeRawPointer.self), toByteOffset: 48, as: UnsafeRawPointer.self)
+    t.storeBytes(of: unsafeBitCast(agentInput, to: UnsafeRawPointer.self), toByteOffset: 64, as: UnsafeRawPointer.self)
+    t.storeBytes(of: unsafeBitCast(focusTarget, to: UnsafeRawPointer.self), toByteOffset: 112, as: UnsafeRawPointer.self)
     t.storeBytes(of: unsafeBitCast(moduleCreate, to: UnsafeRawPointer.self), toByteOffset: 72, as: UnsafeRawPointer.self)
     t.storeBytes(of: unsafeBitCast(moduleDestroy, to: UnsafeRawPointer.self), toByteOffset: 80, as: UnsafeRawPointer.self)
     t.storeBytes(of: unsafeBitCast(moduleLater, to: UnsafeRawPointer.self), toByteOffset: 88, as: UnsafeRawPointer.self)
     t.storeBytes(of: unsafeBitCast(moduleCall, to: UnsafeRawPointer.self), toByteOffset: 96, as: UnsafeRawPointer.self)
     t.storeBytes(of: unsafeBitCast(prepareForReuse, to: UnsafeRawPointer.self), toByteOffset: 104, as: UnsafeRawPointer.self)
-    t.storeBytes(of: unsafeBitCast(controllerCreate, to: UnsafeRawPointer.self), toByteOffset: 112, as: UnsafeRawPointer.self)
-    t.storeBytes(of: unsafeBitCast(controllerView, to: UnsafeRawPointer.self), toByteOffset: 120, as: UnsafeRawPointer.self)
-    t.storeBytes(of: unsafeBitCast(controllerScreens, to: UnsafeRawPointer.self), toByteOffset: 128, as: UnsafeRawPointer.self)
-    t.storeBytes(of: unsafeBitCast(controllerDestroy, to: UnsafeRawPointer.self), toByteOffset: 136, as: UnsafeRawPointer.self)
+    t.storeBytes(of: unsafeBitCast(controllerCreate, to: UnsafeRawPointer.self), toByteOffset: 120, as: UnsafeRawPointer.self)
+    t.storeBytes(of: unsafeBitCast(controllerView, to: UnsafeRawPointer.self), toByteOffset: 128, as: UnsafeRawPointer.self)
+    t.storeBytes(of: unsafeBitCast(controllerScreens, to: UnsafeRawPointer.self), toByteOffset: 136, as: UnsafeRawPointer.self)
+    t.storeBytes(of: unsafeBitCast(controllerDestroy, to: UnsafeRawPointer.self), toByteOffset: 144, as: UnsafeRawPointer.self)
     return t
 }()
 

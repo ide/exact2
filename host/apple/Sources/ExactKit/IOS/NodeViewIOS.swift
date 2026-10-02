@@ -245,7 +245,7 @@ final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, UIScrollV
     /// hears these. Keys come from a hardware keyboard (`pressesBegan`).
     /// UIKit's focus search finds what UIKit can focus (`FocusSearch`).
     override func didAddSubview(_ subview: UIView) { super.didAddSubview(subview); FocusSearch.joined(subview) }
-    override var canBecomeFirstResponder: Bool { !disabled && !inert && field == nil && textArea == nil && (kind == "button" || canvases?.wantsInput(id) == true || !handlers.isDisjoint(with: ["focus", "blur", "key"])) }
+    override var canBecomeFirstResponder: Bool { !disabled && !inert && field == nil && textArea == nil && (kind == "button" || isNativeButton || canvases?.wantsInput(id) == true || !handlers.isDisjoint(with: ["focus", "blur", "key"])) }
     override func becomeFirstResponder() -> Bool {
         guard !disabled, !inert else { return false }
         let ok = super.becomeFirstResponder()
@@ -406,21 +406,24 @@ final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, UIScrollV
         guard kind == "image", let source = imageSource, source.hasPrefix("symbol:") else { return }
         isAccessibilityElement = false
         let name = props["symbolName"] ?? "", points = number("font_size", 16), weight = number("font_weight", 400)
-        let key = "\(source):\(name):\(points):\(weight)"
+        let weights: [UIImage.SymbolWeight] = [.ultraLight, .thin, .light, .regular, .medium, .semibold, .bold, .heavy, .black]
+        let index = min(8, max(0, Int((weight / 100).rounded()) - 1))
+        let key = "\(source):\(name):\(points):\(index):\(symbolLookKey)"
         if symbolKey != key {
             symbolKey = key; loadGeneration += 1
             let generation = loadGeneration
-            image = SymbolMeasure.image(name, points: points, weight: weight)
+            image = name.isEmpty ? nil : symbolImage(name, symbolConfiguration(UIImage.SymbolConfiguration(pointSize: points > 0 ? points : 1, weight: weights[index])))
             symbolFound = image != nil; if points <= 0 { image = nil }
             if name.isEmpty, !source.hasPrefix("symbol:sf/"), symbolRefusal != source { symbolRefusal = source; presenter?.session?.log("image \(source) refused: unknown symbol role") }
             if !name.isEmpty || source.hasPrefix("symbol:sf/") { symbolRefusal = nil }
             let leaf = symbolView ?? UIImageView()
             if symbolView == nil { symbolView = leaf; addSubview(leaf) }
-            leaf.image = image; leaf.isAccessibilityElement = false; leaf.isUserInteractionEnabled = false
+            showSymbol(image, on: leaf); leaf.isAccessibilityElement = false; leaf.isUserInteractionEnabled = false
             // The size layout measured already (SymbolMeasure): no move.
             presenter?.queueIntrinsicSize(self, generation: generation, SymbolMeasure.size(name, points: points, weight: weight))
         }
         symbolView?.tintColor = color("tint_color", .black)
+        if let leaf = symbolView { applySymbolEffect(leaf) }
         layoutSymbol()
     }
     func layoutSymbol() {
@@ -932,13 +935,18 @@ final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, UIScrollV
             materialView.effect = backdropEffect() ?? materialEffect(kind ?? "ultra-thin", interactive: interactive)
             materialInteractive = interactive
         }
-        let radius = number("border_radius", number("border_radius_top_left"))
+        applyMaterialRadius()
+    }
+    func applyMaterialRadius() {
+        guard let materialView else { return }
+        let radius = BorderPaint.clip(materialView.layer, in: bounds, radii: cornerSizes(in: bounds))
         if #available(iOS 26.0, *) {
             materialView.cornerConfiguration = .corners(radius: .fixed(Double(radius)))
         } else {
             materialView.layer.cornerRadius = radius
             materialView.clipsToBounds = true
         }
+        if style["mask_image"] != nil { applyBoxMask() }
     }
     var pendingScrollLeft: Double? {
         get { extras?.pendingScrollLeft }
@@ -960,6 +968,7 @@ final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, UIScrollV
         for (k, v) in set { next[k] = v }
         props = next
         swipeOwner = props["swipeContent"] != nil
+        if set["symbolEffectValue"] != nil { updateSymbol() }
         if (pendingScrollLeft ?? 0) != 0 || (pendingScrollTop ?? 0) != 0 { needScroll() }
         if set["inert"] != nil || clear.contains("inert") {
             let ownInert = props["inert"] == "true"
@@ -1034,7 +1043,8 @@ final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, UIScrollV
 
     /// CSS `filter` (LLP 1055.000 D14): the box shows through a filtered
     /// picture (`BoxFilter`), drawn again after each batch.
-    private var boxFilter: BoxFilter?
+    private(set) var boxFilter: BoxFilter?
+    var hasBoxFilter: Bool { boxFilter != nil }
     func applyFilter() {
         // A node with no `filter` and none before makes no `BoxFilter` (three
         // layers) to learn so: every styled node passes through here.
@@ -1049,14 +1059,14 @@ final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, UIScrollV
             f.remove()
             boxFilter = nil
             presenter?.boxFilters.remove(self)
-            layer.mask = ClipPath.mask(clipPath, clipRule)
+            applyBoxMask()
         }
     }
 
     func renderFilter() {
         guard let f = boxFilter else { return }
         guard superview != nil else { f.remove(); return }
-        f.render(layer, clip: ClipPath.mask(clipPath, clipRule), scale: window?.screen.scale ?? traitCollection.displayScale)
+        f.render(layer, clip: resolvedClipMask(), scale: window?.screen.scale ?? traitCollection.displayScale)
     }
 
     override func didMoveToSuperview() {
@@ -1077,14 +1087,16 @@ final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, UIScrollV
     func applyStyle(_ s: NodeStyle) {
         defer { video?.update() }
         let origin = style["transform_origin"]
+        let old = style
         style = s
         updateSymbol()
         (clipPath, clipRule) = (ClipPath.path(s["clip_path"]), ClipPath.rule(s["clip_path"]))
-        layer.mask = ClipPath.mask(clipPath, clipRule)
+        applyBoxMask()
         applyFilter()
         updateMaterial()
         TextCopy.apply(self)
         syncScroll()
+        applyAffordances()
         styleTextArea()
         if let f = field, let t = text {
             f.font = t.font(size: number("font_size", 16), weight: Int(number("font_weight", 400)), family: Int(number("font_family")), italic: (style["font_style"]?.string) == "italic", numeric: Int(number("font_variant_numeric")))
@@ -1094,6 +1106,7 @@ final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, UIScrollV
         }
         layer.zPosition = usedZIndex
         if s["transform_origin"] != origin { applyTransform() }
+        applySpace(changedFrom: old)
         setNeedsDisplay()
     }
 
@@ -1211,6 +1224,9 @@ final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, UIScrollV
         if focusRing != nil { showFocusRing(true) }
         if let s = presenter?.session, s.firstLayoutMs == nil { s.firstLayoutMs = ExactEnv.wall() }
         super.layoutSubviews()
+        if materialView != nil { applyMaterialRadius() }
+        syncEllipticalClip()
+        if style["perspective"] != nil { applyPerspective() }
         if kind == "image" { presenter?.session?.rasters.resized(self); if raster != nil { applyImageLayer() } }
         presenter?.collections.changed(id)
         presenter?.transformGeometry.changed()
@@ -1223,31 +1239,15 @@ final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, UIScrollV
         layoutSymbol()
     }
 
-    /// CSS reduces overlapping corner radii by one common factor: top left,
-    /// top right, bottom right, bottom left.
+    /// The reduced radii; the layer fast path additionally requires circles.
+    func cornerSizes(in rect: CGRect, inset: CGFloat = 0) -> [CGSize] {
+        BorderPaint.reduced(BorderPaint.radii(style, in: rect, inset: inset), in: rect)
+    }
     func cornerRadii(in rect: CGRect, inset: CGFloat = 0) -> [CGFloat] {
-        let names = ["top_left", "top_right", "bottom_right", "bottom_left"]
-        let r = names.map { max(0, number("border_radius_" + $0) - inset) }
-        let sums = [r[0] + r[1], r[3] + r[2], r[0] + r[3], r[1] + r[2]]
-        let edges = [rect.width, rect.width, rect.height, rect.height]
-        var factor: CGFloat = 1
-        for i in 0..<4 where sums[i] > 0 { factor = min(factor, edges[i] / sums[i]) }
-        return r.map { $0 * factor }
+        cornerSizes(in: rect, inset: inset).map { $0.width }
     }
     func roundedPath(in rect: CGRect, inset: CGFloat = 0) -> UIBezierPath {
-        let r = cornerRadii(in: rect, inset: inset)
-        let p = UIBezierPath()
-        p.move(to: CGPoint(x: rect.minX + r[0], y: rect.minY))
-        p.addLine(to: CGPoint(x: rect.maxX - r[1], y: rect.minY))
-        p.addArc(withCenter: CGPoint(x: rect.maxX-r[1], y: rect.minY+r[1]), radius: r[1], startAngle: -.pi/2, endAngle: 0, clockwise: true)
-        p.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY-r[2]))
-        p.addArc(withCenter: CGPoint(x: rect.maxX-r[2], y: rect.maxY-r[2]), radius: r[2], startAngle: 0, endAngle: .pi/2, clockwise: true)
-        p.addLine(to: CGPoint(x: rect.minX+r[3], y: rect.maxY))
-        p.addArc(withCenter: CGPoint(x: rect.minX+r[3], y: rect.maxY-r[3]), radius: r[3], startAngle: .pi/2, endAngle: .pi, clockwise: true)
-        p.addLine(to: CGPoint(x: rect.minX, y: rect.minY+r[0]))
-        p.addArc(withCenter: CGPoint(x: rect.minX+r[0], y: rect.minY+r[0]), radius: r[0], startAngle: .pi, endAngle: 3 * .pi/2, clockwise: true)
-        p.close()
-        return p
+        UIBezierPath(cgPath: BorderPaint.roundedRect(rect, cornerSizes(in: rect, inset: inset), shape: CornerShape(style["corner_shape"])))
     }
 
     override func draw(_ rect: CGRect) {
@@ -1265,15 +1265,9 @@ final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, UIScrollV
         if presenter?.views[id] === self { firstDraw() }
         let path = roundedPath(in: bounds)
         let uniform = number("border_width")
-        // A box Core Animation can say is the layer's (`applyBoxLayer`).
-        if boxDrawn {
-            let bg = color("background_color", .clear)
-            if bg.cgColor.alpha > 0 {
-                bg.setFill()
-                path.fill()
-            }
-        }
-        paintGradient(ctx, clip: path.cgPath)
+        // A box Core Animation can say is the layer's (`applyBoxLayer`);
+        // the background within its `background-clip` (LLP 1077 D6).
+        paintBackground(ctx, border: path.cgPath, color: boxDrawn)
         if boxDrawn {
             // Sides that differ in colour or width, or a radius the layer
             // cannot say: each side in its colour, joined as the web joins
@@ -1281,8 +1275,8 @@ final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, UIScrollV
             let widths = ["top", "right", "bottom", "left"].map { number("border_width_" + $0, uniform) }
             let top = color("border_color_top", .clear)
             let colors = ["top", "right", "bottom", "left"].map { color("border_color_" + $0, top).cgColor }
-            let radii = ["top_left", "top_right", "bottom_right", "bottom_left"].map { number("border_radius_" + $0) }
-            BorderPaint.paint(ctx, box: bounds, widths: widths, colors: colors, radii: radii)
+            let radii = BorderPaint.radii(style, in: bounds)
+            BorderPaint.paint(ctx, box: bounds, widths: widths, colors: colors, radii: radii, shape: CornerShape(style["corner_shape"]))
         }
         if kind == "image", symbolView == nil, let bitmap = raster?.image {
             // CSS object-fit over the content box (the frame inside border
@@ -1316,7 +1310,10 @@ final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, UIScrollV
                 let post = Presenter.signposts.beginInterval("text-draw")
                 defer { Presenter.signposts.endInterval("text-draw", post) }
                 let spec = paragraphSpec()
-                if let paragraph = paragraphLayout() { TextEngine.draw(paragraph, spec: spec, in: contentBox(), context: ctx, dirty: rect) }
+                if let paragraph = paragraphLayout() {
+                    paintBackgroundThroughText(ctx, paragraph: paragraph, spec: spec, in: contentBox())
+                    TextEngine.draw(paragraph, spec: spec, in: contentBox(), context: ctx, dirty: rect)
+                }
             }
         }
         if Capture.capturing, let picture = Capture.web[id] {

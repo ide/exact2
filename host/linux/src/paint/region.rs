@@ -286,9 +286,11 @@ impl Picture {
             let mut cost = 1usize; // hit, including opacity-zero nodes
             if opacity > 0. {
                 paint.emit(&geometry, |_, _| cost += 1);
-                cost += usize::from(paint.gradient.is_some());
+                cost += paint.gradients.len();
                 cost += usize::from(paint.backdrop > 0.);
-                cost += paint.borders(&geometry).len() + paint.shadow_fills(&geometry).len();
+                cost += paint.borders(&geometry).len()
+                    + paint.shadow_fills(&geometry).len()
+                    + paint.inset_shadow_fills(&geometry).len();
                 cost += match &payload {
                     Payload::Empty => 0,
                     Payload::Text(..) => 1,
@@ -629,11 +631,17 @@ impl<'a> Replay<'a> {
                             .padding
                             .into_iter()
                             .chain(n.paint.widths)
-                            .chain(n.paint.radii)
-                            .all(f32::is_finite);
+                            .all(f32::is_finite)
+                        && n.paint
+                            .radii
+                            .into_iter()
+                            .all(exact_kernel::Dimension::is_finite);
                     n.paint.emit(&geometry, |shape, _| {
-                        finite &=
-                            finite_rect(shape.rect) && shape.radii.into_iter().all(f32::is_finite);
+                        finite &= finite_rect(shape.rect)
+                            && shape
+                                .radii
+                                .into_iter()
+                                .all(|(x, y)| x.is_finite() && y.is_finite());
                     });
                     if let Payload::Image(image, fit, _) = &n.payload {
                         finite &= object_fit(image.natural(), *fit, c).is_none_or(finite_rect);

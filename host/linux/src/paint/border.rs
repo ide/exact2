@@ -13,7 +13,8 @@
 //! quadrilateral covers all of the corner's border. Sides that share a colour
 //! are one fill, so no seam shows where they meet.
 
-use super::Rect4;
+use super::{Rect4, Shape};
+use exact_kernel::corner::CornerShape;
 
 /// One step of a path, in points.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -70,6 +71,34 @@ pub fn reduced(radii: [(f32, f32); 4], w: f32, h: f32) -> [(f32, f32); 4] {
         .filter(|(sum, _)| *sum > 0.0)
         .fold(1.0_f32, |f, (sum, edge)| f.min(edge.max(0.0) / sum));
     radii.map(|(x, y)| ((x * factor).max(0.0), (y * factor).max(0.0)))
+}
+
+/// A shape's outline: its corners' `corner-shape` from the kernel (LLP 1077
+/// D1), else [`rounded_rect`].
+pub fn shape_path(out: &mut Vec<PathOp>, shape: &Shape) {
+    shaped_rect(out, shape.rect, shape.radii, shape.corners.as_ref());
+}
+
+/// [`rounded_rect`] with shaped corners, when there are any.
+pub fn shaped_rect(
+    out: &mut Vec<PathOp>,
+    rect: Rect4,
+    radii: [(f32, f32); 4],
+    corners: Option<&CornerShape>,
+) {
+    let Some(corners) =
+        corners.filter(|c| !c.is_round() && radii.iter().any(|r| r.0 > 0.0 && r.1 > 0.0))
+    else {
+        return rounded_rect(out, rect, radii);
+    };
+    for seg in exact_kernel::corner::outline(rect, radii, corners).0 {
+        out.push(match seg {
+            exact_kernel::svg::Seg::Move(x, y) => PathOp::Move(x, y),
+            exact_kernel::svg::Seg::Line(x, y) => PathOp::Line(x, y),
+            exact_kernel::svg::Seg::Cubic(a, b, c, d, e, f) => PathOp::Cubic(a, b, c, d, e, f),
+            exact_kernel::svg::Seg::Close => PathOp::Close,
+        });
+    }
 }
 
 /// A rectangle with an elliptical radius per corner, clockwise on screen.
@@ -142,18 +171,14 @@ fn intersection(a: (f32, f32), b: (f32, f32), c: (f32, f32), d: (f32, f32)) -> O
 /// radii (top-left, top-right, bottom-right, bottom-left), `widths` and
 /// `colors` top, right, bottom, left. One fill per colour; none for a side
 /// without width or alpha.
-pub fn border_fills(
-    rect: Rect4,
-    radii: [f32; 4],
-    widths: [f32; 4],
-    colors: [[u8; 4]; 4],
-) -> Vec<BorderFill> {
+pub fn border_fills(shape: &Shape, widths: [f32; 4], colors: [[u8; 4]; 4]) -> Vec<BorderFill> {
+    let (rect, radii, corners) = (shape.rect, shape.radii, shape.corners);
     let (x, y, w, h) = rect;
     let wd = widths.map(|v| v.max(0.0));
     if w <= 0.0 || h <= 0.0 || wd.iter().all(|v| *v <= 0.0) {
         return Vec::new();
     }
-    let outer = reduced(radii.map(|r| (r.max(0.0), r.max(0.0))), w, h);
+    let outer = reduced(radii, w, h);
     let inner: Rect4 = (
         x + wd[3],
         y + wd[0],
@@ -181,8 +206,8 @@ pub fn border_fills(
     }
     let sided = wd.iter().filter(|v| **v > 0.0).count();
     let mut ring = Vec::new();
-    rounded_rect(&mut ring, rect, outer);
-    rounded_rect(&mut ring, inner, inner_radii);
+    shaped_rect(&mut ring, rect, outer, corners.as_ref());
+    shaped_rect(&mut ring, inner, inner_radii, corners.as_ref());
     if let [(color, sides)] = groups.as_slice() {
         if sides.len() == sided {
             // One colour for every side with width: no joins to draw.
@@ -272,15 +297,37 @@ fn side_quads(
 mod tests {
     use super::*;
 
+    fn border_fills(
+        rect: Rect4,
+        radii: [(f32, f32); 4],
+        widths: [f32; 4],
+        colors: [[u8; 4]; 4],
+    ) -> Vec<BorderFill> {
+        super::border_fills(
+            &Shape {
+                rect,
+                radii,
+                corners: None,
+            },
+            widths,
+            colors,
+        )
+    }
+
     const R: [u8; 4] = [255, 0, 0, 255];
     const G: [u8; 4] = [0, 255, 0, 255];
 
     #[test]
     fn one_colour_is_one_ring_and_four_are_four_parts() {
-        let one = border_fills((0., 0., 100., 70.), [20.; 4], [2., 10., 2., 10.], [R; 4]);
+        let one = border_fills(
+            (0., 0., 100., 70.),
+            [(20., 20.); 4],
+            [2., 10., 2., 10.],
+            [R; 4],
+        );
         assert_eq!(one.len(), 1);
         assert!(one[0].clip.is_none());
-        let four = border_fills((0., 0., 100., 70.), [20.; 4], [10.; 4], [R, G, R, G]);
+        let four = border_fills((0., 0., 100., 70.), [(20., 20.); 4], [10.; 4], [R, G, R, G]);
         assert_eq!(four.len(), 2, "sides that share a colour are one fill");
         assert!(four.iter().all(|f| f.clip.is_some()));
     }
@@ -289,7 +336,7 @@ mod tests {
     fn square_corners_are_exact_trapezoids_joined_on_the_diagonal() {
         let fills = border_fills(
             (0., 0., 100., 70.),
-            [0.; 4],
+            [(0., 0.); 4],
             [4., 12., 20., 8.],
             [R, G, R, G],
         );
@@ -305,14 +352,19 @@ mod tests {
         assert_eq!(
             border_fills(
                 (0., 0., 100., 70.),
-                [12.; 4],
+                [(12., 12.); 4],
                 [10., 10., 10., 10.],
                 [R, clear, G, clear]
             )
             .len(),
             2
         );
-        let bar = border_fills((0., 0., 100., 70.), [12.; 4], [0., 0., 0., 6.], [R; 4]);
+        let bar = border_fills(
+            (0., 0., 100., 70.),
+            [(12., 12.); 4],
+            [0., 0., 0., 6.],
+            [R; 4],
+        );
         assert_eq!(bar.len(), 1, "a left bar alone is its own ring");
     }
 

@@ -111,6 +111,12 @@ size_t exact_text_collapse(const uint8_t *utf8, size_t len, const size_t *lens, 
  * the schema has no such material. */
 size_t exact_material_platform(const uint8_t *name, size_t len, uint8_t platform, const uint8_t **out);
 
+/* LLP 1077 D1. A box outline with shaped corners as one closed polygon: `shape` 4 K values
+ * (NaN is -apple-continuous), `radii` 8 (top-left first, horizontal then vertical, reduced).
+ * Writes x,y pairs into `out` when `cap` holds them all; returns the point count. */
+size_t exact_corner_outline(const float *shape, float x, float y, float width, float height,
+    const float *radii, float *out, size_t cap);
+
 /* LLP 1043.000 D5-D7. Same-thread TextShape lifetime, independent of runtime.
  * Non-null buffers must be aligned and valid for their stated counts. */
 typedef struct ExactFlowPair { float x, y; } ExactFlowPair;
@@ -445,6 +451,10 @@ uint32_t exact_intrinsics(ExactRuntime rt, size_t len);
 /* A select's options (LLP 1069.001 D5), JSON in the output buffer, not a
  * batch: {"options":[{"value","label","disabled"}],"chosen":index|null}. */
 uint32_t exact_select_options(ExactRuntime rt, uint32_t view);
+/* A button's face, custom or native (LLP 1069.011.000 D1), JSON in the output
+ * buffer, not a batch: {"button":bool,"title":string|null,"symbol":apple-name|null,
+ * "raster","leading","fits":bool,"label":string|null,"style",...the native style}. */
+uint32_t exact_press_face(ExactRuntime rt, uint32_t view);
 
 /* The agent API (LLP 1012): a request in the input buffer's first len bytes
  * ({"op":"tree"} / "state" / "logs" / "settle"), the reply in the output

@@ -6,10 +6,8 @@ import CExact
 import Foundation
 #if os(iOS)
 import UIKit
-typealias SymbolImage = UIImage
 #else
 import AppKit
-typealias SymbolImage = NSImage
 #endif
 
 enum SymbolMeasure {

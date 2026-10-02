@@ -26,10 +26,13 @@ final class PlainView: UIView {
 class ScrollView: UIScrollView {
     var scrollsX = true
     var scrollsY = true
+    /// A pan cancels a touch in progress, as it does a custom button's; UIKit
+    /// would leave a `UIControl` its touch, so a native button (LLP 1069.011
+    /// D4) is named. A canvas that owns its input keeps it.
     override func touchesShouldCancel(in view: UIView) -> Bool {
-        // A button is UIKit's (NativeButtonIOS): a drag that starts on one
+        // A button is UIKit's (NativeButton, or a native one, NativeButtonIOS): a drag that starts on one
         // still scrolls, as a pan on any box does.
-        !CanvasInput.owns(view) && (view is NativeButton || super.touchesShouldCancel(in: view))
+        !CanvasInput.owns(view) && (view is NativeButton || view is NativeButtonIOS || super.touchesShouldCancel(in: view))
     }
     override func gestureRecognizerShouldBegin(_ gesture: UIGestureRecognizer) -> Bool {
         if gesture === panGestureRecognizer {

@@ -180,13 +180,54 @@ pub fn project(
     kernel
         .apply(0, 1, &ops)
         .map_err(|e| format!("kernel refused the static tree: {e:?}"))?;
+    // A text folds into its box's content (LLP 1007.001) only when the
+    // template holds all of it: no bound row or prop but its text, no
+    // handler, and not a repeated row (copies would join one block). A box
+    // with a bound row keeps its text too: the row may make it lay out
+    // other than a block, and so does a button whose parent has one (its
+    // height may come to be the parent's).
+    let repeated = each_rows(plan, sites);
+    let bound = |i: usize, only_text: bool| {
+        plan.nodes[i]
+            .bindings
+            .iter()
+            .map(|b| plan.binding(b))
+            .any(|b| {
+                literal(plan, plan.code(b.expr)).is_none()
+                    && !(only_text && b.kind == BindingKind::Prop && b.id == PropId::Text as u16)
+                    && (only_text || b.kind == BindingKind::Style)
+            })
+    };
+    let parents = {
+        let mut p = vec![None; plan.nodes.len()];
+        for (i, c) in tree.iter().enumerate() {
+            for c in c {
+                p[*c as usize] = Some(i);
+            }
+        }
+        p
+    };
+    let may_fold: Vec<bool> = (0..plan.nodes.len())
+        .map(|i| {
+            plan.nodes[i].handlers.len == 0
+                && !repeated.contains(&i)
+                && !bound(i, true)
+                && parents[i].is_some_and(|p| {
+                    let button =
+                        NodeType::from_wire(plan.nodes[p].node_type) == Some(NodeType::Pressable);
+                    !bound(p, false) && !(button && parents[p].is_none_or(|g| bound(g, false)))
+                })
+        })
+        .collect();
     let mut out = Vec::with_capacity(plan.nodes.len());
     for (i, node) in plan.nodes.iter().enumerate() {
         if NodeType::from_wire(node.node_type) == Some(NodeType::Head) {
             out.push(None);
             continue;
         }
-        let mut parts = template::parts(&kernel, plan, view(i)).ok_or("a view the kernel lost")?;
+        let child_may_fold = matches!(tree[i].as_slice(), [c] if may_fold[*c as usize]);
+        let mut parts = template::parts_with(&kernel, plan, view(i), may_fold[i], child_may_fold)
+            .ok_or("a view the kernel lost")?;
         // A sampled prop decided the tag; its value is the effect's.
         for b in node.bindings.iter() {
             let row = plan.binding(b);
@@ -242,6 +283,38 @@ pub fn project(
         }
     }
     Ok(out)
+}
+
+/// Every `each` row's roots, through any region at its top.
+fn each_rows(plan: &Plan, sites: &crate::emit::Sites) -> Vec<usize> {
+    fn roots(
+        plan: &Plan,
+        sites: &crate::emit::Sites,
+        list: &[crate::emit::Site],
+        into: &mut Vec<usize>,
+    ) {
+        for s in list {
+            match s {
+                crate::emit::Site::Node(i) => into.push(*i as usize),
+                crate::emit::Site::Region(r) => {
+                    for arm in plan.regions[*r as usize].arms.iter() {
+                        roots(plan, sites, sites.of_arm(arm.0), into);
+                    }
+                }
+            }
+        }
+    }
+    let mut rows = Vec::new();
+    for region in plan
+        .regions
+        .iter()
+        .filter(|r| r.kind == exact_plan::RegionKind::Each)
+    {
+        for arm in region.arms.iter() {
+            roots(plan, sites, sites.of_arm(arm.0), &mut rows);
+        }
+    }
+    rows
 }
 
 /// Which nodes can follow, among their parent's children, a node that paints
@@ -305,34 +378,7 @@ fn can_follow(
         holds[i] = Some(h);
         h
     }
-    // An `each` row's roots, through any region at its top.
-    fn roots(
-        plan: &Plan,
-        sites: &crate::emit::Sites,
-        list: &[crate::emit::Site],
-        into: &mut Vec<usize>,
-    ) {
-        for s in list {
-            match s {
-                crate::emit::Site::Node(i) => into.push(*i as usize),
-                crate::emit::Site::Region(r) => {
-                    for arm in plan.regions[*r as usize].arms.iter() {
-                        roots(plan, sites, sites.of_arm(arm.0), into);
-                    }
-                }
-            }
-        }
-    }
-    let mut rows = Vec::new();
-    for region in plan
-        .regions
-        .iter()
-        .filter(|r| r.kind == exact_plan::RegionKind::Each)
-    {
-        for arm in region.arms.iter() {
-            roots(plan, sites, sites.of_arm(arm.0), &mut rows);
-        }
-    }
+    let rows = each_rows(plan, sites);
     let mut follows = vec![false; n];
     for children in tree {
         let mut before = false;
@@ -421,6 +467,20 @@ pub struct Write {
 }
 
 /// A row's value `none` (or the keyword `auto`/`normal`) writes nothing, as
+/// A bound value naming one of UIKit's system colours as its `light-dark()`
+/// pair, anywhere in the text (a shorthand's colour part too); the kernel's
+/// table, so literal and bound values agree (LLP 1077 D13).
+pub static SYSTEM_COLOR_MAP: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
+    let pairs: Vec<String> = exact_kernel::style::symbols::SYSTEM_COLORS
+        .iter()
+        .map(|(name, l, d)| format!("[\"{name}\",\"light-dark(#{l:08x}, #{d:08x})\"]"))
+        .collect();
+    format!(
+        "v=>typeof v===\"string\"&&/-apple-system-/i.test(v)?[{}].reduce((s,[n,c])=>s.replace(new RegExp(n+\"(?![\\\\w-])\",\"gi\"),c),v):v",
+        pairs.join(",")
+    )
+});
+
 /// css.rs writes no declaration for the row's empty value.
 const NONE: &str = "v=>v==null||/^\\s*none\\s*$/i.test(v)?null:v";
 
@@ -455,7 +515,23 @@ pub fn style_writes(id: u16, timeline: bool) -> Result<Vec<Write>, String> {
                 "v=>v==null||/^\\s*none\\s*$/i.test(v)?null:\"paused\"",
             ),
         ],
+        // @ref LLP 1077 §5 — Apple's affordances: no declaration on the web
+        // (its forms are declared in LLP 1001).
+        StyleId::SymbolRendering
+        | StyleId::SymbolPalette
+        | StyleId::SymbolValue
+        | StyleId::SymbolEffect
+        | StyleId::PressHaptic
+        | StyleId::ContentTransition
+        | StyleId::ScrollEdgeEffect
+        | StyleId::HoverEffect
+        | StyleId::SmartInvert => vec![],
         StyleId::Animation => vec![with("animation", NONE)],
+        // @ref LLP 1069.011 D8 — and the custom property a native button reads.
+        StyleId::AccentColor => vec![
+            with("accent-color", "v=>v"),
+            with("--exact-accent", "v=>v==null?v:/^\\s*auto\\s*$/i.test(v)?\"AccentColor\":v"),
+        ],
         StyleId::DragTimeline => vec![with("--exact-drag-timeline", NONE)],
         StyleId::AnimationTimeline => vec![
             with(
@@ -486,6 +562,13 @@ pub fn style_writes(id: u16, timeline: bool) -> Result<Vec<Write>, String> {
         StyleId::ClipPath => vec![with(
             "clip-path",
             "v=>v==null||/^\\s*(none|path\\(|url\\()/i.test(v)?v:null",
+        )],
+        // @ref LLP 1077 D1 — Apple's curve as the web's stand-in. A bound
+        // radius is not rescaled here, as css.rs scales a static one: a
+        // dynamic `-apple-continuous` reaches less far on the web.
+        StyleId::CornerShape => vec![with(
+            "corner-shape",
+            "v=>v==null?v:v.replace(/-apple-continuous/gi,\"superellipse(1.6)\")",
         )],
         _ => {
             let (name, unit) = style_row(id)?;
@@ -528,6 +611,10 @@ pub fn style_row(id: u16) -> Result<(String, String), String> {
             | StyleCodec::PaintOrder
             | StyleCodec::Filter
             | StyleCodec::BackgroundImage
+            | StyleCodec::MaskImage
+            | StyleCodec::BoxShadow
+            | StyleCodec::TextShadow
+            | StyleCodec::CornerShape
     ) {
         return Ok((css_property(row), String::new()));
     }
@@ -545,11 +632,7 @@ pub fn style_row(id: u16) -> Result<(String, String), String> {
             | StyleCodec::I32
     ) || matches!(
         row,
-        StyleId::ShadowOffset
-            | StyleId::ShadowRadius
-            | StyleId::ShadowColor
-            | StyleId::ShadowOpacity
-            | StyleId::FontFamily
+        StyleId::FontFamily
             | StyleId::LineClamp
             | StyleId::PressScale
             | StyleId::FontVariantNumeric
@@ -588,6 +671,8 @@ fn css_property(id: StyleId) -> String {
         StyleId::PositionType => return "position".into(),
         StyleId::BackdropBlur => return "backdrop-filter".into(),
         StyleId::SvgMask => return "mask".into(),
+        StyleId::TextStrokeWidth => return "-webkit-text-stroke-width".into(),
+        StyleId::TextStrokeColor => return "-webkit-text-stroke-color".into(),
         id => id.name(),
     };
     for (prefix, suffix) in [
