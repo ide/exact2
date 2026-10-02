@@ -73,6 +73,8 @@ final class ControlHost: NSObject {
     var kinds: [UInt32: String] = [:]
     /// The size last reported per control, so each is published once.
     private var reported: [UInt32: CGSize] = [:]
+    /// Each control's accent as last written, by value: a new UIColor of the same colour is not a change.
+    private var accents: [UInt32: String] = [:]
     /// A select's menu as last built, so a batch that leaves it alone does not rebuild it.
     var menus: [UInt32: SelectMenu] = [:]
     /// A range's last reported value while it moves, so each is sent once.
@@ -149,6 +151,7 @@ final class ControlHost: NSObject {
             controls.removeValue(forKey: id)?.removeFromSuperview()
             reported.removeValue(forKey: id)
             faces.removeValue(forKey: id)
+            accents.removeValue(forKey: id)
             kinds.removeValue(forKey: id)
             menus.removeValue(forKey: id)
             lastRange.removeValue(forKey: id)
