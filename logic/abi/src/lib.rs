@@ -6,8 +6,8 @@ use exact_plan::{
     Plan, Value,
 };
 use exact_runner::{
-    Answer, DataError, DataSource, FailureKind, HttpScheduling, Outcome, Request, Response, Store,
-    SurfaceOutcome, SurfaceRequest,
+    Answer, DataError, DataSource, FailureKind, HttpScheduling, Outcome, Redirect, Request,
+    Response, Store, SurfaceOutcome, SurfaceRequest,
 };
 
 pub mod draw;
@@ -235,6 +235,14 @@ fn encode_result(w: &mut Writer, result: Result<Answer, DataError>) {
             w.u8(u8::from(r.grants.is_some()));
             w.string(r.grants.as_deref().unwrap_or(""));
         }
+        // The seam's HTTP kinds carry no redirect mode yet: a module asking
+        // for one is refused, never silently followed.
+        Ok(Answer::Later(r)) if r.redirect != Redirect::Follow => encode_result(
+            w,
+            Err(DataError::Unavailable(
+                "a redirect mode cannot cross the Rust module seam yet".into(),
+            )),
+        ),
         Ok(Answer::Later(r))
             if r.continuation.is_none() && r.surface.is_none() && r.storage.is_none() =>
         {
@@ -286,6 +294,7 @@ fn read_result(r: &mut Reader<'_>) -> Result<Result<Answer, DataError>, String> 
         0 => Ok(Answer::Now(Value::decode(r).map_err(error)?)),
         1 | 6 | 9 => Ok(Answer::Later(Request {
             stream: tag == 9,
+            redirect: Redirect::Follow,
             http: if tag != 1 {
                 let limit = r.u32().map_err(error)?;
                 if limit == 0 || limit > 64 << 20 {

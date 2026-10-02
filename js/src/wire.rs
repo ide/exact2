@@ -1,7 +1,7 @@
 //! The JSON both sides of the host door speak: a fetch as the prelude
 //! records it, a reply as `__exact_fulfill` and `__exact_message` take it,
 //! and the Canvas 2D recorder's text and image questions (ops 9 and 10).
-use exact_runner::{Outcome, Request};
+use exact_runner::{Outcome, Redirect, Request};
 use serde_json::{json, Value as Json};
 
 pub(crate) fn request_from_json(text: &str) -> Result<Request, String> {
@@ -39,6 +39,7 @@ pub(crate) fn request_from_json(text: &str) -> Result<Request, String> {
         headers,
         body: field("body").unwrap_or_default().into_bytes(),
         stream: j.get("stream").and_then(Json::as_bool).unwrap_or(false),
+        redirect: Redirect::parse(j.get("redirect").and_then(Json::as_str))?,
     })
 }
 
