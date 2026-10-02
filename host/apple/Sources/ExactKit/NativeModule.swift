@@ -11,7 +11,7 @@
 //
 //   0  u32 major            3
 //   4  u32 size             104 or more
-//   8  const char *roster   JSON: {"tag": {"snapshot": bool, "reuse": bool, "sizes": bool}, …}
+//   8  const char *roster   JSON: {"tag": {"snapshot": bool}, …}
 //  16  create(module, tag, tagLen, props, propsLen, event, reply, ctx, nonce, err, errCap) → handle
 //  24  platform_view(handle) → NSView * / UIView *   (the module keeps ownership)
 //  32  set_props(handle, json, len, err, errCap) → 0 accepted, else refused
@@ -561,7 +561,6 @@ final class NativeViews {
         case .success(let m): module = m
         }
         entry.snapshotBit = caps["snapshot"] as? Bool == true && table.snapshot != nil
-        entry.sizes = caps["sizes"] as? Bool == true
         let started = CFAbsoluteTimeGetCurrent()
         #if os(iOS)
         if reuse(entry, table: table, owner: owner) { return }
@@ -609,7 +608,6 @@ final class NativeViews {
         made += 1
         measured?("native", CFAbsoluteTimeGetCurrent() - started)
         log("\(entry.name) #\(entry.id): ready")
-        measure(entry)
     }
 
     /// A host that holds a costly view mid-fling (LLP 1068 §5.1): `holds`
@@ -679,7 +677,6 @@ final class NativeViews {
         if status == 0 {
             entry.props = props
             if entry.state == "error" { entry.state = "ready"; entry.error = nil }
-            measure(entry)
         } else {
             fail(entry, "error", "props refused: \(String(cString: error.map { CChar(bitPattern: $0) }))")
         }
@@ -870,26 +867,6 @@ extension NodeView {
     func destroyEmbedded() {
         presenter?.session?.webviews.destroy(id: id)
         presenter?.session?.natives.destroy(id: id)
-    }
-}
-
-extension NativeViews {
-    /// A `sizes` view's own size at its box's width becomes the box's
-    /// intrinsic size, as the tablist's UITabBar reports its height (LLP 1059
-    /// D2a): the kernel takes the height as the box's automatic minimum, so
-    /// an explicit `min-height` still wins. Reported only when it changes,
-    /// and only once the box has a width.
-    fileprivate func measure(_ entry: NativeEntry) {
-        #if os(iOS)
-        guard entry.sizes, entry.state == "ready", let view = entry.view, let owner = entry.owner,
-              let presenter = owner.presenter, owner.bounds.width > 0 else { return }
-        let fit = view.sizeThatFits(CGSize(width: owner.bounds.width, height: 0))
-        guard fit.height.isFinite, fit.height > 0 else { return }
-        let size = CGSize(width: owner.bounds.width, height: fit.height)
-        guard entry.measured != size else { return }
-        entry.measured = size
-        presenter.queueIntrinsicSize(owner, generation: owner.loadGeneration, size)
-        #endif
     }
 }
 
