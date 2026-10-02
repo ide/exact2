@@ -1,7 +1,7 @@
 # Native iOS fidelity: what the `fetch-redirect` branch adds
 
 **Status:** this branch, all checks green (cargo build/test/clippy/fmt,
-caps, 110 UIKit XCTests). 2026-10-02.
+caps, 111 UIKit XCTests). 2026-10-02.
 
 These changes came from building a production-style iOS app on Exact and
 comparing it, screen by screen, with the same app written natively. Each one
@@ -87,6 +87,10 @@ Diagnosis: `issues/20261001-simulator-builds-have-no-entitlements.md`.
   - The choice applies on the next turn, not after the dismissal animation.
   - Invokers are pressed as themselves, not under a transparent overlay that
     swallowed their touch feedback.
+- **Content popovers are UIKit's popovers.** A popover whose rows don't press
+  (a tooltip, a detail) shows in a `UIPopoverPresentationController` anchored
+  to its invoker. Its own boxes are borrowed, sized as laid out, and handed
+  back hidden when it closes.
 - **Controls write UIKit properties only when they change.** A Liquid Glass
   `UISwitch` restarted its thumb animation on every batch, and a switch's
   value is never written while it's being held.
