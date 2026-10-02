@@ -144,6 +144,18 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
             routeIDs = op.ids
         }
         var routes = routeIDs.compactMap { presenter.views[$0] }.filter { $0.props["navigationKey"] != nil }
+        // No route among the root's children (a signed-out app shows its
+        // sign-in as plain content): native containment retires, its views
+        // leave the window, and the plain content is what shows and is
+        // touched — never a stale stack over it.
+        if routes.isEmpty {
+            if primaryNavigation != nil || tabs != nil {
+                let children = routeIDs.compactMap { presenter.views[$0] }
+                reset(clearFocus: false)
+                for (index, node) in children.enumerated() { root.container.insertSubview(node, at: index) }
+            }
+            return nil
+        }
         // D1: the stack is the prefix through the route the root names; a
         // key that names none leaves the stack alone, and says so once.
         let rootKey = root.props["navigationKey"] ?? ""
