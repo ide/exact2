@@ -1,5 +1,8 @@
 # Native iOS fidelity: what the `fetch-redirect` branch adds
 
+> Superseded by `issues/20261002-lexy-main.md`, which covers the branch after
+> its merge with `main` (some items below were replaced by main's versions).
+
 **Status:** this branch, all checks green (cargo build/test/clippy/fmt,
 caps, boot, 113 UIKit XCTests). 2026-10-02.
 
