@@ -1165,6 +1165,11 @@ test('device grants derive the plists, their translations and the release entitl
     assert.match(plist, /<key>NSSpeechRecognitionUsageDescription<\/key><string>Transcribes.<\/string>/);
     assert.match(plist, /<key>CFBundleLocalizations<\/key><array><string>en<\/string><string>fr<\/string><\/array>/);
   }
+  // The manifest's orientation locks the iPhone, not the iPad.
+  const portrait = infoPlist({ ...app, manifest: { host: {}, orientation: 'portrait' } }, true, { distribution: { UISupportedInterfaceOrientations: ['x'], 'UISupportedInterfaceOrientations~ipad': ['y'] } });
+  assert.match(portrait, /<key>UISupportedInterfaceOrientations<\/key><array><string>UIInterfaceOrientationPortrait<\/string><\/array>/);
+  assert.match(portrait, /<key>UISupportedInterfaceOrientations~ipad<\/key><array><string>y<\/string><\/array>/);
+  assert.doesNotMatch(infoPlist(app, false), /UISupportedInterfaceOrientations/);
   // No device grant, no key: the plists are what they were.
   for (const plist of [infoPlist(app, false), macInfoPlist(app, { reach: { ...reach, usage: {} } })]) assert.doesNotMatch(plist, /UsageDescription|CFBundleLocalizations/);
   const dir = mkdtempSync(resolve(tmpdir(), 'exact-usage-'));
