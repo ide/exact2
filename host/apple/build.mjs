@@ -462,6 +462,13 @@ export const entitlements = (app, team, debuggable = true, reach = null) => {
   return plistFile(dict);
 };
 
+/** What a simulator build links as its entitlements (no profile, no team):
+ * the application identifier, and the Keychain group it implies. */
+export const simulatedEntitlements = (app) => plistFile({
+  'application-identifier': app.id,
+  'keychain-access-groups': [app.id],
+});
+
 /** The device grants' derivations (LLP 1069.008 D4), from the bake's
  * `reach` (`bake/src/reach.rs`, over the runner's one table): each usage key
  * with the base locale's purpose, and `CFBundleLocalizations` with every
@@ -1007,6 +1014,17 @@ function main(args) {
       '-Xswiftc', '-Xclang-linker', '-Xswiftc', '-isysroot',
       '-Xswiftc', '-Xclang-linker', '-Xswiftc', sdk,
     );
+    // A simulator app is not provisioned, and an ad-hoc signature that
+    // carries entitlements does not launch there; the simulator reads them
+    // from this section instead, as Xcode's "simulated entitlements" do.
+    // Without an application identifier every Keychain call (the store's
+    // secrets) fails with "A required entitlement is not present".
+    if (!device) {
+      const simulated = resolve(swiftBuildRoot, 'simulated-entitlements.plist');
+      mkdirSync(swiftBuildRoot, { recursive: true });
+      writeFileSync(simulated, simulatedEntitlements(app));
+      swiftArgs.push('-Xlinker', '-sectcreate', '-Xlinker', '__TEXT', '-Xlinker', '__entitlements', '-Xlinker', simulated);
+    }
   }
   // SwiftPM owns its output layout. Swift Build and the native build system
   // use different directories; ask with the same destination arguments.
