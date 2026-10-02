@@ -211,7 +211,7 @@ final class NativeButton: UIButton {
             config.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { incoming in
                 var out = incoming; out.font = font; return out
             }
-            config.titleLineBreakMode = .byTruncatingTail
+            config.titleLineBreakMode = text.number("line_clamp", 0) == 1 ? .byTruncatingTail : .byWordWrapping
             config.baseForegroundColor = color
         }
         if let symbol {
@@ -239,7 +239,9 @@ final class NativeButton: UIButton {
             let glyph = config.image?.size ?? a.size
             config.imagePadding = max(0, stacked ? b.minY - a.maxY + (a.height - glyph.height) / 2 : b.minX - a.maxX + (a.width - glyph.width) / 2)
         }
-        config.contentInsets = NSDirectionalEdgeInsets(top: 4, leading: 8, bottom: 4, trailing: 8)
+        // The kernel sized the box for its content; the configuration adds
+        // no padding of its own that would make a fitted title truncate.
+        config.contentInsets = .zero
         return config
     }
 
