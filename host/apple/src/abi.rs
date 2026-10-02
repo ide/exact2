@@ -16,9 +16,8 @@
 //! each process links one app archive because the C names are fixed.
 
 use crate::host::{Host, PlanBytes};
-use crate::measure::{install_fonts, CallbackMeasurer, FontsFn, MeasureFn};
+use crate::measure::{install_fonts, FontsFn, MeasureFn};
 use crate::store::{endow_bound, snapshot_of, Platform};
-use exact_kernel::{MonospaceMeasurer, TextMeasurer};
 use exact_runner::{
     DataSource, Event, FailureKind, Outcome, SurfaceOutcome, SurfaceRequest, MAX_HOST_WORK_BYTES,
 };
@@ -42,6 +41,8 @@ pub struct Hooks {
     pub wake_ctx: *mut c_void,
     /// Measures a Canvas 2D run with Core Text (LLP 1056 D8), with `ctx`.
     pub canvas_text: Option<crate::canvas_text::CanvasTextFn>,
+    /// Measures a system symbol in layout (LLP 1035.004.000), with `ctx`.
+    pub symbol: Option<crate::measure::SymbolFn>,
 }
 
 impl Hooks {
@@ -53,6 +54,7 @@ impl Hooks {
             wake: None,
             wake_ctx: std::ptr::null_mut(),
             canvas_text: None,
+            symbol: None,
         }
     }
 }
@@ -450,10 +452,7 @@ impl<D: DataSource> Bridge<D> {
         if let Some(compat) = self.compat {
             exact_runner::delivery::refuse_analysis(compat).map_err(str::to_string)?;
         }
-        let measurer: Box<dyn TextMeasurer> = match hooks.measure {
-            Some(f) => Box::new(CallbackMeasurer::new(f, hooks.ctx)),
-            None => Box::new(MonospaceMeasurer::default()),
-        };
+        let measurer = crate::measure::from_hooks(hooks.measure, hooks.ctx, hooks.symbol);
         // The app's bindings, once (LLP 1016 D6; LLP 1018 D6): the secrets it
         // kept are read into a snapshot before the runner boots, so the first
         // frame is a returning user's; the executor thread takes the same
@@ -719,10 +718,7 @@ impl<D: DataSource> Bridge<D> {
         // Build the candidate beside the live host. A decode, app-identity,
         // or runner refusal must not turn a reload into an empty window.
         let carried = carried.or_else(|| self.host.as_ref().map(Host::carry));
-        let measurer: Box<dyn TextMeasurer> = match hooks.measure {
-            Some(f) => Box::new(CallbackMeasurer::new(f, hooks.ctx)),
-            None => Box::new(MonospaceMeasurer::default()),
-        };
+        let measurer = crate::measure::from_hooks(hooks.measure, hooks.ctx, hooks.symbol);
         // A reload carries the running store (`Carried::store`). A fresh
         // session takes the granted platform snapshot before its first query,
         // just like boot_fresh; neither path releases effects until commit.
