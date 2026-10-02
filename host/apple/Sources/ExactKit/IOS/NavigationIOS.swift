@@ -72,9 +72,18 @@ private final class RouteController: UIViewController {
     }
 }
 
-final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureRecognizerDelegate {
+final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureRecognizerDelegate, UITabBarControllerDelegate {
     unowned let presenter: Presenter
     private var primaryNavigation: UINavigationController?
+    /// Tabbed routes (`navigationTab`): one container per tab under a tab
+    /// bar controller (TabContainersIOS.swift), each showing its own tab's
+    /// screens. A selected stack container's navigation controller is
+    /// `primaryNavigation`; any other selected container leaves it nil.
+    private var tabs: UITabBarController?
+    private var tabContainers: [String: TabContainer] = [:]
+    private var selectedContainer: TabContainer? { selectedTab.flatMap { tabContainers[$0] } }
+    private var tabRoutes: [NodeView] = []
+    private var selectedTab: String?
     private var presentedNavigations: [UINavigationController] = []
     private var modalNavigation: UINavigationController? { presentedNavigations.last }
     private var navigation: UINavigationController? { modalNavigation ?? primaryNavigation }
@@ -134,10 +143,23 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
         for op in batch.ops where op.op == .children && op.id == root.id {
             routeIDs = op.ids
         }
-        let routes = routeIDs.compactMap { presenter.views[$0] }.filter { $0.props["navigationKey"] != nil }
+        var routes = routeIDs.compactMap { presenter.views[$0] }.filter { $0.props["navigationKey"] != nil }
         // D1: the stack is the prefix through the route the root names; a
         // key that names none leaves the stack alone, and says so once.
         let rootKey = root.props["navigationKey"] ?? ""
+        // Tabbed: every tab's stack is rendered, each row naming its tab; the
+        // selected tab is the one holding the route the root names, and the
+        // rules below apply to its rows alone.
+        if routes.contains(where: { !($0.props["navigationTab"] ?? "").isEmpty }) {
+            tabRoutes = routes
+            let tab = routes.first(where: { $0.props["navigationKey"] == rootKey })?.props["navigationTab"]
+                ?? selectedTab ?? routes.first?.props["navigationTab"] ?? ""
+            selectedTab = tab
+            routes = routes.filter { $0.props["navigationTab"] == tab }
+        } else {
+            tabRoutes = []
+            selectedTab = nil
+        }
         guard let range = NavigationRules.stack(routeKeys: routes.map { $0.props["navigationKey"] ?? "" }, selected: rootKey) else {
             if refusedKey != rootKey {
                 refusedKey = rootKey
@@ -147,17 +169,146 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
         }
         refusedKey = nil
         let selected = range.upperBound - 1
-        let wanted = routes[range].map { node -> RouteController in
-            let c = controllers[node.id] ?? RouteController(node)
-            controllers[node.id] = c
-            c.mount()
-            c.configure { [weak self] target in self?.pressControl(named: target, in: node) }
-            return c
-        }
+        let wanted = routes[range].map(controller(for:))
         return (root, routes, selected, wanted)
     }
 
+    private func controller(for node: NodeView) -> RouteController {
+        let c = controllers[node.id] ?? RouteController(node)
+        controllers[node.id] = c
+        c.mount()
+        c.configure { [weak self] target in self?.pressControl(named: target, in: node) }
+        return c
+    }
+
+    private func makeNavigation() -> UINavigationController {
+        let nav = UINavigationController()
+        nav.setNavigationBarHidden(true, animated: false)
+        nav.navigationBar.prefersLargeTitles = true
+        nav.delegate = self
+        nav.interactivePopGestureRecognizer?.delegate = self
+        if #available(iOS 26.0, *) { nav.interactiveContentPopGestureRecognizer?.delegate = self }
+        return nav
+    }
+
+    /// The tab bar controller over one container per tab, in the order the
+    /// tabs' rows come. Each tab's root route names its container
+    /// (`navigationContainer`, `navigationContainerProps`) and its item
+    /// (`navigationTabTitle`, `navigationTabSymbol`,
+    /// `navigationTabSelectedSymbol`); the tabs not selected show their own
+    /// screens, through their first presented route.
+    private func installTabs(root: NodeView, selected: String, wanted: [RouteController]) {
+        if tabs == nil {
+            var responder: UIResponder? = root
+            while responder != nil && !(responder is UIViewController) { responder = responder?.next }
+            guard let parent = responder as? UIViewController else { return }
+            let controller = UITabBarController()
+            controller.delegate = self
+            parent.addChild(controller)
+            root.addSubview(controller.view)
+            controller.view.frame = root.bounds
+            controller.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+            controller.didMove(toParent: parent)
+            tabs = controller
+        }
+        guard let tabs else { return }
+        var order: [String] = []
+        for node in tabRoutes {
+            let tab = node.props["navigationTab"] ?? ""
+            if !tab.isEmpty, !order.contains(tab) { order.append(tab) }
+        }
+        for tab in order {
+            let rows = tabRoutes.filter { $0.props["navigationTab"] == tab }
+            guard let first = rows.first else { continue }
+            let kind = (first.props["navigationContainer"] ?? "").isEmpty ? "stack" : first.props["navigationContainer"]!
+            // A module container's stand-in is replaced once the module has one.
+            let current = tabContainers[tab]
+            var fresh = false
+            if current == nil || current!.kind != kind || (kind != "screen" && current is ScreenContainer),
+               let made = makeContainer(kind, props: first.props["navigationContainerProps"] ?? ""),
+               current == nil || current!.kind != kind || made is ModuleContainer {
+                current?.stack?.delegate = nil
+                tabContainers[tab] = made
+                fresh = true
+            }
+            guard let container = tabContainers[tab] else { continue }
+            let item = container.controller.tabBarItem!
+            let title = first.props["navigationTabTitle"], symbol = first.props["navigationTabSymbol"] ?? ""
+            let selectedSymbol = first.props["navigationTabSelectedSymbol"] ?? symbol
+            if item.title != title { item.title = title }
+            if item.accessibilityIdentifier != "\(symbol)|\(selectedSymbol)" {
+                item.image = UIImage(systemName: symbol)
+                item.selectedImage = UIImage(systemName: selectedSymbol)
+                item.accessibilityIdentifier = "\(symbol)|\(selectedSymbol)"
+            }
+            if tab == selected {
+                // A selected stack is driven by sync, animated; installation
+                // only seeds a new one.
+                if fresh || container.stack == nil {
+                    container.show(wanted)
+                    if let nav = container.stack { showBar(nav, animated: false) }
+                }
+            } else {
+                container.show(rows.prefix { !["modal", "fullscreen"].contains($0.props["navigationPresentation"] ?? "") }.map(controller(for:)))
+                if let nav = container.stack { showBar(nav, animated: false) }
+            }
+        }
+        for tab in Array(tabContainers.keys) where !order.contains(tab) {
+            tabContainers.removeValue(forKey: tab)?.stack?.delegate = nil
+        }
+        let controllers = order.compactMap { tabContainers[$0]?.controller }
+        if (tabs.viewControllers ?? []).count != controllers.count || !zip(tabs.viewControllers ?? [], controllers).allSatisfy({ $0 === $1 }) {
+            tabs.setViewControllers(controllers, animated: false)
+        }
+        if let index = order.firstIndex(of: selected), tabs.selectedIndex != index { tabs.selectedIndex = index }
+        primaryNavigation = tabContainers[selected]?.stack
+    }
+
+    /// A tab's container: "stack", "screen", or the app module's own. A
+    /// module container stands in as a plain screen until the module has
+    /// loaded (navigation is told, and installs it then) or when the module
+    /// has none by that name (logged once).
+    private func makeContainer(_ kind: String, props: String) -> TabContainer? {
+        switch kind {
+        case "stack": return StackContainer(makeNavigation())
+        case "screen": return ScreenContainer()
+        default:
+            guard let natives = presenter.session?.natives else { return ScreenContainer(kind: kind) }
+            if let native = natives.container(named: kind, props: props) { return ModuleContainer(native) }
+            natives.containersReady = { [weak self] in
+                self?.sync(Batch(ops: [], timers: false, motion: false, clock: nil, error: nil))
+            }
+            return ScreenContainer(kind: kind)
+        }
+    }
+
+    /// Agent activation (LLP 1012) of a control UIKit's chrome stands in for
+    /// — a tab's `navigationTabControl`, a route's `navigationTrailing`, the
+    /// Back control under a native back button — presses it as the tab bar
+    /// or bar button would; nil for anything else.
+    func activate(_ node: NodeView) -> Bool? {
+        guard let id = node.props["id"], !id.isEmpty else { return nil }
+        let routes = routeIDs.compactMap { presenter.views[$0] }
+        let stands = routes.contains { $0.props["navigationTabControl"] == id || $0.props["navigationTrailing"] == id }
+            || (id == container?.props["navigationBack"] && navigation?.isNavigationBarHidden == false)
+        guard stands else { return nil }
+        guard node.handlers.contains("press"), !node.disabled else { return false }
+        presenter.press(node.id)
+        return true
+    }
+
+    /// A tab is chosen in Contract: a tap presses the tab's root route's
+    /// `navigationTabControl` (by HTML id), whose action selects it, and the
+    /// projection follows. UIKit never selects on its own.
+    func tabBarController(_ tabBarController: UITabBarController, shouldSelect viewController: UIViewController) -> Bool {
+        guard let tab = tabContainers.first(where: { $0.value.controller === viewController })?.key,
+              let control = tabRoutes.first(where: { $0.props["navigationTab"] == tab })?.props["navigationTabControl"] else { return false }
+        pressControl(named: control, in: nil)
+        return false
+    }
+
     private func installPrimary(root: NodeView, wanted: [RouteController]) {
+        if let selectedTab { installTabs(root: root, selected: selectedTab, wanted: wanted); return }
         guard primaryNavigation == nil else { return }
         // Find the containing controller before installing our child.
         var responder: UIResponder? = root
@@ -183,13 +334,13 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
     /// Initial containment is ready before child frames. It does not present
     /// a sheet or flush focus commands from the partially applied batch.
     func installInitialOwner(_ batch: Batch) {
-        guard primaryNavigation == nil, !syncing, presenter.session?.view?.window != nil else { return }
+        guard primaryNavigation == nil, tabs == nil, !syncing, presenter.session?.view?.window != nil else { return }
         syncing = true
         defer { syncing = false }
         guard let (root, routes, selected, wanted) = projection(batch) else { return }
         let parts = NavigationRules.segments(presentations: routes[...selected].map { $0.props["navigationPresentation"] })
         installPrimary(root: root, wanted: Array(wanted[parts[0]]))
-        primaryNavigation?.view.layoutIfNeeded()
+        (tabs?.view ?? primaryNavigation?.view)?.layoutIfNeeded()
     }
 
     func sync(_ batch: Batch) {
@@ -212,9 +363,13 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
         }.count
         // Mount the destination under a departing presentation before starting
         // dismissal, so its editor can accept the batch's focus handoff.
-        let owners = [primaryNavigation].compactMap { $0 } + presentedNavigations
+        // A selected tab container that is not a stack shows its screens its
+        // own way; the stacks it may present still sync below.
+        let owners: [UINavigationController?] = [primaryNavigation] + presentedNavigations
+        if primaryNavigation == nil, let selectedContainer { selectedContainer.show(Array(wanted[parts[0]])) }
         for index in 0...common where index < owners.count {
-            let nav = owners[index], stack = Array(wanted[parts[index]])
+            guard let nav = owners[index] else { continue }
+            let stack = Array(wanted[parts[index]])
             let same = nav.viewControllers.count == stack.count && zip(nav.viewControllers, stack).allSatisfy { $0 === $1 }
             if !same {
                 // @ref LLP 1038 D6 — a tab change swaps immediately. A replacement within one stack
@@ -233,8 +388,11 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
             presenter.modals.closeTop()
             return
         }
-        if boundaries.count > mounted.count, let background = navigation, let owner {
-            let source = background.topViewController as? RouteController
+        // Under tabs, the first presentation is over the whole tab bar
+        // controller, and its owner is the tab bar controller's parent.
+        let background: UIViewController? = presentedNavigations.isEmpty && tabs != nil ? tabs : navigation
+        if boundaries.count > mounted.count, let background, let owner {
+            let source = (navigation?.topViewController as? RouteController) ?? wanted[parts[0]].last
             let part = parts[mounted.count + 1], route = wanted[part.lowerBound].node
             guard presenter.modals.canPresent(from: owner, route: route) else { return }
             let nav = UINavigationController()
@@ -257,7 +415,11 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
             presenter.modals.present(route, navigation: nav, from: background, node: source?.node,
                                      preceding: preceding, owner: owner)
         }
-        if let nav = navigation {
+        if let tabs, presentedNavigations.isEmpty {
+            tabs.view.frame = root.bounds
+            root.bringSubviewToFront(tabs.view)
+            tabs.view.layoutIfNeeded()
+        } else if let nav = navigation {
             nav.view.frame = root.bounds
             root.bringSubviewToFront(nav.view)
             nav.view.layoutIfNeeded()
@@ -266,7 +428,7 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
         presenter.modals.updatePermissions()
     }
 
-    var owner: UIViewController? { presenter.modals.owner ?? primaryNavigation?.parent }
+    var owner: UIViewController? { presenter.modals.owner ?? tabs?.parent ?? primaryNavigation?.parent }
 
     /// UIKit's bar shows for a route that declares a title, and hides for one
     /// that does not, as each becomes the top of its stack.
@@ -275,10 +437,12 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
         if nav.isNavigationBarHidden != hidden { nav.setNavigationBarHidden(hidden, animated: animated) }
     }
 
-    /// A bar button presses the authored control the route names by HTML id.
-    private func pressControl(named target: String, in route: NodeView) {
-        guard let control = presenter.carrying("id").first(where: {
-            $0.props["id"] == target && ($0 === route || $0.isDescendant(of: route)) && $0.handlers.contains("press") && !$0.disabled
+    /// A bar button presses the authored control the route names by HTML id
+    /// (anywhere, for a tab's control).
+    private func pressControl(named target: String, in route: NodeView?) {
+        guard let control = presenter.carrying("id").first(where: { node in
+            node.props["id"] == target && (route.map { node === $0 || node.isDescendant(of: $0) } ?? true)
+                && node.handlers.contains("press") && !node.disabled
         }) else {
             presenter.session?.log("navigationTrailing \"\(target)\" names no enabled control in its route")
             return
@@ -359,7 +523,8 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
     }
 
     func move(to parent: UIViewController, mount: () -> Void) {
-        guard let nav = navigation, nav.parent !== parent else { mount(); return }
+        let moving: UIViewController? = tabs != nil && presentedNavigations.isEmpty ? tabs : navigation
+        guard let nav = moving, nav.parent !== parent else { mount(); return }
         let container = nav.view.superview
         nav.willMove(toParent: nil)
         nav.view.removeFromSuperview()
@@ -495,6 +660,18 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
     func reset(clearFocus: Bool = true) {
         presenter.modals.reset()
         for nav in presentedNavigations { retireNavigation(nav, preserving: false) }
+        for container in tabContainers.values { container.stack?.delegate = nil }
+        if let tabs {
+            tabs.delegate = nil
+            tabs.willMove(toParent: nil)
+            tabs.view.removeFromSuperview()
+            tabs.removeFromParent()
+            self.tabs = nil
+            primaryNavigation = nil
+        }
+        tabContainers.removeAll()
+        tabRoutes = []
+        selectedTab = nil
         primaryNavigation?.delegate = nil
         primaryNavigation?.willMove(toParent: nil)
         primaryNavigation?.view.removeFromSuperview()

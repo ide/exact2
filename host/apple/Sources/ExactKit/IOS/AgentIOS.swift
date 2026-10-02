@@ -452,6 +452,12 @@ extension Agent {
             return activated ? ["tapped": id, "delivery": "host-activation", "native": "segmented-control"]
                 : ["error": "native segment #\(id) is unavailable"]
         }
+        if let id = req["id"] as? Int, let node = presenter.views[UInt32(id)],
+           req["wheel"] == nil, req["hover"] == nil, req["contextmenu"] == nil, req["dblclick"] == nil,
+           let activated = presenter.navigation.activate(node) {
+            return activated ? ["tapped": id, "delivery": "host-activation", "native": "navigation"]
+                : ["error": "navigation control #\(id) is disabled"]
+        }
         if let id = req["id"] as? Int, presenter.swipeActions.ownsAction(UInt32(id)),
            req["wheel"] == nil, req["hover"] == nil, req["contextmenu"] == nil, req["dblclick"] == nil {
             guard let button = presenter.swipeActions.actionView(UInt32(id)), let window = button.window,

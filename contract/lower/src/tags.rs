@@ -588,6 +588,19 @@ pub fn attr(name: &str) -> Option<AttrTarget> {
         "navigationTrailing" => AttrTarget::Prop(p("navigationTrailing")),
         "navigationTrailingSymbol" => AttrTarget::Prop(p("navigationTrailingSymbol")),
         "navigationBackButton" => AttrTarget::Prop(p("navigationBackButton")),
+        // A route's tab (iOS: one navigation controller per tab under a
+        // UITabBarController), and on a tab's root route its tab bar item and
+        // the authored control (by HTML id) a tap on it presses.
+        "navigationTab" => AttrTarget::Prop(p("navigationTab")),
+        "navigationTabTitle" => AttrTarget::Prop(p("navigationTabTitle")),
+        "navigationTabSymbol" => AttrTarget::Prop(p("navigationTabSymbol")),
+        "navigationTabSelectedSymbol" => AttrTarget::Prop(p("navigationTabSelectedSymbol")),
+        "navigationTabControl" => AttrTarget::Prop(p("navigationTabControl")),
+        // What shows a tab's routes: "stack" (a navigation controller, the
+        // default), "screen" (its root alone), or a screen container the
+        // app's native module registers, with its props as a JSON object.
+        "navigationContainer" => AttrTarget::Prop(p("navigationContainer")),
+        "navigationContainerProps" => AttrTarget::Prop(p("navigationContainerProps")),
         "navigationSource" => AttrTarget::Prop(p("navigationSource")),
         "closedby" => AttrTarget::Prop(p("closedby")),
         "contextTarget" => AttrTarget::Prop(p("contextTarget")),

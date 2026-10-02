@@ -35,9 +35,11 @@ import Foundation
 #if os(macOS)
 import AppKit
 public typealias ExactNativeView = NSView
+public typealias ExactNativeViewController = NSViewController
 #else
 import UIKit
 public typealias ExactNativeView = UIView
+public typealias ExactNativeViewController = UIViewController
 #endif
 
 public typealias ExactNativeEventFn = @convention(c) (UnsafeMutableRawPointer?, UInt32, UInt32, UnsafePointer<UInt8>?, UInt32) -> Void
@@ -121,6 +123,9 @@ public final class ExactReply: @unchecked Sendable {
 open class ExactModule {
     /// The roster: each tag's factory, read once per process.
     open class var views: [String: ExactNativeFactory] { [:] }
+    /// Screen containers by name (LLP 1038): a tab or a sheet whose root
+    /// route says `navigationContainer="<name>"` is shown by one of these.
+    open class var controllers: [String: ExactControllerFactory] { [:] }
     public let context: ExactModuleContext
     public required init(context: ExactModuleContext) { self.context = context }
     /// A long call (`native.later`): start the work and return; reply once.
@@ -175,6 +180,34 @@ open class ExactNativeInstance {
     /// The next `setProps` is a first mount, and `events.load()` follows once
     /// nothing of the last row shows. Events sent before that mount are dropped.
     open func prepareForReuse() throws { throw ExactNativeRefusal("no reuse") }
+}
+
+/// A screen container (LLP 1038): an app's own view controller that shows a
+/// tab's (or a sheet's) routes, root first. The screens are Exact's — each a
+/// view controller holding a route's content — and the container arranges
+/// them as it likes: side by side, paged, under its own chrome. Navigation
+/// stays Contract's: the container shows what the router holds and never
+/// adds or removes a screen itself. Main thread only.
+open class ExactNativeController {
+    public init() {}
+    /// The container the host puts in the tab bar controller (or presents).
+    open var controller: ExactNativeViewController { fatalError("\(type(of: self)) has no controller") }
+    /// The screens to show, root first; called whenever the route stack changes.
+    open func setScreens(_ screens: [ExactNativeViewController]) {}
+    /// Last call; the screens are the host's again.
+    open func destroy() {}
+}
+
+/// How to make a screen container from the session's module, given the
+/// tab's root route's `navigationContainerProps` (a JSON object of strings,
+/// read when the container is made).
+public struct ExactControllerFactory {
+    public let make: (ExactModule, [String: String]) throws -> ExactNativeController
+    public init(make: @escaping (ExactModule, [String: String]) throws -> ExactNativeController) { self.make = make }
+    /// A container that needs nothing from the module.
+    public init(make: @escaping ([String: String]) throws -> ExactNativeController) {
+        self.init { _, props in try make(props) }
+    }
 }
 
 /// A roster entry: how to make an instance from the session's module,
@@ -243,6 +276,7 @@ private func module(_ raw: UnsafeMutableRawPointer?) -> ExactModule? {
 }
 
 private let roster: [String: ExactNativeFactory] = exactModule.views
+private let containers: [String: ExactControllerFactory] = exactModule.controllers
 
 private let create: @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<UInt8>?, UInt32, UnsafePointer<UInt8>?, UInt32, ExactNativeEventFn?, ExactNativeReplyFn?, UnsafeMutableRawPointer?, UInt32, UnsafeMutablePointer<UInt8>?, UInt32) -> UnsafeMutableRawPointer? = { owner, tag, tagLength, json, jsonLength, event, reply, ctx, nonce, out, capacity in
     let name = tag.map { String(decoding: UnsafeBufferPointer(start: $0, count: Int(tagLength)), as: UTF8.self) } ?? ""
@@ -334,6 +368,37 @@ private let moduleCall: @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<
     }
 }
 
+// Screen containers (size ≥ 144): create, the controller, its screens, destroy.
+private let controllerCreate: @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<UInt8>?, UInt32, UnsafePointer<UInt8>?, UInt32, UnsafeMutablePointer<UInt8>?, UInt32) -> UnsafeMutableRawPointer? = { owner, name, nameLength, json, jsonLength, out, capacity in
+    let key = name.map { String(decoding: UnsafeBufferPointer(start: $0, count: Int(nameLength)), as: UTF8.self) } ?? ""
+    guard let factory = containers[key] else { write("no controller for \(key)", out, capacity); return nil }
+    guard let owner = module(owner) else { write("no module instance", out, capacity); return nil }
+    do {
+        let made = try factory.make(owner, try props(json, jsonLength))
+        return Unmanaged.passRetained(made).toOpaque()
+    } catch {
+        write(String(describing: error), out, capacity)
+        return nil
+    }
+}
+private func container(_ raw: UnsafeMutableRawPointer?) -> ExactNativeController? {
+    raw.map { Unmanaged<ExactNativeController>.fromOpaque($0).takeUnretainedValue() }
+}
+private let controllerView: @convention(c) (UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? = { raw in
+    container(raw).map { Unmanaged.passUnretained($0.controller).toOpaque() }
+}
+private let controllerScreens: @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<UnsafeMutableRawPointer?>?, UInt32) -> Void = { raw, list, count in
+    guard let made = container(raw) else { return }
+    let screens = (0..<Int(count)).compactMap { i in list?[i].map { Unmanaged<ExactNativeViewController>.fromOpaque($0).takeUnretainedValue() } }
+    made.setScreens(screens)
+}
+private let controllerDestroy: @convention(c) (UnsafeMutableRawPointer?) -> Void = { raw in
+    guard let raw else { return }
+    let made = Unmanaged<ExactNativeController>.fromOpaque(raw)
+    made.takeUnretainedValue().destroy()
+    made.release()
+}
+
 private let prepareForReuse: @convention(c) (UnsafeMutableRawPointer?) -> Int32 = { raw in
     guard let h = handle(raw) else { return 1 }
     do { try h.instance.prepareForReuse(); return 0 } catch { return 1 }
@@ -343,10 +408,10 @@ private let prepareForReuse: @convention(c) (UnsafeMutableRawPointer?) -> Int32 
 private let major: UInt32 = 2
 
 private let table: UnsafeMutableRawPointer = {
-    let text = "{" + roster.keys.sorted().map { tag in
+    let text = "{" + (roster.keys.sorted().map { tag in
         "\"\(tag)\":{\"snapshot\":\(roster[tag]!.snapshot),\"reuse\":\(roster[tag]!.reuse),\"sizes\":\(roster[tag]!.sizes)}"
-    }.joined(separator: ",") + "}"
-    let size = 112
+    } + containers.keys.sorted().map { "\"\($0)\":{\"controller\":true}" }).joined(separator: ",") + "}"
+    let size = 144
     let t = UnsafeMutableRawPointer.allocate(byteCount: size, alignment: 8)
     t.initializeMemory(as: UInt8.self, repeating: 0, count: size)
     t.storeBytes(of: major, as: UInt32.self)
@@ -362,6 +427,10 @@ private let table: UnsafeMutableRawPointer = {
     t.storeBytes(of: unsafeBitCast(moduleLater, to: UnsafeRawPointer.self), toByteOffset: 88, as: UnsafeRawPointer.self)
     t.storeBytes(of: unsafeBitCast(moduleCall, to: UnsafeRawPointer.self), toByteOffset: 96, as: UnsafeRawPointer.self)
     t.storeBytes(of: unsafeBitCast(prepareForReuse, to: UnsafeRawPointer.self), toByteOffset: 104, as: UnsafeRawPointer.self)
+    t.storeBytes(of: unsafeBitCast(controllerCreate, to: UnsafeRawPointer.self), toByteOffset: 112, as: UnsafeRawPointer.self)
+    t.storeBytes(of: unsafeBitCast(controllerView, to: UnsafeRawPointer.self), toByteOffset: 120, as: UnsafeRawPointer.self)
+    t.storeBytes(of: unsafeBitCast(controllerScreens, to: UnsafeRawPointer.self), toByteOffset: 128, as: UnsafeRawPointer.self)
+    t.storeBytes(of: unsafeBitCast(controllerDestroy, to: UnsafeRawPointer.self), toByteOffset: 136, as: UnsafeRawPointer.self)
     return t
 }()
 

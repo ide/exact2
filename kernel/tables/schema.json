@@ -601,6 +601,41 @@
       "kind": "str"
     },
     {
+      "id": 221,
+      "name": "navigationTab",
+      "kind": "str"
+    },
+    {
+      "id": 222,
+      "name": "navigationTabTitle",
+      "kind": "str"
+    },
+    {
+      "id": 223,
+      "name": "navigationTabSymbol",
+      "kind": "str"
+    },
+    {
+      "id": 224,
+      "name": "navigationTabSelectedSymbol",
+      "kind": "str"
+    },
+    {
+      "id": 225,
+      "name": "navigationTabControl",
+      "kind": "str"
+    },
+    {
+      "id": 226,
+      "name": "navigationContainer",
+      "kind": "str"
+    },
+    {
+      "id": 227,
+      "name": "navigationContainerProps",
+      "kind": "str"
+    },
+    {
       "id": 214,
       "name": "scrollRestoration",
       "kind": "str"

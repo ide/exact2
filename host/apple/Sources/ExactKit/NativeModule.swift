@@ -27,6 +27,12 @@
 //        answer(reply, status, bytes, len) once, any thread: exact_app_reply
 //  96  module_call(module, body, len, slot, answer)
 //        answer(slot, status, bytes, len) before returning: exact_app_answer
+// 112  controller_create(module, name, nameLen, props, propsLen, err, errCap) → handle
+//        size ≥ 144 (LLP 1038): a screen container the roster lists as
+//        {"name": {"controller": true}}
+// 120  controller_view(handle) → NSViewController * / UIViewController *
+// 128  controller_set_screens(handle, controllers, count)   root first
+// 136  controller_destroy(handle)
 // 104  prepare_for_reuse(handle) → 0 reset, else refused   size ≥ 112; nullable
 //        (LLP 1068 §4.8): as if created with no props; the next set_props is
 //        a first mount, and `load` follows once no pixel of the last row shows
@@ -77,6 +83,8 @@ private final class NativeTable {
     typealias SnapshotFn = @convention(c) (UnsafeMutableRawPointer?, UInt32) -> Void
     typealias DestroyFn = @convention(c) (UnsafeMutableRawPointer?) -> Void
     typealias ReuseFn = @convention(c) (UnsafeMutableRawPointer?) -> Int32
+    typealias ControllerCreateFn = @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<UInt8>?, UInt32, UnsafePointer<UInt8>?, UInt32, UnsafeMutablePointer<UInt8>?, UInt32) -> UnsafeMutableRawPointer?
+    typealias ControllerScreensFn = @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<UnsafeMutableRawPointer?>?, UInt32) -> Void
     typealias AbiFn = @convention(c) () -> UnsafeRawPointer?
     typealias ChangedFn = @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<UInt8>?, UInt32) -> Void
     typealias NowFn = @convention(c) (UnsafeMutableRawPointer?) -> Double
@@ -97,6 +105,10 @@ private final class NativeTable {
     let moduleLater: ModuleLaterFn
     let moduleCall: ModuleLaterFn
     var prepareForReuse: ReuseFn?
+    var controllerCreate: ControllerCreateFn?
+    var controllerView: ViewFn?
+    var controllerScreens: ControllerScreensFn?
+    var controllerDestroy: DestroyFn?
 
     private init(path: String, roster: [String: [String: Any]], create: @escaping CreateFn, platformView: @escaping ViewFn,
                  setProps: @escaping SetFn, snapshot: SnapshotFn?, destroy: @escaping DestroyFn,
@@ -146,6 +158,12 @@ private final class NativeTable {
             moduleLater: unsafeBitCast(moduleLater, to: ModuleLaterFn.self),
             moduleCall: unsafeBitCast(moduleCall, to: ModuleLaterFn.self))
         loaded.prepareForReuse = size >= 112 ? pointer(104).map { unsafeBitCast($0, to: ReuseFn.self) } : nil
+        if size >= 144 {
+            loaded.controllerCreate = pointer(112).map { unsafeBitCast($0, to: ControllerCreateFn.self) }
+            loaded.controllerView = pointer(120).map { unsafeBitCast($0, to: ViewFn.self) }
+            loaded.controllerScreens = pointer(128).map { unsafeBitCast($0, to: ControllerScreensFn.self) }
+            loaded.controllerDestroy = pointer(136).map { unsafeBitCast($0, to: DestroyFn.self) }
+        }
         return .success(loaded)
     }
 }
@@ -260,6 +278,40 @@ private let nativeNowCallback: NativeTable.NowFn = { host in
     ExactSession.session(for: ExactRuntime(UInt(bitPattern: host)))?.now() ?? ExactEnv.wall()
 }
 
+#if os(macOS)
+typealias NativeViewController = NSViewController
+#else
+typealias NativeViewController = UIViewController
+#endif
+
+/// An app module's screen container: its view controller, and the screens
+/// (route controllers, root first) it is given to show.
+final class NativeContainer {
+    let name: String
+    let controller: NativeViewController
+    private var handle: UnsafeMutableRawPointer?
+    private let screensFn: NativeTable.ControllerScreensFn
+    private let destroyFn: NativeTable.DestroyFn
+    private var shown: [ObjectIdentifier] = []
+    fileprivate init(name: String, handle: UnsafeMutableRawPointer, controller: NativeViewController,
+                     setScreens: @escaping NativeTable.ControllerScreensFn, destroy: @escaping NativeTable.DestroyFn) {
+        self.name = name; self.handle = handle; self.controller = controller; screensFn = setScreens; destroyFn = destroy
+    }
+    func setScreens(_ screens: [NativeViewController]) {
+        let ids = screens.map(ObjectIdentifier.init)
+        guard ids != shown, let handle else { return }
+        shown = ids
+        var raws: [UnsafeMutableRawPointer?] = screens.map { Unmanaged.passUnretained($0).toOpaque() }
+        raws.withUnsafeMutableBufferPointer { screensFn(handle, $0.baseAddress, UInt32($0.count)) }
+    }
+    func destroy() {
+        guard let handle else { return }
+        self.handle = nil
+        destroyFn(handle)
+    }
+    deinit { destroy() }
+}
+
 final class NativeViews {
     weak var session: ExactSession?
     private var entries: [UInt32: NativeEntry] = [:]
@@ -315,10 +367,45 @@ final class NativeViews {
     /// The paint gate: the turn after the first drawn frame (the GPU
     /// module's), and every later batch. The first call loads the artifact.
     func loadIfNeeded() {
-        guard !gateOpen, !entries.isEmpty else { return }
+        guard !gateOpen, !entries.isEmpty || containersWanted else { return }
         gateOpen = true
         for entry in entries.values.sorted(by: { $0.id < $1.id }) where entry.state == "loading" && !entry.name.isEmpty { attach(entry) }
+        if containersWanted { containersReady?() }
     }
+
+    // MARK: Screen containers (LLP 1038)
+
+    /// Navigation asked for an app container before the gate opened; it is
+    /// told when it can have one (`containersReady`).
+    private var containersWanted = false
+    var containersReady: (() -> Void)?
+
+    /// The app module's screen container `name`, made from `props` (a JSON
+    /// object of strings); nil until the artifact is loaded at the paint
+    /// gate, or when the module has none by that name (said once).
+    func container(named name: String, props: String) -> NativeContainer? {
+        guard gateOpen else { containersWanted = true; return nil }
+        guard case .success(let table) = table(), let create = table.controllerCreate, let view = table.controllerView,
+              let screens = table.controllerScreens, let destroy = table.controllerDestroy,
+              table.roster[name]?["controller"] as? Bool == true else {
+            if refusedContainers.insert(name).inserted { log("no screen container \"\(name)\" in the module") }
+            return nil
+        }
+        guard case .success(let module) = module(table) else { return nil }
+        var error = [UInt8](repeating: 0, count: 512)
+        let key = Data(name.utf8), json = Data(props.utf8)
+        let handle = key.withUnsafeBytes { k in json.withUnsafeBytes { p in
+            create(module, k.bindMemory(to: UInt8.self).baseAddress, UInt32(key.count), p.bindMemory(to: UInt8.self).baseAddress, UInt32(json.count), &error, UInt32(error.count))
+        } }
+        guard let handle, let raw = view(handle) else {
+            if refusedContainers.insert(name).inserted { log("screen container \"\(name)\" refused: \(String(cString: error.map { CChar(bitPattern: $0) }))") }
+            return nil
+        }
+        log("screen container \(name): made")
+        return NativeContainer(name: name, handle: handle, controller: Unmanaged<NativeViewController>.fromOpaque(raw).takeUnretainedValue(),
+                               setScreens: screens, destroy: destroy)
+    }
+    private var refusedContainers = Set<String>()
 
     private func table() -> Result<NativeTable, NativeFailure> {
         if let loaded = NativeProcess.table { return loaded }
