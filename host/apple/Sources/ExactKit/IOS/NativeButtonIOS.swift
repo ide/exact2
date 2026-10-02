@@ -216,8 +216,11 @@ final class NativeButton: UIButton {
         }
         if let symbol {
             let points = symbol.number("font_size", 17)
-            let glyph = UIImage(systemName: symbol.props["symbolName"] ?? "",
-                                withConfiguration: UIImage.SymbolConfiguration(pointSize: points, weight: symbolWeight(symbol.number("font_weight", 400))))
+            let sized = UIImage.SymbolConfiguration(pointSize: points, weight: symbolWeight(symbol.number("font_weight", 400)))
+            // The authored size, not the scale a configuration would pick for
+            // its button's size.
+            config.preferredSymbolConfigurationForImage = sized
+            let glyph = UIImage(systemName: symbol.props["symbolName"] ?? "", withConfiguration: sized)
             let tint = symbol.color("tint_color", .label)
             if text == nil { config.baseForegroundColor = tint }
             // A symbol in the title's colour is a template UIKit tints and
