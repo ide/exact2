@@ -129,11 +129,11 @@ private final class RasterDownload: NSObject, URLSessionDataDelegate, @unchecked
             if kill(pid, 0) != 0 && errno == ESRCH { try? fm.removeItem(at: root.appendingPathComponent(name)) }
         }
         #if os(iOS)
-        // The loose `exact-raster-<uuid>` files an earlier build left (an iOS
-        // app's tmp is its own).
+        // The loose `exact-raster-<uuid>` and `exact-raster-download-<uuid>`
+        // files earlier builds left (an iOS app's tmp is its own).
         let tmp = URL(fileURLWithPath: NSTemporaryDirectory())
         for name in (try? fm.contentsOfDirectory(atPath: tmp.path)) ?? []
-        where name.hasPrefix("exact-raster-") && UUID(uuidString: String(name.dropFirst(13))) != nil {
+        where name.hasPrefix("exact-raster-") && UUID(uuidString: String(name.suffix(36))) != nil {
             try? fm.removeItem(at: tmp.appendingPathComponent(name))
         }
         #endif
