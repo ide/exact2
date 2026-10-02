@@ -1288,7 +1288,11 @@ final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, UIScrollV
     /// there), never less than the box.
     func fitScroll() {
         guard let sv = scroll else { return }
-        let size = CGSize(width: sv.scrollsX ? max(content.width, sv.bounds.width) : sv.bounds.width, height: sv.scrollsY ? max(content.height, sv.bounds.height) : sv.bounds.height)
+        // The content's own height, as UIKit's: floored to the box, short
+        // content became a screen tall, and a keyboard inset then scrolled
+        // that empty space into view above the keyboard. Bounce still
+        // comes from alwaysBounceVertical below.
+        let size = CGSize(width: sv.scrollsX ? max(content.width, sv.bounds.width) : sv.bounds.width, height: sv.scrollsY ? content.height : sv.bounds.height)
         if sv.contentSize != size { sv.contentSize = size }
         // An orthogonal carousel's computed auto axis has no vertical travel.
         // Making that axis bounce traps Mac wheel input instead of letting the
