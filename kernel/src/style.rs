@@ -111,6 +111,11 @@ impl Env {
     }
 }
 
+/// `-exact-apple-glass-container: auto`'s row value: the hosts take the
+/// merge distance from the box's laid-out gap. Negative rows below it are
+/// no group, as the default (-1) is.
+pub const GLASS_CONTAINER_AUTO: f32 = -2.0;
+
 /// A length: automatic, absolute points, a percentage of the parent (0–100),
 /// a percentage plus points — CSS's `calc(<p>% + <n>px)`, which the engine
 /// resolves against the percentage's basis — or a safe-area inset of the
@@ -443,6 +448,15 @@ impl StyleValue {
                 } else {
                     shadow.opacity
                 });
+            }
+        }
+        // `-exact-apple-glass-container: auto`: the merge distance is the
+        // box's own gap, which only the host's laid-out frames know.
+        if style == StyleId::ExactAppleGlassContainer {
+            match self {
+                StyleValue::Auto => return Ok(GLASS_CONTAINER_AUTO),
+                StyleValue::Text(t) if t.trim() == "auto" => return Ok(GLASS_CONTAINER_AUTO),
+                _ => {}
             }
         }
         // @ref LLP 1053.000 D1 — CSS `backdrop-filter`: `none` or one `blur()`.
