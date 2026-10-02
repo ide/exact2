@@ -127,6 +127,9 @@ final class MenuHost {
         var buttons: [UIAlertAction] = []
         /// A prompt's text fields (`PromptFieldIOS.swift`).
         var fields: [PromptField] = []
+        /// Shown because the dialog is `open`, not because an invoker
+        /// opened it: closed when the state closes it.
+        var held = false
         init(host: MenuHost, source: NodeView?, popover: NodeView, modal: Bool, actions: [Presented], style: Style, title: String?, message: String?) {
             self.host = host; self.source = source; self.popover = popover; self.modal = modal; self.actions = actions; self.style = style
             sourced = source != nil; invoked = source.map { host.opens($0, popover) } ?? false
@@ -183,6 +186,9 @@ final class MenuHost {
         if let owner = confirmation, !owner.fields.isEmpty { followPrompt(owner) }
         if let owner = confirmation, !valid(owner) { resetConfirmation() }
         sheets.sync()
+        if confirmation == nil, let held = presenter.carrying("tag:dialog").first(where: { $0.props["open"] == "true" }) {
+            DispatchQueue.main.async { [weak self, weak held] in if let held { self?.presentHeld(held) } }
+        }
         var popovers: [String: NodeView] = [:]
         for (name, entry) in agentOpen {
             guard let pop = entry.popover, presenter.views[pop.id] === pop, pop.props["id"] == name,
@@ -422,6 +428,9 @@ final class MenuHost {
     }
     private func valid(_ owner: Confirmation) -> Bool {
         guard let pop = owner.popover else { return false }
+        if owner.held {
+            return live(pop) && pop.props["open"] == "true" && owner.actions.allSatisfy { presented(owner, $0) }
+        }
         guard owner.sourced else { return showable(pop) && presenter?.navigation.routeKey(containing: pop) == owner.route
             && owner.actions.allSatisfy { presented(owner, $0) } }
         guard let source = owner.source else { return false }
@@ -1040,11 +1049,18 @@ final class MenuHost {
         return sheets.isOpen(pop) ? true : nil
     }
     private func showsModal(_ source: NodeView) -> Bool { presenter?.invocation(of: source)?.action == .showModal }
+    /// A dialog the state holds `open` (HTML's attribute): presented as a
+    /// modal with no invoker while it is, over whatever this session already
+    /// presents (a sheet); its button presses are the app's to close it with.
+    private func presentHeld(_ pop: NodeView) {
+        guard confirmation == nil, isDialog(pop) else { return }
+        _ = openConfirmation(from: nil, popover: pop, modal: true, dispatchPress: false, held: true)
+    }
     /// `anchorItem`: with no `source`, what UIKit says a popover presents from
     /// (`UIMenuLeaf.presentationSourceItem`), such as the button whose menu
     /// held the row that asked.
     private func openConfirmation(from source: NodeView?, popover pop: NodeView, modal: Bool, anchorItem: AnyObject? = nil,
-                                  dispatchPress: Bool = true, announce: Bool = true) -> Bool {
+                                  dispatchPress: Bool = true, announce: Bool = true, held: Bool = false) -> Bool {
         var modal = modal
         // Both invoker actions fire, as on the web: the source's press first
         // (Session.press applies its batch synchronously), then what the
@@ -1096,7 +1112,9 @@ final class MenuHost {
         let boundary = isDialog(pop) ? pop.superview : nil
         // A disabled choice shows dimmed; the others stay choosable.
         guard prompts(pop) || actions.contains(where: { eligible($0, inertBoundary: boundary) }) else { return refuse("every action is disabled") }
-        guard let controller = controller(for: source ?? pop), !busy(controller) else { return false }
+        guard var controller = controller(for: source ?? pop) else { return false }
+        if held { while let shown = controller.presentedViewController, !shown.isBeingDismissed { controller = shown } }
+        guard !busy(controller) else { return false }
         let presented = actions.map { Confirmation.Presented($0, title: title(of: $0), enabled: eligible($0, inertBoundary: boundary)) }
         let texts = children.filter { $0.kind == "text" }.map(title(of:)).filter { !$0.isEmpty }
         let fields = children.filter(\.isPromptField)
@@ -1111,6 +1129,7 @@ final class MenuHost {
             : (title: label, message: texts.isEmpty ? nil : texts.joined(separator: "\n"))
         let owner = Confirmation(host: self, source: source, popover: pop, modal: modal, actions: presented, style: style,
                                  title: words.title, message: words.message)
+        owner.held = held
         // A native action's tint is its accent (LLP 1069.011.000 D5); the
         // alert has one tint, the first action's. Unsaid, it is UIKit's
         // (LLP 1115 D4): a `color` the action only inherits is not its own.

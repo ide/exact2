@@ -84,6 +84,7 @@ const HOST_WORDS: [&str; 90] = [
     "navigationgrabber",
     "navigationscroll",
     "num",
+    "open",
     "pressed",
     "quote",
     "refreshing",
