@@ -388,6 +388,9 @@ fn lower_with_sites(
         }
         let range = l.b.args(&args);
         l.b.set_resource_args(l.resources[i], range);
+        if let Some(identity) = r.identity {
+            l.b.set_resource_identity(l.resources[i], identity as u16);
+        }
     }
     // @ref LLP 1048.003 D6 — a declared placeholder is a row of its own,
     // after every authored row; its arguments read no state.

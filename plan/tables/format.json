@@ -160,6 +160,11 @@
           "codec": "range:args"
         },
         {
+          "name": "identity",
+          "codec": "u16",
+          "_comment": "How many leading args say what the answer is: the call's own, before a `with` (LLP 1027 D4). The rest say how it is asked \u2014 a revision, the time, a token \u2014 and a kept answer is shown at boot when its identifying args match, then asked again with the current rest. Equal to the args' length without a `with`."
+        },
+        {
           "name": "ty",
           "codec": "idx:types"
         },

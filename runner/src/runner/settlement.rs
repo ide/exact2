@@ -432,6 +432,21 @@ impl<D: DataSource> Runner<D> {
                         .as_ref()
                         .filter(|s| {
                             failed
+                                // @ref LLP 1027 D4 — before the source can answer,
+                                // a kept answer to the same question shows: its
+                                // identifying arguments (those before a `with`)
+                                // match, though how it is asked — a revision, the
+                                // time — has moved on. It is the device's last
+                                // known answer, stale until `data_ready` asks with
+                                // the current arguments.
+                                || (!self.data.ready()
+                                    && self.stale[i]
+                                    && self.store_readers[i]
+                                    && !s.placeholder
+                                    && !forced
+                                    && usize::from(row.identity) < args.len()
+                                    && s.args.len() == args.len()
+                                    && s.args[..usize::from(row.identity)] == args[..usize::from(row.identity)])
                                 || (asked_args.unwrap_or(&s.args) == &args
                                 && self.plan.str(row.source) != crate::delivery::SOURCE
                                 && self.plan.str(row.source) != crate::viewport::SOURCE

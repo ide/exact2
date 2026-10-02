@@ -51,6 +51,7 @@ mod refreshes;
 mod rem;
 mod reorder_binding;
 mod reorder_collection;
+mod resource_with;
 mod routes;
 mod rust_shapes;
 mod search;

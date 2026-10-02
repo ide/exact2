@@ -9,6 +9,7 @@ mod flow_agent;
 mod format;
 mod height_binding;
 mod incremental;
+mod kept_identity;
 mod list_layout;
 mod live_tick;
 mod now_screen;

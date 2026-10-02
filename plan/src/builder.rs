@@ -422,6 +422,7 @@ impl PlanBuilder {
         self.plan.resources.push(ResourcesRow {
             name,
             source,
+            identity: args.len as u16,
             args,
             ty,
             initial,
@@ -678,7 +679,9 @@ impl PlanBuilder {
 
     /// Replace a resource's arguments.
     pub fn set_resource_args(&mut self, id: ResourcesId, args: ArgsRange) {
-        self.plan.resources[id.0 as usize].args = args;
+        let row = &mut self.plan.resources[id.0 as usize];
+        row.args = args;
+        row.identity = args.len as u16;
     }
 
     /// A declared `else empty(…)`'s constant (LLP 1054.000.002 D3).
@@ -704,6 +707,12 @@ impl PlanBuilder {
     /// 1048.003 D6).
     pub fn set_resource_placeholder(&mut self, id: ResourcesId, placeholder: ResourcesId) {
         self.plan.resources[id.0 as usize].placeholder = Some(placeholder);
+    }
+
+    /// How many leading arguments identify a resource's answer: those before
+    /// its `with` (LLP 1027 D4).
+    pub fn set_resource_identity(&mut self, id: ResourcesId, identity: u16) {
+        self.plan.resources[id.0 as usize].identity = identity;
     }
 
     /// Mark a resource as one the bake found consulting the store (LLP 1027

@@ -373,15 +373,21 @@ pub struct Binding {
     pub span: Span,
 }
 
-/// `resource name = source(args) as shape T [else source(args)]`.
+/// `resource name = source(args) [with values] as shape T [else source(args)]`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ResourceDecl {
     /// Name.
     pub name: String,
     /// The data source's name.
     pub source: String,
-    /// Argument expressions.
+    /// Argument expressions: the call's, then its `with` values, which the
+    /// source receives after them.
     pub args: Vec<Expr>,
+    /// How many leading arguments say what the answer is: the call's own.
+    /// `with` values say how it is asked — a revision, the time, a token —
+    /// and never which answer it is, so a kept answer whose call arguments
+    /// match still shows (LLP 1027 D4). `None`: no `with`, every argument.
+    pub identity: Option<usize>,
     /// The declared shape.
     pub shape: TypeExpr,
     /// `else source(args)` (LLP 1048.003 D6): what shows while the source

@@ -734,7 +734,21 @@ impl Parser {
         self.expect_punct("=")?;
         let source = self.source_ident(span)?;
         self.expect_punct("(")?;
-        let args = self.call_args()?;
+        let mut args = self.call_args()?;
+        // `with v, …`: how the question is asked, not what it is.
+        let identity = if self.at_ident("with") {
+            self.next();
+            let identity = args.len();
+            loop {
+                args.push(self.expr()?);
+                if !self.eat_punct(",") {
+                    break;
+                }
+            }
+            Some(identity)
+        } else {
+            None
+        };
         self.expect_word("as")?;
         self.expect_word("shape")?;
         let shape = self.type_expr()?;
@@ -758,6 +772,7 @@ impl Parser {
             name,
             source,
             args,
+            identity,
             shape,
             placeholder,
             span,
