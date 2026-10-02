@@ -565,10 +565,10 @@ pub(crate) fn check_style_value(
             {
                 return err("lower-css-resize", "CSS resize handles are not implemented by the native layout presenters; only `resize=\"none\"` is portable. Other values require user-controlled box geometry, not a different property name", span);
             }
-            if rows.contains(&StyleId::UserSelect)
-                && matches!(v.as_str(), "text" | "all" | "contain")
-            {
-                return err("lower-css-user-select", "CSS user-select text/all/contain require selectable text and selection ownership on iOS and Linux; those presenters do not implement it. Supported portable values are auto and none", span);
+            // `text` and `all`: the web selects; iOS offers the system Copy
+            // for the box's text on a long press (TextCopyIOS.swift).
+            if rows.contains(&StyleId::UserSelect) && v.as_str() == "contain" {
+                return err("lower-css-user-select", "CSS user-select contain needs selection ownership the native presenters do not implement. Supported values are auto, none, text and all (on iOS, text and all offer Copy on a long press)", span);
             }
             if rows.contains(&StyleId::PositionArea) && !POSITION_AREAS.contains(&v.trim()) {
                 return err("lower-css-position-area", format!("`position-area=\"{v}\"`: exact2 places an invoker's popover in a subset of CSS `position-area`: {}. Other areas (left, another right, a corner, span-left, logical keywords) are not implemented by the native top layers; a flip is `position-try`, also not implemented", POSITION_AREAS.join(", ")), span);

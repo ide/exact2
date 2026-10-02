@@ -1,0 +1,64 @@
+// CSS `user-select: text | all` on iOS. A label there is never selected in
+// place: a long press on it offers the system edit menu's Copy for its whole
+// text, as SwiftUI's `textSelection` does on iPhone. The box's text is its
+// own (a `text` node) or its descendants', in order, joined by spaces.
+#if os(iOS)
+import UIKit
+
+final class TextCopy: NSObject, UIEditMenuInteractionDelegate {
+    weak var owner: NodeView?
+    let press: UILongPressGestureRecognizer
+    private(set) var menu: UIEditMenuInteraction!
+
+    init(_ owner: NodeView) {
+        self.owner = owner
+        press = UILongPressGestureRecognizer()
+        super.init()
+        press.addTarget(self, action: #selector(pressed(_:)))
+        press.delaysTouchesEnded = false
+        menu = UIEditMenuInteraction(delegate: self)
+        owner.addGestureRecognizer(press)
+        owner.addInteraction(menu)
+    }
+
+    /// Installs or removes the menu as the node's `user-select` says.
+    static func apply(_ view: NodeView) {
+        let on = ["text", "all"].contains(view.style["user_select"]?.string ?? "auto")
+        if on, view.textCopy == nil { view.textCopy = TextCopy(view) }
+        if !on, let copy = view.textCopy {
+            view.removeGestureRecognizer(copy.press)
+            view.removeInteraction(copy.menu)
+            view.textCopy = nil
+        }
+    }
+
+    /// What Copy writes: the node's text as it reads.
+    static func text(of view: NodeView) -> String {
+        if view.kind == "text" { return view.paragraphSpec().runs.map(\.text).joined() }
+        return view.container.subviews
+            .compactMap { ($0 as? NodeView).map(text(of:)) }
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+    }
+
+    @objc private func pressed(_ g: UILongPressGestureRecognizer) {
+        guard g.state == .began, let owner, !TextCopy.text(of: owner).isEmpty else { return }
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        let at = CGPoint(x: owner.bounds.midX, y: owner.bounds.minY)
+        menu.presentEditMenu(with: UIEditMenuConfiguration(identifier: nil, sourcePoint: at))
+    }
+
+    func editMenuInteraction(_ interaction: UIEditMenuInteraction, menuFor configuration: UIEditMenuConfiguration, suggestedActions: [UIMenuElement]) -> UIMenu? {
+        guard let owner else { return nil }
+        let copy = UIAction(title: String(localized: "Copy"), image: UIImage(systemName: "document.on.document")) { _ in
+            UIPasteboard.general.string = TextCopy.text(of: owner)
+        }
+        return UIMenu(children: [copy])
+    }
+
+    /// The menu points at the box, as at a selected label.
+    func editMenuInteraction(_ interaction: UIEditMenuInteraction, targetRectFor configuration: UIEditMenuConfiguration) -> CGRect {
+        owner?.bounds ?? .zero
+    }
+}
+#endif
