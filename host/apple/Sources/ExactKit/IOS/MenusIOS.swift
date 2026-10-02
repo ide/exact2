@@ -85,7 +85,13 @@ final class MenuHost {
         }
         var popovers: [String: NodeView] = [:]
         for v in presenter.carrying("popover") + presenter.carrying("tag:dialog").filter({ $0.props["popover"] == nil }) {
-            if ExactEnv.agentMode && !isConfirmation(v) { continue }
+            // Agent drives see a menu's rows inline (LLP 1021 D4); a
+            // confirmation or content popover is UIKit's under either carrier.
+            if ExactEnv.agentMode && !isConfirmation(v) && !isContent(v) { continue }
+            if let shown = shownContent, shown.pop === v {
+                if let name = v.props["id"] { popovers[name] = v }
+                continue
+            }
             v.isHidden = true
             if let name = v.props["id"] { popovers[name] = v }
         }
@@ -100,7 +106,7 @@ final class MenuHost {
             // A confirmation's invoker is pressed as itself (its own touch
             // feedback, its glass), and its press opens the confirmation
             // (`invokeConfirmation`); only a menu needs UIKit's button.
-            if isConfirmation(pop) { live.remove(v.id); continue }
+            if isConfirmation(pop) || isContent(pop) { live.remove(v.id); continue }
             let button = overlays[v.id] ?? {
                 let b = UIButton(type: .custom)
                 b.showsMenuAsPrimaryAction = true
@@ -210,6 +216,7 @@ final class MenuHost {
     }
     func reset() {
         resetConfirmation()
+        shownContent?.dismiss(animated: false)
         overlays.values.forEach { $0.removeFromSuperview() }
         overlays.removeAll()
     }
@@ -244,6 +251,10 @@ final class MenuHost {
             }
             return false
         }
+        if let pop = contentPopover(invokedBy: node) {
+            openContent(from: node, popover: pop)
+            return true
+        }
         guard let pop = confirmation(invokedBy: node) else { return nil }
         return openConfirmation(from: node, popover: pop)
     }
@@ -255,12 +266,54 @@ final class MenuHost {
         return pop
     }
 
-    /// A touch's press on a confirmation's invoker: open it. True when `node`
-    /// invokes one, whether or not it could open now.
+    /// A touch's press on a confirmation's (or a content popover's) invoker:
+    /// open it. True when `node` invokes one, whether or not it could open now.
     func invokeConfirmation(_ node: NodeView) -> Bool {
-        guard let pop = confirmation(invokedBy: node) else { return false }
-        _ = openConfirmation(from: node, popover: pop)
-        return true
+        if let pop = confirmation(invokedBy: node) {
+            _ = openConfirmation(from: node, popover: pop)
+            return true
+        }
+        if let pop = contentPopover(invokedBy: node) {
+            openContent(from: node, popover: pop)
+            return true
+        }
+        return false
+    }
+
+    // MARK: Content popovers
+
+    /// A popover whose rows are not a menu's (no row presses) and that is not
+    /// a confirmation: its own boxes, shown in UIKit's popover from its
+    /// invoker (a tooltip, a detail), sized as laid out.
+    private func isContent(_ pop: NodeView) -> Bool {
+        guard pop.props["popover"] != nil, !isConfirmation(pop) else { return false }
+        let rows = pop.container.subviews.compactMap { $0 as? NodeView }
+        return !rows.isEmpty && !rows.contains { $0.handlers.contains("press") }
+    }
+
+    func contentPopover(invokedBy node: NodeView) -> NodeView? {
+        guard let name = target(of: node), let pop = presenter?.views.values.first(where: {
+            $0.props["id"] == name && isContent($0)
+        }), opens(node, pop) else { return nil }
+        return pop
+    }
+
+    private var shownContent: ContentPopover?
+
+    private func openContent(from source: NodeView, popover pop: NodeView) {
+        if source.handlers.contains("press") { presenter?.press(source.id) }
+        guard shownContent == nil, live(pop), source.window != nil else { return }
+        var responder: UIResponder? = source
+        while responder != nil && !(responder is UIViewController) { responder = responder?.next }
+        guard var controller = responder as? UIViewController else { return }
+        while let presented = controller.presentedViewController, !presented.isBeingDismissed { controller = presented }
+        let shown = ContentPopover(pop: pop) { [weak self] in self?.shownContent = nil }
+        guard let presentation = shown.popoverPresentationController else { return }
+        presentation.sourceView = source
+        presentation.sourceRect = source.bounds
+        presentation.delegate = shown
+        shownContent = shown
+        controller.present(shown, animated: !ExactEnv.agentFreezes)
     }
 
     /// A dialog the state holds `open` (HTML's attribute): presented as
@@ -372,6 +425,48 @@ final class MenuHost {
             .compactMap { ($0 as? NodeView).map(title(of:)) }
             .filter { !$0.isEmpty }
             .joined(separator: " ")
+    }
+}
+/// UIKit's popover holding a content popover's own boxes, borrowed from
+/// where they live and given back, hidden, when it closes. The kernel keeps
+/// laying the popover out where it stands; the view's bounds follow its
+/// frame, so the boxes show from their own origin.
+final class ContentPopover: UIViewController, UIPopoverPresentationControllerDelegate {
+    weak var pop: NodeView?
+    private weak var home: UIView?
+    private let closed: () -> Void
+    init(pop: NodeView, closed: @escaping () -> Void) {
+        self.pop = pop
+        self.closed = closed
+        home = pop.superview
+        super.init(nibName: nil, bundle: nil)
+        modalPresentationStyle = .popover
+        preferredContentSize = pop.bounds.size
+    }
+    required init?(coder: NSCoder) { nil }
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        guard let pop else { return }
+        view.addSubview(pop)
+        pop.isHidden = false
+    }
+    override func viewWillLayoutSubviews() {
+        super.viewWillLayoutSubviews()
+        guard let pop else { return }
+        if preferredContentSize != pop.bounds.size { preferredContentSize = pop.bounds.size }
+        view.bounds.origin = pop.frame.origin
+    }
+    func adaptivePresentationStyle(for controller: UIPresentationController, traitCollection: UITraitCollection) -> UIModalPresentationStyle { .none }
+    func presentationControllerDidDismiss(_ presentationController: UIPresentationController) { giveBack() }
+    override func dismiss(animated flag: Bool, completion: (() -> Void)? = nil) {
+        super.dismiss(animated: flag) { [weak self] in self?.giveBack(); completion?() }
+    }
+    private func giveBack() {
+        if let pop, let home, pop.superview !== home {
+            pop.isHidden = true
+            home.addSubview(pop)
+        }
+        closed()
     }
 }
 #endif

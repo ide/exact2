@@ -1319,10 +1319,12 @@ final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, UIScrollV
     // so a touch on a button's text reaches the button, as a DOM click
     // bubbles. A pan cancels it (the scroll view's `canCancelContentTouches`):
     // scroll always wins.
-    /// Whether this node opens a native confirmation (MenusIOS), which a
-    /// press presents: it is pressable without a press handler of its own.
+    /// Whether this node opens a native confirmation or content popover
+    /// (MenusIOS), which a press presents: it is pressable without a press
+    /// handler of its own.
     var invokesConfirmation: Bool {
-        (!(props["popovertarget"] ?? "").isEmpty || !(props["commandfor"] ?? "").isEmpty) && presenter?.menus.confirmation(invokedBy: self) != nil
+        guard !(props["popovertarget"] ?? "").isEmpty || !(props["commandfor"] ?? "").isEmpty, let menus = presenter?.menus else { return false }
+        return menus.confirmation(invokedBy: self) != nil || menus.contentPopover(invokedBy: self) != nil
     }
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
         if ((isSurfaceControl || ownsSurfaceControl) ? inputCanvas?.canvasInput : canvasInput)?.touches(touches, phase: "down", source: self) == true { return }
