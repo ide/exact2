@@ -835,10 +835,15 @@ extension NativeViews {
         return true
     }
 
-    /// `owner` was laid out: a sizing view is measured at its new width, and
-    /// a taken view that kept its size takes the box.
+    /// `owner` was laid out: the view takes the box (autoresizing never grows
+    /// a view whose box started empty, as a `sizes` view's does until it is
+    /// measured), a sizing view is measured at its new width, and a taken
+    /// view that kept its size takes the box.
     func laidOut(_ owner: NodeView) {
-        if let entry = entries[owner.id] { measure(entry) }
+        if let entry = entries[owner.id] {
+            if !entry.sizing, let view = entry.view, view.superview === owner, view.frame != owner.bounds { view.frame = owner.bounds }
+            measure(entry)
+        }
         guard let entry = entries[owner.id], entry.sizing, let view = entry.view, !owner.bounds.isEmpty else { return }
         entry.sizing = false
         view.frame = owner.bounds
