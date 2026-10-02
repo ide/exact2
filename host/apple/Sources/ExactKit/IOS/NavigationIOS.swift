@@ -89,6 +89,9 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
     private var navigation: UINavigationController? { modalNavigation ?? primaryNavigation }
     /// The route on top of the stack in front: the one the person sees.
     var activeRoute: RouteController? { navigation?.topViewController as? RouteController }
+    /// Whether native navigation holds the screens: the app root is then no
+    /// screen of its own, and never scrolls (each screen's root does).
+    var holdsScreens: Bool { primaryOwner != nil }
     private(set) var syncing = false
     private var mounting = false
     private(set) weak var container: NodeView?
