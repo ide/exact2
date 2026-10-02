@@ -76,6 +76,41 @@ pub enum HttpScheduling {
     },
 }
 
+/// What a redirect response does: the Fetch standard's `redirect` option.
+/// Native transports follow it in Rust, re-checking the grant on every hop;
+/// `Manual` hands the 3xx back (its `Location` readable), `Error` fails.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Redirect {
+    /// Follow to the final response.
+    #[default]
+    Follow,
+    /// Return the redirect response itself.
+    Manual,
+    /// Fail the request on a redirect.
+    Error,
+}
+
+impl Redirect {
+    /// The mode `fetch` names (absent is `follow`), refusing any other word.
+    pub fn parse(name: Option<&str>) -> Result<Redirect, String> {
+        match name.unwrap_or("follow") {
+            "follow" => Ok(Redirect::Follow),
+            "manual" => Ok(Redirect::Manual),
+            "error" => Ok(Redirect::Error),
+            other => Err(format!("redirect: follow, manual or error, not {other}")),
+        }
+    }
+
+    /// Its name as `fetch` spells it.
+    pub fn name(self) -> &'static str {
+        match self {
+            Redirect::Follow => "follow",
+            Redirect::Manual => "manual",
+            Redirect::Error => "error",
+        }
+    }
+}
+
 /// One host request, with ordered native execution unless explicitly opted in.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Request {
@@ -108,6 +143,8 @@ pub struct Request {
     /// URLSession's 60-second idle timeout). A stream has no deadline.
     /// Set by TypeScript's `fetch(url, {exactTimeout})` and [`Request::timeout`].
     pub timeout_ms: Option<u32>,
+    /// What a redirect response does (`fetch`'s `redirect`).
+    pub redirect: Redirect,
 }
 
 /// The longest request deadline a source may ask for: one hour.
@@ -137,6 +174,7 @@ impl Request {
             body,
             stream: false,
             timeout_ms: None,
+            redirect: Redirect::Follow,
         }
     }
 
@@ -190,6 +228,7 @@ impl Request {
             body: Vec::new(),
             stream: false,
             timeout_ms: None,
+            redirect: Redirect::Follow,
         }
     }
 
@@ -207,6 +246,7 @@ impl Request {
             body: json.as_bytes().to_vec(),
             stream: false,
             timeout_ms: None,
+            redirect: Redirect::Follow,
         }
     }
 

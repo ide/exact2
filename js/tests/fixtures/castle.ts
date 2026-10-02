@@ -183,6 +183,9 @@ function answer(source: string, args: unknown[], store: Store): unknown {
     // A deadline for the whole exchange: a timeout rejects with its kind.
     case "timed": return fetch("https://api.castle.xyz/slow", { exactTimeout: args[0] } as RequestInit)
       .then(r => r.text(), (e: { kind: string; message: string }) => `failed: ${e.kind}: ${e.message}`);
+    case "redirected": return fetch("https://api.castle.xyz/moved", {
+      ...(args[0] === "" ? {} : { redirect: args[0] }),
+    }).then(r => r.status + " " + (r.headers.get("location") ?? ""));
     default: throw new DataError("UnknownSource", source);
   }
 }
