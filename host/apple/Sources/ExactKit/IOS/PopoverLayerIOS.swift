@@ -94,4 +94,35 @@ final class PopoverTouch: UIGestureRecognizer, UIGestureRecognizerDelegate {
     }
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool { true }
 }
+
+extension MenuHost {
+    /// A popover the agent opened (`agentOpen`): out of its parent into its
+    /// `PopoverLayer` while open, and back at its index after.
+    final class Lifted {
+        var placement = PositionArea.History()
+        /// Anchored to its opener at least once.
+        var placed = false
+        let source: UInt32?
+        weak var popover: NodeView?
+        weak var parent: UIView?
+        var index: Int
+        let center: CGPoint
+        /// Its place in HTML's popover stack: when it opened, and the open
+        /// popover it is nested in (its opener or its parent inside that
+        /// one), which hiding hides it with (LLP 1021 §5, "Submenus").
+        let order: Int
+        let ancestor: String?
+        let layer: PopoverLayer
+        #if os(iOS)
+        var relay: MountRelay?
+        #endif
+        init(source: UInt32?, popover: NodeView, order: Int, ancestor: String?, presenter: Presenter) {
+            self.source = source; self.popover = popover; self.order = order; self.ancestor = ancestor
+            layer = PopoverLayer(presenter: presenter, order: order, popover: popover)
+            parent = popover.superview
+            index = parent?.subviews.firstIndex(of: popover) ?? 0
+            center = popover.center
+        }
+    }
+}
 #endif

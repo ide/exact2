@@ -50,23 +50,15 @@ fn refused(body: &str) -> (String, String) {
     (e.id.to_string(), e.message)
 }
 
-/// `open` on a `dialog` is refused, and the error teaches the modal ways to
-/// open and close one: in HTML `open` alone shows it non-modally.
+/// `open` on a `dialog` compiles: the dialog shows while the state holds it
+/// true, and the Apple hosts present it as UIKit's alert.
 #[test]
-fn a_dialogs_open_attribute_is_refused_teaching_show_modal() {
+fn a_dialogs_open_attribute_holds_it_open_from_the_state() {
     for open in ["open=true", "open=busy"] {
-        let (id, message) = refused(&format!(
+        contract::compile(&app(&format!(
             "dialog id=\"c\" role=\"alertdialog\" {open}\n  button press=go commandfor=\"c\" command=\"close\"\n    text \"Delete\"\n  button commandfor=\"c\" command=\"close\"\n    text \"Cancel\""
-        ));
-        assert_eq!(id, "lower-unknown-attr");
-        for taught in [
-            "non-modal",
-            "showModal(\"id\")",
-            "command=\"show-modal\"",
-            "close(\"id\")",
-        ] {
-            assert!(message.contains(taught), "{message}");
-        }
+        )))
+        .unwrap();
     }
 }
 
