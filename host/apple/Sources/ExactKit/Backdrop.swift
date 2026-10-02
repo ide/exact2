@@ -146,7 +146,8 @@ extension NodeView {
 
     /// The material this node asks for: the host-policy prop, else a backdrop.
     var materialRequest: String? {
-        if let material = props["backgroundMaterial"] { return material }
+        // An empty value (a bound one turned off) asks for none.
+        if let material = props["backgroundMaterial"], !material.isEmpty { return material }
         return backdropOperations.isEmpty ? nil : "backdrop"
     }
 }

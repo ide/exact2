@@ -123,8 +123,9 @@ final class MenuHost {
         isDialog(node) || node.props["accessibilityRole"] == "alertdialog"
     }
     private func target(of source: NodeView) -> String? {
-        if source.props["commandfor"] != nil { return source.props["commandfor"] }
-        return source.props["popovertarget"]
+        // An empty attribute names nothing, as a bound one may.
+        if let name = source.props["commandfor"], !name.isEmpty { return name }
+        return source.props["popovertarget"].flatMap { $0.isEmpty ? nil : $0 }
     }
     private func closes(_ source: NodeView, _ target: NodeView) -> Bool {
         if isDialog(target) {
@@ -182,23 +183,10 @@ final class MenuHost {
             else { continue }
             if v.isNativeButton { continue } // Its own primary action invokes after activation (D13).
             live.insert(v.id)
-            if isConfirmation(pop) {
-                let button = overlays[v.id] ?? UIButton(type: .custom)
-                button.menu = nil
-                button.showsMenuAsPrimaryAction = false
-                button.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-                button.accessibilityLabel = v.props["accessibilityLabel"] ?? title(of: v)
-                button.accessibilityIdentifier = v.props["testId"] ?? v.props["id"]
-                button.isEnabled = !v.disabled
-                let actionId = UIAction.Identifier("exact.confirmation")
-                button.removeAction(identifiedBy: actionId, for: .touchUpInside)
-                button.addAction(UIAction(identifier: actionId) { [weak self, weak v, weak pop] _ in
-                    guard let self, let v, let pop else { return }
-                    _ = self.openConfirmation(from: v, popover: pop)
-                }, for: .touchUpInside)
-                v.addSubview(button); button.frame = v.bounds; overlays[v.id] = button
-                continue
-            }
+            // A confirmation's invoker is pressed as itself (its own touch
+            // feedback, its glass), and its press opens the confirmation
+            // (`invokeConfirmation`); only a menu needs UIKit's button.
+            if isConfirmation(pop) { live.remove(v.id); continue }
             let button = overlays[v.id] ?? {
                 #if os(iOS)
                 let b = MenuButton(type: .custom)
@@ -208,6 +196,12 @@ final class MenuHost {
                 #endif
                 b.showsMenuAsPrimaryAction = true
                 b.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+                // The menu's button covers the invoker: carry its touch to
+                // the invoker's own press feedback.
+                for (events, down) in [(UIControl.Event([.touchDown, .touchDragEnter]), true),
+                                       (UIControl.Event([.touchUpInside, .touchUpOutside, .touchCancel, .touchDragExit, .menuActionTriggered]), false)] {
+                    b.addAction(UIAction { [weak b] _ in (b?.superview as? NodeView)?.pressed = down }, for: events)
+                }
                 overlays[v.id] = b
                 return b
             }()
@@ -590,11 +584,22 @@ final class MenuHost {
             }
             return false
         }
+        guard let pop = confirmation(invokedBy: node) else { return nil }
+        return openConfirmation(from: node, popover: pop)
+    }
+    /// The confirmation `node` opens, when it is a confirmation's invoker.
+    func confirmation(invokedBy node: NodeView) -> NodeView? {
         guard let name = target(of: node), let pop = presenter?.views.values.first(where: {
             $0.props["id"] == name && isConfirmation($0) && ($0.props["popover"] != nil || isDialog($0))
-        }) else { return nil }
-        guard opens(node, pop) else { return false }
-        return openConfirmation(from: node, popover: pop)
+        }), opens(node, pop) else { return nil }
+        return pop
+    }
+    /// A touch's press on a confirmation's invoker: open it. True when `node`
+    /// invokes one, whether or not it could open now.
+    func invokeConfirmation(_ node: NodeView) -> Bool {
+        guard let pop = confirmation(invokedBy: node) else { return false }
+        _ = openConfirmation(from: node, popover: pop)
+        return true
     }
     /// A sheet action's handler: the action at `index` as presented, nil
     /// for the cancel. Its own entry, never a successor's at that index.
@@ -663,7 +668,8 @@ final class MenuHost {
             presenter?.session?.log("confirmation \(pop.props["id"] ?? "?") refused: \(why)")
             return false
         }
-        guard !actions.isEmpty else { return refuse("no action (a button with press)") }
+        // An alert may be a notice: no action, its one cancel acknowledging it.
+        guard !actions.isEmpty || cancels.count == 1 else { return refuse("no action (a button with press) and no one cancel") }
         guard cancels.count <= 1 else { return refuse("\(cancels.count) cancels; at most one hide-only button") }
         guard children.allSatisfy({ child in child.kind == "text" || actions.contains { $0 === child } || cancels.contains { $0 === child } }) else {
             return refuse("only text, actions and one cancel may be its rows")
@@ -687,10 +693,11 @@ final class MenuHost {
         // A native action's tint is its accent (LLP 1069.011.000 D5); the
         // alert has one tint, the first action's. Unsaid, it is UIKit's
         // (LLP 1115 D4): a `color` the action only inherits is not its own.
-        let lead = actions[0]
-        owner.alert.view.tintColor = lead.isNativeButton
-            ? lead.channels("accent_color").map { TextEngine.color($0) }
-            : lead.ownUIColor("text_color")
+        if let lead = actions.first {
+            owner.alert.view.tintColor = lead.isNativeButton
+                ? lead.channels("accent_color").map { TextEngine.color($0) }
+                : lead.ownUIColor("text_color")
+        }
         for (index, entry) in presented.enumerated() {
             let action = actions[index]
             let style: UIAlertAction.Style = action.props["destructive"] == "true" ? .destructive : .default
