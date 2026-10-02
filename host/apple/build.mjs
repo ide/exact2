@@ -428,6 +428,8 @@ export const infoPlist = (app, device = false, { executable = 'ExactIOS', id = a
   if (ios.backgroundModes?.length) dict.UIBackgroundModes = ios.backgroundModes;
   // @ref LLP 1096 D8 — the audio session's category, which ExactKit's one owner reads.
   if (app.manifest.audio_session) dict.ExactAudioSession = app.manifest.audio_session;
+  // URL schemes the app may ask `canOpenURL` about (another app's, to see it is installed).
+  if (ios.queriesSchemes?.length) dict.LSApplicationQueriesSchemes = ios.queriesSchemes;
   // The manifest's `file_handlers`, as on the Mac, opened in place from
   // Files ("Open in", LLP 1069.010 slice 4), and the non-system types they
   // name (Markdown) imported so Files can match them.
