@@ -32,7 +32,7 @@ swelling member crosses it and flows into its neighbours.
 ## Proposal
 
 ```
--exact-apple-glass-container: <length>    /* none by default */
+-exact-apple-glass-container: auto | <length>    /* none by default */
 ```
 
 - **A vendor property, read only by the Apple hosts.** The `-exact-` prefix
@@ -105,11 +105,10 @@ Not yet verified:
 
 ## Open questions
 
-1. **`auto`.** Spacing equal to the box's `gap` is the common case, and
-   `auto` would say so without repeating the number. The prototype's `f32`
-   codec can't express it; it needs a small codec (`auto | <length>`), with
-   `auto` resolved by the host from the computed `row_gap` / `column_gap`. The
-   host doesn't receive those today, because layout rows stay in the kernel.
+1. **`auto`** *(built since)*: spacing equal to the box's gap is the common
+   case. The kernel stores `auto` as a sentinel row value, and the iOS host
+   takes the smallest space between neighbouring children as laid out,
+   updating the container when layout changes.
 2. **Morphing on swap** (SwiftUI's `glassEffectID`). When a member is replaced,
    e.g. Start becomes Stop, SwiftUI morphs the glass. In UIKit that comes from
    animating the change inside the container. Exact's replacement is a destroy
