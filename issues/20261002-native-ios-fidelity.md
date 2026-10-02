@@ -25,9 +25,9 @@ Tests:
 - `runner/tests/it/kept_identity.rs`
 - `contract/cli/tests/it/resource_with.rs`
 
-### A store write that changes nothing is no write (runner)
-`Store::set` with the value already kept bumps no revision and sends the
-host nothing. A data source that keeps something as it answers (a
+### A store write that changes nothing bumps no revision (runner)
+`Store::set` with the value already kept is still written to the host
+(whose copy may differ), but bumps no revision. A data source that keeps something as it answers (a
 last-good reading, a folded history) used to make every store reader be
 asked again, which wrote again, until settlement refused with `Cycle`.
 
@@ -105,7 +105,9 @@ Diagnosis: `issues/20261001-simulator-builds-have-no-entitlements.md`.
 - **HTML `enterkeyhint`** is the return key (`returnKeyType`).
 - **HTML `autocomplete`** is the field's `UITextContentType` (`username`,
   `current-password`, `new-password`, `one-time-code`, address parts, …),
-  so Password AutoFill and SMS codes fill it; `off` names nothing.
+  so Password AutoFill and SMS codes fill it; `off` names nothing, and a
+  trailing `webauthn` is skipped. The web emits it (and `enterkeyhint`) as
+  the attribute.
 - **CSS `user-select: text | all`** gives a long press the system edit
   menu's Copy for the box's whole text, as SwiftUI's `textSelection` does on
   iPhone (a label is never selected in place there).
@@ -122,8 +124,9 @@ Diagnosis: `issues/20261001-simulator-builds-have-no-entitlements.md`.
 - **The manifest's `orientation`** (Web App Manifest) locks the iPhone's
   `UISupportedInterfaceOrientations`; iPad keeps all four, as multitasking
   requires.
-- **A killed process's raster downloads are cleared** at the next launch's
-  first download; every launch used to leave one in `tmp`.
+- **A killed process's raster downloads are cleared.** Each process downloads
+  into `tmp/exact-raster-downloads/<pid>`, and the first download sweeps the
+  folders of processes no longer running; every launch used to leave one.
 - **Native module views** can size themselves (`sizes`) and take their box at
   every layout.
 
