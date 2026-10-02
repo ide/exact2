@@ -59,6 +59,8 @@ final class NodeExtras {
     var transformContact: TransformContact?
     var swipeOrigin: Double = 0
     var contextRecognizer: UILongPressGestureRecognizer?
+    /// `user-select: text` (`TextCopyIOS.swift`).
+    var textCopy: TextCopy?
     var doubleRecognizer: UITapGestureRecognizer?
     #if !os(tvOS)
     var hoverRecognizer: UIHoverGestureRecognizer?
@@ -157,6 +159,7 @@ extension NodeView {
     package var transformContact: TransformContact? { get { extras?.transformContact } set { if newValue != nil || extras != nil { more.transformContact = newValue } } }
     var swipeOrigin: Double { get { extras?.swipeOrigin ?? 0 } set { if newValue != 0 || extras != nil { more.swipeOrigin = newValue } } }
     var contextRecognizer: UILongPressGestureRecognizer? { get { extras?.contextRecognizer } set { if newValue != nil || extras != nil { more.contextRecognizer = newValue } } }
+    var textCopy: TextCopy? { get { extras?.textCopy } set { if newValue != nil || extras != nil { more.textCopy = newValue } } }
     var doubleRecognizer: UITapGestureRecognizer? { get { extras?.doubleRecognizer } set { if newValue != nil || extras != nil { more.doubleRecognizer = newValue } } }
     #if !os(tvOS)
     var hoverRecognizer: UIHoverGestureRecognizer? { get { extras?.hoverRecognizer } set { if newValue != nil || extras != nil { more.hoverRecognizer = newValue } } }
