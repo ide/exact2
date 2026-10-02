@@ -24,6 +24,44 @@ private final class RouteController: UIViewController {
         loadViewIfNeeded()
         if node.superview !== view { view.addSubview(node) }
     }
+    /// The route's native navigation bar (LLP 1038): a `navigationTitle`
+    /// shows UIKit's bar with that title, large unless `navigationLargeTitle`
+    /// is "false"; `navigationBackButton` "minimal" shows the chevron alone;
+    /// `navigationTrailing` names (by HTML id) an authored control a trailing
+    /// bar button presses, drawn as the `navigationTrailingSymbol` SF Symbol.
+    /// A route with no title keeps the bar hidden, as before.
+    var hasBar: Bool { !(node.props["navigationTitle"] ?? "").isEmpty }
+    func configure(press: @escaping (String) -> Void) {
+        let item = navigationItem
+        let title = node.props["navigationTitle"] ?? ""
+        if item.title != title { item.title = title.isEmpty ? nil : title }
+        item.largeTitleDisplayMode = node.props["navigationLargeTitle"] == "false" ? .never : .always
+        item.backButtonDisplayMode = node.props["navigationBackButton"] == "minimal" ? .minimal : .default
+        if let target = node.props["navigationTrailing"], !target.isEmpty {
+            let symbol = node.props["navigationTrailingSymbol"] ?? ""
+            if item.rightBarButtonItem?.accessibilityIdentifier != "\(target)|\(symbol)" {
+                let button = UIBarButtonItem(image: UIImage(systemName: symbol), primaryAction: UIAction { _ in press(target) })
+                button.accessibilityIdentifier = "\(target)|\(symbol)"
+                item.rightBarButtonItem = button
+            }
+        } else if item.rightBarButtonItem != nil {
+            item.rightBarButtonItem = nil
+        }
+        // Large titles collapse as the route's own scroll view scrolls under
+        // the bar: UIKit insets it and tracks it as the content scroll view.
+        guard hasBar, isViewLoaded, let scroll = firstScroll(in: node) else { return }
+        if scroll.contentInsetAdjustmentBehavior != .automatic { scroll.contentInsetAdjustmentBehavior = .automatic }
+        if contentScrollView(for: .top) !== scroll { setContentScrollView(scroll, for: .top) }
+    }
+    private func firstScroll(in root: UIView) -> UIScrollView? {
+        var queue: [UIView] = [root]
+        while !queue.isEmpty {
+            let view = queue.removeFirst()
+            if let scroll = view as? UIScrollView, view !== root { return scroll }
+            queue.append(contentsOf: view.subviews)
+        }
+        return nil
+    }
     // A button can remove a route before UIKit starts its pop. Preserve its
     // outgoing pixels for that transition; an interactive pop uses live views.
     func freeze() {
@@ -113,6 +151,7 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
             let c = controllers[node.id] ?? RouteController(node)
             controllers[node.id] = c
             c.mount()
+            c.configure { [weak self] target in self?.pressControl(named: target, in: node) }
             return c
         }
         return (root, routes, selected, wanted)
@@ -126,6 +165,7 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
         guard let parent = responder as? UIViewController else { return }
         let nav = UINavigationController()
         nav.setNavigationBarHidden(true, animated: false)
+        nav.navigationBar.prefersLargeTitles = true
         nav.delegate = self
         parent.addChild(nav)
         root.addSubview(nav.view)
@@ -185,6 +225,7 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
                     && !nav.viewControllers.contains { $0 === stack.last }
                 nav.setViewControllers(stack, animated: (pushOrPop || arrives) && index == owners.count - 1 && mounted.count == boundaries.count && !ExactEnv.agentFreezes && nav.view.window != nil)
             }
+            showBar(nav, animated: false)
             nav.view.layoutIfNeeded()
         }
         if mounted.count > common {
@@ -198,6 +239,7 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
             guard presenter.modals.canPresent(from: owner, route: route) else { return }
             let nav = UINavigationController()
             nav.setNavigationBarHidden(true, animated: false)
+            nav.navigationBar.prefersLargeTitles = true
             nav.delegate = self
             owner.addChild(nav)
             root.addSubview(nav.view)
@@ -206,6 +248,7 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
             nav.didMove(toParent: owner)
             presentedNavigations.append(nav)
             nav.setViewControllers(Array(wanted[part]), animated: false)
+            showBar(nav, animated: false)
             nav.interactivePopGestureRecognizer?.delegate = self
             if #available(iOS 26.0, *) { nav.interactiveContentPopGestureRecognizer?.delegate = self }
             nav.view.layoutIfNeeded()
@@ -224,6 +267,24 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
     }
 
     var owner: UIViewController? { presenter.modals.owner ?? primaryNavigation?.parent }
+
+    /// UIKit's bar shows for a route that declares a title, and hides for one
+    /// that does not, as each becomes the top of its stack.
+    private func showBar(_ nav: UINavigationController, for controller: UIViewController? = nil, animated: Bool) {
+        let hidden = !((controller ?? nav.topViewController) as? RouteController).map(\.hasBar).orFalse
+        if nav.isNavigationBarHidden != hidden { nav.setNavigationBarHidden(hidden, animated: animated) }
+    }
+
+    /// A bar button presses the authored control the route names by HTML id.
+    private func pressControl(named target: String, in route: NodeView) {
+        guard let control = presenter.carrying("id").first(where: {
+            $0.props["id"] == target && ($0 === route || $0.isDescendant(of: route)) && $0.handlers.contains("press") && !$0.disabled
+        }) else {
+            presenter.session?.log("navigationTrailing \"\(target)\" names no enabled control in its route")
+            return
+        }
+        presenter.press(control.id)
+    }
 
     func willMount() { mounting = true }
 
@@ -387,6 +448,7 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
         // still the pop destination. Keep that contact's source until didShow.
         if interactiveTransition, interactiveSource != nil { return }
         let transition = navigationController.transitionCoordinator
+        showBar(navigationController, for: viewController, animated: animated)
         changing = animated && transition?.viewController(forKey: .to) === viewController
         interactiveTransition = changing && transition?.initiallyInteractive == true
         interactiveSource = nil
@@ -448,5 +510,9 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
         lastTransition = "idle"
         if clearFocus { presenter.cancelPendingFocus() }
     }
+}
+
+private extension Optional where Wrapped == Bool {
+    var orFalse: Bool { self ?? false }
 }
 #endif

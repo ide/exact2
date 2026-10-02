@@ -576,6 +576,31 @@
       "kind": "float"
     },
     {
+      "id": 216,
+      "name": "navigationTitle",
+      "kind": "str"
+    },
+    {
+      "id": 217,
+      "name": "navigationLargeTitle",
+      "kind": "str"
+    },
+    {
+      "id": 218,
+      "name": "navigationTrailing",
+      "kind": "str"
+    },
+    {
+      "id": 219,
+      "name": "navigationTrailingSymbol",
+      "kind": "str"
+    },
+    {
+      "id": 220,
+      "name": "navigationBackButton",
+      "kind": "str"
+    },
+    {
       "id": 214,
       "name": "scrollRestoration",
       "kind": "str"
