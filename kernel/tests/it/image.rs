@@ -434,6 +434,58 @@ fn a_projected_tablist_reserves_its_native_height_and_releases_it() {
 }
 
 #[test]
+fn a_native_module_view_takes_its_reported_height_as_its_automatic_minimum() {
+    let mut kernel = Kernel::with_monospace();
+    let mut root = StyleProps::default();
+    root.display = Display::Flex;
+    root.mask.set(StyleId::Display);
+    root.flex_direction = FlexDirection::Column;
+    root.mask.set(StyleId::FlexDirection);
+    let mut ops = vec![
+        Op::CreateView {
+            id: 1,
+            node_type: NodeType::View,
+        },
+        Op::CreateView {
+            id: 2,
+            node_type: NodeType::NativeView,
+        },
+        Op::CreateView {
+            id: 3,
+            node_type: NodeType::View,
+        },
+    ];
+    ops.extend([
+        Op::SetStyle {
+            id: 1,
+            patch: Box::new(root),
+        },
+        Op::SetStyle {
+            id: 3,
+            patch: Box::new(image_style(&[(StyleId::Height, 40.0)])),
+        },
+        Op::SetChildren {
+            id: 1,
+            children: vec![2, 3],
+        },
+        Op::AttachRoot { id: 1 },
+    ]);
+    kernel.apply(0, 1, &ops).unwrap();
+    // Unsized, the module's box is empty until its view reports a size.
+    assert_eq!(frame(&mut kernel, 2).1, 0.0);
+    kernel.set_intrinsic_size(2, Some((390.0, 83.0))).unwrap();
+    assert_eq!(frame(&mut kernel, 2).1, 83.0);
+    assert_eq!(kernel.node(3).unwrap().frame.y, 83.0);
+    // A plain view still refuses one.
+    assert_eq!(
+        kernel.set_intrinsic_size(3, Some((390.0, 83.0))),
+        Err(LayoutError::NotAnImage(3).into())
+    );
+    kernel.set_intrinsic_size(2, None).unwrap();
+    assert_eq!(frame(&mut kernel, 2).1, 0.0);
+}
+
+#[test]
 fn a_tab_bar_minimum_moves_siblings_without_overriding_explicit_css_min_height() {
     use exact_kernel::{PropId, PropValue};
     for display in [Display::Block, Display::Flex] {

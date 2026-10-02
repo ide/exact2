@@ -178,26 +178,30 @@ open class ExactNativeInstance {
 }
 
 /// A roster entry: how to make an instance from the session's module,
-/// whether it answers snapshots, and whether a list may reuse it (LLP 1068
-/// §4.8).
+/// whether it answers snapshots, whether a list may reuse it (LLP 1068
+/// §4.8), and whether its view sizes itself: a `sizes` view's own
+/// `sizeThatFits` at the box's width is reported as the box's intrinsic size
+/// (iOS), so a box Contract leaves `height: auto` takes the platform's height.
 public struct ExactNativeFactory {
     public let snapshot: Bool
     public let reuse: Bool
+    public let sizes: Bool
     public let make: (ExactModule, [String: String], ExactNativeEvents) throws -> ExactNativeInstance
-    public init(snapshot: Bool = false, reuse: Bool = false, make: @escaping (ExactModule, [String: String], ExactNativeEvents) throws -> ExactNativeInstance) {
+    public init(snapshot: Bool = false, reuse: Bool = false, sizes: Bool = false, make: @escaping (ExactModule, [String: String], ExactNativeEvents) throws -> ExactNativeInstance) {
         self.snapshot = snapshot
         self.reuse = reuse
+        self.sizes = sizes
         self.make = make
     }
     /// A view that needs nothing from the module.
-    public init(snapshot: Bool = false, reuse: Bool = false, make: @escaping ([String: String], ExactNativeEvents) throws -> ExactNativeInstance) {
-        self.init(snapshot: snapshot, reuse: reuse) { _, props, events in try make(props, events) }
+    public init(snapshot: Bool = false, reuse: Bool = false, sizes: Bool = false, make: @escaping ([String: String], ExactNativeEvents) throws -> ExactNativeInstance) {
+        self.init(snapshot: snapshot, reuse: reuse, sizes: sizes) { _, props, events in try make(props, events) }
     }
     /// A view of the app's module, typed: `ExactNativeFactory(for: Recorder.self)
     /// { recorder, props, events in … }`. The session's module is always the
     /// app's `exactModule`; another type is refused by name.
-    public init<M: ExactModule>(for module: M.Type, snapshot: Bool = false, reuse: Bool = false, make: @escaping (M, [String: String], ExactNativeEvents) throws -> ExactNativeInstance) {
-        self.init(snapshot: snapshot, reuse: reuse) { owner, props, events in
+    public init<M: ExactModule>(for module: M.Type, snapshot: Bool = false, reuse: Bool = false, sizes: Bool = false, make: @escaping (M, [String: String], ExactNativeEvents) throws -> ExactNativeInstance) {
+        self.init(snapshot: snapshot, reuse: reuse, sizes: sizes) { owner, props, events in
             guard let typed = owner as? M else { throw ExactNativeRefusal("the session's module is \(type(of: owner)), not \(M.self)") }
             return try make(typed, props, events)
         }
@@ -340,7 +344,7 @@ private let major: UInt32 = 2
 
 private let table: UnsafeMutableRawPointer = {
     let text = "{" + roster.keys.sorted().map { tag in
-        "\"\(tag)\":{\"snapshot\":\(roster[tag]!.snapshot),\"reuse\":\(roster[tag]!.reuse)}"
+        "\"\(tag)\":{\"snapshot\":\(roster[tag]!.snapshot),\"reuse\":\(roster[tag]!.reuse),\"sizes\":\(roster[tag]!.sizes)}"
     }.joined(separator: ",") + "}"
     let size = 112
     let t = UnsafeMutableRawPointer.allocate(byteCount: size, alignment: 8)
