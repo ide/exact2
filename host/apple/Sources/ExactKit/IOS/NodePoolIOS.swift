@@ -182,11 +182,11 @@ final class NodePool {
     }
     /// `view`'s node children, through its logical container (its clip box,
     /// a glass's content view); nil when the view holds a platform subview
-    /// other than its glyph, material or clip box, or a live scroll view.
+    /// other than its glyph, material, clip box or button, or a live scroll view.
     private func children(_ view: NodeView) -> [NodeView]? {
         guard view.scroll == nil, view.overlay == nil else { return nil }
         let container = view.container
-        func own(_ sub: UIView) -> Bool { sub === view.symbolView || sub === view.materialView || sub === view.clipBox || sub === view.glassGroupView || sub === view.glassSlot }
+        func own(_ sub: UIView) -> Bool { sub === view.symbolView || sub === view.materialView || sub === view.clipBox || sub === view.glassGroupView || sub === view.glassSlot || sub is NativeButton }
         if container !== view {
             guard view.subviews.allSatisfy({ own($0) || ($0 === container) }) else { return nil }
         }
@@ -533,6 +533,7 @@ extension NodeView {
     func rebind(_ newID: UInt32) {
         id = newID
         incarnation = NodePool.issue()
+        if kind == "button" { presenter?.buttonNodes.insert(newID) }
         // UIKit's setters are not free, even to the same value.
         if isHidden { isHidden = false }
         if alpha != 1 { alpha = 1 }

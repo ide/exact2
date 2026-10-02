@@ -102,6 +102,7 @@ mod trim;
 mod typescript;
 mod typography;
 mod r#use;
+mod vendor;
 mod viewport;
 mod visual;
 mod vocab;

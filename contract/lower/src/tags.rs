@@ -805,6 +805,7 @@ pub fn attr(name: &str) -> Option<AttrTarget> {
         // platform draws it.
         "accent-color" => styles(&[StyleId::AccentColor]),
         "appearance" => styles(&[StyleId::Appearance]),
+        "-exact-apple-button-style" => styles(&[StyleId::ExactAppleButtonStyle]),
         "tint-color" => styles(&[StyleId::TintColor]),
         "opacity" => styles(&[StyleId::Opacity]),
         // @ref LLP 1064 D1 — one value, each row takes its part of the parse.
