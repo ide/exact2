@@ -1124,8 +1124,11 @@ test('device grants derive the plists, their translations and the release entitl
   // The manifest's orientation locks the iPhone, not the iPad.
   const portrait = infoPlist({ ...app, manifest: { host: {}, orientation: 'portrait' } }, true, { distribution: { UISupportedInterfaceOrientations: ['x'], 'UISupportedInterfaceOrientations~ipad': ['y'] } });
   assert.match(portrait, /<key>UISupportedInterfaceOrientations<\/key><array><string>UIInterfaceOrientationPortrait<\/string><\/array>/);
-  assert.match(portrait, /<key>UISupportedInterfaceOrientations~ipad<\/key><array><string>y<\/string><\/array>/);
+  assert.match(portrait, /<key>UISupportedInterfaceOrientations~ipad<\/key><array>(<string>[A-Za-z]+<\/string>){4}<\/array>/);
   assert.doesNotMatch(infoPlist(app, false), /UISupportedInterfaceOrientations/);
+  // A development build has no distribution keys: iPad still keeps all four.
+  const dev = infoPlist({ ...app, manifest: { host: {}, orientation: 'portrait' } }, false);
+  assert.match(dev, /<key>UISupportedInterfaceOrientations~ipad<\/key><array>(<string>[A-Za-z]+<\/string>){4}<\/array>/);
   // No device grant, no key: the plists are what they were.
   for (const plist of [infoPlist(app, false), macInfoPlist(app, { reach: { ...reach, usage: {} } })]) assert.doesNotMatch(plist, /UsageDescription|CFBundleLocalizations/);
   const dir = mkdtempSync(resolve(tmpdir(), 'exact-usage-'));

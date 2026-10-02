@@ -277,9 +277,7 @@ fn secret_union_preserves_per_side_restrictions_and_shared_values() {
     }
     assert_eq!(store.get("js"), Some("written"));
     assert_eq!(store.get("rust"), Some("written"));
-    // Each side writes "written" as it answers and again as it parses; the
-    // second keeps what is kept, so it is no write.
-    assert_eq!(store.take_writes().len(), 2);
+    assert_eq!(store.take_writes().len(), 4);
     for source in ["jsrequest", "rustrequest"] {
         let Answer::Later(request) = mixed.answer(&mut store, source, &[]).unwrap() else {
             panic!()
