@@ -264,17 +264,21 @@ final class MenuHost {
     private func finish(_ owner: Confirmation, chosen: NodeView?) {
         guard confirmation === owner, !owner.finishing else { return }
         owner.finishing = true
+        // The choice is the app's on the next turn, while the alert is still
+        // leaving, as a system menu's is — not after its dismissal has played
+        // out. The next turn, not this one: UIKit is inside its selection
+        // callback, and the press may destroy the presenting editor or
+        // dismiss its parent sheet.
+        DispatchQueue.main.async { [weak self, owner] in
+            guard let self, self.confirmation === owner else { return }
+            let action = chosen.flatMap { self.valid(owner) && self.valid(owner, chosen: $0) ? $0 : nil }
+            if let action { self.presenter?.press(action.id) }
+        }
         owner.alert.dismiss(animated: !ExactEnv.agentFreezes) { [weak self, owner] in
-            // A native action arrives after the alert leaves its window;
-            // dismiss can therefore complete synchronously inside UIKit's
-            // selection callback, before its dismissal delegate is called.
-            // Keep the owner until that stack unwinds before app code can
-            // destroy the presenting editor or dismiss its parent sheet.
+            // Keep the owner until UIKit's stack unwinds.
             DispatchQueue.main.async { [weak self, owner] in
                 guard let self, self.confirmation === owner else { return }
-                let action = chosen.flatMap { self.valid(owner) && self.valid(owner, chosen: $0) ? $0 : nil }
                 self.confirmation = nil
-                if let action { self.presenter?.press(action.id) }
             }
         }
     }
