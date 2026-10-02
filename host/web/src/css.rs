@@ -279,6 +279,14 @@ pub fn css_text(style: &StyleProps, font_names: &[String]) -> (String, Vec<Skipp
             // Written with `rotate` and `translate` (LLP 1077 D8), never alone:
             // nothing of their own to write, and nothing skipped (kanban F30).
             (StyleId::RotateAxis | StyleId::TranslateZ, _) => {}
+            // Safari still reads only the prefixed spelling.
+            (StyleId::UserSelect, _) if lowered(id, &value) => {
+                for name in ["-webkit-user-select:", "user-select:"] {
+                    out.push_str(name);
+                    declared(&mut out, id, &value);
+                    out.push(';');
+                }
+            }
             _ if lowered(id, &value) => {
                 property(&mut out, id);
                 out.push(':');
@@ -814,6 +822,22 @@ mod flow_tests {
         assert!(css.contains("shape-outside:circle(closest-side at 50% 50%);"));
         assert!(css.contains("shape-margin:8px;"));
         assert!(css.contains("wrap-flow:both;"));
+        assert!(skipped.is_empty());
+    }
+
+    #[test]
+    fn user_select_is_written_for_safari_too() {
+        let mut s = StyleProps::default();
+        s.set_dynamic(
+            StyleId::UserSelect,
+            &exact_kernel::StyleValue::Text("none".into()),
+        )
+        .unwrap();
+        let (css, skipped) = css_text(&s, &[]);
+        assert!(
+            css.contains("-webkit-user-select:none;user-select:none;"),
+            "{css}"
+        );
         assert!(skipped.is_empty());
     }
 }
