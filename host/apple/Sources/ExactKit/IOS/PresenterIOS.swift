@@ -344,7 +344,12 @@ final class Presenter {
         guard let target, let top else { return }
         if keyboardScroller == nil { keyboardScroller = (target, target.contentInset.bottom) }
         let frame = target.convert(target.bounds, to: window)
-        let overlap = min(max(0, frame.maxY - max(top, frame.minY)), frame.height)
+        // The keyboard takes the place of the bottom safe area, which the
+        // screen's content already pads for (`env(safe-area-inset-bottom)`):
+        // the inset is the overlap past it, as UIKit's and SwiftUI's keyboard
+        // insets replace the safe area rather than add to it.
+        let safe = max(0, frame.maxY - (window.bounds.maxY - window.safeAreaInsets.bottom))
+        let overlap = max(0, min(max(0, frame.maxY - max(top, frame.minY)), frame.height) - safe)
         let bottom = (keyboardScroller?.bottom ?? 0) + overlap
         if target.contentInset.bottom != bottom { target.contentInset.bottom = bottom }
         target.verticalScrollIndicatorInsets.bottom = bottom
