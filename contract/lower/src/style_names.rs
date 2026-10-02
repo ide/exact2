@@ -258,6 +258,8 @@ pub const STYLE_NAMES: &[(&str, &str, AttrTarget)] = &[
     ("color-scheme", "css CSS Color Adjustment 1", AttrTarget::Styles(&[StyleId::ColorScheme])),
     // @ref LLP 1061 D1 — host-owned press feedback; not a motion target.
     ("-exact-press-scale", "exact LLP 1061", AttrTarget::Styles(&[StyleId::PressScale])),
+    // The Apple hosts' system button style for a `button` (our integration).
+    ("-exact-apple-button-style", "exact LLP 1069.011.001", AttrTarget::Styles(&[StyleId::ExactAppleButtonStyle])),
     // CSS Animations (LLP 1055 D5): the shorthand is the row; the
     // longhands compose into it before lowering (`svg::compose_animation`).
     ("animation", "css CSS Animations 1", AttrTarget::Styles(&[StyleId::Animation])),

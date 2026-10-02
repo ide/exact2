@@ -511,6 +511,7 @@ package final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, U
         self.kind = kind
         self.presenter = presenter
         super.init(frame: .zero)
+        if kind == "button" { presenter.buttonNodes.insert(id) }
         registerForTraitChanges(SystemColor.traits) { (node: NodeView, _: UITraitCollection) in // platform colours follow contrast and level too (LLP 1095 D5)
             // A control's accent, a tablist's tint and a grouped list's
             // switches resolve per appearance in their projections.
@@ -1345,6 +1346,7 @@ package final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, U
         layoutField()
         video?.layout()
         if kind == "native" { presenter?.session?.natives.laidOut(self) }
+        for case let button as NativeButton in subviews where button.frame != bounds { button.frame = bounds }
         layoutTextArea()
         layoutSymbol()
     }
