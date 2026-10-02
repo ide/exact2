@@ -900,8 +900,18 @@ impl LayoutTree {
                     }
                     context.height_measured |= !height_known;
                     let slot = context.slot;
+                    // @ref LLP 1035.004.000 — a system symbol's box is measured
+                    // here, as a paragraph is, until the host reports it.
+                    let measured = (arena.node_type(slot) == NodeType::Image
+                        && arena.intrinsic(slot).is_none())
+                    .then(|| crate::replaced::symbol_name(arena, slot))
+                    .flatten()
+                    .and_then(|name| {
+                        let computed = arena.computed_style(slot, crate::StyleMask::INHERITED);
+                        measurer.measure_symbol(name, computed.font_size, computed.font_weight)
+                    });
                     if let Some(size) =
-                        crate::replaced::measure(arena, slot, style, inset, known, space)
+                        crate::replaced::measure(arena, slot, style, inset, known, space, measured)
                     {
                         return size;
                     }
