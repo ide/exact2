@@ -1434,16 +1434,20 @@ fn props_for(node: &NodeRef<'_>) -> BTreeMap<String, String> {
             .str(PropId::ImageSource)
             .and_then(|s| s.strip_prefix("symbol:"))
         {
-            out.insert(
-                "symbolName".into(),
-                exact_kernel::generated::symbol(role)
-                    .map(|s| s.0)
-                    .unwrap_or("")
-                    .into(),
-            );
+            out.insert("symbolName".into(), apple_symbol(role).into());
         }
     }
     out
+}
+
+/// The Apple system symbol an image's `symbol:` source draws: a portable
+/// role's, or an Apple app's own name (`symbol:apple:car.fill`), which the
+/// host draws at first paint like a role; empty when there is none.
+pub(crate) fn apple_symbol(role: &str) -> &str {
+    match role.strip_prefix("apple:") {
+        Some(name) => name,
+        None => exact_kernel::generated::symbol(role).map_or("", |s| s.0),
+    }
 }
 
 fn handler_name(e: EventKind) -> Option<&'static str> {
@@ -1472,5 +1476,21 @@ fn agent_scratch() -> Result<Option<String>, exact_runner::DataError> {
         _ => Err(exact_runner::DataError::Unavailable(
             "EXACT_AGENT_STORAGE: one name of letters, digits, '.', '-' or '_'".into(),
         )),
+    }
+}
+
+#[cfg(test)]
+mod apple_symbol_tests {
+    use super::apple_symbol;
+
+    #[test]
+    fn a_role_or_an_apple_name_draws_its_system_symbol() {
+        assert_eq!(apple_symbol("apple:car.fill"), "car.fill");
+        assert_eq!(apple_symbol("not-a-role"), "");
+        let role = exact_kernel::generated::SYMBOL_ROLES[0];
+        assert_eq!(
+            apple_symbol(role),
+            exact_kernel::generated::symbol(role).unwrap().0
+        );
     }
 }

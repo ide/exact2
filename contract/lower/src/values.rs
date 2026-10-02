@@ -497,7 +497,15 @@ pub(crate) fn check_prop_value(
     if prop == PropId::ImageSource {
         if let Expr::Str(source, _) = value {
             if let Some(role) = source.strip_prefix("symbol:") {
-                if exact_kernel::generated::symbol(role).is_none() {
+                if let Some(name) = role.strip_prefix("apple:") {
+                    if !apple_symbol_name(name) {
+                        return err(
+                            "lower-attr-value",
+                            format!("`symbol:apple:{name}` is not an Apple system symbol name (lowercase letters, digits and dots, as `car.fill`)"),
+                            span,
+                        );
+                    }
+                } else if exact_kernel::generated::symbol(role).is_none() {
                     return err(
                         "lower-attr-value",
                         format!(
@@ -554,4 +562,38 @@ pub(crate) fn check_prop_value(
         );
     }
     Ok(())
+}
+
+/// An Apple system symbol name, as `symbol:apple:<name>` carries it: dotted
+/// lowercase words and digits (`car.fill`, `thermometer.medium`).
+fn apple_symbol_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.split('.').all(|w| {
+            !w.is_empty()
+                && w.bytes()
+                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
+        })
+}
+
+#[cfg(test)]
+mod apple_symbol_tests {
+    use super::apple_symbol_name;
+
+    #[test]
+    fn apple_symbol_names_are_dotted_lowercase_words() {
+        for name in ["car.fill", "power", "gauge.with.dots.needle.67percent"] {
+            assert!(apple_symbol_name(name), "{name}");
+        }
+        for name in [
+            "",
+            "car.",
+            ".fill",
+            "Car.fill",
+            "car fill",
+            "car/fill",
+            "car..fill",
+        ] {
+            assert!(!apple_symbol_name(name), "{name}");
+        }
+    }
 }

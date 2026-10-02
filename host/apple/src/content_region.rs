@@ -391,11 +391,7 @@ pub(crate) fn projection_size(
             .str(PropId::ImageSource)
             .and_then(|s| s.strip_prefix("symbol:"))
         {
-            bytes = add_wire(
-                bytes,
-                exact_kernel::generated::symbol(role).map_or(0, |s| s.0.len()),
-                6,
-            )?;
+            bytes = add_wire(bytes, crate::host::apple_symbol(role).len(), 6)?;
         }
         for id in node.style.mask.union(StyleMask::INHERITED).iter() {
             bytes = add_wire(bytes, id.name().len(), 6)?
