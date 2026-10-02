@@ -87,9 +87,23 @@ private final class RasterDownload: NSObject, URLSessionDataDelegate, @unchecked
     private let done = DispatchSemaphore(value: 0)
     private var count = 0
     private var failure: Error?
+    /// A download's file goes when its input does (`RasterInput.deinit`),
+    /// which a process that is killed never reaches: every launch left one
+    /// behind. Before this process makes its first, the ones already there
+    /// are an earlier process's, so they go.
+    private static let sweptEarlierRuns: Void = {
+        let tmp = URL(fileURLWithPath: NSTemporaryDirectory())
+        for name in (try? FileManager.default.contentsOfDirectory(atPath: tmp.path)) ?? []
+        // Also the unprefixed `exact-raster-<uuid>` an earlier build left.
+        where name.hasPrefix(prefix) || (name.hasPrefix("exact-raster-") && UUID(uuidString: String(name.dropFirst(13))) != nil) {
+            try? FileManager.default.removeItem(at: tmp.appendingPathComponent(name))
+        }
+    }()
+    static let prefix = "exact-raster-download-"
     init(url: URL) throws {
         self.url = url
-        destination = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("exact-raster-\(UUID().uuidString)")
+        _ = Self.sweptEarlierRuns
+        destination = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("\(Self.prefix)\(UUID().uuidString)")
         guard FileManager.default.createFile(atPath: destination.path, contents: nil, attributes: [.posixPermissions: 0o600]) else { throw RasterFailure.decode }
         file = try FileHandle(forWritingTo: destination)
         super.init()
