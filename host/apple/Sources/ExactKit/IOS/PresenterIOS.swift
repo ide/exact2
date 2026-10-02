@@ -66,6 +66,8 @@ package final class Presenter {
     var anchorChanges = ScrollAnchoring.Changes()
     var materialNodes: Set<UInt32> = []
     let glassGroups = GlassGroups()
+    /// Every `button`, which NativeButtonIOS makes a UIButton.
+    var buttonNodes: Set<UInt32> = []
     var contextNodes: Set<UInt32> = []
     var inlineOwners: [UInt32: (owner: UInt32, index: Int)] = [:]
     package var heightBindings: [UInt32: HeightDragBinding] = [:]
@@ -95,6 +97,7 @@ package final class Presenter {
     lazy var swipeActions = SwipeActionsHost(self)
     lazy var menus = MenuHost(presenter: self)
     lazy var keyboardToolbars = KeyboardToolbars(self)
+    lazy var nativeButtons = NativeButtonHost(presenter: self)
     lazy var segments = SegmentHost(self)
     /// Present only when the composition links them (LLP 1047.001 D4).
     package lazy var groupedLists: GroupedLists? = GroupedListsLink.make?(self)
@@ -454,7 +457,7 @@ package final class Presenter {
         chrome = ChromeIndex()
         views.removeAll()
         inlineOwners.removeAll()
-        scrollers.removeAll(); pendingScrolls.removeAll(); materialNodes.removeAll(); contextNodes.removeAll()
+        scrollers.removeAll(); pendingScrolls.removeAll(); materialNodes.removeAll(); contextNodes.removeAll(); buttonNodes.removeAll(); nativeButtons.reset()
         hoveredInline = nil
         scrollPump.reset()
         textViews.removeAll()
@@ -1110,6 +1113,7 @@ package final class Presenter {
         #endif
         menus.sync()
         glassGroups.reconcile()
+        nativeButtons.sync()
         let changed = touchedAndAbove(touchedIDs)
         swipeActions.sync(changed: changed)
         groupedLists?.sync(changed: changed)
@@ -1140,7 +1144,7 @@ package final class Presenter {
         transformBindings.removeValue(forKey: id)
         transformGeometry.retire(id)
         chrome.forget(id)
-        scrollers.remove(id); pendingScrolls.remove(id); materialNodes.remove(id); contextNodes.remove(id)
+        scrollers.remove(id); pendingScrolls.remove(id); materialNodes.remove(id); contextNodes.remove(id); buttonNodes.remove(id)
         return views.removeValue(forKey: id)
     }
 

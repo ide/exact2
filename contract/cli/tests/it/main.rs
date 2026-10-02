@@ -116,6 +116,7 @@ mod trim;
 mod typescript;
 mod typography;
 mod r#use;
+mod vendor;
 mod viewport;
 mod visible_fields;
 mod visual;
