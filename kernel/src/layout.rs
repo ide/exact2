@@ -1002,8 +1002,9 @@ impl LayoutTree {
                     }
                     context.height_measured |= !height_known;
                     let slot = context.slot;
+                    let measured = crate::replaced::measured_symbol(arena, slot, measurer);
                     if let Some(size) =
-                        crate::replaced::measure(arena, slot, style, inset, known, space)
+                        crate::replaced::measure(arena, slot, style, inset, known, space, measured)
                     {
                         return size;
                     }

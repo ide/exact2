@@ -100,6 +100,16 @@ macro_rules! host {
             $crate::abi::with_entry(&EXACT_RUNTIMES, rt, |e| { e.hooks.canvas_text = measure; });
         }
 
+        /// The system-symbol measurer (LLP 1035.004.000): called in layout on
+        /// the runtime's thread with the context `exact_set_measure` was given.
+        #[no_mangle]
+        pub extern "C" fn exact_set_symbol_measure(
+            rt: u32,
+            measure: ::std::option::Option<$crate::measure::SymbolFn>,
+        ) {
+            $crate::abi::with_entry(&EXACT_RUNTIMES, rt, |e| { e.hooks.symbol = measure; });
+        }
+
         /// A Canvas 2D image handle decoded (LLP 1056 D9): the handle is
         /// the input buffer's first `len` bytes; the batch's length.
         #[no_mangle]

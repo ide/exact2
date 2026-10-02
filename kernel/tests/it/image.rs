@@ -607,3 +607,128 @@ fn native_block_without_a_report_still_stretches_and_has_no_content_height() {
     kernel.set_intrinsic_size(id, Some((120.0, 40.0))).unwrap();
     assert_eq!(frame(&mut kernel, id), (390.0, 40.0));
 }
+
+/// A host that knows its system symbols' sizes (as the Apple hosts do, from
+/// `UIImage(systemName:)`): each is font-size wide plus its name's length, so
+/// a test can tell the names and sizes it was asked for apart.
+struct SymbolSizes(MonospaceMeasurer);
+impl exact_kernel::TextMeasurer for SymbolSizes {
+    fn measure(
+        &mut self,
+        request: &exact_kernel::TextMeasureRequest<'_>,
+    ) -> exact_kernel::TextMetrics {
+        self.0.measure(request)
+    }
+    fn measure_symbol(
+        &mut self,
+        name: &str,
+        font_size: f32,
+        _font_weight: u16,
+    ) -> Option<(f32, f32)> {
+        (!name.is_empty()).then_some((font_size + name.len() as f32, font_size))
+    }
+}
+
+/// An image whose source is `source`, at `font_size`, in a non-stretching column.
+fn symbol_tree(source: &str, font_size: f32) -> (Kernel, u32) {
+    let mut kernel = Kernel::new(Box::new(SymbolSizes(MonospaceMeasurer::default())));
+    let mut root = StyleProps::default();
+    root.display = Display::Flex;
+    root.mask.set(StyleId::Display);
+    root.flex_direction = FlexDirection::Column;
+    root.mask.set(StyleId::FlexDirection);
+    root.align_items = AlignItems::FlexStart;
+    root.mask.set(StyleId::AlignItems);
+    let mut image = StyleProps::default();
+    image.font_size = font_size;
+    image.mask.set(StyleId::FontSize);
+    let ops = vec![
+        Op::CreateView {
+            id: 1,
+            node_type: NodeType::View,
+        },
+        Op::SetStyle {
+            id: 1,
+            patch: Box::new(root),
+        },
+        Op::CreateView {
+            id: 2,
+            node_type: NodeType::Image,
+        },
+        Op::SetStyle {
+            id: 2,
+            patch: Box::new(image),
+        },
+        Op::SetProp {
+            id: 2,
+            prop: exact_kernel::PropId::ImageSource,
+            value: source.into(),
+        },
+        Op::SetChildren {
+            id: 1,
+            children: vec![2],
+        },
+        Op::AttachRoot { id: 1 },
+    ];
+    kernel.apply(0, 1, &ops).unwrap();
+    (kernel, 2)
+}
+
+#[test]
+fn a_system_symbol_has_its_size_at_the_first_layout() {
+    // LLP 1035.004.000: measured in layout, as text is, not waiting for the
+    // host to report it after the view exists.
+    let (mut kernel, image) = symbol_tree("symbol:sf/envelope", 17.0);
+    assert_eq!(frame(&mut kernel, image), (17.0 + 8.0, 17.0));
+    // A host-reported size, when it comes, is the one used.
+    kernel
+        .set_intrinsic_size(image, Some((24.0, 17.0)))
+        .unwrap();
+    assert_eq!(frame(&mut kernel, image), (24.0, 17.0));
+}
+
+#[test]
+fn a_symbol_is_measured_again_for_a_new_name_or_font_size() {
+    let (mut kernel, image) = symbol_tree("symbol:sf/envelope", 17.0);
+    assert_eq!(frame(&mut kernel, image), (25.0, 17.0));
+    kernel
+        .apply(
+            0,
+            2,
+            &[Op::SetProp {
+                id: 2,
+                prop: exact_kernel::PropId::ImageSource,
+                value: "symbol:sf/message".into(),
+            }],
+        )
+        .unwrap();
+    assert_eq!(frame(&mut kernel, image), (24.0, 17.0), "a new name");
+    let mut bigger = StyleProps::default();
+    bigger.font_size = 22.0;
+    bigger.mask.set(StyleId::FontSize);
+    kernel
+        .apply(
+            0,
+            3,
+            &[Op::SetStyle {
+                id: 2,
+                patch: Box::new(bigger),
+            }],
+        )
+        .unwrap();
+    assert_eq!(frame(&mut kernel, image), (29.0, 22.0), "a new size");
+}
+
+#[test]
+fn a_portable_role_is_measured_by_its_apple_name_and_a_raster_is_not() {
+    let role = exact_kernel::generated::SYMBOL_ROLES[0];
+    let apple = exact_kernel::generated::symbol(role).unwrap().0;
+    let (mut kernel, image) = symbol_tree(&format!("symbol:{role}"), 10.0);
+    assert_eq!(frame(&mut kernel, image), (10.0 + apple.len() as f32, 10.0));
+    let (mut kernel, image) = symbol_tree("https://example.com/a.png", 10.0);
+    assert_eq!(
+        frame(&mut kernel, image),
+        (0.0, 0.0),
+        "a raster waits for its host size"
+    );
+}

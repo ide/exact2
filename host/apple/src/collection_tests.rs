@@ -1,5 +1,6 @@
 //! Apple collection transport and host commits, using the actual runner window.
 use super::*;
+use exact_kernel::MonospaceMeasurer;
 use exact_runner::{CollectionFeedback, CollectionSnapshot, DataError, RowMeasurement, Value};
 use std::cell::Cell as Counter;
 
