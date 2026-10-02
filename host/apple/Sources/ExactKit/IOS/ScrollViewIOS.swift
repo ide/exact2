@@ -38,7 +38,7 @@ class ScrollView: UIScrollView {
     /// would leave a `UIControl` its touch, so a native button (LLP 1069.011
     /// D4) is named. A canvas that owns its input keeps it.
     override func touchesShouldCancel(in view: UIView) -> Bool {
-        !CanvasInput.owns(view) && (view is NativeButtonIOS || super.touchesShouldCancel(in: view))
+        !CanvasInput.owns(view) && (view is NativeButtonIOS || view is NativeButton || super.touchesShouldCancel(in: view))
     }
     override func gestureRecognizerShouldBegin(_ gesture: UIGestureRecognizer) -> Bool {
         if gesture === panGestureRecognizer {
