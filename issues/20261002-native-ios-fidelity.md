@@ -122,6 +122,8 @@ Diagnosis: `issues/20261001-simulator-builds-have-no-entitlements.md`.
 - **The manifest's `orientation`** (Web App Manifest) locks the iPhone's
   `UISupportedInterfaceOrientations`; iPad keeps all four, as multitasking
   requires.
+- **A killed process's raster downloads are cleared** at the next launch's
+  first download; every launch used to leave one in `tmp`.
 - **Native module views** can size themselves (`sizes`) and take their box at
   every layout.
 
