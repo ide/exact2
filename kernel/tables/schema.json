@@ -642,6 +642,12 @@
       "_comment": "HTML `dialog open`: the dialog shows while true, as the state says, not only when an invoker opens it. The Apple hosts present a dialog of texts and buttons as their alert; a button's press (or the alert's cancel) is the app's to close it with."
     },
     {
+      "id": 229,
+      "name": "enterkeyhint",
+      "kind": "str",
+      "_comment": "HTML `enterkeyhint` on a text field: what the keyboard's return key says (enter, done, go, next, previous, search, send). Absent: go when the field submits, else return."
+    },
+    {
       "id": 214,
       "name": "scrollRestoration",
       "kind": "str"

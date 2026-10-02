@@ -988,7 +988,15 @@ final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, UIScrollV
             case "search": f.keyboardType = .webSearch
             default: f.keyboardType = .default
             }
-            f.returnKeyType = handlers.contains("submit") ? .go : .default
+            switch props["enterkeyhint"] {
+            case "done": f.returnKeyType = .done
+            case "go": f.returnKeyType = .go
+            case "next": f.returnKeyType = .next
+            case "search": f.returnKeyType = .search
+            case "send": f.returnKeyType = .send
+            case "enter", "previous": f.returnKeyType = .default
+            default: f.returnKeyType = handlers.contains("submit") ? .go : .default
+            }
             f.isEnabled = !disabled
         }
         if disabled { accessibilityTraits.insert(.notEnabled) } else { accessibilityTraits.remove(.notEnabled) }
