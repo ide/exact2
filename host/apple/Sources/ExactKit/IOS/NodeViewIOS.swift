@@ -473,6 +473,7 @@ final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, UIScrollV
         self.kind = kind
         self.presenter = presenter
         super.init(frame: .zero)
+        if kind == "button" { presenter.buttonNodes.insert(id) }
         registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (node: NodeView, _: UITraitCollection) in
             node.paragraphOwner.invalidateText()
             node.paragraphOwner.setNeedsDisplay()
@@ -699,6 +700,9 @@ final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, UIScrollV
                 }
                 if let hit = child.hitTest(convert(point, to: child), with: event) { return hit }
             }
+            // CSS pointer-events: none — the box is never the target; its
+            // children (which inherit it unless they say auto) still may be.
+            if (style["pointer_events"]?.string) == "none" { return nil }
             return bounds.contains(point) ? self : nil
         }
         guard let overlay else { return ordinary() }
@@ -1191,6 +1195,7 @@ final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, UIScrollV
         if field != nil { field?.frame = contentBox() }
         video?.layout()
         if kind == "native" { presenter?.session?.natives.laidOut(self) }
+        for case let button as NativeButton in subviews where button.frame != bounds { button.frame = bounds }
         layoutTextArea()
         layoutSymbol()
     }

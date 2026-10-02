@@ -30,6 +30,8 @@ final class Presenter {
     var scrollers: Set<UInt32> = []
     var pendingScrolls: Set<UInt32> = []
     var materialNodes: Set<UInt32> = []
+    /// Every `button`, which NativeButtonIOS makes a UIButton.
+    var buttonNodes: Set<UInt32> = []
     var contextNodes: Set<UInt32> = []
     var inlineOwners: [UInt32: (owner: UInt32, index: Int)] = [:]
     var heightBindings: [UInt32: HeightDragBinding] = [:]
@@ -47,6 +49,7 @@ final class Presenter {
     /// The native menu arm (LLP 1021 D3).
     lazy var swipeActions = SwipeActionsHost(self)
     lazy var menus = MenuHost(presenter: self)
+    lazy var nativeButtons = NativeButtonHost(presenter: self)
     lazy var segments = SegmentHost(self)
     lazy var controls = ControlHost(self)
     lazy var navigation = NavigationHost(presenter: self)
@@ -298,7 +301,7 @@ final class Presenter {
         chrome = ChromeIndex()
         views.removeAll()
         inlineOwners.removeAll()
-        scrollers.removeAll(); pendingScrolls.removeAll(); materialNodes.removeAll(); contextNodes.removeAll()
+        scrollers.removeAll(); pendingScrolls.removeAll(); materialNodes.removeAll(); contextNodes.removeAll(); buttonNodes.removeAll(); nativeButtons.reset()
         hoveredInline = nil
         scrollPump.reset()
         textViews.removeAll()
@@ -806,6 +809,7 @@ final class Presenter {
         segments.sync()
         controls.sync()
         menus.sync()
+        nativeButtons.sync()
         let changed = touchedAndAbove(touchedIDs)
         swipeActions.sync(changed: changed)
         positionContexts()
@@ -828,7 +832,7 @@ final class Presenter {
         transformBindings.removeValue(forKey: id)
         transformGeometry.retire(id)
         chrome.forget(id)
-        scrollers.remove(id); pendingScrolls.remove(id); materialNodes.remove(id); contextNodes.remove(id)
+        scrollers.remove(id); pendingScrolls.remove(id); materialNodes.remove(id); contextNodes.remove(id); buttonNodes.remove(id)
         return views.removeValue(forKey: id)
     }
 

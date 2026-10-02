@@ -27,7 +27,9 @@ class ScrollView: UIScrollView {
     var scrollsX = true
     var scrollsY = true
     override func touchesShouldCancel(in view: UIView) -> Bool {
-        !CanvasInput.owns(view) && super.touchesShouldCancel(in: view)
+        // A button is UIKit's (NativeButtonIOS): a drag that starts on one
+        // still scrolls, as a pan on any box does.
+        !CanvasInput.owns(view) && (view is NativeButton || super.touchesShouldCancel(in: view))
     }
     override func gestureRecognizerShouldBegin(_ gesture: UIGestureRecognizer) -> Bool {
         if gesture === panGestureRecognizer {

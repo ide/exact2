@@ -189,12 +189,21 @@ impl Lexer {
                     break;
                 }
                 let span = col_of(pos);
-                if c.is_ascii_alphabetic() || c == '_' {
+                // A vendor-prefixed property, CSS's way of naming a platform's
+                // own (`-exact-apple-style`): Exact's prefix only, after a
+                // space, so a negated name (`-x`) is never one.
+                let vendor = c == '-'
+                    && trimmed[pos..].starts_with("-exact-")
+                    && (pos == 0 || bytes[pos - 1] == b' ');
+                if c.is_ascii_alphabetic() || c == '_' || vendor {
                     // An identifier may contain hyphens — `font-size`,
                     // `aria-label` — as CSS's do; so, as in CSS `calc()`,
                     // subtraction between two names needs spaces (`a - b`),
                     // while `x-1` still lexes as `x`, `-`, `1` (LLP 1017 §8.1).
                     let start = pos;
+                    if vendor {
+                        pos += 1;
+                    }
                     while pos < bytes.len()
                         && ((bytes[pos] as char).is_ascii_alphanumeric()
                             || bytes[pos] == b'_'
