@@ -213,6 +213,14 @@ pub fn css_text(style: &StyleProps, font_names: &[String]) -> (String, Vec<Skipp
                 row: id,
                 reason: "grid rows are not lowered in v1",
             }),
+            // Safari still reads only the prefixed spelling.
+            (StyleId::UserSelect, _) if lowered(id, &value) => {
+                for name in ["-webkit-user-select:", "user-select:"] {
+                    out.push_str(name);
+                    declared(&mut out, id, &value);
+                    out.push(';');
+                }
+            }
             _ if lowered(id, &value) => {
                 property(&mut out, id);
                 out.push(':');
@@ -738,6 +746,22 @@ mod flow_tests {
         assert!(css.contains("shape-outside:circle(closest-side at 50% 50%);"));
         assert!(css.contains("shape-margin:8px;"));
         assert!(css.contains("wrap-flow:both;"));
+        assert!(skipped.is_empty());
+    }
+
+    #[test]
+    fn user_select_is_written_for_safari_too() {
+        let mut s = StyleProps::default();
+        s.set_dynamic(
+            StyleId::UserSelect,
+            &exact_kernel::StyleValue::Text("text".into()),
+        )
+        .unwrap();
+        let (css, skipped) = css_text(&s, &[]);
+        assert!(
+            css.contains("-webkit-user-select:text;user-select:text;"),
+            "{css}"
+        );
         assert!(skipped.is_empty());
     }
 }
