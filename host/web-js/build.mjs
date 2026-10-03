@@ -95,7 +95,9 @@ writeFileSync(resolve(gen, 'draw.js'), tsDraws ? "export { drawer } from './ts-d
 cpSync(resolve(root, 'host/web/canvas2d-glue.js'), resolve(gen, 'canvas2d-glue.js'));
 // `exactTime`: the runner's reserved source (runner/src/time.rs), answered
 // before the app's, as the web host tells the wasm runner (navigation.js).
-const time = /"exactTime":/.test(readFileSync(resolve(gen, 'app.js'), 'utf8').match(/export const sources=\{[^}]*\}/)?.[0] ?? '');
+// The map's values are argument signatures, which may hold braces of their
+// own (a record argument: "{ss[s}n"), so the map is read string by string.
+const time = /"exactTime":/.test(readFileSync(resolve(gen, 'app.js'), 'utf8').match(/export const sources=\{(?:"[^"]*":"[^"]*",?)*\}/)?.[0] ?? '');
 // A file input, `saveFile` or `share` (files.js), registered before any press.
 const files = existsSync(resolve(gen, 'files.flag'));
 writeFileSync(resolve(gen, 'main.js'), [
@@ -105,11 +107,12 @@ writeFileSync(resolve(gen, 'main.js'), [
   ...(time ? [
     "import { sourceTypes } from './names.js';",
     "import { reportTime, reportPlace } from './navigation.js';",
-    "data.reserved = { exactTime: () => {",
+    // Beside the other facts (facts.js), which app.js has already registered.
+    "(data.reserved ??= {}).exactTime = () => {",
     "  const [epochAtZero, utcOffset] = reportTime(clock.now), [locale, timeZone, seed] = reportPlace().split('\\0');",
     "  const f = { epochAtZero, utcOffset, locale, timeZone, seed: Number(seed), resolvedLocale: resolvedLocale() };",
     "  return Object.keys(sourceTypes.exactTime[1]).map(k => f[k]);",
-    "} };",
+    "};",
   ] : []),
   ...(ts ? ["import { install as ts } from './ts-data.js';", `ts(data, ${mixed}${pageModules ? ", () => import('./native.js')" : ''});`] : []),
   ...(dev ? ["import names from './names.js';", "import { conforms, W } from './rt.js';"] : []),
