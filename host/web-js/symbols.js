@@ -7,8 +7,8 @@
 // plan draws a symbol.
 import { After, PropHooks } from "./rt.js";
 import { sfMask } from "./sf.js";
-// For host-drawn chrome (chrome.js: the tab and navigation bars).
-export { symbolSVG, hasSymbol } from "./sf.js";
+// For host-drawn chrome (nav-chrome.js: the tab and navigation bars).
+export { symbolSVG, hasSymbol, sfGlyph } from "./sf.js";
 
 let Table = {};
 const STYLE = '@property --exact-tint{syntax:"<color>";inherits:false;initial-value:#000}img[data-symbol-path]{background-color:var(--exact-tint)!important;mask-image:var(--exact-symbol-mask);mask-repeat:no-repeat;mask-position:center;mask-size:var(--exact-symbol-fit,100% 100%);mask-origin:content-box;mask-clip:content-box}';
