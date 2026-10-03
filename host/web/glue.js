@@ -89,6 +89,8 @@ const dataImports = {
     return Number.isSafeInteger(seed) && seed >= 0 ? seed : 1;
   },
 };
+// The page around the app (chrome.js), after first paint as every piece but this glue and navigation.js (boot.mjs).
+let pageChromeLoad = null, pageChrome = () => { pageChromeLoad ??= loadAfterPaint('./chrome.js', 'pageChrome').then(f => { pageChrome = f; f(); }, e => log(`page chrome: ${e.message}`)); };
 function loadAfterPaint(file, exported) {
   return new Promise((resolve, reject) => {
     const script = document.createElement('script');
@@ -874,7 +876,7 @@ function apply(batch) {
   // Focusing can dispatch an action: every node/value of the batch is committed before its focus handler runs.
   runFocusCommands(focusCommands, { root, ready: inputReady, inertAncestor, log });
   focusAutofocus();
-  positionContexts(); presence.live?.after(batch, views); markScrollDocument();
+  positionContexts(); presence.live?.after(batch, views); markScrollDocument(); pageChrome();
   return batch.timers;
 }
 function applyBatch(batch) {
