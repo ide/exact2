@@ -440,6 +440,19 @@ component Ding
       audio "assets/ding.wav" preload="auto" paused=hush pause=hushed
 ```
 
+Choose a colour by what it means, not by how it looks. **The accent is for what
+the user can act on**: a link, a plain button's title or symbol, a filled
+button's fill, a toggle's on state, the icon of a tappable row. Write it as
+`AccentColor` (or leave `tint-color` unset, whose initial value is
+`AccentColor`), never as the colour the accent happens to be today
+(`system-blue`): the platform keeps the accent dynamic, follows the user's or
+the app's tint, and dims it to grey behind an alert or a sheet to say the
+screen under it is inert. **A colour of its own is for what means something by
+itself**: status (`system-green` locked, `system-orange` unlocked, `system-red`
+destructive), text hierarchy (`label`, `secondary-label`), data, and marks.
+Those never dim. The test: if the colour should change when the accent
+changes, it is `AccentColor`; if changing it would be wrong, name the role.
+
 Keep `id` and `testId` separate:
 
 - `id`: host command target, geometry, cross-node references.
