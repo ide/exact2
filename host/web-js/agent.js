@@ -256,7 +256,7 @@ export function install(exact) {
         {
           const el = views.get(req.id);
           if (el && (el.closest('[inert]') || ['hidden', 'collapse'].includes(getComputedStyle(el).visibility))) return { handled: true, error: `view ${req.id} is hidden or inert` };
-          // A control the navigation chrome stands in for (chrome.js: a tab's, a bar button's, the back
+          // A control the navigation chrome stands in for (nav-chrome.js: a tab's, a bar button's, the back
           // under a bar's back button) is pressed as that chrome presses it, as the iOS host activates it.
           if (el && exact.chrome?.standsIn(el)) { if (el.matches(':disabled')) return { handled: true, error: `view ${req.id} is disabled` }; el.click(); return { handled: true, tapped: req.id, delivery: 'chrome' }; }
           // A tap addressed to an iframe enters its guest (glue.js, LLP 1020 D4).
