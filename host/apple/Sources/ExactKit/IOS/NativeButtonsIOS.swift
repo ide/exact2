@@ -150,6 +150,12 @@ extension ControlHost {
         button.configuration = config
         button.titleLabel?.numberOfLines = 1
         button.tintColor = accent
+        // Behind an alert UIKit dims the tint to grey, as the platform should
+        // for the accent (`AccentColor`, or no accent-color); an authored
+        // `accent-color` is the button's own and keeps its look, as SwiftUI's
+        // foregroundStyle does.
+        let adjust: UIView.TintAdjustmentMode = accent == nil || owner.followsTint("accent_color") ? .automatic : .normal
+        if button.tintAdjustmentMode != adjust { button.tintAdjustmentMode = adjust }
         button.isEnabled = written.enabled
         button.accessibilityLabel = written.label
         button.accessibilityIdentifier = written.testId
