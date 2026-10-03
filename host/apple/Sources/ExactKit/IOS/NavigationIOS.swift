@@ -29,12 +29,15 @@ private final class RouteController: UIViewController {
     /// is "false"; `navigationBackButton` "minimal" shows the chevron alone;
     /// `navigationTrailing` names (by HTML id) an authored control a trailing
     /// bar button presses, drawn as the `navigationTrailingSymbol` SF Symbol.
-    /// A route with no title keeps the bar hidden, as before.
+    /// A route with no title keeps the bar hidden, as before; a blank one
+    /// (" ", a title still loading) shows the bar with no words in it —
+    /// UIKit draws a whitespace title as a pair of quotes.
     var hasBar: Bool { !(node.props["navigationTitle"] ?? "").isEmpty }
     func configure(press: @escaping (String) -> Void) {
         let item = navigationItem
-        let title = node.props["navigationTitle"] ?? ""
-        if item.title != title { item.title = title.isEmpty ? nil : title }
+        let raw = node.props["navigationTitle"] ?? ""
+        let title: String? = raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : raw
+        if item.title != title { item.title = title }
         item.largeTitleDisplayMode = node.props["navigationLargeTitle"] == "false" ? .never : .always
         item.backButtonDisplayMode = node.props["navigationBackButton"] == "minimal" ? .minimal : .default
         if let target = node.props["navigationTrailing"], !target.isEmpty {
