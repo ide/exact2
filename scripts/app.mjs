@@ -314,7 +314,7 @@ const WEB_HOST_GROUPS = {
   base: ['glue.js', 'navigation.js', 'textflow-glue.js', 'timer-glue.js', 'input-glue.js',
     'http-body.js', 'grant-admission.js', 'media-glue.js', 'list-selection.js', 'markup-editor.js', 'document-glue.js',
     'motion-glue.js', 'collection-glue.js', 'canvas2d-glue.js', 'presence-glue.js', 'picker-glue.js',
-    'documents-glue.js', 'auth-glue.js', 'image-glue.js', 'geometry-glue.js'],
+    'documents-glue.js', 'auth-glue.js', 'image-glue.js', 'geometry-glue.js', 'sf-symbols.js'],
   module: ['module-glue.js', 'module-worker.js', 'module-prelude.js'],
   storage: ['storage-request.js', 'storage.js', 'storage-environment.js', 'storage-fs.js', 'storage-sqlite.js',
     'storage-worker.js', 'sqlite3.mjs', 'sqlite3.wasm'],
@@ -1115,7 +1115,7 @@ function completeBuild(app, platform, target, graph, messages, roots, env, prepa
     add(resolve(packageRoot,'Package.swift'));add(resolve(packageRoot,'webarm/WebArm.swift'));add(resolve(packageRoot,'videoarm/VideoArm.swift'));add(resolve(packageRoot,'build.mjs'));
   }
   if(platform==='web') {
-    for(const path of [...Object.values(webHostFiles('base','rust','gpu',...(gpuModules(app.manifest).length?['gpuModules']:[]))),'scripts/app.mjs','scripts/rust.mjs','host/web/index.html','host/web/build.mjs','package.json','bun.lock']) add(resolve(ROOT,path));
+    for(const path of [...Object.values(webHostFiles('base','rust','gpu',...(gpuModules(app.manifest).length?['gpuModules']:[]))),'scripts/app.mjs','scripts/rust.mjs','host/web/index.html','host/web/build.mjs','host/web/sf-material.mjs','package.json','bun.lock']) add(resolve(ROOT,path));
     if (existsSync(resolve(app.dir, 'app.ts'))) {
       // The TS producer is a build dependency, outside the runtime Cargo graph.
       // Its canonical API declaration still determines the accepted app module.
