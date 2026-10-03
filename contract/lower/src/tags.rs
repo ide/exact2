@@ -257,12 +257,14 @@ pub fn tag(name: &str) -> Option<Tag> {
         // kernel does (LLP 1006 §3, LLP 1007 §1).
         // @ref LLP 1069.011 D1 — Exact's UA sheet: a button is the author's
         // box (`appearance: none`); `appearance="auto"` asks for the platform's.
+        // CSS UI 4 §6.1's UA sheet: `button { user-select: none }`.
         "button" => Tag {
             node_type: NodeType::Pressable,
             fixed_styles: &[
                 (StyleId::Display, "flex"),
                 (StyleId::FlexDirection, "column"),
                 (StyleId::Appearance, "none"),
+                (StyleId::UserSelect, "none"),
             ],
             fixed_props: &[(PropId::AccessibilityRole, "button")],
             positional: None,
@@ -443,9 +445,10 @@ pub fn tag(name: &str) -> Option<Tag> {
         // @ref LLP 1069.001 D1, D2 — HTML's `select`: the platform's pop-up
         // control, its options its children. ARIA's role for a one-line
         // select is `combobox`.
+        // CSS UI 4 §6.1's UA sheet: `select { user-select: none }`.
         "select" => Tag {
             node_type: NodeType::Control,
-            fixed_styles: &[],
+            fixed_styles: &[(StyleId::UserSelect, "none")],
             fixed_props: &[
                 (PropId::Type, "select"),
                 (PropId::AccessibilityRole, "combobox"),
@@ -885,6 +888,8 @@ pub fn attr(name: &str) -> Option<AttrTarget> {
         // platform draws it.
         "accent-color" => styles(&[StyleId::AccentColor]),
         "appearance" => styles(&[StyleId::Appearance]),
+        // @ref CSS UI 4 §6.1 — `-webkit-user-select` is its alias.
+        "user-select" | "-webkit-user-select" => styles(&[StyleId::UserSelect]),
         "tint-color" => styles(&[StyleId::TintColor]),
         "opacity" => styles(&[StyleId::Opacity]),
         // @ref LLP 1064 D1 — one value, each row takes its part of the parse.

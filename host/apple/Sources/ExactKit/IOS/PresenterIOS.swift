@@ -32,6 +32,13 @@ final class Presenter {
     var materialNodes: Set<UInt32> = []
     let glassGroups = GlassGroups()
     var contextNodes: Set<UInt32> = []
+    /// Nodes setting `user-select` to `text`, `contain` or `all`, and those
+    /// of them that start a selectable region (`TextCopy.sync`).
+    var selectableNodes: Set<UInt32> = []
+    var copyNodes: Set<UInt32> = []
+    func noteUserSelect(_ view: NodeView) {
+        if ["text", "contain", "all"].contains(view.style["user_select"]?.string ?? "auto") { selectableNodes.insert(view.id) } else { selectableNodes.remove(view.id) }
+    }
     var inlineOwners: [UInt32: (owner: UInt32, index: Int)] = [:]
     var heightBindings: [UInt32: HeightDragBinding] = [:]
     var transformBindings: [UInt32: TransformDragBinding] = [:]
@@ -808,6 +815,7 @@ final class Presenter {
         segments.sync()
         controls.sync()
         menus.sync()
+        TextCopy.sync(self)
         glassGroups.reconcile()
         let changed = touchedAndAbove(touchedIDs)
         swipeActions.sync(changed: changed)
@@ -832,6 +840,8 @@ final class Presenter {
         transformGeometry.retire(id)
         chrome.forget(id)
         scrollers.remove(id); pendingScrolls.remove(id); materialNodes.remove(id); contextNodes.remove(id)
+        if copyNodes.remove(id) != nil { views[id]?.textCopy?.remove(); views[id]?.textCopy = nil }
+        selectableNodes.remove(id)
         return views.removeValue(forKey: id)
     }
 

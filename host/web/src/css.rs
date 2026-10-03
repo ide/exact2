@@ -247,6 +247,15 @@ pub fn css_text(style: &StyleProps, font_names: &[String]) -> (String, Vec<Skipp
                 row: id,
                 reason: "grid rows are not lowered in v1",
             }),
+            // @ref CSS UI 4 §6.1 — Safari still reads only the prefixed
+            // spelling, the alias the spec requires UAs to support.
+            (StyleId::UserSelect, _) if lowered(id, &value) => {
+                for name in ["-webkit-user-select:", "user-select:"] {
+                    out.push_str(name);
+                    declared(&mut out, id, &value);
+                    out.push(';');
+                }
+            }
             // @ref LLP 1069.011 D8 — the accent also as an inherited custom
             // property a native button's look reads; `auto` is the browser's.
             (StyleId::AccentColor, _) if lowered(id, &value) => {
@@ -1169,5 +1178,27 @@ mod declaration_tests {
             animations_css(&list, true),
             list.css().replace(" grow,", " grow-exact-press,")
         );
+    }
+
+    #[test]
+    fn user_select_is_written_with_its_webkit_alias() {
+        // CSS UI 4 §6.1: Safari reads `-webkit-user-select`, the alias UAs
+        // must support; every keyword passes through.
+        for keyword in ["auto", "text", "none", "contain", "all"] {
+            let mut s = StyleProps::default();
+            s.set_dynamic(
+                StyleId::UserSelect,
+                &exact_kernel::StyleValue::Text(keyword.into()),
+            )
+            .unwrap();
+            let (css, skipped) = css_text(&s, &[]);
+            assert!(
+                css.contains(&format!(
+                    "-webkit-user-select:{keyword};user-select:{keyword};"
+                )),
+                "{css}"
+            );
+            assert!(skipped.is_empty());
+        }
     }
 }

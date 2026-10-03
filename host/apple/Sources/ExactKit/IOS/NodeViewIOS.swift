@@ -1082,6 +1082,7 @@ final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, UIScrollV
         updateMaterial()
         syncScroll()
         applyAffordances()
+        presenter?.noteUserSelect(self)
         styleTextArea()
         if let f = field, let t = text {
             f.font = t.font(size: number("font_size", 16), weight: Int(number("font_weight", 400)), family: Int(number("font_family")), italic: (style["font_style"]?.string) == "italic", numeric: Int(number("font_variant_numeric")))

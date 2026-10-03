@@ -12,6 +12,7 @@ struct InlineText {
     let hasSchemeColor: Bool
     let handlers: Set<String>
     let paints: Bool
+    let userSelect: String?
     var range: NSRange = NSRange(location: 0, length: 0)
 
     init(id: UInt32, parent: UInt32, props: [String: String], style: InlineStyle,
@@ -25,6 +26,7 @@ struct InlineText {
         darkBackground = style.darkBackground
         hasSchemeColor = style.paired
         self.handlers = handlers; self.paints = paints
+        userSelect = style.userSelect
     }
 
     var text: String { lightRun.text }
@@ -56,6 +58,8 @@ struct InlineStyle {
     var darkColor: [Double]?
     var darkBackground: [Double]?
     var paired = false
+    /// CSS `user-select`, as the run sets it (CSS UI 4 §6.1; `UserSelect.swift`).
+    var userSelect: String?
 }
 
 extension Presenter {

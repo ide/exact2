@@ -355,6 +355,8 @@ pub(crate) fn native_tag() -> Tag {
             (StyleId::Appearance, "auto"),
             (StyleId::Display, "flex"),
             (StyleId::BoxSizing, "border-box"),
+            // CSS UI 4 §6.1's UA sheet: `button { user-select: none }`.
+            (StyleId::UserSelect, "none"),
         ],
         fixed_props: &[
             (PropId::AccessibilityRole, "button"),

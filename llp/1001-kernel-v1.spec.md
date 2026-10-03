@@ -923,6 +923,41 @@ with its tint, as iOS does on the web and Linux; inherited typography is
 reset on the web's native face; Linux draws no symbol. Its size is the
 platform's, as any control's is.
 
+### Content selection (`user-select`)
+
+`user-select`, style bit 171, is CSS UI 4 §6.1's: `auto | text | none |
+contain | all`, initial `auto`, not inherited, its computed value the keyword.
+Contract takes `-webkit-user-select` as its alias, as the spec requires. Exact's
+UA sheet carries the spec's `button, select { user-select: none }` as fixed
+rows (a custom and a native `button`, and `select`), which an author's value
+overrides. The web writes both spellings and the browser does the rest.
+On macOS the paragraph selection (LLP 1033) follows the spec: `auto` is `text`
+at the root, as on the web; a `none` paragraph or inline run is neither
+highlighted nor copied and starts no selection (nor clears the one there is),
+while its descendants that are selectable again are kept; a selection started
+in a `contain` box stays in it, and one started outside does not end in it;
+touching part of an `all` box selects the box whole, unless the selection lies
+inside one non-`all` part of it. A virtualized list's copy (the runner's
+`list_text`) leaves out `none` text the same way and keeps every offset; its
+endpoints are not widened to an `all` box that crosses rows. Declared, for
+iOS:
+
+- **The root's parent is `none`.** Exact's iOS UA sheet makes it so, as UIKit
+  selects no label: `auto`'s used value is then `none` until an author sets
+  `text`, `contain` or `all`. The spec's used-value rules hold from there
+  (an editable element is always `contain`; `auto` is `all` under `all`,
+  `none` under `none`, else `text`). On the web the root's `auto` is `text`,
+  as in any browser.
+- **No label is selected in place.** A box whose own value is `text`,
+  `contain` or `all` (and, for `all`, the outermost of an `all` run) starts a
+  selectable region. A long press on it offers the system edit menu's Copy
+  for the region's text, and VoiceOver a Copy action, as SwiftUI's
+  `textSelection` does on iPhone. The copy follows the used values: `none`
+  nodes are left out but their selectable descendants are not; a secure
+  field's text never is. An editable element keeps its own selection and
+  gets no menu; an author's `contextmenu` owns the long press.
+- Linux selects no text outside fields and reads the row for nothing yet.
+
 ### Window toolbars
 
 Charlie requested native window-toolbar presentation for Interview on 2026-09-15;

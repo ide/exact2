@@ -32,6 +32,14 @@ final class TextSelection {
     private var pendingBegin = false
     private var deferredDrag: NSEvent?
     private var deferredEnd: (NodeView, NSEvent)?
+    /// Each paragraph's place under `user-select` (CSS UI 4 §6.1): its used
+    /// value, the `contain` box it is in, the outermost `all` box around it,
+    /// whether it is in that box's run of `all`, and else the top of the
+    /// non-`all` subtree of that box it is in. Found with `paragraphs`.
+    private struct Place { var used: String; var contain: UInt32?; var all: UInt32?; var inRun: Bool; var subtree: UInt32? }
+    private var places: [UInt32: Place] = [:]
+    /// The `all` boxes a selection touches, which it selects whole.
+    private var wholeAll = Set<UInt32>()
 
     func structureChanged() {
         ordered = nil
@@ -57,20 +65,51 @@ final class TextSelection {
         if let ordered { return ordered }
         guard let presenter else { return [] }
         var result: [NodeView] = []
-        func walk(_ view: NSView) {
+        places.removeAll(keepingCapacity: true)
+        func walk(_ view: NSView, _ outer: Place) {
             if view.isHidden { return }
-            if let node = view as? NodeView, presenter.session?.regions.owns(node) == true { return }
-            if let node = view as? NodeView, node.isParagraph { result.append(node); return }
-            for child in view.subviews { walk(child) }
+            var place = outer
+            if let node = view as? NodeView {
+                if presenter.session?.regions.owns(node) == true { return }
+                place.used = node.userSelect(parentUsed: outer.used)
+                if place.used == "contain" { place.contain = node.id }
+                if place.used == "all" {
+                    // An `all` not under an `all` is a box of its own.
+                    if outer.used != "all" { place.all = node.id; place.subtree = nil }
+                    place.inRun = true
+                } else {
+                    if place.all != nil && place.subtree == nil { place.subtree = node.id }
+                    place.inRun = false
+                }
+                if node.isParagraph { result.append(node); places[node.id] = place; return }
+            }
+            for child in view.subviews { walk(child, place) }
         }
-        walk(presenter.root)
-        for dialog in presenter.dialogs.presented { walk(dialog) }
+        let root = Place(used: NodeView.rootUserSelect, contain: nil, all: nil, inRun: false, subtree: nil)
+        walk(presenter.root, root)
+        for dialog in presenter.dialogs.presented { walk(dialog, root) }
         ordered = result
         indices = Dictionary(uniqueKeysWithValues: result.enumerated().map { ($0.element.id, $0.offset) })
         return result
     }
 
+    /// A selection may start, end or show in a paragraph whose used value is not `none`.
+    func selectable(_ node: NodeView) -> Bool {
+        _ = paragraphs
+        return places[node.id]?.used != "none"
+    }
+
     private func invalidate() {
+        // An `all` box a selection touches is selected whole, unless the
+        // selection lies inside one non-`all` part of it.
+        var touched: [UInt32: Set<UInt32?>] = [:]
+        wholeAll = []
+        for node in paragraphs {
+            guard let place = places[node.id], let box = place.all, place.used != "none",
+                  let selected = baseRange(node), selected.length > 0 else { continue }
+            touched[box, default: []].insert(place.inRun ? nil : place.subtree)
+        }
+        for (box, parts) in touched where parts.contains(nil) || parts.count > 1 { wholeAll.insert(box) }
         var next: [UInt32: NSRange] = [:]
         for node in paragraphs {
             let selected = range(node).flatMap { $0.length > 0 ? $0 : nil }
@@ -90,6 +129,8 @@ final class TextSelection {
     }
 
     func begin(_ node: NodeView, event: NSEvent) {
+        // `none`: no selection starts here, and the one there is stays.
+        guard selectable(node) else { return }
         gesture += 1; motion = 0; pendingBegin = false; deferredDrag = nil; deferredEnd = nil
         let point = node.local(event.locationInWindow)
         if let reader = node.readerParagraph, reader.offset(at: point, node: node) == nil {
@@ -138,7 +179,12 @@ final class TextSelection {
         guard anchor != nil || list != nil else { return }
         dragged = true
         let point = event.locationInWindow
-        let nodes = paragraphs.filter { list == nil || $0.isDescendant(of: list!) }
+        // A selection ends only where it may (not `none`), inside the
+        // `contain` box it started in and in none it started outside.
+        let region = anchor.flatMap { places[$0.id]?.contain }
+        let nodes = paragraphs.filter {
+            (list == nil || $0.isDescendant(of: list!)) && places[$0.id]?.used != "none" && places[$0.id]?.contain == region
+        }
         guard let node = nodes.min(by: { distance($0, point) < distance($1, point) }) else { return }
         motion += 1
         let local = node.local(point)
@@ -207,7 +253,9 @@ final class TextSelection {
         }
         let parts = paragraphs.compactMap { node -> String? in
             guard let range = range(node), range.length > 0 else { return nil }
-            return (node.paragraphSpec().runs.map(\.text).joined() as NSString).substring(with: range)
+            let text = node.paragraphSpec().runs.map(\.text).joined() as NSString
+            let kept = node.selectableText(text, in: range, used: places[node.id]?.used ?? "text")
+            return kept.isEmpty ? nil : kept
         }
         return parts.joined(separator: "\n\n")
     }
@@ -217,7 +265,15 @@ final class TextSelection {
         return node.paragraphSpec().runs.reduce(0) { $0 + ($1.text as NSString).length }
     }
 
+    /// What the selection holds of `node`: nothing where its used value is
+    /// `none`, all of it inside an `all` box the selection selects whole.
     func range(_ node: NodeView) -> NSRange? {
+        guard selectable(node) else { return nil }
+        if let box = places[node.id]?.all, wholeAll.contains(box) { return NSRange(location: 0, length: length(node)) }
+        return baseRange(node)
+    }
+
+    private func baseRange(_ node: NodeView) -> NSRange? {
         if let list {
             guard let (owner, p) = position(node, offset: 0), owner === list else { return nil }
             let count = length(node)
@@ -304,8 +360,8 @@ final class TextSelection {
     func draw(_ node: NodeView, paragraph: Paragraph, spec: Spec, dirty: NSRect) {
         guard let selection = range(node), selection.length > 0 else { return }
         NSColor.selectedTextBackgroundColor.withAlphaComponent(0.45).setFill()
-        for rect in paragraph.selectionRects(selection, align: spec.align, in: node.contentBox(), dirty: dirty) {
-            rect.fill()
+        for part in node.selectableRanges(selection, used: places[node.id]?.used ?? "text") {
+            for rect in paragraph.selectionRects(part, align: spec.align, in: node.contentBox(), dirty: dirty) { rect.fill() }
         }
     }
 }

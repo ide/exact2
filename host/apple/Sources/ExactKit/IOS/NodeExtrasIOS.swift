@@ -46,6 +46,8 @@ final class NodeExtras {
     var hoverRecognizer: UIHoverGestureRecognizer?
     var textArea: UITextView?
     var field: UITextField?
+    /// `user-select`'s Copy menu, on a node that starts a selectable region (`TextCopyIOS.swift`).
+    var textCopy: TextCopy?
     var pendingValue: String?
     var video: VideoView?
     var web: UIView?
@@ -120,6 +122,7 @@ extension NodeView {
     var hoverRecognizer: UIHoverGestureRecognizer? { get { extras?.hoverRecognizer } set { if newValue != nil || extras != nil { more.hoverRecognizer = newValue } } }
     var textArea: UITextView? { get { extras?.textArea } set { if newValue != nil || extras != nil { more.textArea = newValue } } }
     var field: UITextField? { get { extras?.field } set { if newValue != nil || extras != nil { more.field = newValue } } }
+    var textCopy: TextCopy? { get { extras?.textCopy } set { if newValue != nil || extras != nil { more.textCopy = newValue } } }
     var pendingValue: String? { get { extras?.pendingValue } set { if newValue != nil || extras != nil { more.pendingValue = newValue } } }
     var video: VideoView? { get { extras?.video } set { if newValue != nil || extras != nil { more.video = newValue } } }
     var web: UIView? { get { extras?.web } set { if newValue != nil || extras != nil { more.web = newValue } } }

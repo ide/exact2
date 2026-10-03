@@ -75,5 +75,6 @@ mod transform_binding;
 mod trim;
 mod typescript;
 mod r#use;
+mod user_select;
 mod viewport;
 mod visual;
