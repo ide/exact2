@@ -107,7 +107,21 @@ function back(nav, route) {
   return press(route, attr(nav, "navigationBack"));
 }
 
+/** Whether `el` is a control this chrome presses (a tab's, a route's
+ * `navigationTrailing`, the root's back under a bar's back button): the
+ * agent's tap on it is delivered as the chrome's (agent.js), as the iOS
+ * host's `activate`. */
+function standsIn(el) {
+  const nav = el.id && el.closest("[navigationBack]");
+  if (!nav || !States.has(nav)) return false;
+  const routes = routesOf(nav), route = routes.find(r => r.contains(el));
+  if (routes.some(r => data(r, "tabcontrol") === el.id)) return true;
+  if (route && data(route, "trailing") === el.id) return true;
+  return !!route && el.id === attr(nav, "navigationBack") && !!route.$bar?.querySelector(".lead button");
+}
+
 export function update(root) {
+  (globalThis.exact ??= {}).chrome ??= { standsIn };
   if (!Styled) { Styled = true; document.head.append(Object.assign(document.createElement("style"), { textContent: STYLE })); addEventListener("resize", () => update(root)); }
   for (const nav of root.querySelectorAll("[navigationBack]")) project(nav);
   for (const [nav, st] of States) if (!nav.isConnected) { st.tabbar?.remove(); States.delete(nav); }
