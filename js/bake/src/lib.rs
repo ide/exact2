@@ -278,17 +278,22 @@ fn build_sources(
     }
     let manifest = contract::Manifest::read(app)?;
     let target = std::env::var("TARGET").map_err(|e| e.to_string())?;
-    let compat = exact_bake::compatibility_id_sources(
+    // A store delivers plan and assets, never this module (signed module
+    // delivery is not implemented): such a binary's id pins the module, so a
+    // bundle reaches only binaries whose compiled logic is byte-identical.
+    let module = meta["module"]["sha256"]
+        .as_str()
+        .ok_or("missing module hash")?;
+    let stored = manifest.store(platform) != "0";
+    let compat = exact_bake::compatibility_id_pinned(
         app,
         platform,
         &target,
         &manifest,
         meta["grants"].as_str(),
         mixed_grants(&meta, rust)?,
+        stored.then_some(module),
     )?;
-    if compat.inputs["store"]["L"] != "0" {
-        return Err("module clients currently require deploy.store.<platform> = 0; signed module delivery is not implemented".into());
-    }
     std::fs::write(out.join("compat.json"), compat.to_json()).map_err(|e| e.to_string())?;
     let rust_updates = compat.inputs["rustMode"] != "off"
         && compat.inputs["rustModule"]

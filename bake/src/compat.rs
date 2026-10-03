@@ -116,6 +116,32 @@ pub fn compatibility_id_sources(
     grants: Option<&str>,
     rust_grants: Option<&str>,
 ) -> Result<Compat, String> {
+    compatibility_id_pinned(
+        app_dir,
+        platform,
+        target,
+        manifest,
+        grants,
+        rust_grants,
+        None,
+    )
+}
+
+/// As [`compatibility_id_sources`], for a module client (its logic compiled
+/// into the binary, LLP 1027) whose binary has an update store. Bundles carry
+/// plan and assets, never code, so a bundle is safe only on a binary whose
+/// module is the one the plan was baked against: `module` (the compiled
+/// module's sha256) enters the id as `typescriptModule`, and any change to the
+/// app's TypeScript is a new cohort, a new stream and a new binary.
+pub fn compatibility_id_pinned(
+    app_dir: &Path,
+    platform: &str,
+    target: &str,
+    manifest: &Manifest,
+    grants: Option<&str>,
+    rust_grants: Option<&str>,
+    module: Option<&str>,
+) -> Result<Compat, String> {
     // Cargo must rebake even when only the explicit trust selection changes.
     // External apps call this same entrypoint from their own build scripts.
     if std::env::var_os("OUT_DIR").is_some() {
@@ -142,6 +168,10 @@ pub fn compatibility_id_sources(
     )?;
     if let Some(rust) = rust_grants {
         source_scopes(&mut compat, grants.unwrap_or(""), rust);
+    }
+    if let Some(module) = module {
+        compat.inputs["typescriptModule"] = serde_json::Value::String(module.into());
+        compat.id = compatibility_digest(&compat.inputs);
     }
     crate::reach::derive(app_dir, platform, &mut compat)?;
     if let Some(out) = std::env::var_os("OUT_DIR") {
@@ -737,6 +767,38 @@ mod tests {
         )
         .unwrap();
         dir
+    }
+
+    /// A module client with a store pins its compiled module into the id:
+    /// the same module is the same cohort, any other module another.
+    #[test]
+    fn a_stored_module_client_pins_its_module_into_the_id() {
+        let dir = app("pinned-module");
+        let manifest = Manifest::read(&dir).unwrap();
+        let id = |module| {
+            super::compatibility_id_pinned(
+                &dir,
+                "ios",
+                "aarch64-apple-ios",
+                &manifest,
+                Some(""),
+                None,
+                module,
+            )
+            .unwrap()
+        };
+        let plain = id(None);
+        let a = id(Some("aa"));
+        assert!(plain.inputs["typescriptModule"].is_null());
+        assert_eq!(a.inputs["typescriptModule"], "aa");
+        assert_ne!(a.id, plain.id, "the module is in the id");
+        assert_eq!(id(Some("aa")).id, a.id, "the same module, the same cohort");
+        assert_ne!(id(Some("bb")).id, a.id, "another module, another cohort");
+        assert_eq!(
+            a.id,
+            super::compatibility_digest(&a.inputs),
+            "the id digests the inputs it reports"
+        );
     }
 
     /// A Rust-only app's grants are read here and nowhere earlier: a set a

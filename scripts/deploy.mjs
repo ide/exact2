@@ -671,6 +671,13 @@ function buildFor(app, platform, sourceRoot, run) {
     if (sdk.status !== 0) refuse(`the ${apple} SDK is unavailable: ${sdk.stderr}`);
     env.SDKROOT = sdk.stdout.trim();
     env[apple === 'ios' ? 'IPHONEOS_DEPLOYMENT_TARGET' : 'MACOSX_DEPLOYMENT_TARGET'] = apple === 'ios' ? '17.0' : '14.0';
+    // Build scripts compile Objective-C++ for the Mac, and cc-rs inherits
+    // SDKROOT, which names the phone's: give those units the Mac SDK, as
+    // host/apple/build.mjs does.
+    if (apple === 'ios') {
+      const mac = spawnSync('xcrun', ['--sdk', 'macosx', '--show-sdk-path'], {encoding:'utf8'}).stdout.trim();
+      env.HOST_CXXFLAGS = `${process.env.HOST_CXXFLAGS ?? ''} -isysroot ${mac}`;
+    }
   }
   return buildBake(app, platform, target, {env, analysis:true});
 }
