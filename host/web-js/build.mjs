@@ -140,7 +140,7 @@ writeFileSync(resolve(gen, 'main.js'), [
     `if (wait || ${mixed}) load().then(start); else { start(); requestAnimationFrame(() => setTimeout(load)); }`,
   ] : ['start();']),
 ].join('\n'));
-for (const f of ['agent.js', 'rust-data.js', 'list.js', 'facts.js', 'symbols.js', 'stdlib.js', 'motion.js', 'transform.js', 'svg-transform.js', 'arrange.js', 'reorder.js', 'flow.js', 'native.js']) cpSync(resolve(here, f), resolve(gen, f));
+for (const f of ['agent.js', 'rust-data.js', 'list.js', 'facts.js', 'symbols.js', 'stdlib.js', 'motion.js', 'transform.js', 'svg-transform.js', 'arrange.js', 'reorder.js', 'flow.js', 'native.js', 'nav-chrome.js']) cpSync(resolve(here, f), resolve(gen, f));
 // SF Symbols (host/web/sf-material.mjs): the glyphs of the SF names among the plan's strings.
 cpSync(resolve(root, 'host/web/sf-symbols.js'), resolve(gen, 'sf-symbols.js'));
 writeFileSync(resolve(gen, 'sf.js'), sfModule(Array.from(readFileSync(resolve(gen, 'app.js'), 'utf8').matchAll(/"((?:[^"\\\n]|\\.)*)"/g), m => m[1])));
