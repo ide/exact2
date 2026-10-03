@@ -10,8 +10,8 @@
 // `app:/` file (below).
 import { After, PropHooks, inflight, journal, clock, data } from "./rt.js";
 import { sfMask } from "./sf.js";
-// For host-drawn chrome (chrome.js: the tab and navigation bars).
-export { symbolSVG, hasSymbol } from "./sf.js";
+// For host-drawn chrome (nav-chrome.js: the tab and navigation bars).
+export { symbolSVG, hasSymbol, sfGlyph } from "./sf.js";
 
 let Table = {}, All = null; // every role: not asked for, loading, or loaded (true)
 const draw = (e, role) => { const [path, filled] = Table[role] ?? [""]; e.setAttribute("data-symbol-path", path); e.toggleAttribute("data-symbol-fill", !!filled); };
