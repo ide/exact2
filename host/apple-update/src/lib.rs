@@ -19,7 +19,8 @@ pub static HOOKS: exact_apple::delivery::Hooks = exact_apple::delivery::Hooks {
 /// Instantiate an app with the update adapter linked into its archive.
 #[macro_export]
 macro_rules! host {
-    ($data:ty, $plan:expr, $compat:expr) => {
+    // The adapter module, first: a fragment parse never backtracks.
+    (@adapter $plan:expr, $compat:expr) => {
         mod exact_delivery_adapter {
             use super::*;
             extern "C" fn input(n: usize) -> *mut u8 {
@@ -81,6 +82,22 @@ macro_rules! host {
                     started,
                 };
         }
+    };
+    // An app whose data the binary embeds (a module client, LLP 1027): its
+    // constructor passes through, as `exact_apple::host!`'s sixth argument.
+    ($data:ty, $plan:expr, $compat:expr, $embedded:expr) => {
+        $crate::host!(@adapter $plan, $compat);
+        $crate::exact_apple::host!(
+            $data,
+            $plan,
+            $compat,
+            Some(&$crate::HOOKS),
+            &exact_delivery_adapter::API,
+            $embedded
+        );
+    };
+    ($data:ty, $plan:expr, $compat:expr) => {
+        $crate::host!(@adapter $plan, $compat);
         $crate::exact_apple::host!(
             $data,
             $plan,
