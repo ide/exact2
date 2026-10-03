@@ -1050,10 +1050,18 @@ mod name_tests {
             }
             if selectors.split(',').any(|selector| {
                 let selector = selector.trim();
-                selector.contains("input")
-                    || selector.contains("textarea")
-                    || selector.contains("select")
-                    || selector.contains("button")
+                // A rule nested in a component's own (`& > button` in the
+                // alert's dialog) styles that component, not the control
+                // reset; so does UIKit's switch, drawn from backgrounds at
+                // UIKit's size (zero specificity: the author's size wins), and
+                // a control's own parts (a range's `::-webkit-slider-thumb`).
+                !selector.starts_with('&')
+                    && !selector.contains("[switch]")
+                    && !selector.contains("::")
+                    && (selector.contains("input")
+                        || selector.contains("textarea")
+                        || selector.contains("select")
+                        || selector.contains("button"))
             }) {
                 assert!(
                     !declarations
