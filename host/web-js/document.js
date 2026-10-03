@@ -74,21 +74,21 @@ function publish() {
  * rt.js `After`), as the web host projects after every batch; Escape on a
  * modal route presses its back, and `navigate` takes a popstate's location. */
 export function projectRoots(history, navigate, say, after) {
-  const root = document.getElementById("exact-root"), project = () => { history.project(root, say); chrome(root, say); };
+  const root = document.getElementById("exact-root"), project = () => { history.project(root, say); navChrome(root, say); };
   history.connect(root, navigate, say);
   after.push(project); project();
 }
 
 /** The chrome a root's routes ask for (`navigationTitle`, `navigationTab`
- * …: chrome.js, the tab bar, bars and sheets the native hosts project),
+ * …: nav-chrome.js, the tab bar, bars and sheets the native hosts project),
  * fetched when a projected route first names one and drawn after each
  * projection from then on. */
-let Chrome = null;
-function chrome(root, say) {
-  if (Chrome) { if (Chrome.update) Chrome.update(root); return; }
+let NavChrome = null;
+function navChrome(root, say) {
+  if (NavChrome) { NavChrome.update?.(root); return; }
   if (!root.querySelector("[navigationBack]>[navigationKey]:is([data-navigationtitle],[data-navigationtab])")) return;
-  Chrome = {};
-  import("./chrome.js").then(m => { Chrome = m; m.update(root); }, err => say(`navigation chrome: ${err.message}`));
+  NavChrome = {};
+  import("./nav-chrome.js").then(m => { NavChrome = m; m.update(root); }, err => say(`navigation chrome: ${err.message}`));
 }
 
 /** The elements that may be the page's scroller: `<html data-scrolldocument>`
