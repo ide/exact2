@@ -422,7 +422,8 @@ final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, UIScrollV
             // The size layout measured already (SymbolMeasure): no move.
             presenter?.queueIntrinsicSize(self, generation: generation, SymbolMeasure.size(name, points: points, weight: weight))
         }
-        symbolView?.tintColor = color("tint_color", .black)
+        // `nil` inherits the hierarchy's tint, which UIKit keeps current.
+        symbolView?.tintColor = symbolTint
         if let leaf = symbolView { applySymbolEffect(leaf) }
         layoutSymbol()
     }
@@ -1113,7 +1114,7 @@ final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, UIScrollV
         styleTextArea()
         if let f = field, let t = text {
             f.font = t.font(size: number("font_size", 16), weight: Int(number("font_weight", 400)), family: Int(number("font_family")), italic: (style["font_style"]?.string) == "italic", numeric: Int(number("font_variant_numeric")))
-            f.textColor = color("text_color", .black)
+            f.textColor = color("text_color", SystemColor.canvasText)
             applyPlaceholder(f)
             f.frame = contentBox()
         }

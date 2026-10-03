@@ -13,6 +13,26 @@ import AppKit
 #endif
 
 enum SystemColor {
+    /// CSS's `CanvasText`, the initial `color` (LLP 1078
+    /// stage 2): the platform's own dynamic text colour, so a row the
+    /// presenter has no value for still follows appearance and contrast.
+    #if os(iOS)
+    static let canvasText: UIColor = .label
+    #else
+    static let canvasText: NSColor = .textColor
+    #endif
+    /// `canvasText`'s channels under an appearance, for a painter that takes
+    /// channels; the role's pair where the platform has no answer.
+    static func canvasTextChannels(dark: Bool) -> [Double] {
+        #if os(iOS)
+        let name = "labelColor"
+        #else
+        let name = "textColor"
+        #endif
+        let pair: [Double] = dark ? [255, 255, 255, 255] : [0, 0, 0, 255]
+        return channels(name, dark: dark, fallback: pair) ?? pair
+    }
+
     private static let lock = NSLock()
     nonisolated(unsafe) private static var resolved: [String: [Double]] = [:]
     nonisolated(unsafe) private static var refused: Set<String> = []

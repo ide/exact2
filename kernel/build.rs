@@ -1011,13 +1011,12 @@ fn generate(schema: &Schema, digest: u64) -> String {
     writeln!(w, "        StyleProps {{").unwrap();
     for row in &schema.styles {
         let codec = parse_codec(&row.codec);
-        writeln!(
-            w,
-            "            {}: {},",
-            row.field,
-            codec.default_expr(&row.default, &row.field)
-        )
-        .unwrap();
+        // @ref LLP 1078 stage 2 — a colour default may name a role.
+        let default = match (&codec, row.default.as_str()) {
+            (Codec::ColorValue, Some(name)) => role_default(&schema.colors, name, &row.field),
+            _ => codec.default_expr(&row.default, &row.field),
+        };
+        writeln!(w, "            {}: {},", row.field, default).unwrap();
     }
     writeln!(w, "            mask: StyleMask::EMPTY,").unwrap();
     writeln!(w, "            relative: Default::default(),").unwrap();

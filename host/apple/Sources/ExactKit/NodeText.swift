@@ -116,7 +116,7 @@ extension NodeView {
         // `text-overflow: ellipsis` applies to a box that clips its inline overflow.
         let clips = (style["overflow_x"]?.string).map { $0 != "visible" } ?? false
         var spec = Spec(runs: runs, align: align, lineClamp: lineClamp,
-                        color: channels("text_color", dark: night) ?? [0, 0, 0, 255],
+                        color: channels("text_color", dark: night) ?? SystemColor.canvasTextChannels(dark: night),
                         overflowWrap: style["overflow_wrap"]?.string == "anywhere" ? 2 : style["overflow_wrap"]?.string == "break-word" ? 1 : 0, direction: rtl ? 1 : 0, whiteSpace: whiteSpace, strut: textRun(""))
         spec.ellipsis = lineClamp == 0 && clips && style["text_overflow"]?.string == "ellipsis"
         spec.source = source

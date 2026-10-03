@@ -15,6 +15,25 @@ typealias SymbolConfig = NSImage.SymbolConfiguration
 #endif
 
 extension NodeView {
+    /// The symbol's own tint, or `nil` to follow the platform's accent
+    /// (LLP 1078 stage 2): the initial `tint-color` is `AccentColor`, which the
+    /// platform keeps dynamic (iOS inherits the hierarchy's `tintColor`, a
+    /// window or app tint included; macOS has `controlAccentColor`), so it is
+    /// never resolved to channels here.
+    var symbolTint: PlatformColor? {
+        guard let row = style["tint_color"] else { return nil }
+        if case .object(let o) = row, o["sys"]?.string == "@tint" { return nil }
+        return channels("tint_color").map(TextEngine.color)
+    }
+    /// The accent a `nil` `symbolTint` follows, for an API that needs a colour.
+    var inheritedTint: PlatformColor {
+        #if os(iOS)
+        return tintColor
+        #else
+        return .controlAccentColor
+        #endif
+    }
+
     /// What the symbol's look reads from its style, for the image's key: a
     /// change makes it again.
     var symbolLookKey: String {
@@ -25,7 +44,7 @@ extension NodeView {
     /// The symbol's configuration: its size and weight, then its rendering
     /// mode (D10) — hierarchical in the tint, a palette, or multicolor.
     func symbolConfiguration(_ base: SymbolConfig) -> SymbolConfig {
-        let tint = color("tint_color", .black)
+        let tint = symbolTint ?? inheritedTint
         switch style["symbol_rendering"]?.string {
         case "hierarchical": return base.applying(SymbolConfig(hierarchicalColor: tint))
         case "multicolor": return base.applying(SymbolConfig.preferringMulticolor())

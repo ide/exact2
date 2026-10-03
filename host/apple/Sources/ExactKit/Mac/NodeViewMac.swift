@@ -459,7 +459,7 @@ final class NodeView: NSView, NSTextViewDelegate, NSTextFieldDelegate {
                 presenter.intrinsic(self.id, size)
             }
         }
-        symbolView?.contentTintColor = color("tint_color", .black)
+        symbolView?.contentTintColor = symbolTint ?? .controlAccentColor
         if let leaf = symbolView { applySymbolEffect(leaf) }
         layoutSymbol()
     }
@@ -1137,7 +1137,7 @@ final class NodeView: NSView, NSTextViewDelegate, NSTextFieldDelegate {
         if let f = field, let t = text {
             (f.currentEditor() as? NSTextView)?.insertionPointColor = caretColor
             f.font = t.font(size: number("font_size", 16), weight: Int(number("font_weight", 400)), family: Int(number("font_family")), italic: (style["font_style"]?.string) == "italic", numeric: Int(number("font_variant_numeric")))
-            f.textColor = color("text_color", .black)
+            f.textColor = color("text_color", SystemColor.canvasText)
             applyPlaceholder(f)
             f.frame = contentBox()
         }
