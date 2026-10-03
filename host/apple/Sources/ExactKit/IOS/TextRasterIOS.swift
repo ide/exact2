@@ -236,6 +236,7 @@ extension NodeView {
     func textRasterGeometryChanged() {
         if let key = textRasterKey, key.size == bounds.size, key.box == contentBox() { return }
         textRasterKey = nil
+        presenter?.textStaleInBatch(self)
         presenter?.requestTextPublication()
     }
     func showTextRaster(_ result: TextRasterImage?, for key: TextRasterKey) {
@@ -393,9 +394,19 @@ extension Presenter {
         return owed
     }
 
-    /// Paint motion's colour reaches the screen with its value (LLP 1062
-    /// D6): a paragraph whose presented colour a batch changed is painted
-    /// as the batch ends, where it shows, not on a worker a frame later.
+    /// A batch made `node`'s pixels stale: its text, style or box changed.
+    /// The batch's layout commits as it ends, so a paragraph that shows is
+    /// painted then too (`paintPresentedText`): the old image kept up in a
+    /// box laid out for the new text drew one frame of the old words in the
+    /// new place ("Locking" in "Locked"'s box). Outside a batch (a scroll,
+    /// a worker's return) the pump paints as before.
+    func textStaleInBatch(_ node: NodeView) {
+        if applying, node.isParagraph { presentedText.insert(node.id) }
+    }
+
+    /// One visual state, one commit (LLP 1062 D6, colour; and what
+    /// `textStaleInBatch` names): a paragraph a batch changed is painted as
+    /// the batch ends, where it shows, not on a worker a frame later.
     func paintPresentedText() {
         guard !presentedText.isEmpty else { return }
         let ids = presentedText
