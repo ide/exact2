@@ -418,6 +418,11 @@ final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, UIScrollV
             if !name.isEmpty || source.hasPrefix("symbol:sf/") { symbolRefusal = nil }
             let leaf = symbolView ?? UIImageView()
             if symbolView == nil { symbolView = leaf; addSubview(leaf) }
+            // An authored colour is the symbol's own, drawn into it: UIKit
+            // dims a tint behind an alert, and only the accent should dim
+            // (SwiftUI's foregroundStyle stays; its tint greys).
+            let mono = (style["symbol_rendering"]?.string ?? "monochrome") == "monochrome"
+            if mono, let own = symbolTint { image = image?.withTintColor(own, renderingMode: .alwaysOriginal) }
             showSymbol(image, on: leaf); leaf.isAccessibilityElement = false; leaf.isUserInteractionEnabled = false
             // The size layout measured already (SymbolMeasure): no move.
             presenter?.queueIntrinsicSize(self, generation: generation, SymbolMeasure.size(name, points: points, weight: weight))
