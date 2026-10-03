@@ -1,11 +1,10 @@
 # iOS scrolling: what Exact runs per frame, and three changes
 
-**Status:** Built on the `ide/exact2` fork's `main` branch, 2026-10-02:
+**Status:** Built, 2026-10-02, as three commits that can each be taken
+alone:
 - `4ffb9488`
 - `2be59e59`
-- `9a3d70cc`
-
-Each can be taken alone. Measured on an iOS 27 simulator (iPhone 17 Pro).
+- `9a3d70cc` Measured on an iOS 27 simulator (iPhone 17 Pro).
 
 ## 1. The question
 
