@@ -66,6 +66,7 @@ extension NodeView {
         #if os(macOS)
         textRasterPending = false
         #else
+        presenter?.textStaleInBatch(self)
         presenter?.requestTextPublication()
         #endif
     }
