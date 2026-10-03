@@ -203,6 +203,10 @@ impl<'a> Reader<'a> {
         match self.u8()? {
             0 => Ok(ColorValue::Fixed(self.color()?)),
             1 => Ok(ColorValue::LightDark(self.color()?, self.color()?)),
+            // @ref LLP 1078 D1 — a role by id, a `platform-color()` as written.
+            2 => Ok(ColorValue::Role(self.u8()?)),
+            3 => crate::style::roles::parse_platform(self.string()?)
+                .ok_or(DecodeError::BadColorValue(3)),
             other => Err(DecodeError::BadColorValue(other)),
         }
     }
@@ -545,6 +549,17 @@ impl Writer {
                 self.color(light);
                 self.color(night);
             }
+            ColorValue::Role(id) => {
+                self.u8(2);
+                self.u8(id);
+            }
+            ColorValue::Platform(id) => match crate::style::roles::platform(id) {
+                Some(p) => {
+                    self.u8(3);
+                    self.string(&p.text);
+                }
+                None => self.color_value(ColorValue::Fixed(crate::style::Color::TRANSPARENT)),
+            },
         }
     }
 

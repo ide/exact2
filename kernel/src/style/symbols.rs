@@ -1,7 +1,6 @@
 //! LLP 1077 §5: the affordances Apple's platforms have and CSS has no name
-//! for, as declared rows: an SF Symbol's palette (D10), and the system's
-//! label, fill and separator colours (D13), which resolve as `light-dark()`
-//! pairs of UIKit's own values on every host.
+//! for, as declared rows: an SF Symbol's palette (D10). The system colours
+//! D13 named are roles now (LLP 1078 D2, `roles.rs`).
 
 use super::{Color, ColorValue};
 
@@ -62,26 +61,6 @@ impl SymbolPalette {
     }
 }
 
-/// UIKit's label, fill and separator colours as WebKit spells them, light
-/// and dark (LLP 1077 D13): the one table every host and the web JS
-/// target's bound values read.
-pub const SYSTEM_COLORS: [(&str, u32, u32); 6] = [
-    ("-apple-system-label", 0x0000_00ff, 0xffff_ffff),
-    ("-apple-system-secondary-label", 0x3c3c_4399, 0xebeb_f599),
-    ("-apple-system-tertiary-label", 0x3c3c_434d, 0xebeb_f54d),
-    ("-apple-system-quaternary-label", 0x3c3c_432e, 0xebeb_f529),
-    ("-apple-system-separator", 0x3c3c_434a, 0x5454_5899),
-    ("-apple-system-fill", 0x7878_8033, 0x7878_805c),
-];
-
-pub(super) fn system_color(name: &str) -> Option<ColorValue> {
-    let name = name.trim().to_ascii_lowercase();
-    SYSTEM_COLORS
-        .iter()
-        .find(|(n, ..)| *n == name)
-        .map(|&(_, l, d)| ColorValue::LightDark(Color(l), Color(d)))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -94,13 +73,9 @@ mod tests {
         assert_eq!(SymbolPalette::parse("none").unwrap().0, vec![]);
         assert!(SymbolPalette::parse("#000 #111 #222 #333").is_none());
         assert!(SymbolPalette::parse("bogus").is_none());
-        assert_eq!(
-            system_color("-apple-system-label"),
-            Some(ColorValue::LightDark(Color(0xff), Color(0xffff_ffff)))
-        );
-        assert_eq!(
-            ColorValue::parse_light_dark("-apple-system-secondary-label"),
-            system_color("-apple-system-secondary-label")
-        );
+        // WebKit's names are roles now (LLP 1078 D2), not copied pairs.
+        let label = ColorValue::parse_light_dark("-apple-system-label").unwrap();
+        assert_eq!(label, ColorValue::parse_light_dark("label").unwrap());
+        assert_eq!(label.resolve(true), Color(0xffff_ffff));
     }
 }

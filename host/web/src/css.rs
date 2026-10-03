@@ -525,6 +525,9 @@ fn declared(out: &mut String, id: StyleId, value: &RowValue<'_>) {
             rgba_into(out, *d);
             out.push(')');
         }
+        // @ref LLP 1078 D2 — a CSS system colour as is, an Exact role as
+        // `var(--exact-<role>, <fallback>)`, a `platform-color()` as its web colour.
+        RowValue::ColorValue(c) => exact_kernel::gradient::color_css(out, *c),
         RowValue::LineHeight(v) => out.push_str(&v.css()),
         RowValue::Enum(e) => out.push_str(e),
         RowValue::ClipPath(p) => out.push_str(&p.css()),

@@ -281,7 +281,9 @@ fn build_sources(
     // A store delivers plan and assets, never this module (signed module
     // delivery is not implemented): such a binary's id pins the module, so a
     // bundle reaches only binaries whose compiled logic is byte-identical.
-    let module = meta["module"]["sha256"].as_str().ok_or("missing module hash")?;
+    let module = meta["module"]["sha256"]
+        .as_str()
+        .ok_or("missing module hash")?;
     let stored = manifest.store(platform) != "0";
     let compat = exact_bake::compatibility_id_pinned(
         app,

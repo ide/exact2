@@ -138,8 +138,7 @@ extension NodeView {
         guard case .object(let o)? = style["text_shadow"], let offset = o["o"]?.numbers, offset.count == 2 else { return nil }
         var color = text
         if let c = o["c"] {
-            if let fixed = c.numbers, fixed.count == 4 { color = fixed }
-            else if let pair = c.array, pair.count == 2, let chosen = pair[dark ? 1 : 0].numbers, chosen.count == 4 { color = chosen }
+            if let chosen = c.channels(dark: dark) { color = chosen }
         }
         return offset + [max(0, o["b"]?.number ?? 0)] + color
     }

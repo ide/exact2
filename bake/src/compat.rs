@@ -116,7 +116,15 @@ pub fn compatibility_id_sources(
     grants: Option<&str>,
     rust_grants: Option<&str>,
 ) -> Result<Compat, String> {
-    compatibility_id_pinned(app_dir, platform, target, manifest, grants, rust_grants, None)
+    compatibility_id_pinned(
+        app_dir,
+        platform,
+        target,
+        manifest,
+        grants,
+        rust_grants,
+        None,
+    )
 }
 
 /// As [`compatibility_id_sources`], for a module client (its logic compiled
@@ -763,7 +771,16 @@ mod tests {
         let dir = app("pinned-module");
         let manifest = Manifest::read(&dir).unwrap();
         let id = |module| {
-            super::compatibility_id_pinned(&dir, "ios", "aarch64-apple-ios", &manifest, Some(""), None, module).unwrap()
+            super::compatibility_id_pinned(
+                &dir,
+                "ios",
+                "aarch64-apple-ios",
+                &manifest,
+                Some(""),
+                None,
+                module,
+            )
+            .unwrap()
         };
         let plain = id(None);
         let a = id(Some("aa"));
@@ -772,7 +789,11 @@ mod tests {
         assert_ne!(a.id, plain.id, "the module is in the id");
         assert_eq!(id(Some("aa")).id, a.id, "the same module, the same cohort");
         assert_ne!(id(Some("bb")).id, a.id, "another module, another cohort");
-        assert_eq!(a.id, super::compatibility_digest(&a.inputs), "the id digests the inputs it reports");
+        assert_eq!(
+            a.id,
+            super::compatibility_digest(&a.inputs),
+            "the id digests the inputs it reports"
+        );
     }
 
     /// A Rust-only app's grants are read here and nowhere earlier: a set a

@@ -239,6 +239,11 @@ impl Paint {
             Paint::Color(ColorValue::LightDark(a, b)) => {
                 format!("light-dark({}, {})", hex(*a), hex(*b))
             }
+            Paint::Color(reference) => {
+                let mut out = String::new();
+                crate::style::roles::reference_css(&mut out, *reference);
+                out
+            }
             Paint::Url(id, fallback) => {
                 let tail = match fallback {
                     PaintFallback::Default => String::new(),

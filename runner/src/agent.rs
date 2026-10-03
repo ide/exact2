@@ -593,6 +593,16 @@ fn row_json(v: RowValue<'_>, out: &mut String) {
         RowValue::ColorValue(ColorValue::LightDark(l, d)) => {
             quote(&format!("light-dark({}, {})", hex(l), hex(d)), out)
         }
+        // @ref LLP 1078 D7 — a reference reports what it names.
+        RowValue::ColorValue(ColorValue::Role(id)) => {
+            quote(exact_kernel::style::roles::role_of(id).name, out)
+        }
+        RowValue::ColorValue(ColorValue::Platform(id)) => {
+            match exact_kernel::style::roles::platform(id) {
+                Some(p) => quote(&p.text, out),
+                None => quote("transparent", out),
+            }
+        }
         RowValue::Enum(name) => quote(name, out),
         RowValue::Vec2(v) => {
             let _ = write!(out, "[{},{}]", num(v.x as f64), num(v.y as f64));

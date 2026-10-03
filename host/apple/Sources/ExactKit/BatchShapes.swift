@@ -231,6 +231,12 @@ extension InlineStyle {
         case "letter_spacing": run.letterSpacing = CGFloat(Float(try BatchFields.number(value)))
         case "font_variant_numeric": run.numeric = Int(try BatchFields.number(value)) & 0xff
         case "text_decoration_line": run.decoration = try BatchFields.string(value)
+        case "text_color" where value.isSystemColor, "background_color" where value.isSystemColor:
+            // @ref LLP 1078 D5 — a platform colour, resolved for each
+            // appearance as the run is read (an inline run has no view).
+            guard let light = value.channels(dark: false), let dark = value.channels(dark: true) else { throw BatchReader.Invalid.wire }
+            paired = true
+            if key == "text_color" { run.color = light; darkColor = dark } else { run.background = light; darkBackground = dark }
         case "text_color":
             guard case .array(let a) = value else { throw BatchReader.Invalid.wire }
             if a.count == 2 {

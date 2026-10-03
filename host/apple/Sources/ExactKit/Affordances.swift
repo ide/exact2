@@ -31,9 +31,7 @@ extension NodeView {
         case "multicolor": return base.applying(SymbolConfig.preferringMulticolor())
         case "palette":
             let colors = (style["symbol_palette"]?.array ?? []).compactMap { c -> PlatformColor? in
-                if let fixed = c.numbers, fixed.count == 4 { return TextEngine.color(fixed) }
-                if let pair = c.array, pair.count == 2, let chosen = pair[drawsDark ? 1 : 0].numbers { return TextEngine.color(chosen) }
-                return nil
+                c.channels(dark: drawsDark).map(TextEngine.color)
             }
             return colors.isEmpty ? base : base.applying(SymbolConfig(paletteColors: colors))
         default: return base

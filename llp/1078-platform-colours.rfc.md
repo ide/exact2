@@ -1,7 +1,7 @@
 # LLP 1078: Platform colours: semantic roles, every native colour, and app themes
 
 **Type:** RFC
-**Status:** Draft r2.1, 2026-10-03 (§6's questions for the maintainer, under the owner's principle: the platform's guidelines first). r1 (2026-10-02) was reviewed adversarially against the source and found NOT READY; §8 folds every finding. Not implemented.
+**Status:** Draft r2.1, 2026-10-03; stage 1 built (§9) (§6's questions for the maintainer, under the owner's principle: the platform's guidelines first). r1 (2026-10-02) was reviewed adversarially against the source and found NOT READY; §8 folds every finding. Not implemented.
 **Systems:**
 - Kernel: the colour value, an interned reference; the role table; resolutions the host reports
 - Contract: role keywords, `platform-color()`, `theme`
@@ -564,6 +564,60 @@ is taken:
 | The colour row list was wrong (`outline-color` has no row; filter and stop colours missing) | D1 |
 | No Implementer; first app unnamed | header; §5.6 |
 | Scope: cut Android, Windows and dynamic `platform-color` from r1 | §7 |
+
+## 9. As built (stage 1, 2026-10-03)
+
+Built on the fork's `ide/main` and used by a real app (a vehicle app's
+whole palette) to validate the API.
+
+**Built:**
+- **D2 roles.** `kernel/tables/schema.json`'s `colors` table: CSS's twelve
+  system colours D2 maps, and 31 Exact roles (the labels, `placeholder`,
+  `separator`, `opaque-separator`, `link`, the backgrounds and grouped
+  backgrounds in three levels, four fills, thirteen system hues). `build.rs`
+  generates `COLOR_ROLES`. `SYSTEM_COLORS` is deleted; WebKit's
+  `-apple-system-*` names are aliases.
+- **D1, as a role id and an interned table.** `ColorValue::Role(u8)` indexes
+  the schema's table; `ColorValue::Platform(u16)` indexes a process table of
+  `platform-color()`s, capped at 1024, which the wire carries as the
+  function's canonical text. `ColorValue` stays `Copy + Eq`. Every parser
+  meets them through `parse_light_dark`, so every colour row and embedded
+  colour takes them. **Deviation from D1:** no plan-carried table yet. A
+  role's id is the schema's, which the schema digest already pins; a
+  `platform-color()` is re-interned from its text on decode.
+- **D3 `platform-color()`.** Names are checked as D3 says
+  (`[a-z][A-Za-z0-9]*Color`, `named:<Asset>`); the fallback is required and
+  is never a reference.
+- **D5 on Apple.** The Apple wire carries a reference as
+  `{"sys": <class property>, "c": <fallback>}`. `SystemColor.swift` looks the
+  name up (`class_getClassMethod`, zero arguments, the result a colour) and
+  resolves it against style, Increased Contrast and, on iOS, the view's
+  user-interface level, cached per trait set. Nodes re-apply on a change of
+  style, contrast or level. Inline runs resolve per appearance as they are
+  read.
+- **D7 contrast.** `prefer contrast more` sets the scene's contrast trait on
+  iOS and a high-contrast appearance on macOS.
+- **The web** writes a CSS system colour as is and an Exact role as
+  `var(--exact-<role>, light-dark(<fallback>))`, which reads back as the role.
+
+**Not built yet:**
+- **D4 `theme`.** The app needed none: every colour it named is a role.
+- **The web's role sheet** (Safari's `-apple-system-*`, `prefers-contrast`).
+  Without it the web shows each role's fallback pair, which is correct but
+  not dynamic.
+- **Host-reported resolutions (D1).** Paint motion, SVG filters, gradient
+  stops and SVG scenes use a reference's fallback pair.
+- **The lints:** `lower-platform-color-literal`, `lower-keyframe-color-ref`.
+
+**What the app found:**
+- **A role at an alpha is missing.** The app's 15% washes behind banners and
+  icons (`system-orange` at 15%) stay hand-written `light-dark()` pairs, so
+  they do not follow Increased Contrast. CSS answers this with relative
+  colour (`rgb(from <colour> r g b / 15%)`) or `color-mix()`. The
+  recommendation is relative colour over a reference, resolved by the host
+  after the reference is.
+- **Roles covered everything else**, including fills (`tertiary-fill`,
+  `quaternary-fill`) the r2 table lacked. They are added.
 
 ## Appendix A — Android and Windows (non-normative)
 
