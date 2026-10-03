@@ -396,6 +396,8 @@ const grantSection = (() => {
   writeFileSync(resolve(gen, 'navigation.js'), [...lines.slice(0, begin), `export { ${names.join(', ')} } from './grant-admission.js';`, ...lines.slice(end + 1)].join('\n'));
   return lines.slice(begin, end + 1).join('\n') + '\n';
 })();
+// The page around the app (document.js `markDocument`), the web host's own.
+cpSync(resolve(root, 'host/web/chrome.js'), resolve(gen, 'chrome.js'));
 // The agent adapter reads its own copies of the modules it shares with the
 // entry: a module lives in one chunk, so what only the agent reads from
 // navigation.js (the guest outline and taps, the environment) or names.js
@@ -522,7 +524,7 @@ writeFileSync(resolve(out, 'index.html'), `<!doctype html>
 <base href="/">
 <title>${manifest.name}</title>
 <meta name="viewport" content="${viewport}">
-${preloads}<style>${base}${css}</style>
+${/viewport-fit=cover/.test(viewport) ? '<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">\n' : ''}${preloads}<style>${base}${css}</style>
 <div id="exact-root"${manifest.audio_session ? ` data-audio-session="${manifest.audio_session}"` : ''}></div>
 ${args.includes('--inline') ? `<script type="module">${readFileSync(resolve(out, 'app.js'), 'utf8').replaceAll('</script', '<\\/script')}</script>` : '<script type="module" src="./app.js"></script>'}
 `);
