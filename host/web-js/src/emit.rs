@@ -911,6 +911,9 @@ impl Em<'_> {
             let press = self.uses.rt("pressFeedback");
             let _ = write!(self.out, "{press}();");
         }
+        if presence.contains("--exact-animation-clock:") {
+            self.clocks();
+        }
         if element == "a" {
             attrs.push(("data-view".into(), String::new()));
         }

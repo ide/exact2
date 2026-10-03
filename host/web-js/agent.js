@@ -4,7 +4,7 @@
 // (CDP). Loaded only under `?agent`; never part of an app's boot bytes.
 import names, { types } from './names.js';
 import { R, eq, pieces, pageHistory, Head } from './rt.js';
-import { environment, navigation, guestOutline, guestTap, guestType, viewBox } from './navigation.js';
+import { environment, navigation, guestOutline, guestTap, guestType, viewBox, animationClocks } from './navigation.js';
 // A runtime value as the runner's typed JSON: records by field name.
 const typed = (v, t) => v == null || typeof t === 'string' ? v : Array.isArray(t) ? (t[0] === '?' ? typed(v, t[1]) : v.map(x => typed(x, t[1]))) : Object.fromEntries(Object.keys(t).map((k, i) => [k, typed(v[i], t[k])]));
 const PROPS = [['aria-live', 'accessibilityLive'], ['role', 'accessibilityRole'], ['aria-description', 'accessibilityHint'], ['aria-keyshortcuts', 'accessibilityKeyShortcuts'], ['aria-orientation', 'accessibilityOrientation'], ['aria-level', 'accessibilityHeadingLevel', 1], ['aria-posinset', 'accessibilityPosInSet', 1], ['aria-setsize', 'accessibilitySetSize', 1], ['placeholder', 'placeholder'], ['viewportFit', 'viewportFit'], ['interactiveWidget', 'interactiveWidget']];
@@ -140,9 +140,10 @@ export function install(exact) {
   // to where the last one ends, as the wasm host's does.
   // (navigation.js's `animationClock`, restated; the build gives this module
   // its own copy of navigation.js, so it could now be imported.)
-  const starts = new WeakMap(), held = new WeakSet();
+  // A synced animation starts on its clock's boundary (LLP 1055.002).
+  const starts = new WeakMap(), held = new WeakSet(), clocks = animationClocks(document);
   const anim = {
-    register(t) { for (const a of document.getAnimations()) if (!starts.has(a)) { starts.set(a, t); if (a.playState === 'paused') held.add(a); } },
+    register(t) { for (const a of document.getAnimations()) if (!starts.has(a)) { starts.set(a, clocks.start(a, t) ?? t); if (a.playState === 'paused') held.add(a); } },
     seek(to) {
       for (const a of document.getAnimations()) {
         const timing = a.effect?.getComputedTiming();
