@@ -737,6 +737,11 @@ impl ColorValue {
     /// The colour under an appearance. A host that paints calls this; the web
     /// host does not, because it hands the pair to the browser.
     pub fn resolve(self, dark: bool) -> Color {
+        // @ref LLP 1078 D1 — a reference is what the host reported, else
+        // its fallback pair.
+        if let Some(c) = roles::reported(self, dark) {
+            return c;
+        }
         match self.fallback() {
             ColorValue::LightDark(light, night) => {
                 if dark {

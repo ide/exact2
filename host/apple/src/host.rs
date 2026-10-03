@@ -27,6 +27,11 @@ mod arrange;
 mod arrange_tests;
 #[path = "canvas2d.rs"]
 pub(crate) mod canvas2d;
+#[path = "colors.rs"]
+mod colors;
+#[cfg(test)]
+#[path = "colors_tests.rs"]
+mod colors_tests;
 #[path = "content_region/host.rs"]
 mod content_region_host;
 #[path = "height.rs"]

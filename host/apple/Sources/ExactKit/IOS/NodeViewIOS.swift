@@ -485,6 +485,7 @@ final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, UIScrollV
             node.paragraphOwner.invalidateText()
             node.paragraphOwner.setNeedsDisplay()
             node.applyStyle(node.style)
+            node.presenter?.svg.appearance(node.id, layer: node.layer, dark: node.drawsDark, clock: node.presenter?.session?.clock)
             node.presenter?.requestTextPublication()
             if let presenter = node.presenter, node.superview === presenter.root { presenter.paintCanvas() }
         }

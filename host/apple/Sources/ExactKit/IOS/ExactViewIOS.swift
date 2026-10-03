@@ -44,7 +44,7 @@ public final class ExactView: UIView {
         session.presenter.onTitle = { [weak self] title in self?.onTitle?(title) }
         session.presenter.onKeyboardResize = { [weak self] in self?.fit() }
         session.presenter.observeKeyboard()
-        registerForTraitChanges([UITraitUserInterfaceStyle.self, UITraitDisplayScale.self]) { (view: ExactView, _: UITraitCollection) in view.reportScheme(); view.setNeedsLayout() }
+        registerForTraitChanges([UITraitUserInterfaceStyle.self, UITraitDisplayScale.self, UITraitAccessibilityContrast.self]) { (view: ExactView, _: UITraitCollection) in view.reportScheme(); view.setNeedsLayout() }
     }
 
     /// Paint motion resolves `light-dark()` by this view's appearance (LLP 1062).

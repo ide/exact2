@@ -590,8 +590,20 @@ final class SvgHost {
     private var boxInstalled: [UInt32: [String: String]] = [:]
     private var seeked: Double?
 
+    /// Each scene as last sent and the appearance it was drawn in: a scene's
+    /// `light-dark()` pairs (and reported platform colours, LLP 1078 D1)
+    /// are the presenter's to pick, so an appearance change redraws it.
+    private var payloads: [UInt32: (payload: [String: Any], dark: Bool)] = [:]
+
+    /// A view's appearance changed: its scene, if any, redraws in it.
+    func appearance(_ id: UInt32, layer: CALayer?, dark: Bool, clock: Double?) {
+        guard let last = payloads[id], last.dark != dark else { return }
+        scene(id, last.payload, layer: layer, dark: dark, clock: clock)
+    }
+
     func scene(_ id: UInt32, _ payload: [String: Any], layer: CALayer?, dark: Bool, clock: Double?) {
         guard let layer else { return }
+        payloads[id] = (payload, dark)
         let scene = scenes[id] ?? { let s = SvgScene(); scenes[id] = s; return s }()
         if scene.root.superlayer !== layer { layer.addSublayer(scene.root) }
         scene.scale = max(1, layer.contentsScale)
@@ -620,6 +632,7 @@ final class SvgHost {
 
     func forget(_ id: UInt32) {
         if let scene = scenes.removeValue(forKey: id) { scene.reset(); scene.root.removeFromSuperlayer() }
+        payloads.removeValue(forKey: id)
         if let entry = boxSpecs.removeValue(forKey: id) { CssAnimations.apply([], to: entry.layer, clock: nil, installed: &boxInstalled[id, default: [:]]) }
         boxInstalled.removeValue(forKey: id)
     }

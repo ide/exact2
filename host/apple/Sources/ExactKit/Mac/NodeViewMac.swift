@@ -794,6 +794,7 @@ final class NodeView: NSView, NSTextViewDelegate, NSTextFieldDelegate {
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
         if let regions = presenter?.session?.regions, regions.owns(self) { regions.geometryChanged() }
+        presenter?.svg.appearance(id, layer: layer, dark: drawsDark, clock: presenter?.session?.clock)
         guard hasSchemeColor || inlineText.contains(where: { $0.hasSchemeColor }) else { return }
         paragraphOwner.invalidateText()
         paragraphOwner.needsDisplay = true

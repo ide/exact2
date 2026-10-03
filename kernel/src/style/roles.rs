@@ -5,7 +5,8 @@
 
 use super::{Color, ColorValue};
 use crate::generated::{ColorRole, COLOR_ROLES};
-use std::sync::{Arc, Mutex};
+use std::collections::BTreeMap;
+use std::sync::{Arc, Mutex, RwLock};
 
 /// The role a keyword names: CSS's system colours in any ASCII case, Exact's
 /// roles, WebKit's `-apple-system-*` names for them, and the web form a role
@@ -54,6 +55,72 @@ pub struct PlatformColor {
     pub fallback: ColorValue,
     /// The function as written, canonical: what the wire carries.
     pub text: Box<str>,
+}
+
+/// What a host reported each reference resolves to (LLP 1078 D1), by
+/// reference and appearance: a host with the platform's colours resolves
+/// every reference under the traits it is showing (style, Increased
+/// Contrast) and reports the whole set again whenever they change, so what
+/// the kernel resolves itself — paint motion, gradients, SVG scenes and
+/// filters — is the platform's colour, not a snapshot of the fallback. A
+/// host that reports nothing (Linux, headless) keeps the fallback pair.
+/// One platform per process, so one table.
+static REPORTED: RwLock<BTreeMap<(u8, u16, bool), Color>> = RwLock::new(BTreeMap::new());
+
+fn reference_key(c: ColorValue) -> Option<(u8, u16)> {
+    match c {
+        ColorValue::Role(id) => Some((0, u16::from(id))),
+        ColorValue::Platform(id) => Some((1, id)),
+        _ => None,
+    }
+}
+
+/// The colour a host reported for a reference under an appearance.
+pub fn reported(c: ColorValue, dark: bool) -> Option<Color> {
+    let (kind, id) = reference_key(c)?;
+    REPORTED.read().ok()?.get(&(kind, id, dark)).copied()
+}
+
+/// Replace every reported resolution with `entries` (a reference, an
+/// appearance, its colour); `true` when anything resolves differently.
+pub fn set_reported(entries: impl IntoIterator<Item = (ColorValue, bool, Color)>) -> bool {
+    let next: BTreeMap<(u8, u16, bool), Color> = entries
+        .into_iter()
+        .filter_map(|(c, dark, color)| reference_key(c).map(|(k, id)| ((k, id, dark), color)))
+        .collect();
+    let Ok(mut table) = REPORTED.write() else {
+        return false;
+    };
+    let changed = *table != next;
+    *table = next;
+    changed
+}
+
+/// Every reference a host may resolve, with its native name on this
+/// platform: each role, then each interned `platform-color()` that names one.
+pub fn references(macos: bool) -> Vec<(ColorValue, Box<str>)> {
+    let mut out: Vec<(ColorValue, Box<str>)> = COLOR_ROLES
+        .iter()
+        .enumerate()
+        .filter_map(|(i, r)| {
+            let name = if macos { r.macos } else { r.ios };
+            let id = u8::try_from(i).ok()?;
+            (!name.is_empty()).then(|| (ColorValue::Role(id), name.into()))
+        })
+        .collect();
+    if let Ok(table) = PLATFORM.lock() {
+        for (i, p) in table.iter().enumerate() {
+            let name = if macos {
+                p.macos.clone()
+            } else {
+                p.ios.clone()
+            };
+            if let (Some(name), Ok(id)) = (name, u16::try_from(i)) {
+                out.push((ColorValue::Platform(id), name));
+            }
+        }
+    }
+    out
 }
 
 /// Interned `platform-color()`s. A plan names a few; the cap keeps a data
@@ -182,6 +249,29 @@ pub(crate) fn reference_css(out: &mut String, c: ColorValue) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_reported_resolution_replaces_the_fallback_until_withdrawn() {
+        // A name no other test reports: the table is process-wide.
+        let c = ColorValue::parse_light_dark(
+            "platform-color(ios rolesTestReportColor, light-dark(#010203, #040506))",
+        )
+        .unwrap();
+        assert_eq!(c.resolve(true), Color(0x0405_06ff));
+        assert!(references(false)
+            .iter()
+            .any(|(r, name)| *r == c && &**name == "rolesTestReportColor"));
+        assert!(set_reported([(c, true, Color(0xff00_00ff))]));
+        assert_eq!(c.resolve(true), Color(0xff00_00ff));
+        assert_eq!(
+            c.resolve(false),
+            Color(0x0102_03ff),
+            "light was not reported"
+        );
+        assert!(!set_reported([(c, true, Color(0xff00_00ff))]), "unchanged");
+        assert!(set_reported([]));
+        assert_eq!(c.resolve(true), Color(0x0405_06ff));
+    }
 
     #[test]
     fn roles_answer_to_css_and_webkit_names_and_their_own_css() {

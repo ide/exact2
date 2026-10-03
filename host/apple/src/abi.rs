@@ -1467,6 +1467,8 @@ pub fn with_entry<D: DataSource>(
 
 mod exports;
 
+#[path = "abi/colors.rs"]
+mod colors;
 #[path = "abi/commands.rs"]
 mod commands;
 

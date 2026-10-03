@@ -147,6 +147,12 @@ impl SvgState {
         }
     }
 
+    /// Every scene sent so far is rebuilt: the colours it resolved changed
+    /// (LLP 1078 D1). An unchanged scene is not sent again.
+    pub(crate) fn all_dirty(&mut self) {
+        self.dirty.extend(self.sent.keys().copied());
+    }
+
     /// Whether an SVG element handles presses; its scene says so.
     pub(crate) fn handlers(&mut self, id: ViewId, press: bool) {
         if press {
@@ -997,9 +1003,16 @@ fn paint_json(paint: Option<&ShapePaint>, s: &mut String) {
         return server_json(server, paint.opacity, s);
     }
     let a = |alpha: u8| ((alpha as f32) * paint.opacity).round() as u8;
-    // A reference paints its fallback in a scene (LLP 1078 §7: the scene's
-    // colours resolve by appearance only).
-    match paint.color.fallback() {
+    // @ref LLP 1078 D1 — a reference paints what the presenter reported
+    // for each appearance (else its fallback pair); a new report rebuilds
+    // the scene, so the scene follows the platform's colour.
+    let color = match paint.color {
+        c @ (ColorValue::Role(_) | ColorValue::Platform(_)) => {
+            ColorValue::LightDark(c.resolve(false), c.resolve(true))
+        }
+        c => c,
+    };
+    match color {
         ColorValue::Fixed(c) => {
             let _ = write!(s, "[{},{},{},{}]", c.r(), c.g(), c.b(), a(c.a()));
         }

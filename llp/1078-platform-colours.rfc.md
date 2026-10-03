@@ -615,8 +615,7 @@ paint keeps SVG's initials (`fill` black), as the web does.
 - **The web's role sheet** (Safari's `-apple-system-*`, `prefers-contrast`).
   Without it the web shows each role's fallback pair, which is correct but
   not dynamic.
-- **Host-reported resolutions (D1).** Paint motion, SVG filters, gradient
-  stops and SVG scenes use a reference's fallback pair.
+- ~~**Host-reported resolutions (D1).**~~ Built 2026-10-03, see below.
 - **The lints:** `lower-platform-color-literal`, `lower-keyframe-color-ref`.
 
 **What the app found:**
@@ -628,6 +627,29 @@ paint keeps SVG's initials (`fill` black), as the web does.
   after the reference is.
 - **Roles covered everything else**, including fills (`tertiary-fill`,
   `quaternary-fill`) the r2 table lacked. They are added.
+
+**Host-reported resolutions (D1, D6), built 2026-10-03:**
+- The presenter resolves every reference (each role, each interned
+  `platform-color()` with a name for its platform) in both appearances under
+  the current contrast and reports them (`exact_color_references`,
+  `exact_colors`): on every appearance report and every preference change,
+  so Increased Contrast and whatever else the platform adjusts flow through.
+  A name the platform lacks is not reported, and keeps its fallback.
+- `ColorValue::resolve` answers a reference with the report, else the
+  fallback pair (`style/roles.rs`, one table per process). So what the
+  kernel resolves itself follows the platform: paint motion's endpoints,
+  gradient stops, SVG scene paint and filter colours.
+- A changed report re-targets paint motion (transitioning, D6), rebuilds SVG
+  scenes and re-sends the styles with a reference in a gradient
+  (`host/apple/src/colors.rs`). An SVG scene's pairs are now re-picked when
+  its view's appearance changes (`SvgHost.appearance`), which they were not.
+- Rows that cross as a name (`{"sys", "c"}`: colours, borders, shadows, the
+  symbol palette) were already resolved per view by `SystemColor.swift`.
+- **Still the fallback:** keyframe colours (a reference is refused in
+  `keyframes`, D6 as written); text rasters in content regions resolve when
+  built, not on a report; an elevated level is not reported (the kernel
+  resolves at the base level); SVG filter colours resolve in the light
+  appearance, as before. Linux and headless runs report nothing.
 
 ## Appendix A — Android and Windows (non-normative)
 
