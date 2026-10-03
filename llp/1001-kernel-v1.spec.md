@@ -401,6 +401,21 @@ in phase. The reason: indicators that appear at different moments (two pending
 commands, skeletons) should pulse together, and CSS can only do that with a
 script setting each animation's `startTime`; the web host does exactly that.
 
+**`formatDate` and `formatNumber` on the JS target are the browser's `Intl`
+(2026-10-03, [LLP 1054.000.003](1054.000.003-dates-numbers-and-durations-in-the-roster.rfc.md)
+D2, D3; not reviewed).** The runner's are Rust copies of `Intl`'s `en-US`
+(`runner/src/format.rs`), held to one oracle table so every host prints the
+same bytes; native and the wasm target keep them. The JS target
+(`host/web-js/stdlib.js`) asks `Intl.DateTimeFormat` and
+`Intl.NumberFormat` with the same options, the same fixed offset (the instant
+truncated, shifted by the offset, formatted in UTC), and the same blank for
+input out of range. The reason: the wasmless page carries no runner, and the
+browser already has the formatter; a Rust copy compiled to JavaScript would be
+bytes for nothing. What it costs: a browser whose ICU prints differently
+(a joiner, a space, a compact suffix) differs from native. On 2026-10-03 the
+whole oracle table, 1079 strings, matched in Bun 1.4.2 (ICU 78.1), Chromium
+153 and WebKit 26.6 (`host/web/tests/web-js-stdlib.test.mjs` holds Bun's).
+
 **Drag timelines (2026-09-27, [LLP 1057.003](1057.003-gesture-timelines.rfc.md)
 D1, accepted by Charlie).** `drag-timeline`, bit 150, is not CSS. CSS names a
 timeline on a scroller (`scroll-timeline`) or on a box's visibility
