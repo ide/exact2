@@ -4,7 +4,9 @@
 alone:
 - `4ffb9488`
 - `2be59e59`
-- `9a3d70cc` Measured on an iOS 27 simulator (iPhone 17 Pro).
+- `9a3d70cc`
+
+Measured on an iOS 27 simulator (iPhone 17 Pro).
 
 ## 1. The question
 
