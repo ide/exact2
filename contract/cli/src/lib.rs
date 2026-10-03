@@ -209,7 +209,8 @@ from_pass!(contract_lower::LowerError, "lower");
 /// `use … from "./file.contract"` in it cannot be resolved: compile a file
 /// that uses others with [`compile_path`].
 pub fn compile(src: &str) -> Result<Plan, CompileError> {
-    let file = contract_syntax::parse(src)?;
+    let mut file = contract_syntax::parse(src)?;
+    contract_syntax::resolve_clock_timelines(&mut file)?;
     if let Some(u) = file.uses.first() {
         return Err(CompileError {
             pass: "use",
@@ -323,7 +324,9 @@ fn compile_path_output(
         file: Some(path.to_path_buf()),
         related: Box::new([]),
     })?;
-    let (file, sources) = sources::load(path, src, &app_root)?;
+    let (mut file, sources) = sources::load(path, src, &app_root)?;
+    contract_syntax::resolve_clock_timelines(&mut file)
+        .map_err(|e| vec![sources.resolve(e.into())])?;
     native::check(&file, &app_root).map_err(|all| {
         all.into_iter()
             .map(|e| sources.resolve(e))
