@@ -15,6 +15,8 @@
 // host's `documentHead` writes them (document-glue.js), the page's own title
 // where no head sets one.
 
+import { pageChrome } from "./chrome.js";
+
 /** The active head's fields by prop name (`headTitle` …): what a renderer
  * reads (render.mjs), and the agent's `state.head`. */
 export const Head = {};
@@ -92,10 +94,12 @@ function navChrome(root, say) {
 }
 
 /** The elements that may be the page's scroller: `<html data-scrolldocument>`
- * while one is (D4), which the shell's rule reads, as the web host's glue. */
+ * while one is (D4), which the shell's rule reads, as the web host's glue;
+ * and the page around the app (chrome.js), after each commit. */
 export const Docs = new Set();
 let Marked = false;
 export function markDocument() {
+  pageChrome();
   if (!Docs.size && !Marked) return;
   Marked = false;
   for (const e of Docs) if (!e.isConnected) Docs.delete(e); else Marked ||= e.getAttribute("data-scrolldocument") === "true";

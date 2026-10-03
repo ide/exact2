@@ -442,6 +442,7 @@ fn lowered(id: StyleId, value: &RowValue<'_>) -> bool {
                 | StyleId::ScrollEdgeEffect
                 | StyleId::HoverEffect
                 | StyleId::SmartInvert
+                | StyleId::ExactAppleButtonStyle
         ) =>
         {
             false
