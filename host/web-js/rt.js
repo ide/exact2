@@ -1035,7 +1035,7 @@ export function each(p, list, key, row, pure) {
   let [a, b] = range(p), own = Owner;
   let rows = new Map(), single = false, order = null;
   effect(() => {
-    const items = list();
+    const items = list(); if (b?.parentNode) p = b.parentNode; // a region built in an outer row's fragment lives where that row went
     untracked(() => {
       // Rows moving or leaving are adopted rows (a row waiting for its slice
       // shows its rendered values until then, and adopts at the current ones).
