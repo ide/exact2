@@ -202,6 +202,27 @@ impl PaintMotion {
         Some(self.apply(kernel, sync, engine, first))
     }
 
+    /// The platform's colours resolve differently (a host reported new
+    /// resolutions, LLP 1078 D1): every owner re-targets under its
+    /// appearance, transitioning under its row as an appearance change does
+    /// (LLP 1078 D6). Nothing before the first appearance report.
+    pub fn colors_changed(
+        &mut self,
+        kernel: &Kernel,
+        engine: &mut Engine,
+        now: f64,
+    ) -> Option<Vec<(u64, Property)>> {
+        let dark = self.dark?;
+        let seek = engine.advance(now);
+        debug_assert!(seek.is_ok(), "the clock never runs backwards here");
+        let views = &self.views;
+        let sync = kernel.paint_resync(
+            |key| views.get(&motion_node(key)).copied().unwrap_or(dark),
+            &mut self.owners,
+        );
+        Some(self.apply(kernel, sync, engine, false))
+    }
+
     /// Report one view's appearance. Its first differing report corrects
     /// in place; subsequent changes, including rejoining the session, move.
     pub fn set_view_scheme(

@@ -1124,6 +1124,8 @@ public final class ExactSession {
         let dark = DisplayPreferences.systemDark
         #endif
         apply(runtime.setPreferences(DisplayPreferences.bits(systemDark: dark)))
+        // Increased Contrast changes what every platform colour resolves to.
+        apply(runtime.reportColors())
     }
     /// @ref LLP 1069.000 D2 — told after every boot and on each change; a
     /// change while iOS suspends the process lands with the foreground
@@ -1146,7 +1148,7 @@ public final class ExactSession {
         return batch.error
     }
     /// The view's appearance, for paint motion's `light-dark()` (LLP 1062).
-    public func scheme(dark: Bool) { guard booted, state != .destroyed else { return }; schemeDark = dark; apply(runtime.scheme(dark: dark)) }
+    public func scheme(dark: Bool) { guard booted, state != .destroyed else { return }; schemeDark = dark; apply(runtime.scheme(dark: dark)); apply(runtime.reportColors()) }
     /// The appearance last reported for the session, and each node view
     /// found painting motion in another (a sheet's override, say), by id.
     private(set) var schemeDark: Bool?
