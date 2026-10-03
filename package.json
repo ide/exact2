@@ -3,9 +3,10 @@
   "private": true,
   "packageManager": "bun@1.4.2",
   "engines": { "bun": ">=1.4.2" },
-  "description": "The bake's TypeScript toolchain (LLP 1027 D5, ruled 2026-09-03): Rolldown bundles and strips an app's `app.ts` to one script for hermesc. SQLite WASM is shipped as a lazy browser storage artifact.",
+  "description": "The bake's TypeScript toolchain (LLP 1027 D5, ruled 2026-09-03): Rolldown bundles and strips an app's `app.ts` to one script for hermesc. SQLite WASM is shipped as a lazy browser storage artifact. Material Symbols' SVGs are the web's stand-ins for SF Symbols (host/web/sf-material.mjs), read at build time.",
   "workspaces": ["packages/*"],
   "devDependencies": {
+    "@material-symbols/svg-400": "0.47.6",
     "@sqlite.org/sqlite-wasm": "3.53.4-build1",
     "playwright-core": "1.63.0",
     "rolldown": "1.2.9",
