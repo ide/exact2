@@ -26,8 +26,10 @@ impl Em<'_> {
         );
     }
 
-    /// A bound paint fact for the CSS sibling-order rule. The expression is
-    /// pure; the same effect scope as its style owns this attribute.
+    /// A bound paint fact for the CSS sibling-order rule, or another row the
+    /// stylesheet reads as an attribute, written as the expression of `v`
+    /// each names. The expression is pure; the same effect scope as its
+    /// style owns this attribute.
     pub(super) fn paint_binding(&mut self, kind: NodeType, b: &BindingsRow, e: &str, f: &str) {
         if kind.is_svg_element() || kind.is_metadata() {
             return;
@@ -35,31 +37,43 @@ impl Em<'_> {
         let fact = match b.kind {
             BindingKind::Style => StyleId::from_bit(b.id as u32).and_then(|id| {
                 Some(match id {
-                    StyleId::PositionType => {
-                        ("data-exact-position".into(), "v!=null&&v!==\"static\"")
-                    }
-                    StyleId::Display => ("data-exact-flex".into(), "v===\"flex\"||v===\"grid\""),
-                    StyleId::ZIndex => ("data-exact-z".into(), "v!=null&&v!==\"auto\""),
-                    id if exact_web::host::layers::STACKS.contains(&id) => {
-                        (format!("data-exact-stack-{}", id as u16), "v!=null")
-                    }
+                    StyleId::PositionType => (
+                        "data-exact-position".into(),
+                        "v!=null&&v!==\"static\"?\"\":null",
+                    ),
+                    StyleId::Display => (
+                        "data-exact-flex".into(),
+                        "v===\"flex\"||v===\"grid\"?\"\":null",
+                    ),
+                    StyleId::ZIndex => ("data-exact-z".into(), "v!=null&&v!==\"auto\"?\"\":null"),
+                    id if exact_web::host::layers::STACKS.contains(&id) => (
+                        format!("data-exact-stack-{}", id as u16),
+                        "v!=null?\"\":null",
+                    ),
+                    // Not a paint fact: the attribute the stylesheet's
+                    // approximation of Apple's button styles reads
+                    // (element.rs `props_of` writes a static one).
+                    StyleId::ExactAppleButtonStyle => (
+                        "data-exact-apple-button-style".into(),
+                        "v==null||v===\"none\"?null:v",
+                    ),
                     _ => return None,
                 })
             }),
             BindingKind::Prop => PropId::from_wire(b.id).and_then(|id| {
-                let condition = match id {
-                    PropId::BackgroundMaterial | PropId::NavigationKey => "v!=null",
-                    PropId::NavigationPresentation => "v===\"modal\"",
+                let value = match id {
+                    PropId::BackgroundMaterial | PropId::NavigationKey => "v!=null?\"\":null",
+                    PropId::NavigationPresentation => "v===\"modal\"?\"\":null",
                     _ => return None,
                 };
-                Some((format!("data-exact-stack-prop-{}", id as u16), condition))
+                Some((format!("data-exact-stack-prop-{}", id as u16), value))
             }),
         };
-        if let Some((name, condition)) = fact {
+        if let Some((name, value)) = fact {
             let p = self.uses.rt("P");
             let _ = write!(
                 self.out,
-                "{p}({e},\"{name}\",()=>{{const v=({f})();return ({condition})?\"\":null}});"
+                "{p}({e},\"{name}\",()=>{{const v=({f})();return {value}}});"
             );
         }
     }

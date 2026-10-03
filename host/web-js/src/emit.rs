@@ -542,6 +542,12 @@ pub fn emit(plan: &Plan, site_attrs: bool) -> Result<Output, String> {
             let mut m = String::from("width=device-width, initial-scale=1");
             if let Some(f) = fit {
                 let _ = write!(m, ", viewport-fit={f}");
+                // A root that covers the screen is an app's, as on the
+                // native hosts: the page never zooms (pinch, double tap, or a
+                // focused field), and the base sheet keeps its document still.
+                if f == "cover" {
+                    m.push_str(", maximum-scale=1, user-scalable=no");
+                }
             }
             if let Some(w) = widget {
                 let _ = write!(m, ", interactive-widget={w}");
