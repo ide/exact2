@@ -1081,40 +1081,52 @@ final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, UIScrollV
         updateMaterial()
         applyTextArea()
         if let f = field {
-            f.tintColor = props["emojiPicker"] == "true" ? .clear : nil
+            let tint: UIColor? = props["emojiPicker"] == "true" ? .clear : nil
+            if f.tintColor != tint { f.tintColor = tint }
             if (set["emojiPicker"] != nil || clear.contains("emojiPicker")), f.isFirstResponder { f.reloadInputViews() }
             if let v = props["value"] { writeValue(v, into: f) }
             applyPlaceholder(f); applyFieldName(f)
-            // The web's `type` and `inputmode`, as UIKit spells them.
+            // The web's `type` and `inputmode`, as UIKit spells them. Each is
+            // written only when it changes: a focused field told its traits
+            // again (every batch that touches its props, a focus move's
+            // among them) reloads its input views, and the AutoFill bar
+            // above the keyboard flickers out and back.
             let type = props["type"] ?? "text"
-            f.isSecureTextEntry = type == "password"
-            f.textContentType = inputContentType
+            let secure = type == "password"
+            if f.isSecureTextEntry != secure { f.isSecureTextEntry = secure }
+            if f.textContentType != inputContentType { f.textContentType = inputContentType }
             let traitsChanged = f.autocapitalizationType != inputCapitalization || f.autocorrectionType != inputCorrection || f.spellCheckingType != inputSpellChecking
-            f.autocapitalizationType = inputCapitalization
-            f.autocorrectionType = inputCorrection
-            f.spellCheckingType = inputSpellChecking
-            if traitsChanged, f.isFirstResponder { f.reloadInputViews() }
-            switch props["inputMode"] ?? type {
-            case "email": f.keyboardType = .emailAddress
-            case "numeric": f.keyboardType = .numberPad
-            case "decimal", "number": f.keyboardType = .decimalPad
-            case "tel": f.keyboardType = .phonePad
-            case "url": f.keyboardType = .URL
-            case "search": f.keyboardType = .webSearch
-            default: f.keyboardType = .default
+            if traitsChanged {
+                f.autocapitalizationType = inputCapitalization
+                f.autocorrectionType = inputCorrection
+                f.spellCheckingType = inputSpellChecking
+                if f.isFirstResponder { f.reloadInputViews() }
             }
+            let keyboard: UIKeyboardType
+            switch props["inputMode"] ?? type {
+            case "email": keyboard = .emailAddress
+            case "numeric": keyboard = .numberPad
+            case "decimal", "number": keyboard = .decimalPad
+            case "tel": keyboard = .phonePad
+            case "url": keyboard = .URL
+            case "search": keyboard = .webSearch
+            default: keyboard = .default
+            }
+            if f.keyboardType != keyboard { f.keyboardType = keyboard }
+            let returnKey: UIReturnKeyType
             // HTML's `enterkeyhint` labels the return key (feed F25); UIKit
             // has no `previous`, which keeps the default.
             switch props["enterKeyHint"] {
-            case "done": f.returnKeyType = .done
-            case "go": f.returnKeyType = .go
-            case "next": f.returnKeyType = .next
-            case "search": f.returnKeyType = .search
-            case "send": f.returnKeyType = .send
-            case "enter", "previous": f.returnKeyType = .default
-            default: f.returnKeyType = handlers.contains("submit") ? .go : .default
+            case "done": returnKey = .done
+            case "go": returnKey = .go
+            case "next": returnKey = .next
+            case "search": returnKey = .search
+            case "send": returnKey = .send
+            case "enter", "previous": returnKey = .default
+            default: returnKey = handlers.contains("submit") ? .go : .default
             }
-            f.isEnabled = !disabled
+            if f.returnKeyType != returnKey { f.returnKeyType = returnKey }
+            if f.isEnabled == disabled { f.isEnabled = !disabled }
         }
         if disabled { accessibilityTraits.insert(.notEnabled) } else { accessibilityTraits.remove(.notEnabled) }
         accessibilityIdentifier = props["testId"]
