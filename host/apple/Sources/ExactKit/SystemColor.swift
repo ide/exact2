@@ -1,4 +1,4 @@
-// @ref LLP 1078 D3, D5 — a colour row that names a platform colour: a role's
+// @ref LLP 1081 D3, D5 — a colour row that names a platform colour: a role's
 // class colour property (`secondaryLabelColor`), a `platform-color()`'s, an
 // asset catalogue colour (`named:Brand`), or the view's inherited tint
 // (`@tint`, `@tint/0.2` with an alpha). Resolved by name at runtime, so a
@@ -13,7 +13,7 @@ import AppKit
 #endif
 
 enum SystemColor {
-    /// CSS's `CanvasText`, the initial `color` (LLP 1078
+    /// CSS's `CanvasText`, the initial `color` (LLP 1081
     /// stage 2): the platform's own dynamic text colour, so a row the
     /// presenter has no value for still follows appearance and contrast.
     #if os(iOS)
@@ -40,7 +40,7 @@ enum SystemColor {
     nonisolated(unsafe) private static var lastTint: Native?
 
     /// Whether Increased Contrast is on, as `prefers-contrast` reads it (an
-    /// agent's `prefer contrast more` pins it, LLP 1078 D7).
+    /// agent's `prefer contrast more` pins it, LLP 1081 D7).
     static var highContrast: Bool { DisplayPreferences.contrast == "more" }
 
     /// A trait or a system colour changed: every resolution is stale.
@@ -64,7 +64,7 @@ enum SystemColor {
         lock.unlock()
         guard known, let color = lookup(name), let rgba = rgba(color, dark: dark, contrast: contrast, elevated: elevated) else {
             lock.lock()
-            if refused.insert(name).inserted { NSLog("Exact: no platform colour %@; its fallback is shown (LLP 1078 D3)", name) }
+            if refused.insert(name).inserted { NSLog("Exact: no platform colour %@; its fallback is shown (LLP 1081 D3)", name) }
             lock.unlock()
             return fallback
         }
@@ -124,7 +124,7 @@ enum SystemColor {
     }
 
     /// `AccentColor`: the app's tint (iOS) or the system accent (macOS),
-    /// times an alpha (`Highlight` is the tint at 0.2 on iOS, LLP 1078 §6.1).
+    /// times an alpha (`Highlight` is the tint at 0.2 on iOS, LLP 1081 §6.1).
     private static func tint(alpha: Double, dark: Bool, fallback: [Double]?) -> [Double]? {
         var color: Native?
         if Thread.isMainThread {

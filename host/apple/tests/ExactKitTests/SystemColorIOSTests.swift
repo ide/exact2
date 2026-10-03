@@ -3,7 +3,7 @@ import UIKit
 import XCTest
 @testable import ExactKit
 
-/// LLP 1078 D5: a colour row naming a platform colour shows UIKit's own
+/// LLP 1081 D5: a colour row naming a platform colour shows UIKit's own
 /// colour for the view's traits, and its fallback where UIKit has none.
 final class SystemColorIOSTests: XCTestCase {
     private func channels(_ c: UIColor, _ traits: UITraitCollection) -> [Double] {

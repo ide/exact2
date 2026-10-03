@@ -778,7 +778,7 @@ extension Agent {
         session.view?.updateTraitsIfNeeded()
     }
     var systemDark: Bool { session.presenter.viewport.window?.windowScene?.traitCollection.userInterfaceStyle == .dark }
-    /// `prefer contrast more` (LLP 1078 D7): the scene's contrast trait, so
+    /// `prefer contrast more` (LLP 1081 D7): the scene's contrast trait, so
     /// platform colours resolve as Increased Contrast shows them.
     func systemContrast(more: Bool) {
         guard let window = session.presenter.viewport.window else { return }

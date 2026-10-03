@@ -650,10 +650,10 @@ pub enum ColorValue {
     /// CSS `light-dark(a, b)`: the first under a light scheme, the second
     /// under a dark one.
     LightDark(Color, Color),
-    /// A colour role (LLP 1078 D2), by id into `COLOR_ROLES`: the platform's
+    /// A colour role (LLP 1081 D2), by id into `COLOR_ROLES`: the platform's
     /// own colour where a host has it, the role's pair everywhere else.
     Role(u8),
-    /// A `platform-color()` (LLP 1078 D3), by id into the interned table.
+    /// A `platform-color()` (LLP 1081 D3), by id into the interned table.
     Platform(u16),
 }
 
@@ -667,7 +667,7 @@ impl ColorValue {
     /// The colour under an appearance. A host that paints calls this; the web
     /// host does not, because it hands the pair to the browser.
     pub fn resolve(self, dark: bool) -> Color {
-        // @ref LLP 1078 D1 — a reference is what the host reported, else
+        // @ref LLP 1081 D1 — a reference is what the host reported, else
         // its fallback pair.
         if let Some(c) = roles::reported(self, dark) {
             return c;
@@ -685,20 +685,8 @@ impl ColorValue {
         }
     }
 
-    /// A role's WebKit name (`-apple-system-label`), when it has one: what an
-    /// Apple host draws vibrantly inside a material (LLP 1077 D13).
-    pub fn system_name(self) -> Option<&'static str> {
-        match self {
-            ColorValue::Role(id) => {
-                let alias = roles::role_of(id).alias;
-                (!alias.is_empty()).then_some(alias)
-            }
-            _ => None,
-        }
-    }
-
     /// What a host without the platform's colour shows: a reference's
-    /// fallback (LLP 1078 D1), and any other value as it is.
+    /// fallback (LLP 1081 D1), and any other value as it is.
     pub fn fallback(self) -> ColorValue {
         match self {
             ColorValue::Role(id) => roles::role_fallback(id),
@@ -715,7 +703,7 @@ impl ColorValue {
         !matches!(self, ColorValue::Fixed(_))
     }
 
-    /// A colour that is more than one colour: a role (LLP 1078 D2, which
+    /// A colour that is more than one colour: a role (LLP 1081 D2, which
     /// takes in WebKit's `-apple-system-*` names, LLP 1077 D13), a
     /// `platform-color()` (D3), or `light-dark(<color>, <color>)`, CSS's own
     /// spelling. Whitespace is free; anything else is not this, and falls
@@ -731,7 +719,7 @@ impl ColorValue {
     }
 
     /// `light-dark(<color>, <color>)` alone (LLP 1034): a reference is not
-    /// valid inside one (LLP 1078 D1).
+    /// valid inside one (LLP 1081 D1).
     pub fn parse_pair(text: &str) -> Option<ColorValue> {
         let inner = text.trim().strip_prefix("light-dark(")?.strip_suffix(')')?;
         // The comma between the two colours, not one inside an `rgb()`.

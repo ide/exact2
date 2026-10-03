@@ -16,7 +16,7 @@ typealias SymbolConfig = NSImage.SymbolConfiguration
 
 extension NodeView {
     /// The symbol's own tint, or `nil` to follow the platform's accent
-    /// (LLP 1078 stage 2): the initial `tint-color` is `AccentColor`, which the
+    /// (LLP 1081 stage 2): the initial `tint-color` is `AccentColor`, which the
     /// platform keeps dynamic (iOS inherits the hierarchy's `tintColor`, a
     /// window or app tint included; macOS has `controlAccentColor`), so it is
     /// never resolved to channels here.

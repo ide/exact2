@@ -719,7 +719,7 @@ fn row_json(v: RowValue<'_>, out: &mut String) {
         RowValue::ColorValue(ColorValue::LightDark(l, d)) => {
             quote(&format!("light-dark({}, {})", hex(l), hex(d)), out)
         }
-        // @ref LLP 1078 D7 — a reference reports what it names.
+        // @ref LLP 1081 D7 — a reference reports what it names.
         RowValue::ColorValue(ColorValue::Role(id)) => {
             quote(exact_kernel::style::roles::role_of(id).name, out)
         }

@@ -105,7 +105,7 @@ fn apples_affordances_are_declared_rows_and_haptic_is_a_command() {
     assert_eq!(palette.symbol_palette.0.len(), 2);
     assert_eq!(style_of(&r, "value").symbol_value, 0.4);
     assert_eq!(style_of(&r, "mono").symbol_value, -1.0);
-    // A role now (LLP 1078 D2): the platform's colour, its pair the fallback.
+    // A role now (LLP 1081 D2): the platform's colour, its pair the fallback.
     let secondary = style_of(&r, "secondary").text_color;
     assert!(matches!(secondary, exact_kernel::ColorValue::Role(_)));
     assert_eq!(

@@ -1,4 +1,4 @@
-//! LLP 1078 D1, D6 on the Apple host: what the kernel resolves itself — a
+//! LLP 1081 D1, D6 on the Apple host: what the kernel resolves itself — a
 //! gradient's stops, an SVG scene's paint, paint motion's endpoints —
 //! follows the presenter's report, and a new report re-presents it.
 use super::*;
@@ -78,7 +78,7 @@ fn a_report_re_presents_what_the_kernel_resolved() {
         "{}",
         scene["scene"]
     );
-    // The text's colour transitions toward the reported one (LLP 1078 D6).
+    // The text's colour transitions toward the reported one (LLP 1081 D6).
     let v: serde_json::Value = serde_json::from_str(&batch).unwrap();
     assert_eq!(v["motion"], true, "a transition runs");
     // The same report again changes nothing and sends nothing.

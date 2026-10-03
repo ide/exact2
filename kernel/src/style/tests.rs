@@ -573,7 +573,7 @@ fn segment_lengths_round_trip_the_wire() {
 
 #[test]
 fn a_bare_node_s_colour_is_the_platform_s_text_colour_and_its_tint_the_accent() {
-    // LLP 1078 stage 2: CSS's initial `color` is `CanvasText`, a system
+    // LLP 1081 stage 2: CSS's initial `color` is `CanvasText`, a system
     // colour; a host with it shows the platform's, never a snapshot.
     let s = StyleProps::default();
     let canvas_text = roles::role("CanvasText").unwrap();

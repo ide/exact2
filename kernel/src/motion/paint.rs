@@ -203,9 +203,9 @@ impl PaintMotion {
     }
 
     /// The platform's colours resolve differently (a host reported new
-    /// resolutions, LLP 1078 D1): every owner re-targets under its
+    /// resolutions, LLP 1081 D1): every owner re-targets under its
     /// appearance, transitioning under its row as an appearance change does
-    /// (LLP 1078 D6). Nothing before the first appearance report.
+    /// (LLP 1081 D6). Nothing before the first appearance report.
     pub fn colors_changed(
         &mut self,
         kernel: &Kernel,

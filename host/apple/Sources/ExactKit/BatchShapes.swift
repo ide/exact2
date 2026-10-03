@@ -238,7 +238,7 @@ extension InlineStyle {
         case "font_variant_numeric": run.numeric = Int(try BatchFields.number(value)) & 0xff
         case "text_decoration_line": run.decoration = try BatchFields.string(value)
         case "text_color" where value.isSystemColor, "background_color" where value.isSystemColor:
-            // @ref LLP 1078 D5 — a platform colour, resolved for each
+            // @ref LLP 1081 D5 — a platform colour, resolved for each
             // appearance as the run is read (an inline run has no view).
             guard let light = value.channels(dark: false), let dark = value.channels(dark: true) else { throw BatchReader.Invalid.wire }
             paired = true

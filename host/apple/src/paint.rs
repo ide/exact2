@@ -85,7 +85,7 @@ impl<D: DataSource> Host<D> {
         self.finish(batch, None)
     }
 
-    /// The platform's colours resolve differently (LLP 1078 D1): paint
+    /// The platform's colours resolve differently (LLP 1081 D1): paint
     /// motion re-targets, transitioning under each owner's row (D6).
     pub(super) fn repaint_colors(&mut self, batch: &mut Batch) {
         if let Some(retired) = self.paint.motion.colors_changed(

@@ -211,8 +211,11 @@ impl<'a> Reader<'a> {
         match self.u8()? {
             0 => Ok(ColorValue::Fixed(self.color()?)),
             1 => Ok(ColorValue::LightDark(self.color()?, self.color()?)),
-            // @ref LLP 1078 D1 — a role by id, a `platform-color()` as written.
-            2 => Ok(ColorValue::Role(self.u8()?)),
+            // @ref LLP 1081 D1 — a role by id, a `platform-color()` as written.
+            2 => match self.u8()? {
+                i if (i as usize) < crate::generated::COLOR_ROLES.len() => Ok(ColorValue::Role(i)),
+                _ => Err(DecodeError::BadColorValue(2)),
+            },
             3 => crate::style::roles::parse_platform(self.string()?)
                 .ok_or(DecodeError::BadColorValue(3)),
             other => Err(DecodeError::BadColorValue(other)),
@@ -651,7 +654,7 @@ mod tests {
         // build.rs hashes the production codec sources beside the canonical
         // schema. The literal makes an accidental removal of that coupling a
         // test failure whenever the byte snapshot above is intentionally moved.
-        assert_eq!(SCHEMA_DIGEST, 0xb7c3_3ff0_1821_69b5);
+        assert_eq!(SCHEMA_DIGEST, 0x51b0_dc60_47ff_4256);
     }
 
     #[test]

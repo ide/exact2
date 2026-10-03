@@ -1,4 +1,4 @@
-//! Colours that name a platform colour (LLP 1078): a role from the schema's
+//! Colours that name a platform colour (LLP 1081): a role from the schema's
 //! table (D2), or `platform-color()` (D3). Each carries a fallback pair, so
 //! the kernel and any host without the platform's colour always have a
 //! deterministic RGBA; a host that has it resolves the name per view.
@@ -57,7 +57,7 @@ pub struct PlatformColor {
     pub text: Box<str>,
 }
 
-/// What a host reported each reference resolves to (LLP 1078 D1), by
+/// What a host reported each reference resolves to (LLP 1081 D1), by
 /// reference and appearance: a host with the platform's colours resolves
 /// every reference under the traits it is showing (style, Increased
 /// Contrast) and reports the whole set again whenever they change, so what
@@ -150,7 +150,7 @@ pub fn native_name_ok(name: &str) -> bool {
         && name.chars().all(|c| c.is_ascii_alphanumeric())
 }
 
-/// `platform-color(<platform> <name>, …, <fallback>)` (LLP 1078 D3), interned.
+/// `platform-color(<platform> <name>, …, <fallback>)` (LLP 1081 D3), interned.
 /// The fallback is a colour or a `light-dark()` pair, never a reference.
 pub fn parse_platform(text: &str) -> Option<ColorValue> {
     let inner = text
@@ -243,6 +243,20 @@ pub(crate) fn reference_css(out: &mut String, c: ColorValue) {
             None => out.push_str("transparent"),
         },
         other => crate::gradient::color_css(out, other),
+    }
+}
+
+impl ColorValue {
+    /// A role's WebKit name (`-apple-system-label`), when it has one: what an
+    /// Apple host draws vibrantly inside a material (LLP 1077 D13).
+    pub fn system_name(self) -> Option<&'static str> {
+        match self {
+            ColorValue::Role(id) => {
+                let alias = role_of(id).alias;
+                (!alias.is_empty()).then_some(alias)
+            }
+            _ => None,
+        }
     }
 }
 

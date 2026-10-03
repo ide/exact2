@@ -467,7 +467,7 @@ pub struct Write {
 }
 
 /// A row's value `none` (or the keyword `auto`/`normal`) writes nothing, as
-/// A bound value naming a colour role (LLP 1078 D2) as the role's CSS: the
+/// A bound value naming a colour role (LLP 1081 D2) as the role's CSS: the
 /// whole value (`"secondary-label"`), or a WebKit `-apple-system-*` name
 /// anywhere in it (a shorthand's colour part too); the kernel's table, so
 /// literal and bound values agree.

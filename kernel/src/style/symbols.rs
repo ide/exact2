@@ -1,6 +1,6 @@
 //! LLP 1077 §5: the affordances Apple's platforms have and CSS has no name
 //! for, as declared rows: an SF Symbol's palette (D10). The system colours
-//! D13 named are roles now (LLP 1078 D2, `roles.rs`).
+//! D13 named are roles now (LLP 1081 D2, `roles.rs`).
 
 use super::{Color, ColorValue};
 
@@ -73,7 +73,7 @@ mod tests {
         assert_eq!(SymbolPalette::parse("none").unwrap().0, vec![]);
         assert!(SymbolPalette::parse("#000 #111 #222 #333").is_none());
         assert!(SymbolPalette::parse("bogus").is_none());
-        // WebKit's names are roles now (LLP 1078 D2), not copied pairs.
+        // WebKit's names are roles now (LLP 1081 D2), not copied pairs.
         let label = ColorValue::parse_light_dark("-apple-system-label").unwrap();
         assert_eq!(label, ColorValue::parse_light_dark("label").unwrap());
         assert_eq!(label.resolve(true), Color(0xffff_ffff));

@@ -148,7 +148,7 @@ impl SvgState {
     }
 
     /// Every scene sent so far is rebuilt: the colours it resolved changed
-    /// (LLP 1078 D1). An unchanged scene is not sent again.
+    /// (LLP 1081 D1). An unchanged scene is not sent again.
     pub(crate) fn all_dirty(&mut self) {
         self.dirty.extend(self.sent.keys().copied());
     }
@@ -1003,7 +1003,7 @@ fn paint_json(paint: Option<&ShapePaint>, s: &mut String) {
         return server_json(server, paint.opacity, s);
     }
     let a = |alpha: u8| ((alpha as f32) * paint.opacity).round() as u8;
-    // @ref LLP 1078 D1 — a reference paints what the presenter reported
+    // @ref LLP 1081 D1 — a reference paints what the presenter reported
     // for each appearance (else its fallback pair); a new report rebuilds
     // the scene, so the scene follows the platform's colour.
     let color = match paint.color {

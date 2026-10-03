@@ -1,4 +1,4 @@
-//! The presenter's colour report (LLP 1078 D1): which references it should
+//! The presenter's colour report (LLP 1081 D1): which references it should
 //! resolve, and what it resolved them to. See `colors.rs` in the host.
 
 use super::Bridge;

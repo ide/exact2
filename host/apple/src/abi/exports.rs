@@ -463,7 +463,7 @@ macro_rules! host {
             $crate::abi::with_runtime(&EXACT_RUNTIMES, rt, false, |b, _| b.view_scheme(view, dark != 0), |n| n)
         }
 
-        /// Every colour reference the presenter should resolve (LLP 1078
+        /// Every colour reference the presenter should resolve (LLP 1081
         /// D1), as JSON in the output buffer; returns its length.
         #[no_mangle]
         pub extern "C" fn exact_color_references(rt: u32) -> u32 {

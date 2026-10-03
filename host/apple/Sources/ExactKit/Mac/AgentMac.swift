@@ -789,7 +789,7 @@ extension Agent {
         (Agent.systemAppearance ?? NSApp.effectiveAppearance).bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
     }
     nonisolated(unsafe) static var systemAppearance: NSAppearance?
-    /// `prefer contrast more` (LLP 1078 D7): the high-contrast variant of the
+    /// `prefer contrast more` (LLP 1081 D7): the high-contrast variant of the
     /// system appearance, so views redraw and platform colours resolve as
     /// Increase Contrast shows them.
     func systemContrast(more: Bool) {

@@ -151,7 +151,7 @@ pub fn style_json_sized(style: &StyleProps, env: &Env, keep_size: bool) -> (Stri
                 push_color_value(&mut out, c);
                 true
             }
-            // A reference crosses by name (LLP 1078 D1); a role WebKit names
+            // A reference crosses by name (LLP 1081 D1); a role WebKit names
             // is also listed in `system_colors`, for vibrancy (LLP 1077 D13).
             RowValue::ColorValue(c @ (ColorValue::Role(_) | ColorValue::Platform(_))) => {
                 push_color_value(&mut out, c);
@@ -420,7 +420,7 @@ fn push_dimension(out: &mut String, d: Dimension) {
 /// A colour row's value as the presenters read it: four channels, or a
 /// `light-dark()` pair of them (LLP 1034 D1).
 /// A colour row's wire form: four channels, a `light-dark()` pair of them,
-/// or a reference (LLP 1078 D1) as `{"sys": <name>, "c": <pair>}`: this
+/// or a reference (LLP 1081 D1) as `{"sys": <name>, "c": <pair>}`: this
 /// platform's class colour property (or `@tint`, `named:<Asset>`), which the
 /// presenter resolves per view against its traits, and the fallback pair.
 /// A `platform-color()` with no name for this platform crosses as its fallback.

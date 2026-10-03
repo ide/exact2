@@ -447,7 +447,7 @@ final class Runtime {
     func tick(now: Double) -> Batch { on { read(exact_tick(rt, now)) } }
     func scheme(dark: Bool) -> Batch { on { read(exact_scheme(rt, dark ? 1 : 0)) } }
     func viewScheme(_ view: UInt32, dark: Bool) -> Batch { on { read(exact_view_scheme(rt, view, dark ? 1 : 0)) } }
-    /// @ref LLP 1078 D1 — every colour reference the kernel resolves itself
+    /// @ref LLP 1081 D1 — every colour reference the kernel resolves itself
     /// (paint motion, gradients, SVG scenes), resolved by the platform in
     /// both appearances under the current contrast and reported, so none of
     /// them is a frozen fallback. A name the platform lacks is left out: the

@@ -420,8 +420,7 @@ final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, UIScrollV
             showSymbol(image, on: leaf); leaf.isAccessibilityElement = false; leaf.isUserInteractionEnabled = false
             presenter?.queueIntrinsicSize(self, generation: generation, (image?.size ?? (points > 0 ? CGSize(width: points, height: points) : nil)))
         }
-        // `nil` inherits the hierarchy's tint, which UIKit keeps current.
-        symbolView?.tintColor = symbolTint
+        symbolView?.tintColor = symbolTint // `nil` inherits UIKit's live tint
         if let leaf = symbolView { applySymbolEffect(leaf) }
         layoutSymbol()
     }
@@ -477,10 +476,8 @@ final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, UIScrollV
         self.kind = kind
         self.presenter = presenter
         super.init(frame: .zero)
-        // A platform colour (LLP 1078 D5) also follows contrast and level.
-        registerForTraitChanges([UITraitUserInterfaceStyle.self, UITraitAccessibilityContrast.self, UITraitUserInterfaceLevel.self]) { (node: NodeView, _: UITraitCollection) in
-            node.paragraphOwner.invalidateText()
-            node.paragraphOwner.setNeedsDisplay()
+        registerForTraitChanges([UITraitUserInterfaceStyle.self, UITraitAccessibilityContrast.self, UITraitUserInterfaceLevel.self]) { (node: NodeView, _: UITraitCollection) in // platform colours follow contrast and level too (LLP 1081 D5)
+            node.paragraphOwner.invalidateText(); node.paragraphOwner.setNeedsDisplay()
             node.applyStyle(node.style)
             node.presenter?.svg.appearance(node.id, layer: node.layer, dark: node.drawsDark, clock: node.presenter?.session?.clock)
             node.presenter?.requestTextPublication()

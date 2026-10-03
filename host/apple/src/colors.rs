@@ -1,4 +1,4 @@
-//! Platform colours the kernel resolves itself (LLP 1078 D1, D6).
+//! Platform colours the kernel resolves itself (LLP 1081 D1, D6).
 //!
 //! A row naming a role or a `platform-color()` crosses as its name, and the
 //! presenter resolves it per view (`SystemColor.swift`). What the kernel

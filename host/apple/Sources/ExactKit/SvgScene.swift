@@ -591,7 +591,7 @@ final class SvgHost {
     private var seeked: Double?
 
     /// Each scene as last sent and the appearance it was drawn in: a scene's
-    /// `light-dark()` pairs (and reported platform colours, LLP 1078 D1)
+    /// `light-dark()` pairs (and reported platform colours, LLP 1081 D1)
     /// are the presenter's to pick, so an appearance change redraws it.
     private var payloads: [UInt32: (payload: [String: Any], dark: Bool)] = [:]
 
