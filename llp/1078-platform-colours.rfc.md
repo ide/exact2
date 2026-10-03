@@ -600,6 +600,16 @@ whole palette) to validate the API.
 - **The web** writes a CSS system colour as is and an Exact role as
   `var(--exact-<role>, light-dark(<fallback>))`, which reads back as the role.
 
+**Stage 2, initial values (2026-10-03):** `color` starts as `CanvasText`
+and `tint-color` as `AccentColor` (`ColorValue::Role`; the schema's
+`default` may name a role), so an unstyled node is the platform's label
+colour and an untinted symbol the platform's tint, resolved for appearance
+and Increased Contrast, never a snapshotted black. The Apple presenter's
+fallback for an absent `color` is `UIColor.label` / `NSColor.textColor`; an
+untinted symbol inherits UIKit's `tintColor` (a window or app tint
+included) and uses `controlAccentColor` on macOS. SVG
+paint keeps SVG's initials (`fill` black), as the web does.
+
 **Not built yet:**
 - **D4 `theme`.** The app needed none: every colour it named is a role.
 - **The web's role sheet** (Safari's `-apple-system-*`, `prefers-contrast`).

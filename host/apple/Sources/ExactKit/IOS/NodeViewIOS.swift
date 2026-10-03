@@ -420,7 +420,8 @@ final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, UIScrollV
             showSymbol(image, on: leaf); leaf.isAccessibilityElement = false; leaf.isUserInteractionEnabled = false
             presenter?.queueIntrinsicSize(self, generation: generation, (image?.size ?? (points > 0 ? CGSize(width: points, height: points) : nil)))
         }
-        symbolView?.tintColor = color("tint_color", .black)
+        // `nil` inherits the hierarchy's tint, which UIKit keeps current.
+        symbolView?.tintColor = symbolTint
         if let leaf = symbolView { applySymbolEffect(leaf) }
         layoutSymbol()
     }
@@ -808,7 +809,7 @@ final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, UIScrollV
         // white field in a dark app (the night) paints a light placeholder
         // and it vanishes. Mute this field's text color — the web's
         // `input::placeholder`.
-        let ink = (f.textColor ?? UIColor(red: 0, green: 0, blue: 0, alpha: 1)).withAlphaComponent(0.30)
+        let ink = (f.textColor ?? SystemColor.canvasText).withAlphaComponent(0.30)
         f.attributedPlaceholder = NSAttributedString(string: text, attributes: [
             .font: font,
             .foregroundColor: ink,
@@ -1133,7 +1134,7 @@ final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, UIScrollV
         styleTextArea()
         if let f = field, let t = text {
             f.font = t.font(size: number("font_size", 16), weight: Int(number("font_weight", 400)), family: Int(number("font_family")), italic: (style["font_style"]?.string) == "italic", numeric: Int(number("font_variant_numeric")))
-            f.textColor = color("text_color", .black)
+            f.textColor = color("text_color", SystemColor.canvasText)
             applyPlaceholder(f)
             f.frame = contentBox()
         }

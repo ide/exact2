@@ -799,7 +799,7 @@ final class NodeView: NSView, NSTextViewDelegate, NSTextFieldDelegate {
         // a white field in a dark app (the night) paints a light placeholder
         // and it vanishes. Mute this field's text color — the web's
         // `input::placeholder` (`#3c3c434c` on black type).
-        let ink = (f.textColor ?? NSColor(srgbRed: 0, green: 0, blue: 0, alpha: 1)).withAlphaComponent(0.30)
+        let ink = (f.textColor ?? SystemColor.canvasText).withAlphaComponent(0.30)
         f.placeholderAttributedString = NSAttributedString(string: text, attributes: [
             .font: font,
             .foregroundColor: ink,
@@ -1077,7 +1077,7 @@ final class NodeView: NSView, NSTextViewDelegate, NSTextFieldDelegate {
         if let f = field, let t = text {
             (f.currentEditor() as? NSTextView)?.insertionPointColor = caretColor
             f.font = t.font(size: number("font_size", 16), weight: Int(number("font_weight", 400)), family: Int(number("font_family")), italic: (style["font_style"]?.string) == "italic", numeric: Int(number("font_variant_numeric")))
-            f.textColor = color("text_color", .black)
+            f.textColor = color("text_color", SystemColor.canvasText)
             applyPlaceholder(f)
             f.frame = contentBox()
         }

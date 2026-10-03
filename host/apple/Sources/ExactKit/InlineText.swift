@@ -33,7 +33,7 @@ struct InlineText {
     func run(dark: Bool) -> Run {
         var value = lightRun
         if dark { value.color = darkColor; value.background = darkBackground }
-        (value.shadow, value.stroke) = paint.resolve(dark: dark, color: value.color ?? [0, 0, 0, 255])
+        (value.shadow, value.stroke) = paint.resolve(dark: dark, color: value.color ?? SystemColor.canvasTextChannels(dark: dark))
         return value
     }
 
@@ -50,7 +50,7 @@ struct InlineText {
                       numeric: Int(number("font_variant_numeric")),
                       color: style["text_color"]?.channels(dark: dark),
                       decoration: style["text_decoration_line"]?.string ?? "", href: href)
-        (run.shadow, run.stroke) = RunPaintRows(style).resolve(dark: dark, color: run.color ?? [0, 0, 0, 255])
+        (run.shadow, run.stroke) = RunPaintRows(style).resolve(dark: dark, color: run.color ?? SystemColor.canvasTextChannels(dark: dark))
         return run
     }
 }

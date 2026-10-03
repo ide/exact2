@@ -338,3 +338,14 @@ const KEYWORD_BITS: &str = r#"    /// A space-separated keyword list as a row's 
         if words.is_empty() { Self::ALL[0].name().to_string() } else { words.join(" ") }
     }
 "#;
+
+/// A colour row's initial value naming a role (`"CanvasText"`, LLP 1078
+/// stage 2): the platform's own colour where a host has it, so an unstyled
+/// node follows the system's appearance and contrast.
+pub fn role_default(colors: &[[String; 6]], name: &str, field: &str) -> String {
+    let id = colors
+        .iter()
+        .position(|c| c[0] == name)
+        .unwrap_or_else(|| panic!("schema: style `{field}` default `{name}` is no role"));
+    format!("ColorValue::Role({id}u8)")
+}
