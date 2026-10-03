@@ -360,11 +360,10 @@ final class MenuHost {
         let owner = Confirmation(host: self, source: source, popover: pop, actions: actions, title: heading,
                                  message: texts.isEmpty ? nil : texts.joined(separator: "\n"),
                                  style: modal ? .alert : .actionSheet)
-        // A native action's tint is its accent (LLP 1069.011.000 D5).
-        if let action = actions.first {
-            owner.alert.view.tintColor = action.isNativeButton
-                ? action.channels("accent_color").map { TextEngine.color($0) } ?? .systemBlue
-                : action.color("text_color", .systemBlue)
+        // A native action's tint is its accent (LLP 1069.011.000 D5); a
+        // custom row keeps the system's tint, as UIKit's own sheets do.
+        if let action = actions.first, action.isNativeButton, let accent = action.channels("accent_color") {
+            owner.alert.view.tintColor = TextEngine.color(accent)
         }
         for action in actions {
             let style: UIAlertAction.Style = action.props["destructive"] == "true" ? .destructive : .default
@@ -381,12 +380,9 @@ final class MenuHost {
         if !modal {
             guard let presentation = owner.alert.popoverPresentationController else { return nil }
             presentation.sourceView = source
-            // A labelled row anchors at its text; an icon control uses its box.
-            let labels = source.container.subviews.compactMap { $0 as? NodeView }.filter { $0.kind == "text" }
-            let labelBox = labels.reduce(CGRect.null) { $0.union($1.convert($1.bounds, to: source)) }
-            presentation.sourceRect = labelBox.isNull ? source.bounds : CGRect(x: labelBox.minX, y: 0, width: labelBox.width, height: source.bounds.height)
-            presentation.permittedArrowDirections = []
-            presentation.canOverlapSourceViewRect = true
+            // From the invoker's box, with UIKit's arrow, as a sheet anchored
+            // to a control is.
+            presentation.sourceRect = source.bounds
             presentation.delegate = owner
         }
         return owner
