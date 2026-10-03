@@ -50,6 +50,26 @@ impl Uses {
     }
 }
 
+/// Stdlib entries `stdlib.js` holds, not `rt.js` (it is at its line cap):
+/// imported from there only by a plan that calls one.
+const STDLIB_JS: [&str; 3] = ["x_formatDate", "x_formatNumber", "x_at"];
+
+/// The module's `rt.js` names, and its `stdlib.js` import (empty when the
+/// plan calls none of those).
+pub fn imports(uses: &Uses) -> (Vec<String>, String) {
+    let (std, rt): (Vec<String>, Vec<String>) = uses
+        .names
+        .iter()
+        .cloned()
+        .partition(|n| STDLIB_JS.contains(&n.as_str()));
+    let std = if std.is_empty() {
+        String::new()
+    } else {
+        format!("import{{{}}}from\"./stdlib.js\";", std.join(","))
+    };
+    (rt, std)
+}
+
 /// Whether `code` reads or writes a row slot.
 pub fn touches_rows(plan: &Plan, code: &[u8]) -> bool {
     instructions(code).flatten().any(|i| {
