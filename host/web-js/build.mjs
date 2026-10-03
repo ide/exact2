@@ -259,11 +259,12 @@ writeFileSync(resolve(gen, 'main.js'), [
   ...(time ? [
     "import { sourceTypes } from './names.js';",
     "import { reportTime, reportPlace } from './navigation.js';",
-    "data.reserved = { exactTime: () => {",
+    // Beside the other facts (facts.js), which app.js has already registered.
+    "(data.reserved ??= {}).exactTime = () => {",
     "  const [epochAtZero, utcOffset] = reportTime(clock.now), [locale, timeZone, seed] = reportPlace().split('\\0');",
     "  const f = { epochAtZero, utcOffset, locale, timeZone, seed: Number(seed), resolvedLocale: resolvedLocale() };",
     "  return Object.keys(sourceTypes.exactTime[1]).map(k => f[k]);",
-    "} };",
+    "};",
     // The zone's offset follows the clock (habits F6): a timer, a `then` or the agent's `clock` that finds the offset
     // at its instant changed (a DST change, a new zone) answers `exactTime` again first (LLP 1027.000.000 D2).
     "let told = reportTime(clock.now)[1];",
