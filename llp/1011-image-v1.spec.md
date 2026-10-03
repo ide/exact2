@@ -238,7 +238,9 @@ bitmap stays shared and unchanged; no tinted asset enters the image cache.
   locally (below); `symbol:sf/<name>` passes an opaque, possibly empty name
   directly to the running Apple OS (LLP 1035.004.000, Codex 2026-10-02).
   An unresolved symbol paints nothing and supplies a one-font-size square
-  as fallback intrinsic size; raw SF sources are also empty on web/Linux,
+  as fallback intrinsic size; raw SF sources are empty on Linux; on the
+  web a name with a Material Symbols counterpart draws that glyph at its
+  own size (LLP 1035.004.000, amendment 2026-10-03), any other is empty,
   never fetched. `layout` reports current resolution and its reason; missing
   raw names produce no warning. Symbol/raster changes clear old image state;
   `app:/` resolves under `AppFiles`' roots, learned from the library at boot

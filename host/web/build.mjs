@@ -19,6 +19,7 @@
 // Developer builds bake development trust; EXACT_UPDATE_TRUST=production
 // requires signing keys, and the deploy verb always selects production.
 import { grantOrigins } from './navigation.js';
+import { sfModule } from './sf-material.mjs';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
@@ -175,6 +176,8 @@ function copyHostFiles(group) {
 }
 if (!bakeOnly) copyHostFiles('base');
 if (!bakeOnly && !production) copyHostFiles('development');
+// SF Symbols' every glyph (sf-material.mjs), which glue.js loads at a plan's first SF name.
+if (!bakeOnly) writeFileSync(resolve(stage, 'sf.js'), sfModule(null));
 // The Markdown editor's rules (exact-markdown-editor, LLP 1045 D5) are their
 // own wasm beside markup-editor.js, fetched only when a Markdown textarea mounts.
 const webEnv = webToolchainEnv(buildEnv);
