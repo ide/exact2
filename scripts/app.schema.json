@@ -404,8 +404,14 @@
           "additionalProperties": false
         },
         "web": {
-          "description": "The web host has no settings yet; an empty object.",
+          "description": "The web host's settings.",
           "type": "object",
+          "properties": {
+            "navigationChrome": {
+              "description": "Draw iOS's navigation chrome on the page (host/web-js/nav-chrome.js): a bar per header-shaped route and a tab bar from the root's tablist, in place of the authored header and tablist. Absent, the page paints them as authored.",
+              "enum": ["ios"]
+            }
+          },
           "additionalProperties": false
         }
       },

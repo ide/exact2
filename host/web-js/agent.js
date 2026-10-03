@@ -157,6 +157,7 @@ export function install(exact) {
   // (navigation.js's `animationClock`, restated; the build gives this module
   // its own copy of navigation.js, so it could now be imported.)
   // A synced animation starts on its clock's boundary (LLP 1055.002).
+  // A scroll-driven animation (nav-chrome.css's large title) follows its scroller, never the clock.
   const starts = new WeakMap(), held = new WeakSet(), clocks = animationClocks(document);
   // A scroll-driven animation follows its scroll, not a clock.
   const timed = () => document.getAnimations().filter(a => !a.timeline || a.timeline instanceof DocumentTimeline);
