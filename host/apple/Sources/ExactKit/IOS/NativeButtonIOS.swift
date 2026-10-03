@@ -116,6 +116,13 @@ final class NativeButton: UIButton {
         removeFromSuperview()
     }
 
+    /// The tint dims behind an alert and comes back after it: a face drawn
+    /// in `AccentColor` is drawn again in the tint as it now is.
+    override func tintColorDidChange() {
+        super.tintColorDidChange()
+        if configured { update() }
+    }
+
     func update() {
         guard let owner else { return }
         if superview !== owner { owner.addSubview(self) }
@@ -155,13 +162,13 @@ final class NativeButton: UIButton {
         let key = [style, title ?? "", symbol?.props["symbolName"] ?? "", "\(symbol?.number("font_size") ?? 0)",
                    "\(symbol?.color("tint_color", .label) ?? .clear)", "\(text?.color("text_color", .label) ?? .clear)",
                    "\(text?.number("font_size") ?? 0)", "\(text?.number("font_weight") ?? 0)", "\(radius)", "\(owner.bounds.size)",
-                   "\(a)", "\(b)", "\(owner.color("accent_color", .clear))"].joined(separator: "|")
+                   "\(a)", "\(b)", "\(owner.color("accent_color", .clear))", "\(tintColor.resolvedColor(with: traitCollection))"].joined(separator: "|")
         if key != signature {
             signature = key
-            let rest = NativeButton.configuration(style, owner: owner, text: text, symbol: symbol, title: title, radius: radius, symbolBox: a, textBox: b)
+            let rest = NativeButton.configuration(style, owner: owner, text: text, symbol: symbol, title: title, radius: radius, symbolBox: a, textBox: b, accent: tintColor)
             // SwiftUI's bordered styles dim the whole button while pressed,
             // its label too; UIKit's configurations darken only the fill.
-            let tint = symbol?.color("tint_color", .label) ?? .label
+            let tint: UIColor = symbol.map { $0.followsTint("tint_color") ? tintColor : $0.color("tint_color", .label) } ?? .label
             let dimImage = rest.image?.withTintColor(tint.withAlphaComponent(0.5), renderingMode: .alwaysOriginal)
             let titleTransformer = rest.titleTextAttributesTransformer
             // The handler goes in before the configuration: assigning a
@@ -182,6 +189,16 @@ final class NativeButton: UIButton {
                 button.configuration = config
             }
             configuration = rest
+            // Behind an alert UIKit dims the tint (the accent) to grey, as the
+            // platform should; every other colour here is authored (a title's
+            // `color`, a symbol's `tint-color`, an `accent-color` fill) and
+            // keeps its look, as SwiftUI's foregroundStyle does. Only a fill
+            // the configuration takes from the tint still follows it.
+            let fills = ["filled", "tinted", "prominent-glass"].contains(style)
+            let fromTint = (fills && (owner.color("accent_color", .clear) == .clear || owner.followsTint("accent_color")))
+                || (style == "plain" && text?.followsTint("text_color") == true) || symbol?.followsTint("tint_color") == true
+            let adjust: UIView.TintAdjustmentMode = fromTint ? .automatic : .normal
+            if tintAdjustmentMode != adjust { tintAdjustmentMode = adjust }
         }
         configured = true
         drawn.filter { !nodes.contains($0) }.forEach { $0.isHidden = false }
@@ -191,7 +208,7 @@ final class NativeButton: UIButton {
     }
 
     private static func configuration(_ style: String, owner: NodeView, text: NodeView?, symbol: NodeView?, title: String?,
-                                      radius: CGFloat, symbolBox a: CGRect, textBox b: CGRect) -> UIButton.Configuration {
+                                      radius: CGFloat, symbolBox a: CGRect, textBox b: CGRect, accent tintNow: UIColor) -> UIButton.Configuration {
         var config: UIButton.Configuration
         switch style {
         case "glass": if #available(iOS 26.0, *) { config = .glass() } else { config = .gray() }
@@ -205,11 +222,15 @@ final class NativeButton: UIButton {
         config.cornerStyle = radius > 0 && radius * 2 >= short - 0.5 ? .capsule : .fixed
         if config.cornerStyle == .fixed { config.background.cornerRadius = radius }
         let accent = owner.color("accent_color", .clear)
-        if accent != .clear { config.baseBackgroundColor = accent }
+        // An `AccentColor` fill is left to the configuration, which takes it
+        // from the tint and so dims it with the tint.
+        if accent != .clear, !owner.followsTint("accent_color") { config.baseBackgroundColor = accent }
         if let text, let title {
             config.title = title
             let font = UIFont.systemFont(ofSize: text.number("font_size", 17), weight: weight(text.number("font_weight", 400)))
-            let color = text.color("text_color", .label)
+            // `AccentColor` is the tint as UIKit draws it now: grey behind an
+            // alert (the button redraws when it changes, tintColorDidChange).
+            let color = text.followsTint("text_color") ? tintNow : text.color("text_color", .label)
             // The font only: the colour is the configuration's foreground,
             // which UIKit itself fades while a plain button is held.
             config.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { incoming in
@@ -225,7 +246,7 @@ final class NativeButton: UIButton {
             // its button's size.
             config.preferredSymbolConfigurationForImage = sized
             let glyph = UIImage(systemName: symbol.props["symbolName"] ?? "", withConfiguration: sized)
-            let tint = symbol.color("tint_color", .label)
+            let tint = symbol.followsTint("tint_color") ? tintNow : symbol.color("tint_color", .label)
             if text == nil { config.baseForegroundColor = tint }
             // A symbol in the title's colour is a template UIKit tints and
             // fades with it; one of its own colour is drawn in it.
