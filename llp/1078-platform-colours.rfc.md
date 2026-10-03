@@ -1,7 +1,7 @@
 # LLP 1078: Platform colours: semantic roles, every native colour, and app themes
 
 **Type:** RFC
-**Status:** Draft r2, 2026-10-03. r1 (2026-10-02) was reviewed adversarially against the source and found NOT READY; §8 folds every finding. Not implemented.
+**Status:** Draft r2.1, 2026-10-03 (§6's questions for the maintainer, under the owner's principle: the platform's guidelines first). r1 (2026-10-02) was reviewed adversarially against the source and found NOT READY; §8 folds every finding. Not implemented.
 **Systems:**
 - Kernel: the colour value, an interned reference; the role table; resolutions the host reports
 - Contract: role keywords, `platform-color()`, `theme`
@@ -475,20 +475,55 @@ Exact's display preferences (`DisplayPreferences.agentContrast`,
    - Screenshots in light, dark, Increased Contrast and an elevated sheet
      match a hand-built UIKit screen.
 
-## 6. Open questions
+## 6. Open questions for the maintainer
 
-1. **`Highlight` on iOS.** UIKit has no selection colour; the stand-in is the
-   tint at 0.2 alpha. Is that what UIKit's own text selection shows, on
-   iOS 26?
-2. **Should a role ever be vibrant by default?** LLP 1077 D13 makes the
-   `-apple-system-*` labels vibrant under a material. With the trait set
-   including the material, roles inherit that. Confirm it reads right on
-   glass.
-3. **macOS grouped backgrounds.** `windowBackgroundColor` for both grouped
-   roles, or `underPageBackgroundColor`? Needs a side-by-side on macOS 26.
-4. **A lint for missing platforms.** Should Contract warn when
-   `platform-color` names `ios` but not `macos` in an app that ships both?
-   Recommendation: a lint, not an error.
+**The principle, from the app's owner (2026-10-03):** follow each platform's
+own guidelines wherever they speak (Apple's Human Interface Guidelines, and
+Material and Fluent when those hosts land). An Exact choice is made only
+where a guideline is silent, and is then declared. Each question below has a
+recommendation on that basis; the maintainer decides.
+
+1. **What is `Highlight` on iOS?**
+   - **Why it's open:** UIKit has no named selection colour. The HIG says
+     selection follows the app's tint, and UIKit's text selection draws the
+     tint at a reduced alpha.
+   - **Recommendation:** follow UIKit. `Highlight` is the inherited
+     `tintColor` at the alpha UIKit's own selection uses on the running OS,
+     measured, not guessed. `HighlightText` is `labelColor`. Measure on iOS
+     26 and 27 before fixing the alpha in the table.
+2. **Should roles be vibrant on glass and other materials by default?**
+   - **Why it's open:** the HIG's Liquid Glass and materials guidance says
+     text and symbols on a material use vibrant label and fill colours, and
+     UIKit does this for its own controls.
+   - **Recommendation:** yes. A role resolved under a material
+     (`backgroundMaterial`, a glass button or group) is the vibrant variant,
+     as LLP 1077 D13 already intends for the `-apple-system-*` labels, and
+     the trait set (D5) carries the material. A non-role colour (hex, a pair,
+     a `platform-color`) is never made vibrant. Confirm by side-by-side with
+     a native glass button and a sheet on iOS 26.
+3. **Which AppKit colours are the macOS grouped backgrounds?**
+   - **Why it's open:** the HIG's macOS guidance has grouped forms (System
+     Settings) draw their groups as raised rounded boxes on the window
+     background. AppKit has no `systemGroupedBackground`.
+   - **Recommendation:** match what AppKit's own grouped forms draw.
+     `grouped-background` is `windowBackgroundColor`;
+     `secondary-grouped-background` is the colour a `.grouped` SwiftUI
+     `Form`'s section uses on macOS 26, measured and named in the table (or
+     declared as a stand-in if it is not a public colour). `controlBackgroundColor`
+     only if the measurement says so.
+4. **Should Contract warn when `platform-color` omits a platform the app
+   ships?**
+   - **Recommendation:** yes, a lint, not an error, since the fallback
+     always renders. The lint's message points at the role table first: if
+     a role covers the need, the guidelines' own semantic colour beats a
+     hand-picked one on every platform.
+5. **Where a platform's guideline and CSS disagree, which wins?**
+   - **Example:** dark `Canvas`, `#000000` on iOS and `#121212` in Chrome.
+   - **Recommendation:** the platform, on that platform. That's the
+     principle above. The web stays the oracle for *semantics* (which role,
+     inheritance, `currentcolor`, motion), not for a native platform's
+     palette values, and each such difference is declared in LLP 1001. Confirm
+     this reading of "the web is the standard" for colour values.
 
 ## 7. Scope of r1
 
