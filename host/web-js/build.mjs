@@ -19,6 +19,7 @@ import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync,
 import { basename, dirname, isAbsolute, join, normalize, posix, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { transformSync } from 'rolldown/utils';
+import { sfModule } from '../web/sf-material.mjs';
 import { buildEditor, buildFlow, buildMarkdown, buildModule, buildMotion, fresh, moduleGrants, webCompiler } from './module.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -374,6 +375,9 @@ writeFileSync(resolve(gen, 'main.js'), [
   ...(containerHatches ? ["requestAnimationFrame(() => requestAnimationFrame(() => import('./hatches.js').then(m => m.containers())));"] : []),
 ].join('\n'));
 for (const f of ['agent.js', 'perf.js', 'seam.js', 'rust-data.js', 'list.js', 'facts.js', 'symbols.js', 'motion.js', 'transform.js', 'svg-transform.js', 'dataset.js', 'format.js', 'hatches.js', 'arrange.js', 'reorder.js', 'flow.js', 'native.js', 'shared.js']) cpSync(resolve(here, f), resolve(gen, f));
+// SF Symbols (host/web/sf-material.mjs): the glyphs of the SF names among the plan's strings.
+cpSync(resolve(root, 'host/web/sf-symbols.js'), resolve(gen, 'sf-symbols.js'));
+writeFileSync(resolve(gen, 'sf.js'), sfModule(Array.from(readFileSync(resolve(gen, 'app.js'), 'utf8').matchAll(/"((?:[^"\\\n]|\\.)*)"/g), m => m[1])));
 // The web host's own pieces, loaded after first paint (motion.js, a pan, `select`, text flow, rt.js `pr`, native.js, rt.js `geo`, media.js, notify.js, sounds.js).
 for (const f of ['frames.js', 'motion-glue.js', 'group-glue.js', 'input-glue.js', 'markup-editor.js', 'textflow-glue.js', 'timer-glue.js', 'presence-glue.js', 'native-glue.js', 'geometry-glue.js', 'resize-glue.js', 'media-glue.js', 'notify-glue.js', 'sound-glue.js']) cpSync(resolve(root, 'host/web', f), resolve(gen, f));
 // Virtualized lists' browser half, the web host's own, loaded after first paint.
