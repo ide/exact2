@@ -2,8 +2,13 @@
 // web host's rendering (`glue.js` `refreshSymbols`) — the role's path as a
 // mask over the node's tint, sized by its font — after each commit. A
 // dynamic source names a role from `table`, the plan's own strings that are
-// roles. Imported by an app's module only when its plan draws a symbol.
+// roles. An SF name (`symbol:sf/…`) draws its Material glyph from `sf.js`
+// (host/web/sf-material.mjs). Imported by an app's module only when its
+// plan draws a symbol.
 import { After, PropHooks } from "./rt.js";
+import { sfMask } from "./sf.js";
+// For host-drawn chrome (chrome.js: the tab and navigation bars).
+export { symbolSVG, hasSymbol } from "./sf.js";
 
 let Table = {};
 const STYLE = '@property --exact-tint{syntax:"<color>";inherits:false;initial-value:#000}img[data-symbol-path]{background-color:var(--exact-tint)!important;mask-image:var(--exact-symbol-mask);mask-repeat:no-repeat;mask-position:center;mask-size:var(--exact-symbol-fit,100% 100%);mask-origin:content-box;mask-clip:content-box}';
@@ -13,7 +18,7 @@ export function symbols(table) {
   if (typeof document === "undefined") return;
   document.head.append(Object.assign(document.createElement("style"), { textContent: STYLE }));
   PropHooks.src = (e, v) => {
-    if (e.localName !== "img" || !v?.startsWith("symbol:")) { e.removeAttribute("data-symbol-path"); e.removeAttribute("data-symbol-fill"); e.removeAttribute("data-symbol-source"); e.symbolKey = null; template(e, v); return false; }
+    if (e.localName !== "img" || !v?.startsWith("symbol:")) { e.removeAttribute("data-symbol-path"); e.removeAttribute("data-symbol-fill"); e.removeAttribute("data-symbol-source"); e.removeAttribute("data-symbol-glyph"); e.symbolKey = null; template(e, v); return false; }
     template(e, null);
     const [path, filled] = Table[v.slice(7)] ?? [""];
     e.setAttribute("data-symbol-source", v); e.setAttribute("data-symbol-path", path); e.toggleAttribute("data-symbol-fill", !!filled); e.alt = "";
@@ -40,18 +45,23 @@ function template(e, v) {
 function refresh() {
   for (const el of document.querySelectorAll("#exact-root img[data-symbol-path]")) {
     const cs = getComputedStyle(el), size = parseFloat(cs.fontSize), weight = Number(cs.fontWeight);
-    const path = el.getAttribute("data-symbol-path"), filled = el.hasAttribute("data-symbol-fill"), key = `${path}:${filled}:${size}:${weight}`;
+    const path = el.getAttribute("data-symbol-path"), filled = el.hasAttribute("data-symbol-fill"), source = el.getAttribute("data-symbol-source") ?? "";
+    const key = `${source}:${path}:${filled}:${size}:${weight}`;
     if (el.symbolKey !== key) {
       el.symbolKey = key;
+      // An SF name draws its Material glyph at its own size (sf-symbols.js).
+      const sf = source.startsWith("symbol:sf/") ? sfMask(source.slice(10), size, weight) : null;
+      el.toggleAttribute("data-symbol-glyph", !!sf);
       const point = size, stroke = 1.1 + (Math.max(100, Math.min(900, weight)) - 100) / 400;
       const paint = filled ? 'fill="black" fill-rule="evenodd"' : `fill="none" stroke="black" stroke-width="${stroke}" stroke-linecap="round" stroke-linejoin="round"`;
-      el.symbolMask = `url("data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="${point}" height="${point}" viewBox="0 0 24 24"><path d="${path}" ${paint}/></svg>`)}")`;
-      el.symbolPlaceholder = `data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="${point}" height="${point}"/>`)}`;
+      el.symbolMask = sf?.mask ?? `url("data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="${point}" height="${point}" viewBox="0 0 24 24"><path d="${path}" ${paint}/></svg>`)}")`;
+      el.symbolPlaceholder = sf?.placeholder ?? `data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="${point}" height="${point}"/>`)}`;
+      el.symbolSize = sf ? [sf.width, sf.height] : [size, size];
     }
     if (el.getAttribute("src") !== el.symbolPlaceholder) el.src = el.symbolPlaceholder;
     el.style.setProperty("--exact-symbol-mask", el.symbolMask);
-    const px = parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight), py = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
-    const fits = size <= el.clientWidth - px && size <= el.clientHeight - py;
-    el.style.setProperty("--exact-symbol-fit", cs.objectFit === "none" || (cs.objectFit === "scale-down" && fits) ? `${size}px ${size}px` : cs.objectFit === "scale-down" ? "contain" : cs.objectFit === "fill" ? "100% 100%" : cs.objectFit);
+    const px = parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight), py = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom), [w, h] = el.symbolSize;
+    const fits = w <= el.clientWidth - px && h <= el.clientHeight - py;
+    el.style.setProperty("--exact-symbol-fit", cs.objectFit === "none" || (cs.objectFit === "scale-down" && fits) ? `${w}px ${h}px` : cs.objectFit === "scale-down" ? "contain" : cs.objectFit === "fill" ? "100% 100%" : cs.objectFit);
   }
 }

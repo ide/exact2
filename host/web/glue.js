@@ -366,27 +366,27 @@ function tintFit(el) {
     && el.naturalHeight <= el.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom);
   el.style.setProperty("--exact-tint-fit", fits ? "auto" : "contain");
 }
-function refreshSymbols() {
+let sfTable = null; function refreshSymbols() { // an SF name draws its Material glyph (sf-symbols.js) from every glyph's table, loaded at the first
   for (const el of views.values()) {
     if (!(el instanceof HTMLImageElement)) continue; if (!el.hasAttribute("data-symbol-path")) { tintFit(el); continue; }
-    const cs = getComputedStyle(el), size = parseFloat(cs.fontSize), weight = Number(cs.fontWeight);
-    const path = el.getAttribute("data-symbol-path"), filled = el.hasAttribute("data-symbol-fill"), key = `${path}:${filled}:${size}:${weight}`;
-    if (!path && !el.dataset.symbolSource?.startsWith("symbol:sf/") && el.symbolRefusal !== el.dataset.symbolSource) {
+    const cs = getComputedStyle(el), size = parseFloat(cs.fontSize), weight = Number(cs.fontWeight), sfName = el.dataset.symbolSource?.startsWith("symbol:sf/") ? el.dataset.symbolSource.slice(10) : null;
+    const path = el.getAttribute("data-symbol-path"), filled = el.hasAttribute("data-symbol-fill"), key = `${el.dataset.symbolSource}:${path}:${filled}:${size}:${weight}:${!!sfTable?.ready}`;
+    if (!path && sfName === null && el.symbolRefusal !== el.dataset.symbolSource) {
       log(`image ${el.dataset.symbolSource} refused: unknown symbol role`); el.symbolRefusal = el.dataset.symbolSource;
     }
+    if (sfName && !sfTable) { sfTable = loadAfterPaint("./sf.js", "sfSymbols").then(m => { sfTable.ready = m; refreshSymbols(); }); inflight.add(sfTable); sfTable.finally(() => inflight.delete(sfTable)); }
     if (el.symbolKey !== key) {
-      el.symbolKey = key;
+      el.symbolKey = key; const sf = sfName && sfTable?.ready ? sfTable.ready.sfMask(sfName, size, weight) : null; el.toggleAttribute("data-symbol-glyph", !!sf);
       const point = size, stroke = 1.1 + (Math.max(100, Math.min(900, weight)) - 100) / 400;
-      const paint = filled ? 'fill="black" fill-rule="evenodd"' : `fill="none" stroke="black" stroke-width="${stroke}" stroke-linecap="round" stroke-linejoin="round"`;
-      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${point}" height="${point}" viewBox="0 0 24 24"><path d="${path}" ${paint}/></svg>`;
-      el.symbolMask = `url("data:image/svg+xml,${encodeURIComponent(svg)}")`;
-      el.symbolPlaceholder = `data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="${point}" height="${point}"/>`)}`;
+      const paint = filled ? 'fill="black" fill-rule="evenodd"' : `fill="none" stroke="black" stroke-width="${stroke}" stroke-linecap="round" stroke-linejoin="round"`, svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${point}" height="${point}" viewBox="0 0 24 24"><path d="${path}" ${paint}/></svg>`;
+      el.symbolMask = sf?.mask ?? `url("data:image/svg+xml,${encodeURIComponent(svg)}")`; el.symbolSize = sf ? [sf.width, sf.height] : [size, size];
+      el.symbolPlaceholder = sf?.placeholder ?? `data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="${point}" height="${point}"/>`)}`;
     }
     if (el.getAttribute("src") !== el.symbolPlaceholder) el.src = el.symbolPlaceholder;
     el.style.setProperty("--exact-symbol-mask", el.symbolMask);
-    const paddingX = parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight), paddingY = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
-    const fits = size <= el.clientWidth - paddingX && size <= el.clientHeight - paddingY;
-    const fit = cs.objectFit === "none" || (cs.objectFit === "scale-down" && fits) ? `${size}px ${size}px` : cs.objectFit === "scale-down" ? "contain" : cs.objectFit === "fill" ? "100% 100%" : cs.objectFit;
+    const paddingX = parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight), paddingY = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom), [w, h] = el.symbolSize;
+    const fits = w <= el.clientWidth - paddingX && h <= el.clientHeight - paddingY;
+    const fit = cs.objectFit === "none" || (cs.objectFit === "scale-down" && fits) ? `${w}px ${h}px` : cs.objectFit === "scale-down" ? "contain" : cs.objectFit === "fill" ? "100% 100%" : cs.objectFit;
     el.style.setProperty("--exact-symbol-fit", fit);
   }
 }
@@ -1064,7 +1064,7 @@ function nodeDetail(id, plan = false) {
     inViewport: r.right > 0 && r.bottom > 0 && r.left < innerWidth && r.top < innerHeight,
     clipped,
   };
-  node.native = { element: el.localName }; if (el.hasAttribute("data-symbol-source")) { const source = el.dataset.symbolSource, name = source.slice(source.startsWith("symbol:sf/") ? 10 : 7), found = !!el.dataset.symbolPath; node.native.symbol = { source, name, found, ...(!found ? { reason: source === "symbol:sf/" ? "empty" : source.startsWith("symbol:sf/") ? "platform" : "role" } : {}) }; }
+  node.native = { element: el.localName }; if (el.hasAttribute("data-symbol-source")) { const source = el.dataset.symbolSource, name = source.slice(source.startsWith("symbol:sf/") ? 10 : 7), found = !!el.dataset.symbolPath || el.hasAttribute("data-symbol-glyph"); node.native.symbol = { source, name, found, ...(!found ? { reason: source === "symbol:sf/" ? "empty" : source.startsWith("symbol:sf/") ? "platform" : "role" } : {}) }; }
   const cs = getComputedStyle(el);
   node.browser = Object.fromEntries(Object.entries(INHERITED_CSS).map(([row, prop]) => [row, cs.getPropertyValue(prop)]));
   const flow = textflow?.facts(id);
