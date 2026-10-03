@@ -997,8 +997,9 @@ fn paint_json(paint: Option<&ShapePaint>, s: &mut String) {
         return server_json(server, paint.opacity, s);
     }
     let a = |alpha: u8| ((alpha as f32) * paint.opacity).round() as u8;
-    match paint.color.pair() {
-        ColorValue::System(_) => {} // `pair` never returns one
+    // A reference paints its fallback in a scene (LLP 1078 §7: the scene's
+    // colours resolve by appearance only).
+    match paint.color.fallback() {
         ColorValue::Fixed(c) => {
             let _ = write!(s, "[{},{},{},{}]", c.r(), c.g(), c.b(), a(c.a()));
         }
@@ -1016,6 +1017,7 @@ fn paint_json(paint: Option<&ShapePaint>, s: &mut String) {
                 a(d.a())
             );
         }
+        ColorValue::Role(_) | ColorValue::Platform(_) => s.push_str("null"),
     }
 }
 

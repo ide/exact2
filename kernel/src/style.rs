@@ -31,6 +31,7 @@ pub mod env;
 pub use env::link as link_segments;
 pub use env::{Edge, Env, EnvRefusal, Rect, SegmentVar};
 pub mod relative;
+pub mod roles;
 mod shadow;
 pub mod space;
 pub(crate) mod stroke;
@@ -649,11 +650,11 @@ pub enum ColorValue {
     /// CSS `light-dark(a, b)`: the first under a light scheme, the second
     /// under a dark one.
     LightDark(Color, Color),
-    /// One of UIKit's label, fill and separator colours by WebKit's name
-    /// (`symbols::SYSTEM_COLORS`, by index): the table's pair wherever a
-    /// colour paints, and the name an Apple host draws vibrantly inside a
-    /// material (LLP 1077 D13).
-    System(u8),
+    /// A colour role (LLP 1078 D2), by id into `COLOR_ROLES`: the platform's
+    /// own colour where a host has it, the role's pair everywhere else.
+    Role(u8),
+    /// A `platform-color()` (LLP 1078 D3), by id into the interned table.
+    Platform(u16),
 }
 
 impl Default for ColorValue {
@@ -665,9 +666,8 @@ impl Default for ColorValue {
 impl ColorValue {
     /// The colour under an appearance. A host that paints calls this; the web
     /// host does not, because it hands the pair to the browser.
-    pub const fn resolve(self, dark: bool) -> Color {
-        match self.pair() {
-            ColorValue::Fixed(c) => c,
+    pub fn resolve(self, dark: bool) -> Color {
+        match self.fallback() {
             ColorValue::LightDark(light, night) => {
                 if dark {
                     night
@@ -675,42 +675,59 @@ impl ColorValue {
                     light
                 }
             }
-            // `pair` never returns one.
-            ColorValue::System(_) => Color(0),
+            ColorValue::Fixed(c) => c,
+            ColorValue::Role(_) | ColorValue::Platform(_) => Color::TRANSPARENT,
         }
     }
 
-    /// A system colour as the pair it paints; any other value as it is.
-    pub const fn pair(self) -> ColorValue {
-        match self {
-            ColorValue::System(i) => symbols::system_pair(i),
-            other => other,
-        }
-    }
-
-    /// The system colour's WebKit name, when this is one.
+    /// A role's WebKit name (`-apple-system-label`), when it has one: what an
+    /// Apple host draws vibrantly inside a material (LLP 1077 D13).
     pub fn system_name(self) -> Option<&'static str> {
         match self {
-            ColorValue::System(i) => symbols::SYSTEM_COLORS.get(i as usize).map(|s| s.0),
+            ColorValue::Role(id) => {
+                let alias = roles::role_of(id).alias;
+                (!alias.is_empty()).then_some(alias)
+            }
             _ => None,
         }
     }
 
-    /// Whether this is a pair — what a host asks before deciding whether an
-    /// appearance change is anything to it.
-    pub const fn is_scheme_aware(self) -> bool {
-        matches!(self, ColorValue::LightDark(..) | ColorValue::System(_))
+    /// What a host without the platform's colour shows: a reference's
+    /// fallback (LLP 1078 D1), and any other value as it is.
+    pub fn fallback(self) -> ColorValue {
+        match self {
+            ColorValue::Role(id) => roles::role_fallback(id),
+            ColorValue::Platform(id) => {
+                roles::platform(id).map_or(ColorValue::Fixed(Color::TRANSPARENT), |p| p.fallback)
+            }
+            other => other,
+        }
     }
 
-    /// `light-dark(<color>, <color>)`, CSS's own spelling, or one of UIKit's
-    /// label, fill and separator colours by WebKit's name, which is such a
-    /// pair (LLP 1077 D13). Whitespace is free; anything that is not two
-    /// parseable colours is not this function, and falls through to the
-    /// plain colour parse.
+    /// Whether this depends on the appearance: a pair or a reference — what
+    /// a host asks before deciding whether an appearance change is anything to it.
+    pub fn is_scheme_aware(self) -> bool {
+        !matches!(self, ColorValue::Fixed(_))
+    }
+
+    /// A colour that is more than one colour: a role (LLP 1078 D2, which
+    /// takes in WebKit's `-apple-system-*` names, LLP 1077 D13), a
+    /// `platform-color()` (D3), or `light-dark(<color>, <color>)`, CSS's own
+    /// spelling. Whitespace is free; anything else is not this, and falls
+    /// through to the plain colour parse.
     pub fn parse_light_dark(text: &str) -> Option<ColorValue> {
-        if let Some(system) = symbols::system_color(text) {
-            return Some(system);
+        if let Some(role) = roles::role(text) {
+            return Some(ColorValue::Role(role));
         }
+        if text.trim_start().starts_with("platform-color(") {
+            return roles::parse_platform(text);
+        }
+        ColorValue::parse_pair(text)
+    }
+
+    /// `light-dark(<color>, <color>)` alone (LLP 1034): a reference is not
+    /// valid inside one (LLP 1078 D1).
+    pub fn parse_pair(text: &str) -> Option<ColorValue> {
         let inner = text.trim().strip_prefix("light-dark(")?.strip_suffix(')')?;
         // The comma between the two colours, not one inside an `rgb()`.
         let mut depth = 0;

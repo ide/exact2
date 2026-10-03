@@ -147,16 +147,13 @@ pub fn style_json_sized(style: &StyleProps, env: &Env, keep_size: bool) -> (Stri
                 push_rgba(&mut out, [c.r(), c.g(), c.b(), c.a()]);
                 true
             }
-            RowValue::ColorValue(ColorValue::LightDark(l, d)) => {
-                out.push('[');
-                push_rgba(&mut out, [l.r(), l.g(), l.b(), l.a()]);
-                out.push(',');
-                push_rgba(&mut out, [d.r(), d.g(), d.b(), d.a()]);
-                out.push(']');
+            RowValue::ColorValue(c @ ColorValue::LightDark(..)) => {
+                push_color_value(&mut out, c);
                 true
             }
-            // Its pair, as any colour; `system_colors` names it.
-            RowValue::ColorValue(c @ ColorValue::System(_)) => {
+            // A reference crosses by name (LLP 1078 D1); a role WebKit names
+            // is also listed in `system_colors`, for vibrancy (LLP 1077 D13).
+            RowValue::ColorValue(c @ (ColorValue::Role(_) | ColorValue::Platform(_))) => {
                 push_color_value(&mut out, c);
                 systems.extend(c.system_name().map(|s| (name, s)));
                 true
@@ -422,8 +419,40 @@ fn push_dimension(out: &mut String, d: Dimension) {
 /// `[r,g,b,a]`, the channels as integers.
 /// A colour row's value as the presenters read it: four channels, or a
 /// `light-dark()` pair of them (LLP 1034 D1).
-fn push_color_value(out: &mut String, c: ColorValue) {
-    match c.pair() {
+/// A colour row's wire form: four channels, a `light-dark()` pair of them,
+/// or a reference (LLP 1078 D1) as `{"sys": <name>, "c": <pair>}`: this
+/// platform's class colour property (or `@tint`, `named:<Asset>`), which the
+/// presenter resolves per view against its traits, and the fallback pair.
+/// A `platform-color()` with no name for this platform crosses as its fallback.
+pub(crate) fn push_color_value(out: &mut String, c: ColorValue) {
+    let native = match c {
+        ColorValue::Role(id) => {
+            let r = exact_kernel::style::roles::role_of(id);
+            Some(std::borrow::Cow::Borrowed(if cfg!(target_os = "macos") {
+                r.macos
+            } else {
+                r.ios
+            }))
+        }
+        ColorValue::Platform(id) => exact_kernel::style::roles::platform(id).and_then(|p| {
+            let name = if cfg!(target_os = "macos") {
+                p.macos.clone()
+            } else {
+                p.ios.clone()
+            };
+            name.map(|n| std::borrow::Cow::Owned(n.into_string()))
+        }),
+        _ => None,
+    };
+    if let Some(name) = native {
+        out.push_str("{\"sys\":\"");
+        out.push_str(&name);
+        out.push_str("\",\"c\":");
+        push_color_value(out, c.fallback());
+        out.push('}');
+        return;
+    }
+    match c.fallback() {
         ColorValue::Fixed(c) => push_rgba(out, [c.r(), c.g(), c.b(), c.a()]),
         ColorValue::LightDark(l, d) => {
             out.push('[');
@@ -432,7 +461,7 @@ fn push_color_value(out: &mut String, c: ColorValue) {
             push_rgba(out, [d.r(), d.g(), d.b(), d.a()]);
             out.push(']');
         }
-        ColorValue::System(_) => {} // `pair` never returns one
+        ColorValue::Role(_) | ColorValue::Platform(_) => push_rgba(out, [0; 4]),
     }
 }
 

@@ -33,9 +33,7 @@ struct BoxShadowSpec: Equatable {
     static func list(_ value: BatchValue?, dark: Bool) -> [BoxShadowSpec] {
         (value?.array ?? []).compactMap { item in
             guard case .object(let o) = item, let off = o["o"]?.numbers, off.count == 2 else { return nil }
-            var c = o["c"]?.numbers
-            if c == nil, let pair = o["c"]?.array, pair.count == 2 { c = pair[dark ? 1 : 0].numbers }
-            guard let c, c.count == 4, c[3] > 0 else { return nil }
+            guard let c = o["c"]?.channels(dark: dark), c[3] > 0 else { return nil }
             return BoxShadowSpec(color: CGColor(srgbRed: c[0] / 255, green: c[1] / 255, blue: c[2] / 255, alpha: c[3] / 255),
                                  offset: CGSize(width: off[0], height: off[1]), blur: max(0, CGFloat(o["b"]?.number ?? 0)),
                                  spread: CGFloat(o["s"]?.number ?? 0), inset: o["i"] != nil)

@@ -497,7 +497,7 @@ fn hex(out: &mut String, c: Color) {
 }
 
 /// A colour row's canonical CSS: `#rrggbbaa`, or `light-dark()` of two.
-pub(crate) fn color_css(out: &mut String, color: ColorValue) {
+pub fn color_css(out: &mut String, color: ColorValue) {
     match color {
         ColorValue::Fixed(c) => hex(out, c),
         ColorValue::LightDark(light, dark) => {
@@ -507,8 +507,7 @@ pub(crate) fn color_css(out: &mut String, color: ColorValue) {
             hex(out, dark);
             out.push(')');
         }
-        // Its pair: this text reaches browsers, which have no such names.
-        ColorValue::System(_) => color_css(out, color.pair()),
+        reference => crate::style::roles::reference_css(out, reference),
     }
 }
 

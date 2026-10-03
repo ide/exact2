@@ -17,9 +17,21 @@ enum BatchValue: Equatable {
         for value in a { guard let n = value.number else { return nil }; result.append(n) }
         return result
     }
-    var isSchemeColor: Bool { array?.count == 2 && array?.first?.numbers?.count == 4 && array?.last?.numbers?.count == 4 }
-    func channels(dark: Bool) -> [Double]? {
+    /// A colour row naming a platform colour (LLP 1078 D1): `{"sys", "c"}`.
+    var isSystemColor: Bool {
+        if case .object(let o) = self { return o["sys"]?.string != nil }
+        return false
+    }
+    var isSchemeColor: Bool {
+        if case .object(let o) = self { return o["sys"] != nil }
+        return array?.count == 2 && array?.first?.numbers?.count == 4 && array?.last?.numbers?.count == 4
+    }
+    func channels(dark: Bool, elevated: Bool = false) -> [Double]? {
         if let c = numbers, c.count == 4 { return c }
+        // @ref LLP 1078 D5 — a platform colour by name, its pair the fallback.
+        if case .object(let o) = self, let name = o["sys"]?.string {
+            return SystemColor.channels(name, dark: dark, elevated: elevated, fallback: o["c"]?.channels(dark: dark))
+        }
         guard let a = array, a.count == 2, let c = a[dark ? 1 : 0].numbers, c.count == 4 else { return nil }
         return c
     }

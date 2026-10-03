@@ -467,16 +467,23 @@ pub struct Write {
 }
 
 /// A row's value `none` (or the keyword `auto`/`normal`) writes nothing, as
-/// A bound value naming one of UIKit's system colours as its `light-dark()`
-/// pair, anywhere in the text (a shorthand's colour part too); the kernel's
-/// table, so literal and bound values agree (LLP 1077 D13).
+/// A bound value naming a colour role (LLP 1078 D2) as the role's CSS: the
+/// whole value (`"secondary-label"`), or a WebKit `-apple-system-*` name
+/// anywhere in it (a shorthand's colour part too); the kernel's table, so
+/// literal and bound values agree.
 pub static SYSTEM_COLOR_MAP: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
-    let pairs: Vec<String> = exact_kernel::style::symbols::SYSTEM_COLORS
-        .iter()
-        .map(|(name, l, d)| format!("[\"{name}\",\"light-dark(#{l:08x}, #{d:08x})\"]"))
-        .collect();
+    use exact_kernel::{ColorValue, COLOR_ROLES};
+    let mut pairs = Vec::new();
+    for (i, r) in COLOR_ROLES.iter().enumerate() {
+        let mut css = String::new();
+        exact_kernel::gradient::color_css(&mut css, ColorValue::Role(i as u8));
+        pairs.push(format!("{:?}:{css:?}", r.name.to_ascii_lowercase()));
+        if !r.alias.is_empty() {
+            pairs.push(format!("{:?}:{css:?}", r.alias));
+        }
+    }
     format!(
-        "v=>typeof v===\"string\"&&/-apple-system-/i.test(v)?[{}].reduce((s,[n,c])=>s.replace(new RegExp(\"(?<![\\\\w#-])\"+n+\"(?![\\\\w-])\",\"gi\"),c),v):v",
+        "(M=>v=>typeof v===\"string\"?M[v.trim().toLowerCase()]??v.replace(/-apple-system-[a-z-]+/gi,m=>M[m.toLowerCase()]??m):v)({{{}}})",
         pairs.join(",")
     )
 });
