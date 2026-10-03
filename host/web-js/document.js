@@ -76,22 +76,17 @@ function publish() {
  * rt.js `After`), as the web host projects after every batch; Escape on a
  * modal route presses its back, and `navigate` takes a popstate's location. */
 export function projectRoots(history, navigate, say, after, traverse) {
-  const root = document.getElementById("exact-root"), project = () => { history.project(root, say); navChrome(root, say); };
+  const root = document.getElementById("exact-root"), project = () => { history.project(root, say); Chrome?.(root); };
   history.connect(root, navigate, say, traverse);
   after.push(project); project();
 }
 
 /** The chrome a root's routes ask for (`navigationTitle`, `navigationTab`
  * …: nav-chrome.js, the tab bar, bars and sheets the native hosts project),
- * fetched when a projected route first names one and drawn after each
- * projection from then on. */
-let NavChrome = null;
-function navChrome(root, say) {
-  if (NavChrome) { NavChrome.update?.(root); return; }
-  if (!root.querySelector("[navigationBack]>[navigationKey]:is([data-navigationtitle],[data-navigationtab])")) return;
-  NavChrome = {};
-  import("./nav-chrome.js").then(m => { NavChrome = m; m.update(root); }, err => say(`navigation chrome: ${err.message}`));
-}
+ * which registers here when the app's module imports it (emit.rs) and is
+ * drawn in each projection, the first one included. */
+let Chrome = null;
+export const navChrome = update => { Chrome = update; };
 
 /** The elements that may be the page's scroller: `<html data-scrolldocument>`
  * while one is (D4), which the shell's rule reads, as the web host's glue;
