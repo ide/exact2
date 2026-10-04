@@ -27,7 +27,14 @@ public final class ExactLaunch: NSObject {
 
     let facts = exact_launch_constructor_facts()
     /// Monotonic seconds per mark, for the launch session only.
-    private(set) var marks: [Mark: Double] = [:]
+    private(set) var marks: [Mark: Double] = [:] {
+        didSet {
+            for (m, t) in marks where oldValue[m] == nil { ExactJournal.shared.record("mark", ["mark": m.rawValue], at: t) }
+        }
+    }
+    /// Services the launch parts asked for, waiting for their moment.
+    private var services: [(module: String, when: ExactServiceLoad, config: [String: Any], handoff: () -> Data)] = []
+    private var loaded: Set<String> = []
     /// cold, warm, or nil before DFL.
     private(set) var launchType: String?
     /// Why this launch reports no startup metrics, when it doesn't.
@@ -82,9 +89,10 @@ public final class ExactLaunch: NSObject {
         if hidden, suppressed == nil { suppressed = "hidden" }
         if marks[.delegateInit] == nil, suppressed == nil { suppressed = "no delegate mark" }
         launchType = classify()
-        guard suppressed == nil, !ExactEnv.agentMode else { return }
-        watchVsync()
+        ExactJournal.shared.record("launch", ["type": launchType ?? "", "suppressed": suppressed ?? ""])
         watchInterruption()
+        guard suppressed == nil, !ExactEnv.agentMode else { loadServices(.afterStartup); return }
+        watchVsync()
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.ttiTimeout) { [weak self] in
             guard let self, ttiOutcome == nil, suppressed == nil else { return }
             if let o = outstandingNow() { lastOutstanding = o }
@@ -186,6 +194,7 @@ public final class ExactLaunch: NSObject {
         var g = v.at + ((c0 - v.at) / v.interval).rounded(.up) * v.interval
         if g <= c0 { g += v.interval }
         marks[.present] = g
+        loadServices(.afterFirstPixel)
         scheduleEvaluate()
     }
 
@@ -258,6 +267,28 @@ public final class ExactLaunch: NSObject {
         guard ttiOutcome == nil else { return }
         ttiOutcome = outcome
         stopWatching()
+        ExactJournal.shared.record("startup", report())
+        loadServices(.afterStartup)
+    }
+
+    func requestService(module: String, when: ExactServiceLoad, config: [String: Any], handoff: @escaping () -> Data) {
+        services.append((module, when, config, handoff))
+        if when == .afterFirstPixel, marks[.present] != nil || suppressed != nil { loadServices(.afterFirstPixel) }
+        if when == .afterStartup, ttiOutcome != nil || suppressed != nil { loadServices(.afterStartup) }
+    }
+
+    /// Load each service whose moment came, in the turn after this one: never
+    /// inside the work that triggered it.
+    private func loadServices(_ moment: ExactServiceLoad) {
+        let due = services.filter { ($0.when == moment || moment == .afterStartup) && !loaded.contains($0.module) }
+        for s in due {
+            loaded.insert(s.module)
+            DispatchQueue.main.async {
+                let config = (try? JSONSerialization.data(withJSONObject: s.config)) ?? Data("{}".utf8)
+                guard let service = ExactService.load(module: s.module, config: config, handoff: s.handoff()) else { return }
+                ExactJournal.shared.attach(s.module, service)
+            }
+        }
     }
 
     private func stopWatching() {
@@ -272,9 +303,12 @@ public final class ExactLaunch: NSObject {
         let name = UIApplication.didEnterBackgroundNotification
         #endif
         NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+            ExactJournal.shared.record("background")
+            ExactJournal.shared.background()
             guard let self, ttiOutcome == nil, suppressed == nil else { return }
             suppressed = "interrupted"
             stopWatching()
+            loadServices(.afterStartup)
         }
     }
 

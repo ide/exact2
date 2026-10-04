@@ -16,7 +16,7 @@ const run = (cmd, args, opts = {}) => {
   if (r.status !== 0) throw new Error(`${cmd} failed (${r.status ?? r.error?.message})${r.stderr?.length ? ': ' + String(r.stderr).trim() : ''}`);
   return r;
 };
-export function assembleMac({shared, macWidgets, triple, appleReach, hasWeb, webLoadName, args, app, paths, binDir, libDir, bin, loadName, hasGpu, dylib, moduleDylibs, looseArms, hasSvg, svgLoadName, modulesLoadName, modulesBuilt, svgBuilt, canvasGpuLoadName, canvasGpuBuilt, sha1, linkRoot, swiftc, buildReceipt, development, bakedCompat, rosterKeys, production, distribution, stampSdk, products, composition, sdk, bakedPlan, cleanup}, {runApple, appleArtifacts, macInfoPlist, copyAppleStaticTrees, writeUsageStrings, receipt, shippedReceipt, assertAppleIdentity, placeAppleArtifact, infoPlist, distributionKeys, copyAppleGpuProducts, entitlements}) {
+export function assembleMac({shared, serviceDylibs, macWidgets, triple, appleReach, hasWeb, webLoadName, args, app, paths, binDir, libDir, bin, loadName, hasGpu, dylib, moduleDylibs, looseArms, hasSvg, svgLoadName, modulesLoadName, modulesBuilt, svgBuilt, canvasGpuLoadName, canvasGpuBuilt, sha1, linkRoot, swiftc, buildReceipt, development, bakedCompat, rosterKeys, production, distribution, stampSdk, products, composition, sdk, bakedPlan, cleanup}, {runApple, appleArtifacts, macInfoPlist, copyAppleStaticTrees, writeUsageStrings, receipt, shippedReceipt, assertAppleIdentity, placeAppleArtifact, infoPlist, distributionKeys, copyAppleGpuProducts, entitlements}) {
     // `--bundle`'s assembled `.app`, when one was asked for: what `--run`
     // then launches, so the running process has the app's bundle identity —
     // its Info.plist, its document types, its Dock tile (LLP 1033 D2).
@@ -45,6 +45,7 @@ export function assembleMac({shared, macWidgets, triple, appleReach, hasWeb, web
     for (const [has, built, name] of looseArms) { rmSync(resolve(binDir, name), { force: true }); if (has) copyFileSync(built, resolve(binDir, name)); }
     rmSync(resolve(binDir, modulesLoadName), { force: true });
     if (modulesBuilt) copyFileSync(modulesBuilt, resolve(binDir, modulesLoadName));
+    for (const svc of serviceDylibs) { copyFileSync(svc.built, resolve(binDir, svc.load)); run('codesign', ['--force', '--sign', sha1 ?? '-', '--timestamp=none', resolve(binDir, svc.load)], { stdio: 'ignore' }); }
     rmSync(resolve(binDir, svgLoadName), { force: true });
     if (hasSvg) copyFileSync(svgBuilt, resolve(binDir, svgLoadName));
     rmSync(resolve(binDir, canvasGpuLoadName), { force: true });
@@ -88,7 +89,7 @@ export function assembleMac({shared, macWidgets, triple, appleReach, hasWeb, web
       const executables = resolve(contents, 'MacOS'), resources = resolve(contents, 'Resources');
       mkdirSync(executables, { recursive: true });
       mkdirSync(resources);
-      for (const file of [paths.executable, ...loaded, ...(canvasGpuBuilt ? [canvasGpuLoadName] : []), ...(modulesBuilt ? [modulesLoadName] : []), ...(hasGpu ? [loadName] : []), ...moduleDylibs.map(m => m.load)]) copyFileSync(resolve(binDir, file), resolve(executables, file));
+      for (const file of [paths.executable, ...loaded, ...(canvasGpuBuilt ? [canvasGpuLoadName] : []), ...(modulesBuilt ? [modulesLoadName] : []), ...serviceDylibs.map(svc => svc.load), ...(hasGpu ? [loadName] : []), ...moduleDylibs.map(m => m.load)]) copyFileSync(resolve(binDir, file), resolve(executables, file));
       writeFileSync(resolve(contents, 'Info.plist'), macInfoPlist(app, { development, distributed: distribution, reach: appleReach, icon: { ...widgetKeys, ...rosterKeys, ...assetKeys, ...buildInfo(app, { root, production: production || distribution, ...stampSdk }) } }));
       copyAppleStaticTrees(paths.capture, resources);
       for (const file of ['Assets.car', ...(assetKeys.CFBundleIconFile ? [`${assetKeys.CFBundleIconFile}.icns`] : [])]) if (existsSync(resolve(binDir, file))) copyFileSync(resolve(binDir, file), resolve(resources, file));
@@ -98,7 +99,7 @@ export function assembleMac({shared, macWidgets, triple, appleReach, hasWeb, web
       const whole = readFileSync(resolve(binDir, 'receipt.json'), 'utf8');
       writeFileSync(resolve(resources, 'receipt.json'), distribution ? shippedReceipt(whole) : whole);
       // Preserve the GPU artifact signatures that the baked receipt names.
-      for (const file of [...loaded, ...(canvasGpuBuilt ? [canvasGpuLoadName] : []), ...(modulesBuilt ? [modulesLoadName] : [])]) run('codesign', ['--force', '--sign', sha1 ?? '-', '--timestamp=none', resolve(executables, file)], { stdio: 'ignore' });
+      for (const file of [...loaded, ...(canvasGpuBuilt ? [canvasGpuLoadName] : []), ...(modulesBuilt ? [modulesLoadName] : []), ...serviceDylibs.map(svc => svc.load)]) run('codesign', ['--force', '--sign', sha1 ?? '-', '--timestamp=none', resolve(executables, file)], { stdio: 'ignore' });
       copyMacResources(app, contents, buildReceipt.binary.metadata.nativeResources ?? []);
       if (shared) {
         const frameworks = resolve(contents, 'Frameworks');
@@ -125,7 +126,7 @@ export function assembleMac({shared, macWidgets, triple, appleReach, hasWeb, web
     }
     return bundlePath;
 }
-export function assembleIOS({shared, triple, app, paths, binDir, bin, device, development, appleReach, tv, bakedCompat, bakedPlan, ipa, linkRoot, swiftc, buildReceipt, rosterKeys, sdkName, production, distribution, stampSdk, libDir, gpuArtifacts, looseArms, modulesBuilt, modulesLoadName, hasSvg, svgBuilt, svgLoadName, svgFilterBuilt, svgFilterLibraryName, canvasGpuBuilt, canvasGpuLoadName, args, unsigned, prof, ph, sha1, composition, destination, target, sdk, hasGpu, dylib}, {runApple, appleArtifacts, macInfoPlist, copyAppleStaticTrees, writeUsageStrings, receipt, shippedReceipt, assertAppleIdentity, placeAppleArtifact, infoPlist, distributionKeys, copyAppleGpuProducts, entitlements}) {
+export function assembleIOS({shared, serviceDylibs, triple, app, paths, binDir, bin, device, development, appleReach, tv, bakedCompat, bakedPlan, ipa, linkRoot, swiftc, buildReceipt, rosterKeys, sdkName, production, distribution, stampSdk, libDir, gpuArtifacts, looseArms, modulesBuilt, modulesLoadName, hasSvg, svgBuilt, svgLoadName, svgFilterBuilt, svgFilterLibraryName, canvasGpuBuilt, canvasGpuLoadName, args, unsigned, prof, ph, sha1, composition, destination, target, sdk, hasGpu, dylib}, {runApple, appleArtifacts, macInfoPlist, copyAppleStaticTrees, writeUsageStrings, receipt, shippedReceipt, assertAppleIdentity, placeAppleArtifact, infoPlist, distributionKeys, copyAppleGpuProducts, entitlements}) {
   // The bundle, assembled from scratch (new inodes, see above), with the app's assets (a phone reads no other
   // machine's paths); ad-hoc signed for a simulator, signed with the team's identity, profile, and entitlements for a phone.
   const bundle = resolve(binDir, basename(paths.bundle));
@@ -144,6 +145,7 @@ export function assembleIOS({shared, triple, app, paths, binDir, bin, device, de
   copyAppleGpuProducts(libDir, resolve(bundle, 'Frameworks'), gpuArtifacts, !!ipa);
   for (const [has, built, name] of looseArms) if (has) copyFileSync(built, resolve(bundle, 'Frameworks', name));
   if (modulesBuilt) copyFileSync(modulesBuilt, resolve(bundle, 'Frameworks', modulesLoadName));
+  for (const svc of serviceDylibs) copyFileSync(svc.built, resolve(bundle, 'Frameworks', svc.load));
   if (hasSvg) copyFileSync(svgBuilt, resolve(bundle, 'Frameworks', svgLoadName));
   if (svgFilterBuilt) copyFileSync(svgFilterBuilt, resolve(bundle, svgFilterLibraryName));
   if (canvasGpuBuilt) copyFileSync(canvasGpuBuilt, resolve(bundle, 'Frameworks', canvasGpuLoadName));

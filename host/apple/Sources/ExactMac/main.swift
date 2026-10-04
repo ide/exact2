@@ -10,6 +10,7 @@
 import AppKit
 import ExactKit
 import ExactComposition
+import ExactLaunchParts
 
 ProcessRelaunch.waitIfRequested()
 
@@ -548,6 +549,7 @@ final class Delegate: NSObject, NSApplicationDelegate {
     }
     override init() {
         ExactLaunch.shared.delegateInit()
+        ExactLaunch.shared.runLaunchParts(ExactLaunchParts.all)
         super.init()
     }
     /// A one-window app quits with its window; one whose documents each
