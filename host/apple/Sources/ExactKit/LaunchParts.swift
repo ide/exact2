@@ -248,6 +248,24 @@ extension ExactLaunch {
 /// such as Observe to send: custom events, errors and the attributes merged
 /// into everything. Journal events; the module's service decides what they mean.
 public enum ExactEvents {
+    /// Contract's `observe`, `observeAttributes` and `observeError` (Exact
+    /// Observe design §5.2), journal events stamped now. The compiler sends
+    /// a record's fields as name, value pairs.
+    static func hostCommand(_ name: String, _ args: [Any]) {
+        let pairs = { (from: Int) -> [String: Any] in
+            var out: [String: Any] = [:]
+            var i = from
+            while i + 1 < args.count { if let k = args[i] as? String { out[k] = args[i + 1] }; i += 2 }
+            return out
+        }
+        let text = { (i: Int, or: String) in args.count > i ? args[i] as? String ?? or : or }
+        switch name {
+        case "observe": log(text(0, ""), attributes: pairs(2), severity: text(1, "info"))
+        case "observeAttributes": setGlobalAttributes(pairs(0))
+        default: reportError(type: text(1, "ContractError"), message: text(0, ""))
+        }
+    }
+
     /// A custom event (Observe's `logEvent`): `severity` is trace, debug,
     /// info (the default), warn, error or fatal.
     public static func log(_ name: String, attributes: [String: Any] = [:], severity: String = "info", body: String? = nil, displayName: String? = nil) {
