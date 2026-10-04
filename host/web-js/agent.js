@@ -15,6 +15,8 @@ const TYPES = { TEMPLATE: 'Head', BUTTON: 'Pressable', INPUT: 'TextInput', TEXTA
  * screen's or an unselected tab's copy only when no active one carries it, as the runner's `target`. */
 const targetOf = (nodes, t) => { const named = nodes.filter(n => n.props.testId === t); return nodes.find(n => n.id === t) ?? named.find(n => !n.inactive) ?? named[0]; };
 export function install(exact) {
+  // The base sheet's fades are not the agent's (index.html): its clock holds every motion.
+  document.documentElement.setAttribute('data-exact-agent', '');
   const views = exact.views, id = exact.viewId;
   let page;
   const ownPage = () => page ??= (f => ({ prefer: p => { f.prefer(p); return f.read(); } }))(pageReporter(true));
