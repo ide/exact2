@@ -168,19 +168,32 @@ final class NavigationRulesTests: XCTestCase {
     /// while the finger was down — and is owed once (settled twice, the
     /// second compares UIKit with itself).
     func testADestinationSurvivesTheAppMovingMeanwhile() {
-        // The app pushed c while UIKit popped b: one Back would remove c, but
-        // the destination a is c's own parent, so nothing of the app's is lost
-        // that the person did not leave.
-        XCTAssertEqual(NavigationRules.backs(app: ["a", "b", "c"], to: "a"), 2)
+        // The app pushed c while UIKit popped b: the destination is still a,
+        // beneath the app's top, and going back to it leaves c with b.
+        XCTAssertTrue(NavigationRules.isBeneath("a", in: ["a", "b", "c"]))
         // The app popped b and pushed c while UIKit animated its own pop: what
         // UIKit shows is what the host applied, so nothing is owed at all.
         let applied = NavigationRules.Snapshot(tab: nil, stack: ["a"], presented: [])
         XCTAssertNil(NavigationRules.platformChange(applied: applied, observed: applied))
-        // The swiped screen replaced in place (b by b2): back to a removes b2.
-        XCTAssertEqual(NavigationRules.backs(app: ["a", "b2"], to: "a"), 1)
+        // The swiped screen replaced in place (b by b2): a is still beneath.
+        XCTAssertTrue(NavigationRules.isBeneath("a", in: ["a", "b2"]))
         // The app is already there, or has left the destination behind.
-        XCTAssertNil(NavigationRules.backs(app: ["a"], to: "a"))
-        XCTAssertNil(NavigationRules.backs(app: ["x", "y"], to: "a"))
+        XCTAssertFalse(NavigationRules.isBeneath("a", in: ["a"]))
+        XCTAssertFalse(NavigationRules.isBeneath("a", in: ["x", "y"]))
+    }
+
+    /// I1: one transition back is one destination, whatever it removed —
+    /// never a count of screens, never one screen assumed.
+    func testOneTransitionBackIsOneDestinationWhateverItRemoved() {
+        typealias S = NavigationRules.Snapshot
+        let applied = S(tab: nil, stack: ["a", "b", "c", "d"], presented: [["m", "n"]])
+        for (observed, destination) in [
+            (S(tab: nil, stack: ["a", "b", "c", "d"], presented: [["m"]]), "m"),
+            (S(tab: nil, stack: ["a", "b", "c", "d"], presented: []), "d"),
+            (S(tab: nil, stack: ["a"], presented: []), "a"),
+        ] {
+            XCTAssertEqual(NavigationRules.platformChange(applied: applied, observed: observed), .backTo(destination))
+        }
     }
 
     /// D6: leaving is the app's to permit.

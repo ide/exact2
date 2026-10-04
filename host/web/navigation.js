@@ -64,6 +64,20 @@ function pressBack(nav) {
   control.click();
 }
 
+// The fallback for a root without `traverse`: its Back control, resolved in
+// whatever route is selected now, until `key` is the selected route; a press
+// that leaves the selection where it was is a refusal. Returns why a press
+// was refused, as pressBack does.
+function pressBackTo(nav, key) {
+  for (let shown = nav.getAttribute("navigationKey"), n = routesOf(nav).length; shown !== key && n-- > 0;) {
+    const routes = routesOf(nav), at = routes.indexOf(selectedRoute(nav));
+    if (!routes.slice(0, Math.max(at, 0)).some(r => r.getAttribute("navigationKey") === key)) return;
+    const why = pressBack(nav);
+    if (why || nav.getAttribute("navigationKey") === shown) return why;
+    shown = nav.getAttribute("navigationKey");
+  }
+}
+
 function go(to, from, finish = () => {}) {
   const index = browserIndex();
   const current = index !== null && originIndex !== null ? index - originIndex : from;
@@ -108,24 +122,28 @@ function popped({ j, state, url }) {
   const target = owned ? entry.url : url;
   const nav = root.querySelector("[navigationBack]");
   const routes = routesOf(nav), selected = routes.indexOf(selectedRoute(nav));
-  // A completed pop presses the selected route's Back control. A route with
-  // none (a screen with no Back button) still goes back, as the web's Back
-  // does: the root's `navigate` with the entry's URL, as any other traversal,
-  // or with no `navigate` handler the runner's own `back` (LLP 1115 D5).
-  const beneath = owned && j === cursor - 1 && selected > 0
-    && routes[selected - 1].getAttribute("navigationKey") === String(entry.id);
-  const back = beneath && !!backControl(nav);
+  // @ref LLP 1035.001.000 I1 — a Back to an entry still beneath the selected
+  // route goes to that route, however many entries it skipped: never counted
+  // as one screen per entry. One `traverse` to its key where the root
+  // declares it; else the app's Back control, pressed until it is the top. A
+  // route with no Back control (a screen with no Back button) still goes
+  // back, as the web's Back does: the root's `navigate` with the entry's URL,
+  // or with no `navigate` handler the runner's own `back`, a step at a time
+  // (LLP 1115 D5).
   let why = null;
-  // @ref LLP 1035.001.000 — Back over any number of entries to a route still
-  // beneath the selected one is one `traverse` to its key, where the root
-  // declares it; otherwise one step presses Back and more navigate, as before.
-  const traversable = owned && j < cursor
+  const beneath = owned && j < cursor
     && routes.slice(0, Math.max(selected, 0)).some(r => r.getAttribute("navigationKey") === String(entry.id));
   pop = {};
   try {
-    const traversed = traversable && traverse(String(entry.id));
-    if (!traversed && back) why = pressBack(nav);
-    else if (!traversed && navigate(target) === false && beneath) hostBack?.(Number(nav.getAttribute("navigationKey")));
+    const traversed = beneath && traverse(String(entry.id));
+    const back = beneath && !traversed && !!backControl(nav);
+    if (back) why = pressBackTo(nav, String(entry.id));
+    else if (!traversed && navigate(target) === false && beneath)
+      for (let n = routes.length; n-- > 0 && nav.getAttribute("navigationKey") !== String(entry.id);) {
+        const at = nav.getAttribute("navigationKey");
+        hostBack?.(Number(at));
+        if (nav.getAttribute("navigationKey") === at) break;
+      }
     const accepted = back || traversed ? last?.top === entry.id : pop.op?.url === target;
     if (accepted) {
       cursor = j ?? cursor;
