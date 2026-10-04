@@ -537,6 +537,7 @@ fn refine_params_from_view(
                             | "nexttrack"
                             | "stop"
                             | "navigate"
+                            | "traverse"
                             | "cancel"
                             | "resize"
                     ) {
@@ -585,7 +586,7 @@ fn refine_params_from_view(
                                     vec![Ty::List(Box::new(Ty::Record("Picked".into())))]
                                 }
                                 "change" | "input" | "key" | "keyup" | "message" | "navigate"
-                                | "error" => {
+                                | "traverse" | "error" => {
                                     vec![Ty::String]
                                 }
                                 "timeupdate" | "durationchange" => vec![Ty::Number],
