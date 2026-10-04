@@ -478,6 +478,7 @@ impl<D: DataSource> Bridge<D> {
     /// guest message — is the input buffer's first `len` bytes, UTF-8).
     /// Kind 43 is `keyup`, its payload a keydown's (#140).
     /// Kind 14 is navigate: one UTF-8 location at the navigation root (LLP 1038 D8).
+    /// Kind 35 is traverse: the navigation key the platform went back to (LLP 1035.001.000).
     /// Kind 20 is pan (`dx,dy`); 28 panrelease (`vx,vy`, px/s; LLP 1057 §10.6).
     /// Kind 23 is a text field's `input`; 24 and 25 a checkbox's `change`
     /// and `input`, the payload `true` or `false` (LLP 1069.001 D4); 40 to
@@ -516,6 +517,8 @@ impl<D: DataSource> Bridge<D> {
             },
             // @ref LLP 1038 D8 — the next ABI kind after scroll.
             14 => Event::Navigate(payload),
+            // @ref LLP 1035.001.000 — the destination's navigation key.
+            35 => Event::Traverse(payload),
             15 => {
                 let Some(event) = Event::height_release_payload(&payload) else {
                     return self.emit(r#"{"ops":[],"error":"invalid height release"}"#.into());

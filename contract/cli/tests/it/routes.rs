@@ -775,3 +775,48 @@ component Pane
         assert!(error.message.contains("never scrolls on y"), "{error}");
     }
 }
+
+#[test]
+fn traverse_delivers_the_destination_key_and_back_to_pops_to_it() {
+    // @ref LLP 1035.001.000 — one event for a platform Back of any depth.
+    let source = SOURCE
+        .replace(
+            "navigate=followLink",
+            "navigate=followLink traverse=returnTo",
+        )
+        .replace(
+            "  view\n    main",
+            "  action returnTo(entry: string)\n    nav = backTo(nav, entry)\n  view\n    main",
+        );
+    let mut runner = boot(contract::compile(&source).unwrap(), "/prompt/5/write");
+    let root = runner.kernel().roots()[0];
+    let ids: Vec<String> = selected(&state(&runner)["slots"]["nav"])
+        .iter()
+        .map(|e| e["id"].to_string())
+        .collect();
+    assert_eq!(ids.len(), 3);
+    runner
+        .dispatch(root, exact_runner::Event::Traverse(ids[0].clone()))
+        .unwrap();
+    assert_eq!(selected(&state(&runner)["slots"]["nav"]).len(), 1);
+    // A key no longer in the stack: unchanged, refused once in the journal.
+    let before = state(&runner)["slots"]["nav"].clone();
+    runner
+        .dispatch(root, exact_runner::Event::Traverse(ids[2].clone()))
+        .unwrap();
+    assert_eq!(state(&runner)["slots"]["nav"], before);
+    assert!(runner.journal().any(|l| l.contains("backTo")));
+    // Only the navigation root may hear it, and it carries one string.
+    for bad in [
+        source.replace("traverse=returnTo", "traverse=returnTo(\"1\")"),
+        source.replace(
+            "action returnTo(entry: string)",
+            "action returnTo(entry: number)",
+        ),
+        source
+            .replace("traverse=returnTo", "")
+            .replace("button id=\"back\"", "button traverse=returnTo id=\"back\""),
+    ] {
+        assert!(contract::compile(&bad).is_err());
+    }
+}

@@ -8,7 +8,7 @@ let written = [], gone = new Set(), cursor = 0, first = null, originIndex = null
 let echo = null, pop = null, draining = false;
 const queue = [];
 const waiters = new Set();
-let root, navigate, log, hostBack;
+let root, navigate, log, hostBack, traverse;
 const routesIn = node => [...node.children].filter(r => r.hasAttribute("navigationKey"));
 // @ref LLP 1075.003 §3.7 — a navigation root's tabs: the tabpanels its own
 // tablist's tabs name with aria-controls, in tab order (a tablist inside a
@@ -116,11 +116,17 @@ function popped({ j, state, url }) {
     && routes[selected - 1].getAttribute("navigationKey") === String(entry.id);
   const back = beneath && !!backControl(nav);
   let why = null;
+  // @ref LLP 1035.001.000 — Back over any number of entries to a route still
+  // beneath the selected one is one `traverse` to its key, where the root
+  // declares it; otherwise one step presses Back and more navigate, as before.
+  const traversable = owned && j < cursor
+    && routes.slice(0, Math.max(selected, 0)).some(r => r.getAttribute("navigationKey") === String(entry.id));
   pop = {};
   try {
-    if (back) why = pressBack(nav);
-    else if (navigate(target) === false && beneath) hostBack?.(Number(nav.getAttribute("navigationKey")));
-    const accepted = back ? last?.top === entry.id : pop.op?.url === target;
+    const traversed = traversable && traverse(String(entry.id));
+    if (!traversed && back) why = pressBack(nav);
+    else if (!traversed && navigate(target) === false && beneath) hostBack?.(Number(nav.getAttribute("navigationKey")));
+    const accepted = back || traversed ? last?.top === entry.id : pop.op?.url === target;
     if (accepted) {
       cursor = j ?? cursor;
       first = Math.min(first, cursor);
@@ -134,7 +140,8 @@ function popped({ j, state, url }) {
         commit(op);
       }
     } else {
-      if (back) log(`history: Back refused: ${why ?? `pressing the Back control did not select entry ${entry.id}`}; restoring the entry`);
+      if (traversed) log(`history: traverse to ${entry.id} refused; restoring the entry`);
+      else if (back) log(`history: Back refused: ${why ?? `pressing the Back control did not select entry ${entry.id}`}; restoring the entry`);
       else log(`history: ${beneath ? `Back to ${JSON.stringify(target)} refused: route ${nav.getAttribute("navigationKey")} has no id="${nav.getAttribute("navigationBack")}" control, and` : `navigate ${JSON.stringify(target)} refused:`} the navigation root's navigate handler (navigate=…) committed no router change, or the root has none; restoring the entry`);
       if (j !== null && j !== cursor) go(cursor, j);
       else history.replaceState(written[cursor], "", historyURL(written[cursor].url));
@@ -159,9 +166,10 @@ function settled() {
 }
 
 export const navigation = {
-  /** `dispatch(location)` is false when no `navigate` handler heard it; `back(id)` is the runner's own `back` from visit `id`. */
-  connect(hostRoot, dispatch, journal, back = null) {
-    root = hostRoot; navigate = dispatch; log = journal; hostBack = back;
+  /** `dispatch(location)` is false when no `navigate` handler heard it; `back(id)` is the runner's own `back` from visit `id`;
+   * `traverseTo(key)` is true when the root heard `traverse` to the route `key` (LLP 1035.001.000). */
+  connect(hostRoot, dispatch, journal, back = null, traverseTo = () => false) {
+    root = hostRoot; navigate = dispatch; log = journal; hostBack = back; traverse = traverseTo;
     addEventListener("popstate", event => {
       if (!last) return;
       const index = browserIndex();

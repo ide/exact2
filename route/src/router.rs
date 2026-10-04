@@ -201,6 +201,24 @@ pub fn back(_table: &Table, mut r: Router) -> (Router, Option<Refusal>) {
     (r, None)
 }
 
+/// Pop the selected stack to the entry whose id, as a navigation key writes
+/// it (`${e.id}`), is `key`: the destination a platform's own Back reached,
+/// however many screens it took off (LLP 1035.001.000). The top's own key is
+/// unchanged; a key not in the selected stack leaves the value unchanged and
+/// reports one refusal.
+pub fn back_to(_table: &Table, mut r: Router, key: &str) -> (Router, Option<Refusal>) {
+    let Some(position) = stack(&r).iter().position(|e| e.id.to_string() == key) else {
+        return (
+            r,
+            Some(refusal(format!("no entry {key} in the selected stack"))),
+        );
+    };
+    if let Ok(index) = selected(&r) {
+        r.tabs[index].stack.truncate(position + 1);
+    }
+    (r, None)
+}
+
 /// Show a retained tab; reselecting the current tab pops it to its root position.
 /// An unknown tab leaves the entire value unchanged and reports one refusal.
 pub fn select(_table: &Table, mut r: Router, name: &str) -> (Router, Option<Refusal>) {

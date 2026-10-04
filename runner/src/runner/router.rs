@@ -344,6 +344,7 @@ impl RouterContext {
             Stdlib::Push => exact_route::push(&self.table, r, arg()?),
             Stdlib::Replace => exact_route::replace(&self.table, r, arg()?),
             Stdlib::Back => exact_route::back(&self.table, r),
+            Stdlib::BackTo => exact_route::back_to(&self.table, r, arg()?),
             Stdlib::Select => exact_route::select(&self.table, r, arg()?),
             Stdlib::Go => exact_route::go(&self.table, r, arg()?),
             _ => return None,
