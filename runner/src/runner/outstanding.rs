@@ -6,10 +6,11 @@
 //! streams before their first message, resources showing a placeholder until
 //! their source can answer, compiled answers still to be asked again, armed
 //! `after` tasks due within [`STARTUP_TIMER_WINDOW_MS`] (load on appear),
-//! and armed mutation `then`s. A resource whose current arguments failed is
+//! armed mutation `then`s, and mounted elements marked `aria-busy`. A resource whose current arguments failed is
 //! terminal, not outstanding, until something asks again.
 
 use super::{Runner, Target};
+
 use crate::DataSource;
 
 /// An `after` task armed with at most this delay is startup work; a longer
@@ -33,6 +34,9 @@ pub struct Outstanding {
     pub thens: Vec<String>,
     /// Resources whose current arguments failed: settled, but in error.
     pub failed: Vec<String>,
+    /// Mounted elements marked `aria-busy` (by test id, else view id): the
+    /// app's own word that a region is still loading.
+    pub busy: Vec<String>,
     /// The data source can answer.
     pub data_ready: bool,
     /// A refused commit poisoned the runner: every action now fails.
@@ -66,6 +70,7 @@ impl Outstanding {
         list("oneShots", &self.one_shots, &mut out);
         list("thens", &self.thens, &mut out);
         list("failed", &self.failed, &mut out);
+        list("busy", &self.busy, &mut out);
         out.push('}');
         out
     }
@@ -78,6 +83,7 @@ impl Outstanding {
             && self.deferred.is_empty()
             && self.one_shots.is_empty()
             && self.thens.is_empty()
+            && self.busy.is_empty()
     }
 }
 
@@ -124,6 +130,21 @@ impl<D: DataSource> Runner<D> {
                 out.one_shots
                     .push(self.plan.str(self.plan.action(row.action).name).to_string());
             }
+        }
+        // `aria-busy` on a mounted element: what the app says is not final.
+        let mut stack: Vec<u32> = self.kernel.roots().into_iter().rev().collect();
+        while let Some(id) = stack.pop() {
+            let Some(node) = self.kernel.node(id) else {
+                continue;
+            };
+            if node.props.bool(exact_kernel::PropId::AccessibilityBusy) == Some(true) {
+                let name = node
+                    .props
+                    .str(exact_kernel::PropId::TestId)
+                    .map_or_else(|| id.to_string(), str::to_owned);
+                out.busy.push(name);
+            }
+            stack.extend(node.children().into_iter().rev());
         }
         for (m, due) in self.then_due.iter().enumerate() {
             if due.is_finite() {
