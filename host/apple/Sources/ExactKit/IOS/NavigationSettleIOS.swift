@@ -85,7 +85,7 @@ extension NavigationHost {
                   let index = tabs.panels.firstIndex(where: { tabName($0) == tab }) else { return }
             _ = act(tabs.tabs[index].id, 0)
         case .backTo(let key):
-            guard let chain = appSnapshot()?.chain, NavigationRules.backs(app: chain, to: key) != nil else {
+            guard let chain = appSnapshot()?.chain, NavigationRules.isBeneath(key, in: chain) else {
                 // The app has gone elsewhere since: its state wins.
                 return
             }
@@ -95,9 +95,11 @@ extension NavigationHost {
                 if appSnapshot()?.chain.last != key { presenter.session?.log("navigation: traverse to \"\(key)\" left the app elsewhere") }
                 return
             }
-            while true {
-                let before = appSnapshot()?.chain ?? []
-                guard before.last != key, before.contains(key) else { return }
+            // The fallback for an app that does not hear `traverse`: its
+            // platform Back (LLP 1115 D5), resolved anew in whatever route is
+            // now active, taken until the app's top is the destination — never a count
+            // of screens taken from the transition (invariant I1).
+            while let before = appSnapshot()?.chain, NavigationRules.isBeneath(key, in: before) {
                 guard canInvokeBack else {
                     presenter.session?.log("navigation: back to \"\(key)\" refused: \(backRefusal)")
                     return

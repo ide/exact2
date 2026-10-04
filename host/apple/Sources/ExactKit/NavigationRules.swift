@@ -48,6 +48,12 @@ enum NavigationRules {
     }
 
     /// What the platform did, as a destination (D3).
+    ///
+    /// Invariant I1 (LLP 1035.001.000): a transition back carries where it
+    /// went, never how many screens it took. One platform transition may
+    /// remove any number of screens — the back button's menu, a sheet with
+    /// its own stack, nested sheets — so nothing here or in the host counts
+    /// pops, and no delivery assumes one transition is one screen.
     enum Change: Equatable {
         /// The person went back to the route keyed so: a pop of any depth, a
         /// dismissed sheet with whatever it had pushed, nested sheets at once.
@@ -68,11 +74,12 @@ enum NavigationRules {
         return .backTo(last)
     }
 
-    /// D4: how many of the app's own Backs take its chain to `key`; nil when
-    /// `key` is its top or not in it (the app has gone elsewhere: its state wins).
-    static func backs(app: [String], to key: String) -> Int? {
-        guard let index = app.firstIndex(of: key), index < app.count - 1 else { return nil }
-        return app.count - 1 - index
+    /// D4: whether `key` is a route beneath the app's top — a destination
+    /// the app can still be taken back to. Not when it is the top already, or
+    /// gone from the chain (the app has moved elsewhere: its state wins).
+    static func isBeneath(_ key: String, in app: [String]) -> Bool {
+        guard let index = app.firstIndex(of: key) else { return false }
+        return index < app.count - 1
     }
 
     /// D6: leaving a route is the app's to permit. A Back control in the
