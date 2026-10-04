@@ -896,6 +896,8 @@ impl<D: DataSource> Bridge<D> {
             },
             // @ref LLP 1038 D8 — the next ABI kind after scroll.
             14 => Event::Navigate(payload),
+            // @ref LLP 1035.001.000 — the destination's navigation key.
+            29 => Event::Traverse(payload),
             15 => {
                 let Some(event) = Event::height_release_payload(&payload) else {
                     let out = self.host.as_ref().map_or_else(not_booted, |h| {

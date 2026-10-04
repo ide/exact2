@@ -1435,7 +1435,7 @@ export function x_replace(r, location) {
   if (r[1][i][1].length === 1 && d.name !== r[1][i][0]) return refuse(r, "replace cannot change the tab's root route");
   const out = copy(r), s = out[1][i][1]; s[s.length - 1] = entry(s.at(-1)[0], d); return out;
 }
-export function x_back(r) { const i = sel(r); if (i < 0 || r[1][i][1].length < 2) return r; const out = copy(r); out[1][i][1].pop(); return out; }
+export function x_back(r) { const i = sel(r); if (i < 0 || r[1][i][1].length < 2) return r; const out = copy(r); out[1][i][1].pop(); return out; } export function x_backTo(r, key) { const s = x_stack(r), at = s.findIndex(e => String(e[0]) === key); if (at < 0) return refuse(r, `no entry ${key} in the selected stack`); if (at === s.length - 1) return r; const out = copy(r); out[1][sel(r)][1].length = at + 1; return out; } // backTo: LLP 1035.001.000, route/src/router.rs `back_to`
 export function x_select(r, name) {
   const i = r[1].findIndex(t => t[0] === name && t[1].length);
   if (i < 0) return refuse(r, `unknown tab ${name}`);
@@ -1463,9 +1463,9 @@ export const x_path = (name, ...values) => path(Routes.find(r => r.name === name
 /** The router slot's changes, to the browser's history (`navigation.js`,
  * the web host's own), and a popstate back as the navigation root's
  * `navigate` (LLP 1038 D7, D11). */
-let RouterSlot = null, Shown = null, Navigate = null, History = null; export const pageHistory = () => History; // the page's navigation.js, which the agent observes: its own copy's state is never written
+let RouterSlot = null, Shown = null, Navigate = null, Traverse = null, History = null; export const pageHistory = () => History; // the page's navigation.js, which the agent observes: its own copy's state is never written
 /** The plan's navigation roots, with a router or without (document.js `projectRoots`). */
-export function navigationRoots(history) { History = history; projectRoots(history, location => Navigate?.(location), say, After); }
+export function navigationRoots(history) { History = history; projectRoots(history, location => Navigate?.(location), say, After, key => Traverse ? (Traverse(key), true) : false); }
 export function router(slot, history) {
   RouterSlot = slot; navigationRoots(history);
   // @ref LLP 1038 §7 — a plain click on a same-origin link to a declared
@@ -1494,6 +1494,6 @@ export function router(slot, history) {
     history.apply({ top: top[0], url: top[2], removed });
   });
 }
-export const navigateTo = f => { Navigate = f; };
+export const navigateTo = f => { Navigate = f; }, traverseTo = f => { Traverse = f; }; // and the root's `traverse`: history's Back to a route beneath the top (LLP 1035.001.000)
 /** The route a location matches: its row index (renderers pick a policy by it). */
 export const routeAt = location => matchRoute(canonical(location))?.[0] ?? -1;

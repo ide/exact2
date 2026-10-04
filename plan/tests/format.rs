@@ -622,6 +622,7 @@ fn router_format_round_trips_and_checks_semantic_links() {
         ("push", vec!["Router", "string"], "Router"),
         ("replace", vec!["Router", "string"], "Router"),
         ("back", vec!["Router"], "Router"),
+        ("backTo", vec!["Router", "string"], "Router"),
         ("select", vec!["Router", "string"], "Router"),
         ("go", vec!["Router", "string"], "Router"),
         ("stack", vec!["Router"], "list<Entry>"),

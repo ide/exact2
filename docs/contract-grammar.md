@@ -387,7 +387,7 @@ working fixture, not inferred from JavaScript's Event interface.
 
 | Payload appended to captured arguments | Handler names |
 | --- | --- |
-| One string | `change`, `input` (text field, textarea, `select`), `key`, `message`, `error` |
+| One string | `change`, `input` (text field, textarea, `select`), `key`, `message`, `error`, `traverse` (the navigation key of the route the platform went back to) |
 | One boolean | `hover`; `change`, `input` on a checkbox or `switch` |
 | One number | `timeupdate`, `durationchange`; `change`, `input` on `type="range"` |
 | One `list<Picked>` | `change`, `input` on `type="file"` |
@@ -402,8 +402,8 @@ working fixture, not inferred from JavaScript's Event interface.
 `scroll` appends left then top offsets; `panrelease` appends x/y release velocity;
 `heightrelease` appends height and velocity. The compiler validates arity and
 available payload types; tags and hosts constrain where events make sense.
-`navigate` belongs on the first root element, outside any region, which must
-also carry `navigationKey` and `navigationBack`. Transform geometry/release
+`navigate` and `traverse` belong on the first root element, outside any region,
+which must also carry `navigationKey` and `navigationBack`. Transform geometry/release
 bindings are required as a pair. See
 [`handler_arity`](../contract/analyze/src/lib.rs) and the corresponding corpus/tests.
 

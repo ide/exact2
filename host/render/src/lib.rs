@@ -547,6 +547,7 @@ pub(crate) fn activation(
                         | exact_plan::EventKind::Key
                         | exact_plan::EventKind::Submit
                         | exact_plan::EventKind::Navigate
+                        | exact_plan::EventKind::Traverse
                 )
             }))
     {
