@@ -753,6 +753,7 @@ public final class ExactSession {
     @discardableResult
     public func boot(size: CGSize) -> Batch {
         let t = CACurrentMediaTime()
+        ExactLaunch.shared.bootEntered(self)
         primePreferences()
         if let bytes = app.lastPlan {
             // A selected launch can crash in runner/font/asset preparation.
@@ -778,6 +779,7 @@ public final class ExactSession {
     @discardableResult
     public func boot(plan bytes: Data, size: CGSize) -> Batch {
         let t = CACurrentMediaTime()
+        ExactLaunch.shared.bootEntered(self)
         primePreferences()
         let cp = text.checkpoint()
         let batch = runtime.bootPlan(bytes, width: size.width, height: size.height)
@@ -803,7 +805,7 @@ public final class ExactSession {
             AppFiles.learn(runtime) // before the first frame's `app:/` images load (LLP 1069.002 D7)
         }
         apply(batch)
-        if batch.error == nil { tellTime() }
+        if batch.error == nil { tellTime(); ExactLaunch.shared.treeApplied(self, path: "baked") }
         // A fresh runner must receive the view's current viewport and insets.
         if batch.error == nil { view?.rebooted() }
         applyMs = (CACurrentMediaTime() - tApply) * 1000
@@ -884,6 +886,7 @@ public final class ExactSession {
         AppFiles.learn(runtime)
         apply(batch)
         tellTime()
+        ExactLaunch.shared.treeApplied(self, path: label)
         view?.rebooted()
         autofocusHeld = false
         if restart { presenter.restoreFocus(kept, tree: agent("{\"op\":\"tree\"}")) }
@@ -1105,6 +1108,7 @@ public final class ExactSession {
     private func firstDrawn(generation drawnGeneration: Int, token: UInt64) {
         guard state != .destroyed, generation == drawnGeneration else { return }
         if firstDrawMs == nil { firstDrawMs = ExactEnv.wall() }
+        ExactLaunch.shared.drawn(self)
         guard activatedGeneration != drawnGeneration else { return }
         activatedGeneration = drawnGeneration
         DispatchQueue.main.async { [weak self] in
@@ -1123,6 +1127,7 @@ public final class ExactSession {
             }
             AppFiles.learn(runtime) // the roots storage configured
             apply(batch)
+            ExactLaunch.shared.activated(self, ok: batch.error == nil)
             if batch.error == nil {
                 presenter.collections.dataReady()
                 app.firstPixel(token)
