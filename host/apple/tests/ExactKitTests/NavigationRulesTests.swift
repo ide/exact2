@@ -137,31 +137,58 @@ final class NavigationRulesTests: XCTestCase {
         XCTAssertEqual(NavigationRules.segments(presentations: ["modal"]), [0..<0, 0..<1])
     }
 
-    /// D2: only a completed gesture from the still-selected route may
-    /// dispatch. Finishing an old programmatic Back cannot cancel Compose.
-    func testACompletedPopBelongsToItsInteractiveSource() {
-        XCTAssertTrue(NavigationRules.dispatchesBack(shownKey: "", rootKey: "thread", sourceKey: "thread", modalActive: false))
-        // Cancelled: UIKit shows the same route the root still names.
-        XCTAssertFalse(NavigationRules.dispatchesBack(shownKey: "thread", rootKey: "thread", sourceKey: "thread", modalActive: false))
-        // Programmatic: the key already moved when UIKit finished.
-        XCTAssertFalse(NavigationRules.dispatchesBack(shownKey: "", rootKey: "", sourceKey: nil, modalActive: false))
-        XCTAssertFalse(NavigationRules.dispatchesBack(shownKey: "", rootKey: "compose", sourceKey: nil, modalActive: false))
-        // An interactive completion cannot dismiss a newly selected route.
-        XCTAssertFalse(NavigationRules.dispatchesBack(shownKey: "", rootKey: "compose", sourceKey: "thread", modalActive: false))
-        // A sheet's dismissal has its own path.
-        XCTAssertFalse(NavigationRules.dispatchesBack(shownKey: "", rootKey: "compose", sourceKey: "compose", modalActive: true))
+    /// LLP 1035.001.000 D3: what the platform did is the difference between
+    /// what UIKit shows and what the host applied — never how it got there.
+    func testThePlatformsChangeIsWhereUIKitNowStands() {
+        typealias S = NavigationRules.Snapshot
+        let applied = S(tab: "settings", stack: ["s", "u", "d"], presented: [])
+        // The back button or a swipe: one screen off the top.
+        XCTAssertEqual(NavigationRules.platformChange(applied: applied, observed: S(tab: "settings", stack: ["s", "u"], presented: [])), .backTo("u"))
+        // The back button's menu: one transition, several screens, one destination.
+        XCTAssertEqual(NavigationRules.platformChange(applied: applied, observed: S(tab: "settings", stack: ["s"], presented: [])), .backTo("s"))
+        // A cancelled swipe, or the host's own change, already applied: nothing.
+        XCTAssertNil(NavigationRules.platformChange(applied: applied, observed: applied))
+        // UIKit holds something the host never set: nothing to report.
+        XCTAssertNil(NavigationRules.platformChange(applied: applied, observed: S(tab: "settings", stack: ["s", "x"], presented: [])))
+        XCTAssertNil(NavigationRules.platformChange(applied: applied, observed: S(tab: "settings", stack: [], presented: [])))
+        // A sheet pulled down, with the screen it had pushed: back beneath it.
+        let sheet = S(tab: nil, stack: ["a", "b"], presented: [["m", "m2"]])
+        XCTAssertEqual(NavigationRules.platformChange(applied: sheet, observed: S(tab: nil, stack: ["a", "b"], presented: [])), .backTo("b"))
+        // A pop inside the sheet.
+        XCTAssertEqual(NavigationRules.platformChange(applied: sheet, observed: S(tab: nil, stack: ["a", "b"], presented: [["m"]])), .backTo("m"))
+        // Nested sheets dismissed together from the lower one.
+        let nested = S(tab: nil, stack: ["a"], presented: [["m"], ["n"]])
+        XCTAssertEqual(NavigationRules.platformChange(applied: nested, observed: S(tab: nil, stack: ["a"], presented: [])), .backTo("a"))
+        // UIKit selected a tab (the More list): that, whatever its stack.
+        XCTAssertEqual(NavigationRules.platformChange(applied: applied, observed: S(tab: "extra", stack: ["e"], presented: [])), .select("extra"))
     }
 
-    /// D2's exception: the app replaced the swiped screen in place while the
-    /// finger was down (capture giving way to what it wrote). The gesture
-    /// applies to the replacement, so it is not pushed back in.
-    func testASourceReplacedInPlaceIsStillWhatTheSwipeDismissed() {
-        XCTAssertTrue(NavigationRules.dispatchesBack(shownKey: "journal", rootKey: "day", sourceKey: nil, sourceReplaced: true, modalActive: false))
-        // A cancelled swipe still dispatches nothing, replaced or not.
-        XCTAssertFalse(NavigationRules.dispatchesBack(shownKey: "day", rootKey: "day", sourceKey: nil, sourceReplaced: true, modalActive: false))
-        // A newly selected route that did not replace the source keeps D2's rule.
-        XCTAssertFalse(NavigationRules.dispatchesBack(shownKey: "journal", rootKey: "compose", sourceKey: nil, sourceReplaced: false, modalActive: false))
-        XCTAssertFalse(NavigationRules.dispatchesBack(shownKey: "journal", rootKey: "day", sourceKey: nil, sourceReplaced: true, modalActive: true))
+    /// D3/D4: a change is a destination, so it stays right when the app
+    /// moved meanwhile — B2's push during a pop, 1038 D6's source replaced
+    /// while the finger was down — and is owed once (settled twice, the
+    /// second compares UIKit with itself).
+    func testADestinationSurvivesTheAppMovingMeanwhile() {
+        // The app pushed c while UIKit popped b: one Back would remove c, but
+        // the destination a is c's own parent, so nothing of the app's is lost
+        // that the person did not leave.
+        XCTAssertEqual(NavigationRules.backs(app: ["a", "b", "c"], to: "a"), 2)
+        // The app popped b and pushed c while UIKit animated its own pop: what
+        // UIKit shows is what the host applied, so nothing is owed at all.
+        let applied = NavigationRules.Snapshot(tab: nil, stack: ["a"], presented: [])
+        XCTAssertNil(NavigationRules.platformChange(applied: applied, observed: applied))
+        // The swiped screen replaced in place (b by b2): back to a removes b2.
+        XCTAssertEqual(NavigationRules.backs(app: ["a", "b2"], to: "a"), 1)
+        // The app is already there, or has left the destination behind.
+        XCTAssertNil(NavigationRules.backs(app: ["a"], to: "a"))
+        XCTAssertNil(NavigationRules.backs(app: ["x", "y"], to: "a"))
+    }
+
+    /// D6: leaving is the app's to permit.
+    func testLeavingIsPermittedByTheBackControlOrByTraverse() {
+        XCTAssertTrue(NavigationRules.backPermitted(hasControl: true, controlEnabled: true, traverses: false))
+        XCTAssertFalse(NavigationRules.backPermitted(hasControl: true, controlEnabled: false, traverses: true))
+        XCTAssertTrue(NavigationRules.backPermitted(hasControl: false, controlEnabled: false, traverses: true))
+        XCTAssertFalse(NavigationRules.backPermitted(hasControl: false, controlEnabled: false, traverses: false))
     }
 
     /// D1: the Back control is resolved by id among enabled, pressable, live
@@ -193,12 +220,12 @@ final class NavigationRulesTests: XCTestCase {
     /// D1: an interactive pop needs a stack to pop, no transition, no sheet,
     /// a Back control, and no context preview.
     func testWhenAPopMayBegin() {
-        XCTAssertTrue(NavigationRules.popMayBegin(depth: 2, changing: false, modalActive: false, hasBackControl: true, contextPreviewActive: false))
-        XCTAssertFalse(NavigationRules.popMayBegin(depth: 1, changing: false, modalActive: false, hasBackControl: true, contextPreviewActive: false))
-        XCTAssertFalse(NavigationRules.popMayBegin(depth: 2, changing: true, modalActive: false, hasBackControl: true, contextPreviewActive: false))
-        XCTAssertFalse(NavigationRules.popMayBegin(depth: 2, changing: false, modalActive: true, hasBackControl: true, contextPreviewActive: false))
-        XCTAssertFalse(NavigationRules.popMayBegin(depth: 2, changing: false, modalActive: false, hasBackControl: false, contextPreviewActive: false))
-        XCTAssertFalse(NavigationRules.popMayBegin(depth: 2, changing: false, modalActive: false, hasBackControl: true, contextPreviewActive: true))
+        XCTAssertTrue(NavigationRules.popMayBegin(depth: 2, inFlight: false, modalActive: false, permitted: true, contextPreviewActive: false))
+        XCTAssertFalse(NavigationRules.popMayBegin(depth: 1, inFlight: false, modalActive: false, permitted: true, contextPreviewActive: false))
+        XCTAssertFalse(NavigationRules.popMayBegin(depth: 2, inFlight: true, modalActive: false, permitted: true, contextPreviewActive: false))
+        XCTAssertFalse(NavigationRules.popMayBegin(depth: 2, inFlight: false, modalActive: true, permitted: true, contextPreviewActive: false))
+        XCTAssertFalse(NavigationRules.popMayBegin(depth: 2, inFlight: false, modalActive: false, permitted: false, contextPreviewActive: false))
+        XCTAssertFalse(NavigationRules.popMayBegin(depth: 2, inFlight: false, modalActive: false, permitted: true, contextPreviewActive: true))
     }
 
     /// D1's arbitration: the edge is navigation's; past it a `swiperight`
@@ -234,10 +261,10 @@ final class NavigationRulesTests: XCTestCase {
     /// D5: the viewport freeze is for an initially interactive pop, never a
     /// sheet — the Messages defect of 2026-09-09.
     func testTheViewportFreezeIsForAnInteractivePopOnly() {
-        XCTAssertTrue(NavigationRules.freezesViewport(modalActive: false, changing: true, initiallyInteractive: true))
-        XCTAssertFalse(NavigationRules.freezesViewport(modalActive: true, changing: true, initiallyInteractive: true))
-        XCTAssertFalse(NavigationRules.freezesViewport(modalActive: false, changing: false, initiallyInteractive: true))
-        XCTAssertFalse(NavigationRules.freezesViewport(modalActive: false, changing: true, initiallyInteractive: false))
+        XCTAssertTrue(NavigationRules.freezesViewport(modalActive: false, inFlight: true, initiallyInteractive: true))
+        XCTAssertFalse(NavigationRules.freezesViewport(modalActive: true, inFlight: true, initiallyInteractive: true))
+        XCTAssertFalse(NavigationRules.freezesViewport(modalActive: false, inFlight: false, initiallyInteractive: true))
+        XCTAssertFalse(NavigationRules.freezesViewport(modalActive: false, inFlight: true, initiallyInteractive: false))
     }
 
     /// D3: a focus that cannot be delivered has a named reason, in a fixed
@@ -801,17 +828,5 @@ final class MacToolbarTests: XCTestCase {
         p.apply(batchFixture(ops: [], timers: false, motion: false, clock: nil, error: nil))
         XCTAssertTrue(geometryApplied)
     }
-
-    func testPoppedByPlatformCountsScreensUIKitTookOff() {
-        // The back button or swipe: one off the top.
-        XCTAssertEqual(NavigationRules.poppedByPlatform(native: ["settings"], app: ["settings", "rename"]), 1)
-        // The back button's long-press menu: several at once.
-        XCTAssertEqual(NavigationRules.poppedByPlatform(native: ["a"], app: ["a", "b", "c"]), 2)
-        // The app's own pop or push: the stacks already agree.
-        XCTAssertEqual(NavigationRules.poppedByPlatform(native: ["a", "b"], app: ["a", "b"]), 0)
-        XCTAssertEqual(NavigationRules.poppedByPlatform(native: ["a", "b", "c"], app: ["a", "b"]), 0)
-        // Not a prefix (a replacement, another tab): not a pop.
-        XCTAssertEqual(NavigationRules.poppedByPlatform(native: ["x"], app: ["a", "b"]), 0)
-        XCTAssertEqual(NavigationRules.poppedByPlatform(native: [], app: ["a"]), 0)
-    }
 }
+#endif
