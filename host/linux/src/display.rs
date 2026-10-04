@@ -446,8 +446,11 @@ pub fn run<D: DataSource + Default>(config: &mut Config, started: Instant) -> i3
                 &p.host().runner().outstanding(),
             ));
         }
-        if observe_log && marks.take_done() {
-            eprintln!("observe: startup {}", marks.line());
+        if marks.take_done() {
+            crate::journal::record("startup", marks.report());
+            if observe_log {
+                eprintln!("observe: startup {}", marks.line());
+            }
         }
         let now = wall();
         let mut timeout = work_timeout(
