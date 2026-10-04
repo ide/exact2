@@ -18,12 +18,28 @@ fn flip(crtc_id: u32, sequence: u32) -> Event {
     })
 }
 fn read_once(last: Option<u32>, result: io::Result<Vec<Event>>) -> io::Result<Option<u32>> {
+    read_timed(last, result).map(|r| r.map(|(sequence, _)| sequence))
+}
+fn read_timed(
+    last: Option<u32>,
+    result: io::Result<Vec<Event>>,
+) -> io::Result<Option<(u32, Duration)>> {
     let mut result = Some(result);
     receive_flip(crtc(7), last, || {
         result
             .take()
             .expect("one readable turn must perform at most one bounded DRM read")
     })
+}
+
+/// The kernel's flip timestamp comes back with the sequence (Exact Observe
+/// design §3.4: a frame's presentation, not when the loop read the event).
+#[test]
+fn a_flip_carries_the_kernels_timestamp() {
+    assert_eq!(
+        read_timed(None, Ok(vec![flip(7, 30)])).unwrap(),
+        Some((30, Duration::from_millis(16)))
+    );
 }
 
 #[test]
