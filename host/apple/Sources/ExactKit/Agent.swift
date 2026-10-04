@@ -552,6 +552,13 @@ public final class Agent {
                     out["tickets"] = o["tickets"]
                     return out
                 }
+                // An element the app marks aria-busy is still loading: the
+                // fixed point is not the screen's (Exact Observe design §3.5).
+                if let busy = ExactLaunch.ledger(session)?.items.filter({ $0.hasPrefix("busy:") }), !busy.isEmpty {
+                    var out = reply(landed, false, reason: "busy")
+                    out["busy"] = busy.map { String($0.dropFirst(5)) }
+                    return out
+                }
                 return reply(landed, true)
             }
             rounds += 1

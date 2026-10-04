@@ -332,6 +332,9 @@ export function install(exact) {
           if (gpuPending.length) return gpuPendingReply(req, gpuPending);
           const waiting = holds();
           if (waiting.length) return { clock: exact.clock.now, settled: false, reason: 'device', tickets: waiting.map(h => h.ticket) };
+          // An element the app marks aria-busy is still loading (Exact Observe design §3.5).
+          const busy = [...document.querySelectorAll('[aria-busy="true"]')].map(el => el.getAttribute('data-testid') ?? el.id ?? el.tagName);
+          if (busy.length && !exact.inflight.n) return { clock: exact.clock.now, settled: false, reason: 'busy', busy };
           return { clock: exact.clock.now, settled: !exact.inflight.n };
         }
         // A jump that crosses timers stops after each timer whose commit
