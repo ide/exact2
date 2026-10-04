@@ -322,6 +322,7 @@ public final class Agent {
                 return ["id": Int(node.id), "applied": decorations.state]
             }
             nativeSections["presence"] = presenter.presenceObservation()
+            nativeSections["observe"] = ExactLaunch.shared.report(for: session)
             nativeSections["media"] = presenter.views.compactMap { id, view in view.video.map { ["id": id, "state": $0.state()] as [String: Any] } }
             nativeSections["mediaSession"] = mediaSessionState() // LLP 1098 D10
             // The drive's app storage (trivia F7): none unless it names a scratch store.

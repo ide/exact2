@@ -49,9 +49,11 @@ let widgetCore = ProcessInfo.processInfo.environment["EXACT_WIDGET_CORE"] == "1"
 let sharedCore = ProcessInfo.processInfo.environment["EXACT_CORE_FRAMEWORK"]
 let core: [Target] = [
     .systemLibrary(name: "CExact", path: "Sources/CExact"),
+    // The launch constructor (L, the process age, prewarm): C, so it runs before `main`.
+    .target(name: "CExactLaunch", path: "Sources/CExactLaunch"),
     sharedCore.map { .binaryTarget(name: "ExactCore", path: $0) } ?? .target(
         name: "ExactCore",
-        dependencies: ["CExact"],
+        dependencies: ["CExact", "CExactLaunch"],
         path: "Sources/ExactCore",
         swiftSettings: [.unsafeFlags(["-application-extension"])],
         linkerSettings: (widgetCore ? [.unsafeFlags(["-Xlinker", "-force_load", "-Xlinker", libDir + "/lib" + libName + ".a"])] : [.unsafeFlags(["-L", libDir]), .linkedLibrary(libName)]) + [.linkedLibrary("c++"), .linkedFramework("ImageIO")]
