@@ -650,13 +650,8 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
         changing = animated && transition?.viewController(forKey: .to) === viewController
         interactiveTransition = changing && transition?.initiallyInteractive == true
         interactiveSource = nil
-        // The route being left by a swipe, or by UIKit's own back button (a
-        // pop the app has not made yet: the source has already left the
-        // stack): didShow tells Contract, through the Back control, as it
-        // does for the swipe. A pop the app made itself shows the route the
-        // app already selected, and dispatchesBack declines it.
-        if let source = navigationController.transitionCoordinator?.viewController(forKey: .from) as? RouteController,
-           interactiveTransition || (changing && !navigationController.viewControllers.contains(source)) {
+        if interactiveTransition,
+           let source = navigationController.transitionCoordinator?.viewController(forKey: .from) as? RouteController {
             interactiveSource = (source.node, source.key)
             interactiveDepth = navigationController.viewControllers.count + 1
         }
@@ -683,16 +678,37 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
         // stack is as deep as it was when the swipe began.
         let sourceReplaced = source != nil && sourceKey == nil
             && routeIDs.compactMap({ presenter.views[$0] }).filter({ $0.props["navigationKey"] != nil }).count == interactiveDepth
-        let dispatches = (viewController as? RouteController).map {
+        // How UIKit got here is not the question (the back button, its
+        // long-press menu, the swipe, a gesture yet to come): what it now
+        // shows is. A native stack that is the app's with screens taken off
+        // the top was popped by UIKit, and the app is told once per screen,
+        // through its Back control. A stack the app set itself already
+        // matches and reports nothing.
+        let native = navigationController.viewControllers.compactMap { ($0 as? RouteController)?.key }
+        // A swipe whose screen the app replaced while the finger was down
+        // ends on a stack no longer the app's prefix: it was still a back.
+        let replacedBack = sourceReplaced && (viewController as? RouteController).map {
             NavigationRules.dispatchesBack(shownKey: $0.key, rootKey: container?.props["navigationKey"] ?? "",
-                                           sourceKey: sourceKey, sourceReplaced: sourceReplaced,
-                                           modalActive: presenter.modals.inTransition)
-        } ?? false
+                                           sourceKey: nil, sourceReplaced: true, modalActive: presenter.modals.inTransition)
+        } == true
+        let pops = presenter.modals.inTransition ? 0
+            : (replacedBack ? 1 : NavigationRules.poppedByPlatform(native: native, app: appStackKeys()))
         let cancelled = interactiveTransition && (viewController as? RouteController)?.node === source?.node
-        lastTransition = dispatches ? "completed" : (cancelled ? "cancelled" : "idle")
+        lastTransition = pops > 0 ? "completed" : (cancelled ? "cancelled" : "idle")
         interactiveTransition = false
-        guard dispatches, let control = backControl else { return }
-        presenter.press(control.id)
+        guard pops > 0, let control = backControl else { return }
+        for _ in 0..<pops { presenter.press(control.id) }
+    }
+
+    /// The app's stack for the shown navigation, by route key: the selected
+    /// tab's routes (or all, untabbed) through the route the root names.
+    private func appStackKeys() -> [String] {
+        guard let root = container else { return [] }
+        var routes = routeIDs.compactMap { presenter.views[$0] }.filter { $0.props["navigationKey"] != nil }
+        if let tab = selectedTab { routes = routes.filter { $0.props["navigationTab"] == tab } }
+        let keys = routes.map { $0.props["navigationKey"] ?? "" }
+        guard let range = NavigationRules.stack(routeKeys: keys, selected: root.props["navigationKey"] ?? "") else { return [] }
+        return Array(keys[range])
     }
 
     func reset(clearFocus: Bool = true) {

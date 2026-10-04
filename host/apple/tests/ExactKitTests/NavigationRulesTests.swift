@@ -801,5 +801,17 @@ final class MacToolbarTests: XCTestCase {
         p.apply(batchFixture(ops: [], timers: false, motion: false, clock: nil, error: nil))
         XCTAssertTrue(geometryApplied)
     }
+
+    func testPoppedByPlatformCountsScreensUIKitTookOff() {
+        // The back button or swipe: one off the top.
+        XCTAssertEqual(NavigationRules.poppedByPlatform(native: ["settings"], app: ["settings", "rename"]), 1)
+        // The back button's long-press menu: several at once.
+        XCTAssertEqual(NavigationRules.poppedByPlatform(native: ["a"], app: ["a", "b", "c"]), 2)
+        // The app's own pop or push: the stacks already agree.
+        XCTAssertEqual(NavigationRules.poppedByPlatform(native: ["a", "b"], app: ["a", "b"]), 0)
+        XCTAssertEqual(NavigationRules.poppedByPlatform(native: ["a", "b", "c"], app: ["a", "b"]), 0)
+        // Not a prefix (a replacement, another tab): not a pop.
+        XCTAssertEqual(NavigationRules.poppedByPlatform(native: ["x"], app: ["a", "b"]), 0)
+        XCTAssertEqual(NavigationRules.poppedByPlatform(native: [], app: ["a"]), 0)
+    }
 }
-#endif
