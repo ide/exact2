@@ -389,10 +389,18 @@ pub fn emit(plan: &Plan, site_attrs: bool, dev_reload: bool) -> Result<Output, S
         // never asked again (each was a worker turn; the runner's
         // `is_placeholder_row`, review B4): it is settled, not a bake.
         let kept = if is_placeholder { ",1" } else { "" };
+        // kept.js: a store-reading resource's last fresh answer, kept for a
+        // returning launch (`res`'s last argument); not across a dev reload.
         let carry = if dev_reload {
             format!(",{}{kept}", type_json(plan, r.ty))
         } else {
-            kept.to_string()
+            let keep = crate::facts::keep(plan, r);
+            // An `else` row is settled: nothing of it is kept.
+            if keep.is_empty() || is_placeholder {
+                kept.to_string()
+            } else {
+                format!(",0{keep}")
+            }
         };
         let _ = write!(
             body,
@@ -861,7 +869,7 @@ pub(crate) fn type_json(plan: &Plan, ty: exact_plan::TypesId) -> String {
 
 /// A type as the data module client reads it: `n` number, `b` bool, `s`
 /// string, `u` unit, `?T` option, `[T` list, `{T…}` record.
-fn type_code(plan: &Plan, ty: exact_plan::TypesId) -> String {
+pub(crate) fn type_code(plan: &Plan, ty: exact_plan::TypesId) -> String {
     let t = &plan.types[ty.0 as usize];
     match t.kind {
         exact_plan::TypeKind::Number => "n".into(),
