@@ -164,9 +164,19 @@
   /* A held button dims its content, as UIKit's buttons do (NativeButtonIOS.swift: 0.5); one
      with `press-scale` scales instead (LLP 1061), a native one is the browser's. Held is
      touch.js's `data-held` (UIKit's timing: late in a scroller, never for a scroll), or
-     `:active` from the keyboard. No fade back: a transition after every tap would hold the
-     agent's settle (and its clock) for it. */
+     `:active` from the keyboard. */
   #exact-root button:not([data-button-style], [style*="--exact-press:"]):is([data-held], :focus-visible:active):not(:disabled) > * { opacity: .5; }
+  /* A button's looks change as UIKit's do: a press dims at once and the dim fades back, and a
+     colour (enabled, disabled, selected) fades, over 200 ms. Never with reduced motion, nor
+     under the agent (`data-exact-agent`, glue.js and the JS target's agent.js): a fade after
+     every tap would carry its clock on, and the time-driven pictures conformance compares with
+     it. Less specific than an app's own rules (`#exact-root#exact-root`), so its transition wins;
+     a native button (`data-button-style`) keeps its own look. */
+  @media (prefers-reduced-motion: no-preference) {
+    html:not([data-exact-agent]) #exact-root button:not([data-button-style]) { transition: background-color .2s ease-out, color .2s ease-out, filter .2s ease-out; }
+    html:not([data-exact-agent]) #exact-root button:not([data-button-style]) > * { transition: opacity .2s ease-out, color .2s ease-out; }
+    html:not([data-exact-agent]) #exact-root button:not([data-button-style]):is([data-held], :focus-visible:active), html:not([data-exact-agent]) #exact-root button:not([data-button-style]):is([data-held], :focus-visible:active) > * { transition-duration: .06s; }
+  }
   /* A modal `dialog` of texts and buttons is a confirmation, as the native hosts present it:
      UIKit's centred alert (iOS 26's), its first text the title and the next the message, its
      buttons capsules, side by side when two and stacked when more. A button that only
