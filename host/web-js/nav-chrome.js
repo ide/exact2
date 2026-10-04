@@ -21,9 +21,10 @@
 // it to the top.
 // The other routes keep their DOM, undisplayed, each with the offset it had
 // when it left the page, which it has again when it returns (a tab switch,
-// a push, a pop); one shown beside the page's (a slide, the route under a
-// sheet's, a sheet) is a fixed box with its own scroller at that offset. A
-// sheet locks the document while it is up.
+// a push, a pop); one shown beside the page's (a slide's two, a pop's
+// ghost) is a box in the document where the viewport is, with its own
+// scroller at that offset, and a sheet a fixed box. A sheet locks the
+// document while it is up.
 //
 // Contract owns every route, as on iOS: a tab tap presses the tab's
 // `navigationTabControl`, a back button (or the sheet's backdrop, or a drag
@@ -217,16 +218,17 @@ function project(nav) {
  * sheet (or a full-screen cover) is over. */
 const pageRoute = stack => stack.findLast(r => !presentation(r)) ?? null;
 
-/** Which route scrolls the document, which show beside it as fixed boxes
- * (each at its own offset), and which are not displayed; on a change, the
- * document has the offset of the route that now scrolls it. During a slide
- * none does: both routes are fixed boxes, as a ghost is. */
+/** Which route scrolls the document, which show beside it (each at its
+ * own offset), and which are not displayed; on a change, the document has
+ * the offset of the route that now scrolls it. During a slide none does:
+ * both routes are boxes over the viewport (`place`), as a ghost is. */
 function page(nav, st, routes, stack) {
   const top = stack[stack.length - 1];
   const want = st.anims.length && st.slide ? null : pageRoute(stack);
   const was = st.doc;
   let y = null;
   if (want !== was) {
+    if (was && !want) place(nav);
     if (was) was.removeAttribute("data-exact-doc");
     // A route shown beside the page during a slide arrives at the offset it scrolled to there.
     if (want) { y = st.over.has(want) && want.$inset && want.$inset !== want ? want.$inset.scrollTop : want.$docY ?? 0; want.setAttribute("data-exact-doc", ""); }
@@ -239,7 +241,7 @@ function page(nav, st, routes, stack) {
     if (!off && r !== want) over.add(r);
   }
   for (const e of st.shown) if (e.isConnected && e !== want) over.add(e);
-  // A route newly shown as a fixed box scrolls its own scroller to where it
+  // A route newly shown beside the page scrolls its own scroller to where it
   // left the page, its bar drawn as at that offset: Safari starts a scroll
   // timeline that was undisplayed only when its scroller next scrolls.
   for (const r of over) if (!st.over.has(r) && !presentation(r)) {
@@ -251,6 +253,14 @@ function page(nav, st, routes, stack) {
   st.locked = !!presentation(top);
   if (want) overlays(want);
   if (y != null && Math.abs(scrollY - y) > 0.5) scrollTo(0, y);
+}
+
+/** Where the routes shown beside the page are boxes in the document: the
+ * viewport's top and height, read while the page's route still holds the
+ * document's offset (nav-chrome.css). */
+function place(nav) {
+  nav.style.setProperty("--exact-page-y", `${-nav.getBoundingClientRect().top}px`);
+  nav.style.setProperty("--exact-page-h", `${tall(nav)}px`);
 }
 
 /** A box the route lays over its scroller (absolute, outside the scroller:
