@@ -58,6 +58,8 @@ public final class ExactLaunch: NSObject {
     private var contentDirty = false
     private var candidate: Double?
     private var evaluateScheduled = false
+    /// The app's own `aria-busy` was the last thing outstanding.
+    private var declaredLast = false
     static let ttiTimeout = 30.0
 
     private override init() {
@@ -226,7 +228,7 @@ public final class ExactLaunch: NSObject {
         if o["poisoned"] as? Bool == true { finish("logic_failed"); return nil }
         failedResources = o["failed"] as? [String] ?? []
         var out: [String] = []
-        for key in ["requests", "streams", "awaiting", "deferred", "oneShots", "thens"] {
+        for key in ["requests", "streams", "awaiting", "deferred", "oneShots", "thens", "busy"] {
             out += (o[key] as? [String] ?? []).map { "\(key):\($0)" }
         }
         if activation != "ready" { out.append("activation") }
@@ -239,6 +241,7 @@ public final class ExactLaunch: NSObject {
     /// changed since its last one, else now; never before the first frame.
     private func evaluate() {
         guard ttiOutcome == nil, suppressed == nil, let outstanding = outstandingNow() else { return }
+        if outstanding.isEmpty, !lastOutstanding.isEmpty, lastOutstanding.allSatisfy({ $0.hasPrefix("busy:") }) { declaredLast = true }
         if outstanding != lastOutstanding || trace.isEmpty, trace.count < 32, let p = marks[.process] {
             trace.append("\(String(format: "%.1f", (CACurrentMediaTime() - p) * 1000)) [\(outstanding.joined(separator: ", "))]")
         }
@@ -250,7 +253,7 @@ public final class ExactLaunch: NSObject {
             return
         }
         marks[.interactive] = max(now, f0)
-        finish(failedResources.isEmpty ? "settled" : "failed")
+        finish(!failedResources.isEmpty ? "failed" : declaredLast ? "declared" : "settled")
     }
 
     /// A ready candidate holds if nothing came outstanding before its vsync.
@@ -260,7 +263,7 @@ public final class ExactLaunch: NSObject {
         guard let outstanding = outstandingNow(), outstanding.isEmpty else { scheduleEvaluate(); return }
         contentDirty = false
         marks[.interactive] = max(target, marks[.present] ?? target)
-        finish(failedResources.isEmpty ? "settled" : "failed")
+        finish(!failedResources.isEmpty ? "failed" : declaredLast ? "declared" : "settled")
     }
 
     private func finish(_ outcome: String) {
@@ -268,6 +271,7 @@ public final class ExactLaunch: NSObject {
         ttiOutcome = outcome
         stopWatching()
         ExactJournal.shared.record("startup", report())
+        if ExactEnv.environment["EXACT_OBSERVE_LOG"] == "1", let session = launchSession { fputs("observe: startup \(smokeLine(for: session))\n", stderr) }
         loadServices(.afterStartup)
     }
 
@@ -363,7 +367,7 @@ public final class ExactLaunch: NSObject {
             m["\(type)LaunchTime"] = (l - p) + (dfl - md)
         }
         if let f0 = marks[.present] { m["timeToFirstRender"] = f0 - dfl }
-        if let i = marks[.interactive], ttiOutcome == "settled" || ttiOutcome == "failed" { m["timeToInteractive"] = i - dfl }
+        if let i = marks[.interactive], ["settled", "failed", "declared"].contains(ttiOutcome ?? "") { m["timeToInteractive"] = i - dfl }
         return m
     }
 }
