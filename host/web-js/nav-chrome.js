@@ -248,7 +248,22 @@ function page(nav, st, routes, stack) {
   for (const r of st.over) if (!over.has(r)) freeze(r, null);
   st.over = over;
   st.locked = !!presentation(top);
+  if (want) overlays(want);
   if (y != null && Math.abs(scrollY - y) > 0.5) scrollTo(0, y);
+}
+
+/** A box the route lays over its scroller (absolute, outside the scroller:
+ * a floating note, as a UIKit view over a scroll view) stays where it is on
+ * the screen while the page scrolls: fixed, as long as the route is the page. */
+function overlays(r) {
+  const walk = e => {
+    for (const k of e.children) {
+      if (k === r.$inset || k.hasAttribute("data-exact-navbar")) continue;
+      if (getComputedStyle(k).position === "absolute") k.setAttribute("data-exact-overlay", "");
+      else walk(k);
+    }
+  };
+  walk(r);
 }
 
 /** One route's bar (when it has a title), its sheet, and the attributes
