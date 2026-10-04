@@ -12,6 +12,7 @@
 // builds, bundles, installs, and launches.
 import ExactKit
 import ExactComposition
+import ExactLaunchParts
 import UIKit
 
 // The process's own start (exec), from the kernel: what happened before
@@ -161,6 +162,7 @@ func printSmoke() {
 final class AppDelegate: UIResponder, UIApplicationDelegate {
     override init() {
         ExactLaunch.shared.delegateInit()
+        ExactLaunch.shared.runLaunchParts(ExactLaunchParts.all)
         super.init()
     }
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
