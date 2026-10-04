@@ -367,6 +367,8 @@ final class MenuHost {
             DispatchQueue.main.async { [weak self, owner] in
                 guard let self, self.confirmation === owner else { return }
                 self.confirmation = nil
+                // A sheet the alert held back may start now (LLP 1035.001.000 D5).
+                self.presenter?.navigation.settle()
             }
         }
     }
@@ -666,7 +668,8 @@ final class MenuHost {
         while responder != nil && !(responder is UIViewController) { responder = responder?.next }
         guard var controller = responder as? UIViewController else { return }
         while let presented = controller.presentedViewController, !presented.isBeingDismissed { controller = presented }
-        let shown = ContentPopover(pop: pop) { [weak self] in self?.shownContent = nil }
+        // Gone, it no longer holds the owner a waiting sheet needs (LLP 1035.001.000 D5).
+        let shown = ContentPopover(pop: pop) { [weak self] in self?.shownContent = nil; self?.presenter?.navigation.settle() }
         guard let presentation = shown.popoverPresentationController else { return }
         presentation.sourceView = source
         presentation.sourceRect = source.bounds
