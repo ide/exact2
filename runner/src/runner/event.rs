@@ -282,6 +282,11 @@ pub enum Event {
     },
     /// An incoming location at the navigation root. @ref LLP 1038 D8/D11
     Navigate(String),
+    /// The platform took the person back to a route beneath the top — its
+    /// back button or menu, a swipe, a sheet pulled down, the browser's
+    /// Back — at the navigation root: the destination's navigation key.
+    /// @ref LLP 1035.001.000
+    Traverse(String),
     /// An authored sheet handle released: logical height and signed pixels/second.
     HeightRelease {
         /// Finite logical pixels in [0, f32::MAX].
@@ -1036,6 +1041,7 @@ impl<D: DataSource> Runner<D> {
                 Event::Media(kind, _) | Event::Clipboard(kind, _) => kind.name(),
                 Event::SelectionChange { .. } => "selectionchange",
                 Event::Navigate(_) => "navigate",
+                Event::Traverse(_) => "traverse",
                 Event::HeightRelease { .. } => "heightrelease",
                 Event::TransformGeometry { .. } => "transformgeometry",
                 Event::TransformRelease { .. } => "transformrelease",
@@ -1148,6 +1154,7 @@ impl<D: DataSource> Runner<D> {
             Event::Navigate(location) => {
                 (EventKind::Navigate, Some(Value::str(location)), "navigate")
             }
+            Event::Traverse(key) => (EventKind::Traverse, Some(Value::str(key)), "traverse"),
         };
         let row = self.plan.node(node);
         let handler = row

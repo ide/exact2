@@ -28,6 +28,7 @@ fn payload(event: &str, control: Option<&str>) -> Vec<(&'static str, &'static st
         ("durationchange", _) => one("duration", "number", "the media's `duration`"),
         ("select", _) => one("selection", "MarkdownSelection", "the editor's `selection`"),
         ("navigate", _) => one("location", "string", "the location"),
+        ("traverse", _) => one("key", "string", "the destination's navigation key, `key`"),
         ("scroll", _) => numbers(&["scrollLeft", "scrollTop"]),
         ("resize", _) => numbers(&["width", "height"]),
         ("pan", _) => numbers(&["dx", "dy"]),

@@ -1085,13 +1085,21 @@ laid out as [the tabs corpus](../contract/corpus/tabs.contract) shows.
 `navigate=` receives locations the host navigates to itself, such as link clicks
 and browser history.
 
+`traverse=` receives the platform's own Back, however it happened and however far
+it went: UIKit's back button or its long-press menu, the edge swipe, a sheet pulled
+down with whatever it had pushed, the browser's Back over several entries. It is one
+event carrying the `navigationKey` of the route the person is now on; `nav =
+backTo(nav, key)` makes it the top. Without `traverse=`, each screen left presses
+that screen's `navigationBack` control instead, once per screen. Either way a
+disabled Back control in a route keeps the platform from leaving it.
+
 `path("item", value)` checks the route and encodes its parameters. Always build
 locations with it: a template literal as a location is refused and a string
 literal is checked against the table, but any other computed string is not
 checked. Parameter values can be strings or numbers. Declared route parameter
 fields are strings; absent fields for another route are the empty string.
 
-`push`, `open`, `replace`, `go`, `select`, and `back` return a router value; assign
+`push`, `open`, `replace`, `go`, `select`, `back`, and `backTo` return a router value; assign
 the result to `nav`. `select` selects a tab by name. `top`, `stack`, and `depth`
 read the router; `params(nav, name)` lists one parameter across the stack, and
 `searchParam(entry, name)` reads an entry's query. Pushing the same URL already on

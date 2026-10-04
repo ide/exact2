@@ -1229,6 +1229,7 @@ impl Em<'_> {
             }
             match h.event {
                 EventKind::Navigate
+                | EventKind::Traverse
                 | EventKind::Press
                 | EventKind::Change
                 | EventKind::Input
@@ -1324,6 +1325,11 @@ impl Em<'_> {
             if h.event == EventKind::Navigate {
                 let nav = self.uses.rt("navigateTo");
                 let _ = write!(self.out, "{nav}({handler});");
+                continue;
+            }
+            if h.event == EventKind::Traverse {
+                let traverse = self.uses.rt("traverseTo");
+                let _ = write!(self.out, "{traverse}({handler});");
                 continue;
             }
             // A list's edges are the runner's, from its window (list.js).
