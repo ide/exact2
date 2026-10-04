@@ -4,25 +4,32 @@
 // (index.html) needs a fact for.
 //
 // - The canvas and the browser's bars take the app's background: `<html>`
-//   is painted in the root view's background, and `theme-color` (Safari's
-//   status bar and toolbar tint, a standalone page's status bar) in the
-//   background under the top edge, the top page's, so no band of another
-//   colour shows in the safe areas a `viewport-fit=cover` root draws under.
-//   Both follow the scheme as the app's colours do (`light-dark()`).
+//   is painted in the root view's background (also `--exact-canvas`, which
+//   a sheet's backdrop dims for Safari's top bar, nav-chrome.css), and
+//   `theme-color` (the status bar and toolbar tint of Safari before 26,
+//   which tints its bars from the canvas and fixed boxes at the edges) in
+//   the background under the top edge, the top page's, so no band of
+//   another colour shows in the safe areas a `viewport-fit=cover` root
+//   draws under. Both follow the scheme as the app's colours do
+//   (`light-dark()`). A Home Screen app is marked `data-standalone` (the
+//   sheet's body fills its screen).
 // - A `dialog` whose `open` the app holds (`data-open`, element.rs's name
 //   for the prop) is shown modally while it is true and closed when it
 //   turns false, as the native hosts present a held dialog as their alert.
 // - A range's filled track: `--exact-range-fill`, its value's fraction of
 //   `min`…`max`, which the slider's track reads.
-// - Safari applies `:active` (the press feedback the sheet draws) only to a
-//   touch that some listener hears, and still pinch-zooms a page that says
+// - Safari applies `:active` (a native button's look) only to a touch that
+//   some listener hears, and still pinch-zooms a page that says
 //   `user-scalable=no`: a passive listener, and a `gesturestart` refused.
+//   (A press, held and let go as UIKit's are, is touch.js's, loaded after
+//   first paint: the sheet draws its `data-held`.)
 
 let Installed = false, Tint = null, Canvas = null;
 
 function install() {
   Installed = true;
   addEventListener("touchstart", () => {}, { passive: true });
+  if (navigator.standalone) document.documentElement.setAttribute("data-standalone", "");
   if (/user-scalable=no/.test(document.querySelector('meta[name="viewport"]')?.content ?? "")) {
     document.addEventListener("gesturestart", ev => ev.preventDefault());
   }
@@ -52,7 +59,12 @@ function tint() {
   const root = document.getElementById("exact-root")?.firstElementChild;
   if (!root) return;
   const canvas = under(root);
-  if (canvas !== Canvas) { Canvas = canvas; document.documentElement.style.backgroundColor = canvas ?? ""; }
+  if (canvas !== Canvas) {
+    Canvas = canvas;
+    const s = document.documentElement.style;
+    s.backgroundColor = canvas ?? "";
+    if (canvas) s.setProperty("--exact-canvas", canvas); else s.removeProperty("--exact-canvas");
+  }
   // A modal's backdrop is not the page: the bars keep the page's colour.
   if (document.querySelector("dialog:modal")) return;
   const top = under(document.elementFromPoint(innerWidth / 2, 0)) ?? canvas;
