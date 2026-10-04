@@ -508,6 +508,26 @@ one listing at launch, and the app's own secrets stay in the Keychain
 itself; the app still cannot read a kept answer. The web keeps them in
 page storage as before; Linux keeps nothing.
 
+**The JS target keeps them too (2026-10-04).** The web build is the JS
+target (LLP 1071), which has no runner and had kept nothing: its data
+module is bundled with the page, so every source is ready at boot, and a
+returning user saw placeholders until the chained answers landed (Lexy,
+WebKit: data at ~1.1 s, the status at ~2.1 s). `host/web-js/kept.js` keeps
+them as the runner does — one `localStorage` entry a resource,
+`exact.kept.<resource>`, holding its source's name, then its arguments and
+value in the runner's encoding (canonical bytes, hex, `|`), refused over
+8 KB; never the runner's facts; out of the app's reach — for a resource the
+bake marked a reader or whose answer read the store. At boot a resource whose
+kept answer's identifying arguments (before a `with`) equal its own, whose
+value fits its shape and whose source is the same shows it on the first
+frame; since the source is ready, it is asked at once as always and the
+fresh answer replaces it (Lexy: last data on the first frame, ~50 ms, fresh
+at ~1.1 s). The web's own rule beside it: a change to the store's set of
+names (a secret kept that was absent, or forgotten: signing in or out,
+leaving a demo) forgets every kept answer in that commit, so a reload never
+paints another account's data; a rewritten secret (a refreshed token) does
+not. Off under the agent and in a render, whose state is the drive's.
+
 **Storage readers (2026-09-07):** the same `resources.reader` marker covers
 filesystem and SQLite access. A storage call records an external read even when
 bake refuses it; it does not invent a secret read or key. Storage-backed resources
