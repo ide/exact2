@@ -147,6 +147,23 @@ check('a touch activates only where UIKit would, its press late in a scroller', 
     for (const type of ['keyDown', 'keyUp']) await call('Input.dispatchKeyEvent', { type, key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, ...(type === 'keyDown' ? { text: '\r' } : {}) });
     await quiet();
     expect((await seen())[0]).toBe('sw:false,out');
+
+    // A page whose document scrolls (nav-chrome.js's page): the document is the scroller,
+    // so a press on it is late, and a pan of the page on it activates nothing.
+    await evaluate(`document.getElementById('exact-root').append(Object.assign(document.createElement('div'), { style: 'height:2000px' }))`);
+    await Bun.sleep(400);
+    const page = await centre('out');
+    await touch('touchStart', page);
+    expect((await seen())[1]).toBe('');
+    await touch('touchEnd', page);
+    await quiet();
+    expect(await seen()).toEqual(['out', 'out+,out-']);
+    await Promise.all([touch('touchStart', page), touch('touchMove', [page[0], page[1] - 19])]);
+    await drag([page[0], page[1] - 19], [0, -131], 7);
+    await touch('touchEnd', [page[0], page[1] - 150]);
+    await quiet();
+    expect(await evaluate('scrollY')).toBeGreaterThan(50);
+    expect(await seen()).toEqual(['', '']);
   } finally {
     child.kill();
     server.close();
