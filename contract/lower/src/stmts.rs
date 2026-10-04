@@ -6,7 +6,7 @@
 //! block ends. Still no loops; a body always terminates (LLP 1005 §2).
 
 use crate::{expr, LowerError, Lowerer};
-use contract_syntax::Stmt;
+use contract_syntax::{Expr, Stmt};
 use contract_types::{Ref, Scope, Ty};
 use exact_plan::asm::Asm;
 use exact_plan::Opcode;
@@ -95,6 +95,38 @@ impl Lowerer<'_> {
             // A tail call's type check (LLP 1017 §11): nothing to run.
             Stmt::Command { name, .. }
                 if name.starts_with(contract_syntax::inline::tail::CHECK) => {}
+            // Exact Observe design §5.2: a record's fields go to the host by
+            // name — `observe(name, Shape(a=x), sev)` is the command `observe`
+            // with `name, sev, "a", x`; `observeAttributes(Shape(a=x))` is
+            // `"a", x`. Hosts receive records positionally, so the names are
+            // made explicit here.
+            Stmt::Command { name, args, .. }
+                if name == "observe" || name == "observeAttributes" =>
+            {
+                let (head, record) = if name == "observe" {
+                    let severity = args
+                        .get(2)
+                        .cloned()
+                        .unwrap_or_else(|| Expr::Str("info".into(), args[0].span()));
+                    (vec![args[0].clone(), severity], args.get(1))
+                } else {
+                    (Vec::new(), args.first())
+                };
+                let mut flat = head;
+                if let Some(Expr::Call(_, fields, _)) = record {
+                    for field in fields {
+                        if let Expr::NamedArg(key, value, span) = field {
+                            flat.push(Expr::Str(key.clone(), *span));
+                            flat.push(value.as_ref().clone());
+                        }
+                    }
+                }
+                for arg in &flat {
+                    expr::compile_or_none(self, asm, Some(arg), scope, locals)?;
+                }
+                let name = self.b.str(name);
+                asm.command(name, flat.len() as u16);
+            }
             Stmt::Command { name, args, .. } => {
                 let args = expr::command_args(name, args);
                 for arg in &args {

@@ -471,6 +471,8 @@ impl<D: DataSource> Presenter<D> {
                 "haptic" => {}
                 // Outside a `key` event (`key_event` takes a key's), nothing to prevent or stop.
                 "preventDefault" | "stopPropagation" => {}
+                // Exact Observe design §5.2: the Linux journal is not built yet.
+                "observe" | "observeAttributes" | "observeError" => {}
                 // No share sheet here: refused into the journal, or held for
                 // the agent like every host (LLP 1069.003 D6).
                 "share" => {
