@@ -146,6 +146,8 @@ export function update(root) {
   if (Live) {
     const page = [...States.keys()].find(n => n.hasAttribute("data-exact-page"));
     setAttr(document.documentElement, "data-exact-docnav", page ? "" : null);
+    if (page && Paged === false) floor();
+    Paged = !!page;
     // The page keeps each route's offset itself: the browser's own restoring, as its Back
     // pops a route, would scroll the document under a slide's two boxes.
     if (page && history.scrollRestoration !== "manual") history.scrollRestoration = "manual";
@@ -157,6 +159,21 @@ export function update(root) {
       on("touchstart", aim, { passive: true }); on("touchmove", hold, { passive: false });
     }
   }
+}
+/** Whether the page scrolled the document at the last projection (null before the first). */
+let Paged = null;
+/** Safari paints the band under its toolbar in the colour of the fixed box it last read at the
+ * viewport's bottom edge, and keeps it while that element is still rendered, even no longer
+ * fixed: before the page scrolls the document the body is fixed (index.html), and the app's
+ * root, which stays as the page's root, was that box (Lexy's sign-in screen, then Try Demo:
+ * the band stayed the canvas over the content until a reload). A strip in the canvas at the
+ * bottom edge for a second (Safari reads the edges only now and then: 400 ms was not always
+ * read, 800 ms was), then gone, is the last box Safari read there, and it is no longer
+ * rendered, so the band shows the page again. */
+function floor() {
+  const e = el("div", "", { "data-exact-floor": "", "aria-hidden": "true" });
+  document.body.append(e);
+  setTimeout(() => e.remove(), 1000);
 }
 /** While a sheet is up, a touch pans only a scroller in the sheet that can
  * scroll (Safari pans a document whose overflow is hidden, and hands it a
