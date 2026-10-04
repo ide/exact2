@@ -13,8 +13,9 @@
 //   (a quick tap shows it as it lifts); one that moves past SLOP first, or
 //   whose scroller moves, or that the browser takes for a pan
 //   (`pointercancel`), was a scroll: never held, never activated.
-// - A touch that lands while a scroller is still moving (a flick's
-//   momentum, the frames after a scroll) only stops it.
+// - A touch in a scroller that lands while a scroller is still moving (a
+//   flick's momentum, the frames after a scroll) only stops it. Fixed chrome
+//   (a bar, the tab bar) is in no scroller: held at once, even then.
 // - A touch activates only when it lifts within OUTSIDE px of the control's
 //   box (UIKit's touch-up-inside): the click that follows any other touch
 //   is refused, so a checkbox keeps its value and no `press` runs.
@@ -40,12 +41,16 @@ function scrolled() {
   setTimeout(() => addEventListener("scroll", scrolled, OPTS), REARM);
 }
 
-/** The scrollers a touch on `el` could move: ancestors with overflow to scroll. */
+/** The scrollers a touch on `el` could move: ancestors with overflow to scroll, up to
+ * a fixed box (a bar, the tab bar, a sheet: chrome over the page, which no scroller
+ * outside it moves, as a UIKit bar is no scroll view's content). */
 function scrollers(el) {
   const out = [];
+  if (getComputedStyle(el).position === "fixed") return out;
   for (let e = el.parentElement; e; e = e.parentElement) {
     const cs = getComputedStyle(e);
     if ((/auto|scroll/.test(cs.overflowY) && e.scrollHeight > e.clientHeight) || (/auto|scroll/.test(cs.overflowX) && e.scrollWidth > e.clientWidth)) out.push(e);
+    if (cs.position === "fixed") return out;
   }
   const doc = document.scrollingElement;
   if (doc && doc.scrollHeight > doc.clientHeight && getComputedStyle(document.documentElement).overflowY !== "hidden") out.push(doc);
@@ -85,7 +90,7 @@ function down(ev) {
   const r = box ?? el.getBoundingClientRect();
   G = { el, id: ev.pointerId, touch, x: ev.clientX, y: ev.clientY, box: [r.left, r.top, r.right, r.bottom],
     scrolls: scrolls.map(s => [s, s.scrollTop, s.scrollLeft]), shown: false, armed: !scrolls.length, timer: 0,
-    dead: touch && performance.now() - Scrolled < RECENT };
+    dead: touch && scrolls.length > 0 && performance.now() - Scrolled < RECENT };
   if (G.dead) return;
   if (G.armed) show(true);
   else G.timer = setTimeout(() => { if (moved()) return kill(); G.armed = true; show(true); }, DELAY);

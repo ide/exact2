@@ -3,7 +3,7 @@
 // browser's. A touch activates only when it lifts on the control; one that
 // leaves it, or turns into a scroll, or lands while a scroller moves, does
 // not; in a scroller the press shows only after a delay, or as a quick tap
-// lifts; the keyboard still activates.
+// lifts; fixed chrome is in no scroller; the keyboard still activates.
 import { test, expect } from 'bun:test';
 import { spawn } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
@@ -25,13 +25,14 @@ const page = '<meta name="viewport" content="width=device-width, initial-scale=1
     <button id="in" style="width:200px;height:60px">in</button>
     <div style="height:1200px"></div>
   </div>
+  <div style="position:fixed;left:0;right:0;bottom:0;height:60px;touch-action:none"><button id="bar" style="width:120px;height:44px">bar</button></div>
 </div>
 <script type="module">
   import { installTouch } from './touch.js';
   installTouch();
   window.log = [];
   window.held = [];
-  for (const id of ['out', 'in']) document.getElementById(id).addEventListener('click', () => log.push(id));
+  for (const id of ['out', 'in', 'bar']) document.getElementById(id).addEventListener('click', () => log.push(id));
   document.getElementById('sw').addEventListener('change', e => log.push('sw:' + e.target.checked));
   new MutationObserver(ms => { for (const m of ms) held.push(m.target.id + (m.target.hasAttribute('data-held') ? '+' : '-')); })
     .observe(document.getElementById('exact-root'), { subtree: true, attributeFilter: ['data-held'] });
@@ -147,6 +148,41 @@ check('a touch activates only where UIKit would, its press late in a scroller', 
     for (const type of ['keyDown', 'keyUp']) await call('Input.dispatchKeyEvent', { type, key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, ...(type === 'keyDown' ? { text: '\r' } : {}) });
     await quiet();
     expect((await seen())[0]).toBe('sw:false,out');
+
+    // A page whose document scrolls (nav-chrome.js's page): the document is the scroller,
+    // so a press on it is late, and a pan of the page on it activates nothing.
+    await evaluate(`document.getElementById('exact-root').append(Object.assign(document.createElement('div'), { style: 'height:2000px' }))`);
+    await Bun.sleep(400);
+    const page = await centre('out');
+    await touch('touchStart', page);
+    expect((await seen())[1]).toBe('');
+    await touch('touchEnd', page);
+    await quiet();
+    expect(await seen()).toEqual(['out', 'out+,out-']);
+    await Promise.all([touch('touchStart', page), touch('touchMove', [page[0], page[1] - 19])]);
+    await drag([page[0], page[1] - 19], [0, -131], 7);
+    await touch('touchEnd', [page[0], page[1] - 150]);
+    await quiet();
+    expect(await evaluate('scrollY')).toBeGreaterThan(50);
+    expect(await seen()).toEqual(['', '']);
+
+    // Fixed chrome over that page (a tab bar) is in no scroller: held at the touch, even
+    // while the page still moves, and a drag that starts on it pans nothing.
+    await evaluate('scrollBy(0, 4)');
+    await Bun.sleep(20);
+    const bar = await centre('bar');
+    await touch('touchStart', bar);
+    expect((await seen())[1]).toBe('bar+');
+    await touch('touchEnd', bar);
+    await quiet();
+    expect(await seen()).toEqual(['bar', 'bar-']);
+    const before = await evaluate('scrollY');
+    await Promise.all([touch('touchStart', bar), touch('touchMove', [bar[0], bar[1] - 19])]);
+    await drag([bar[0], bar[1] - 19], [0, -131], 7);
+    await touch('touchEnd', [bar[0], bar[1] - 150]);
+    await quiet();
+    expect(await evaluate('scrollY')).toBe(before);
+    expect((await seen())[0]).toBe('');
   } finally {
     child.kill();
     server.close();

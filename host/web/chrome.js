@@ -18,6 +18,8 @@
 //   turns false, as the native hosts present a held dialog as their alert.
 // - A range's filled track: `--exact-range-fill`, its value's fraction of
 //   `min`…`max`, which the slider's track reads.
+// - A hairline box (css.rs `hairline`) is one device pixel where the browser draws a
+//   thin border a whole point: `--exact-hairline` and `--exact-hairline-fill`.
 // - Safari applies `:active` (a native button's look) only to a touch that
 //   some listener hears, and still pinch-zooms a page that says
 //   `user-scalable=no`: a passive listener, and a `gesturestart` refused.
@@ -34,7 +36,24 @@ function install() {
     document.addEventListener("gesturestart", ev => ev.preventDefault());
   }
   document.addEventListener("input", ev => { if (ev.target.type === "range") fill(ev.target); }, true);
+  hairlines();
   matchMedia("(prefers-color-scheme: dark)").addEventListener?.("change", () => requestAnimationFrame(tint));
+}
+
+/** A hairline box is a border one device pixel thick (css.rs `hairline`), as WebKit snaps
+ * a thin border; where the browser draws it a whole point instead (Chromium), it is its
+ * background one device pixel tall, which a layout in device pixels keeps whole. */
+function hairlines() {
+  if (devicePixelRatio <= 1) return;
+  const probe = document.createElement("div");
+  probe.style.cssText = "position:absolute;visibility:hidden;height:0;border-top:.5px solid";
+  document.body.append(probe);
+  const thick = probe.getBoundingClientRect().height >= 1;
+  probe.remove();
+  if (!thick) return;
+  const s = document.documentElement.style;
+  s.setProperty("--exact-hairline", "0px");
+  s.setProperty("--exact-hairline-fill", `${1 / devicePixelRatio}px`);
 }
 
 function fill(e) {
