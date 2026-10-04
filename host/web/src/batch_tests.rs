@@ -75,6 +75,8 @@ fn cases() -> Vec<(&'static str, String)> {
                     top: 5,
                     url: "/tag/\"x\"?q=1".into(),
                     removed: vec![],
+                    pattern: String::new(),
+                    params: vec![],
                 })
             }),
         ),
@@ -85,6 +87,8 @@ fn cases() -> Vec<(&'static str, String)> {
                     top: 18_446_744_073_709_551_615,
                     url: "/".into(),
                     removed: vec![1, 22, 333],
+                    pattern: String::new(),
+                    params: vec![],
                 })
             }),
         ),

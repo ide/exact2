@@ -136,6 +136,11 @@ final class ExactWindow: NSWindow {
     override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect {
         agentMode ? frameRect : super.constrainFrameRect(frameRect, to: screen)
     }
+    /// A navigation's cause (Exact Observe design §3.6): when the click or key happened.
+    override func sendEvent(_ event: NSEvent) {
+        super.sendEvent(event)
+        if [.leftMouseUp, .keyDown].contains(event.type) { ExactLaunch.shared.input(at: event.timestamp) }
+    }
 }
 
 /// One window: its own session and view (LLP 1031 D1). The first is the
