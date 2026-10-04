@@ -364,7 +364,10 @@ extension NavigationHost {
     /// agent's own chrome, where the authored header paints (LLP 1075.003
     /// §3.4).
     func barShows(_ nav: UINavigationController) -> Bool {
-        !ExactEnv.authoredChrome && stacks[ObjectIdentifier(nav)]?.showsBar == true
+        // The More list's stack shows a tab's screens, UIKit's handing: as
+        // that tab's own stack would (LLP 1035.001.000 D8).
+        let nav = nav === moreNavigation ? moreHeldNavigation ?? nav : nav
+        return !ExactEnv.authoredChrome && stacks[ObjectIdentifier(nav)]?.showsBar == true
     }
 
     /// The agent's tap on an authored control a native bar stands for, under
@@ -454,7 +457,9 @@ extension NavigationHost {
             let shape = shows ? HeaderShape(route: c.node, back: back, backIsUIKits: index > 0).flatMap(HeaderShape.shown) : nil
             // LLP 1035.001.000 D6: the back button and its menu show only
             // where leaving is the app's to permit.
-            let canGoBack = index > 0 && backPermitted(in: c.node)
+            // A tab's root shown through the More list goes back to the list,
+            // UIKit's chrome, which leaves no route.
+            let canGoBack = index > 0 ? backPermitted(in: c.node) : nav === moreNavigation
             let scroll = contentScroll(of: c)
             let dataset = c.node.props["dataset"]
             let source = BarSource(header: shape?.header.id, title: shape?.title ?? "", level: shape?.level ?? 0, leading: shape?.leading.map(\.source) ?? [],
