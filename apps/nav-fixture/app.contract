@@ -1,0 +1,79 @@
+// The native navigation fixture (LLP 1035.001.000): every way UIKit's chrome
+// can change what it shows — the back button and its menu three deep, the
+// swipe, a sheet pulled down with a screen it pushed, a sheet over a sheet,
+// an alert over a sheet, a sheet held back by an alert, and seven tabs, so
+// the More list — for `sim.mjs`, which drives them with real touches. Each
+// screen's bar has one trailing button, `next`, the way on.
+routes nav
+  tab home "/"
+    deep "/deep"
+      deeper "/deep/er"
+        deepest "/deep/er/est"
+    sheet "/sheet"
+      inner "/sheet/inner"
+  tab two "/two"
+  tab three "/three"
+  tab four "/four"
+  tab five "/five"
+  tab six "/six"
+    six2 "/six/2"
+  tab seven "/seven"
+
+component NavFixture
+  state alert = false
+  state traverses = 0
+  state backs = 0
+  action selectTab(name: string)
+    nav = select(nav, name)
+  action back
+    backs = backs + 1
+    nav = back(nav)
+  // The platform's Back of any depth: one event, its destination.
+  action returnTo(entry: string)
+    traverses = traverses + 1
+    nav = backTo(nav, entry)
+  action open(url: string)
+    nav = push(nav, url)
+  action openAlert
+    alert = true
+  // The alert's answer asks for a sheet while the alert is still leaving.
+  action sheetAfterAlert
+    alert = false
+    nav = push(nav, "/sheet")
+
+  view
+    main testId="fixture" navigationKey=`${top(nav).id}` navigationBack="back" traverse=returnTo width="100%" height="100%" background-color="#ffffff"
+      each t in nav.tabs key=t.name
+        each e in t.stack key=e.id
+          column navigationKey=`${e.id}` navigationTab=t.name navigationTabTitle=t.name navigationTabSymbol="circle" navigationTabControl=`tab-${t.name}` navigationTitle=e.name navigationLargeTitle="false" navigationPresentation=(e.name == "sheet" ? "modal" : "") navigationTrailing=(e.name == "deepest" or e.name == "six2" or e.name == "four" ? "" : "next") navigationTrailingSymbol="chevron.forward" position="absolute" top=0 right=0 bottom=0 left=0 background-color="#ffffff" padding=120 display="flex" flex-direction="column"
+            text `${e.name} traverses=${traverses} backs=${backs}` testId=`counts-${e.name}`
+            button id="back" press=back position="absolute" width=1 height=1 opacity=0
+              text ""
+            when e.name == "home"
+              button id="next" press=open("/deep") position="absolute" width=1 height=1 opacity=0
+                text ""
+            when e.name == "deep"
+              button id="next" press=open("/deep/er") position="absolute" width=1 height=1 opacity=0
+                text ""
+            when e.name == "deeper"
+              button id="next" press=open("/deep/er/est") position="absolute" width=1 height=1 opacity=0
+                text ""
+            when e.name == "two" or e.name == "three" or e.name == "five" or e.name == "seven"
+              button id="next" press=open("/sheet") position="absolute" width=1 height=1 opacity=0
+                text ""
+            when e.name == "sheet"
+              button id="next" press=open("/sheet/inner") position="absolute" width=1 height=1 opacity=0
+                text ""
+            when e.name == "inner"
+              button id="next" press=openAlert position="absolute" width=1 height=1 opacity=0
+                text ""
+              dialog id="inner-alert" closedby="any" open=alert
+                text "Alert over a sheet"
+                button press=sheetAfterAlert commandfor="inner-alert" command="close" testId="alert-ok"
+                  text "OK"
+            when e.name == "six"
+              button id="next" press=open("/six/2") position="absolute" width=1 height=1 opacity=0
+                text ""
+      each t in nav.tabs key=t.name
+        button id=`tab-${t.name}` press=selectTab(t.name) position="absolute" width=1 height=1 opacity=0
+          text ""
