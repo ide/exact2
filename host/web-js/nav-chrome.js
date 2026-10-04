@@ -14,6 +14,17 @@
 // The browser animates the large title on scroll (the CSS); script adds
 // only behaviour: presses, transitions, a sheet's drag.
 //
+// In a browser, the page's own root (the outermost, in no route or scroller)
+// scrolls the document, as UIKit's window scrolls its top screen: its top
+// route's first scroller is the page's (`data-exact-doc`), so Safari draws
+// it under its status bar and toolbar and a tap on the status bar scrolls
+// it to the top.
+// The other routes keep their DOM, undisplayed, each with the offset it had
+// when it left the page, which it has again when it returns (a tab switch,
+// a push, a pop); one shown beside the page's (a slide, the route under a
+// sheet's, a sheet) is a fixed box with its own scroller at that offset. A
+// sheet locks the document while it is up.
+//
 // Contract owns every route, as on iOS: a tab tap presses the tab's
 // `navigationTabControl`, a back button (or the sheet's backdrop, or a drag
 // down) presses the root's `navigationBack` control in the active route, a
@@ -37,6 +48,10 @@ const kids = e => [...e.childNodes].filter(n => n.nodeType === 1);
 const routesOf = nav => kids(nav).filter(r => r.hasAttribute("navigationKey"));
 const reduced = () => Live && matchMedia("(prefers-reduced-motion: reduce)").matches;
 const States = new Map();
+// A Home Screen app keeps its routes' own scrollers: there iOS 26 lays the
+// page out in a viewport the status bar's height short of the screen and
+// pans the fixed bars away with the document's first scroll.
+const Standalone = Live && (navigator.standalone === true || matchMedia("(display-mode: standalone)").matches);
 let Probe = null;
 
 /** An element of `tag` with class `cls`, attributes and children. */
@@ -55,12 +70,15 @@ function setAttr(e, k, v) { if (v == null) { if (e.hasAttribute(k)) e.removeAttr
 function safe() {
   if (!Probe) {
     Probe = document.createElement("div");
-    Probe.style.cssText = "position:fixed;visibility:hidden;pointer-events:none;padding:env(safe-area-inset-top,0px) 0 env(safe-area-inset-bottom,0px)";
+    Probe.style.cssText = "position:fixed;inset:0;visibility:hidden;pointer-events:none;padding:env(safe-area-inset-top,0px) 0 env(safe-area-inset-bottom,0px)";
     document.body.append(Probe);
   }
   const cs = getComputedStyle(Probe);
   return { top: parseFloat(cs.paddingTop) || 0, bottom: parseFloat(cs.paddingBottom) || 0 };
 }
+/** The height a root's sheets rise in: the viewport's where the root
+ * scrolls the page (the root is then as tall as its page), else its own. */
+const tall = nav => nav.hasAttribute("data-exact-page") ? (safe(), Probe.getBoundingClientRect().height) : nav.clientHeight;
 
 /** A symbol by SF Symbols name at `size` points: the SF table's (the
  * glyphs `image "symbol:sf/…"` draws), the page's own bar glyphs, or
@@ -124,8 +142,36 @@ export function update(root) {
   const navs = Live ? root.querySelectorAll("[navigationBack]") : root.getElementsByTagName("*").filter(e => e.hasAttribute("navigationBack"));
   for (const nav of navs) project(nav);
   for (const [nav, st] of States) if (!nav.isConnected) States.delete(nav);
+  if (Live) {
+    const page = [...States.keys()].find(n => n.hasAttribute("data-exact-page"));
+    setAttr(document.documentElement, "data-exact-docnav", page ? "" : null);
+    const locked = !!page && States.get(page).locked;
+    setAttr(document.documentElement, "data-exact-locked", locked ? "" : null);
+    if (locked !== Locked) {
+      Locked = locked;
+      const on = locked ? addEventListener : removeEventListener;
+      on("touchstart", aim, { passive: true }); on("touchmove", hold, { passive: false });
+    }
+  }
 }
+/** While a sheet is up, a touch pans only a scroller in the sheet that can
+ * scroll (Safari pans a document whose overflow is hidden, and hands it a
+ * pan in a sheet with nothing to scroll); the listeners are there only then. */
+let Locked = false, Pans = false;
+function aim(ev) {
+  Pans = false;
+  const sheet = ev.target.closest?.("[data-exact-sheet]");
+  for (let e = ev.target; sheet && e && e !== sheet.parentNode; e = e.parentElement)
+    if (e.scrollHeight > e.clientHeight + 1 && /auto|scroll/.test(getComputedStyle(e).overflowY)) { Pans = true; break; }
+}
+const hold = ev => { if (!Pans && ev.cancelable) ev.preventDefault(); };
 navChrome(update);
+
+// Safari reads its status bar's colour from the bar again only as the bar's
+// box is new: as the scheme changes, each bar's material is a new box.
+if (Live) matchMedia("(prefers-color-scheme: dark)").addEventListener?.("change", () => {
+  for (const bg of document.querySelectorAll("[data-exact-page] [data-exact-navbar] > .bg")) bg.replaceWith(el("div", "bg"));
+});
 
 function project(nav) {
   const routes = routesOf(nav);
@@ -134,15 +180,21 @@ function project(nav) {
   if (!chromed) {
     if (st) { settle(st); States.delete(nav); }
     for (const k of kids(nav)) if (k.hasAttribute("data-exact-tabbar") || k.hasAttribute("data-exact-backdrop")) k.remove();
+    for (const r of routes) for (const k of ["data-exact-doc", "data-exact-off"]) r.removeAttribute(k);
+    nav.removeAttribute("data-exact-page");
     return;
   }
-  if (!st) { States.set(nav, st = { tab: null, top: null, stack: [], anims: [], shown: new Set() }); if (Live && !nav.$listened) { nav.$listened = true; listen(nav, st); } }
+  if (!st) { States.set(nav, st = { tab: null, top: null, stack: [], anims: [], shown: new Set(), doc: null, over: new Set() }); if (Live && !nav.$listened) { nav.$listened = true; listen(nav, st); } }
+  const paged = Live && !Standalone && !nav.parentElement?.closest("[navigationKey], [data-scroll]");
+  setAttr(nav, "data-exact-page", paged ? "" : null);
   const key = attr(nav, "navigationKey"), selected = routes.find(r => attr(r, "navigationKey") === key);
   if (!selected) return;
   const tabbed = routes.some(r => data(r, "tab"));
   const tab = tabbed ? data(selected, "tab") : null;
   const lane = tab == null ? routes : routes.filter(r => data(r, "tab") === tab);
   const stack = lane.slice(0, lane.indexOf(selected) + 1);
+  // The page's offset, kept by the route leaving it while it is still there.
+  if (paged && st.doc && (st.doc !== pageRoute(stack) || st.top !== stack[stack.length - 1]) && st.doc.isConnected && st.doc.hasAttribute("data-exact-doc")) st.doc.$docY = scrollY;
   // Each route's bar, insets and sheet, the hidden tabs' too (they keep theirs).
   const lanes = new Map();
   for (const r of routes) { const t = tab == null ? "" : data(r, "tab"); if (!lanes.has(t)) lanes.set(t, []); lanes.get(t).push(r); }
@@ -157,6 +209,46 @@ function project(nav) {
   backdrop(nav, st, stack.find(r => presentation(r) === "modal"));
   if (Live) transition(nav, st, tab, stack);
   for (const e of st.shown) if (e.isConnected) e.style.visibility = "";
+  if (paged) page(nav, st, routes, stack);
+}
+
+/** The route whose scroller is the page's: the stack's top, or the route a
+ * sheet (or a full-screen cover) is over. */
+const pageRoute = stack => stack.findLast(r => !presentation(r)) ?? null;
+
+/** Which route scrolls the document, which show beside it as fixed boxes
+ * (each at its own offset), and which are not displayed; on a change, the
+ * document has the offset of the route that now scrolls it. During a slide
+ * none does: both routes are fixed boxes, as a ghost is. */
+function page(nav, st, routes, stack) {
+  const top = stack[stack.length - 1];
+  const want = st.anims.length && st.slide ? null : pageRoute(stack);
+  const was = st.doc;
+  let y = null;
+  if (want !== was) {
+    if (was) was.removeAttribute("data-exact-doc");
+    // A route shown beside the page during a slide arrives at the offset it scrolled to there.
+    if (want) { y = st.over.has(want) && want.$inset && want.$inset !== want ? want.$inset.scrollTop : want.$docY ?? 0; want.setAttribute("data-exact-doc", ""); }
+    st.doc = want;
+  }
+  const over = new Set();
+  for (const r of routes) {
+    const off = r !== want && r !== top && !st.shown.has(r) && !(presentation(top) && r === stack[stack.length - 2]);
+    setAttr(r, "data-exact-off", off ? "" : null);
+    if (!off && r !== want) over.add(r);
+  }
+  for (const e of st.shown) if (e.isConnected && e !== want) over.add(e);
+  // A route newly shown as a fixed box scrolls its own scroller to where it
+  // left the page, its bar drawn as at that offset: Safari starts a scroll
+  // timeline that was undisplayed only when its scroller next scrolls.
+  for (const r of over) if (!st.over.has(r) && !presentation(r)) {
+    if (r.$inset && r.$inset !== r && r.$docY != null) r.$inset.scrollTop = r.$docY;
+    freeze(r, r.$docY ?? 0);
+  }
+  for (const r of st.over) if (!over.has(r)) freeze(r, null);
+  st.over = over;
+  st.locked = !!presentation(top);
+  if (y != null && Math.abs(scrollY - y) > 0.5) scrollTo(0, y);
 }
 
 /** One route's bar (when it has a title), its sheet, and the attributes
@@ -181,7 +273,7 @@ function route(nav, r, previous, sheet, tabbed) {
 
 function makeBar() {
   return el("div", "", { "data-exact-navbar": "" },
-    el("div", "edge"), el("div", "bg"),
+    el("div", "bg"),
     el("div", "bar", {}, el("div", "lead"), el("div", "title", { role: "heading", "aria-level": "1" }), el("div", "trail")),
     el("div", "large", { "aria-hidden": "true" }, el("h1")));
 }
@@ -239,16 +331,26 @@ function scroller(r, bar) {
   setAttr(at, "data-exact-inset", s ? "" : "route");
 }
 
+/** A large title's bar as the scroll-driven animations draw it at offset
+ * `y` (nav-chrome.css `data-exact-frozen`), or animated again (null). */
+function freeze(r, y) {
+  setAttr(r, "data-exact-frozen", y == null ? null : "");
+  if (y == null) return;
+  const L = parseFloat(getComputedStyle(r).getPropertyValue("--exact-nav-large-height")) || 52;
+  r.style.setProperty("--exact-frozen-lift", `${-Math.min(Math.max(y, 0), L)}px`);
+  r.style.setProperty("--exact-frozen-in", String(Math.min(1, Math.max(0, (y - (L - 26)) / 16))));
+}
+
 /** `navigationDetent`'s heights, in points, smallest first. */
 function detents(sheet) {
   if (presentation(sheet) === "fullscreen") return [Infinity];
-  const H = sheet.parentNode?.clientHeight || innerHeight, { top, bottom } = safe();
+  const H = (sheet.parentNode && tall(sheet.parentNode)) || innerHeight, { top, bottom } = safe();
   const large = H - top - 10;
   const all = attr(sheet, "data-navigationdetent").split(/\s+/).map(t => t === "medium" ? H / 2 : t === "large" ? large : Number(t) > 0 ? Math.min(Number(t) + bottom, large) : null).filter(h => h != null);
   return all.length ? all : [large];
 }
 function sheetTop(nav, r, sheet) {
-  const heights = detents(sheet), H = nav.clientHeight;
+  const heights = detents(sheet), H = tall(nav);
   sheet.$detent = Math.min(sheet.$detent ?? heights.length - 1, heights.length - 1);
   const top = heights[sheet.$detent] === Infinity ? 0 : Math.max(0, H - heights[sheet.$detent]);
   const v = `${top}px`;
@@ -270,11 +372,16 @@ function listen(nav, st) {
     else press(nav, b.getAttribute("data-control"));
   });
   nav.addEventListener("scrollend", ev => { const s = ev.target; if (s.hasAttribute?.("data-exact-inset")) s.$y = s.scrollTop; }, { capture: true, passive: true });
+  // The page's offset, as a press or the browser's Back may take its route
+  // away (the commit that removes it clamps the document's): at each, and
+  // where a scroll ends, never per frame.
+  const keep = () => { if (st.doc?.isConnected && st.doc.hasAttribute("data-exact-doc")) st.doc.$docY = scrollY; };
+  for (const t of ["pointerdown", "keydown", "popstate", "scrollend"]) addEventListener(t, keep, { capture: true, passive: true });
   let drag = null;
   nav.addEventListener("pointerdown", ev => {
     const bar = ev.target.closest?.("[data-exact-navbar][data-drag]"), r = bar?.parentNode;
     if (!bar || ev.target.closest("button") || !nav.contains(bar)) return;
-    const heights = detents(r), H = nav.clientHeight;
+    const heights = detents(r), H = tall(nav);
     drag = { r, bar, y: ev.clientY, top: H - heights[r.$detent ?? heights.length - 1], tops: heights.map(h => H - h), last: ev.clientY, lt: performance.now(), v: 0 };
     ev.preventDefault(); bar.setPointerCapture(ev.pointerId);
     r.style.transition = "none";
@@ -292,7 +399,7 @@ function listen(nav, st) {
   });
   const end = () => {
     if (!drag) return;
-    const { r, tops } = drag, H = nav.clientHeight, max = Math.max(...tops);
+    const { r, tops } = drag, H = tall(nav), max = Math.max(...tops);
     const top = drag.top + (drag.last - drag.y) + Math.max(-2.5, Math.min(2.5, drag.v)) * 80;
     drag = null;
     r.style.transition = reduced() ? "" : "top .3s cubic-bezier(.2,.8,.2,1), transform .3s cubic-bezier(.2,.8,.2,1)";
@@ -306,10 +413,12 @@ function listen(nav, st) {
   nav.addEventListener("pointercancel", end);
 }
 
+/** A sheet's backdrop. */
+const dimmer = () => el("div", "", { "data-exact-backdrop": "" });
 function backdrop(nav, st, sheet) {
   let b = kids(nav).find(k => k.hasAttribute("data-exact-backdrop"));
   if (!sheet) { if (b && !st.anims.length) b.remove(); return; }
-  b ??= el("div", "", { "data-exact-backdrop": "" });
+  b ??= dimmer();
   if (b.parentNode !== nav || b.nextSibling) nav.append(b);
 }
 
@@ -348,6 +457,7 @@ function transition(nav, st, tab, stack) {
   if (from === top || !from || st.tab !== tab) { st.tab = tab; return; }
   st.tab = tab;
   settle(st);
+  st.slide = false;
   if (reduced()) return;
   const popped = stack.includes(from) === false && before.includes(top);
   const pushed = !popped && stack.includes(from);
@@ -365,14 +475,16 @@ function transition(nav, st, tab, stack) {
   } else if (sheetOut) {
     show(leaving);
     run(leaving, [{ transform: `translateY(${leaving.$drop || 0}px)` }, { transform: "translateY(110%)" }], { duration: 320, fill: "forwards" });
-    const b = dim() ?? el("div", "", { "data-exact-backdrop": "" });
+    const b = dim() ?? dimmer();
     nav.insertBefore(b, leaving);
     run(b, [{ opacity: 1 }, { opacity: 0 }], { duration: 320, fill: "forwards" });
   } else if (pushed) {
+    st.slide = true;
     show(from);
     run(top, [{ transform: "translateX(100%)", boxShadow: "0 0 0 #0000" }, { transform: "translateX(0)", boxShadow: "-8px 0 24px #00000026" }]);
     run(from, [{ transform: "translateX(0)", filter: "brightness(1)" }, { transform: "translateX(-30%)", filter: "brightness(.9)" }]);
   } else {
+    st.slide = true;
     show(leaving);
     run(leaving, [{ transform: "translateX(0)", boxShadow: "-8px 0 24px #00000026" }, { transform: "translateX(100%)", boxShadow: "0 0 0 #0000" }], { fill: "forwards" });
     run(top, [{ transform: "translateX(-30%)", filter: "brightness(.9)" }, { transform: "translateX(0)", filter: "brightness(1)" }]);
@@ -400,8 +512,9 @@ function settle(st) {
 function ghost(nav, e) {
   e.setAttribute("data-exact-ghost", "");
   e.removeAttribute("navigationKey"); e.removeAttribute("data-testid");
+  for (const k of ["data-exact-doc", "data-exact-off"]) e.removeAttribute(k);
   e.inert = true;
   nav.append(e);
-  const s = e.$inset;
-  if (s && s !== e && s.$y) s.scrollTop = s.$y;
+  const s = e.$inset, y = e.$docY ?? s?.$y;
+  if (s && s !== e && y) s.scrollTop = y;
 }
