@@ -1,8 +1,13 @@
-// @ref LLP 1008 §9 — Contract routes projected into UIKit's navigation
-// controller. UIKit owns recognition, arbitration, progress and cancellation.
-// Only a completed pop invokes the Contract back control. The bar a stack
-// shows, what a route projects into it and when the app module's hooks run
-// are LLP 1075.003's (NavigationBarIOS.swift, NativeHooks.swift).
+// @ref LLP 1008 §9; LLP 1035.001.000 — Contract routes projected into UIKit's
+// containers, and what UIKit then shows read back. UIKit owns recognition,
+// arbitration, progress and cancellation. The host has two directions: the
+// app's routes to UIKit (`sync`, never while anything is in flight), and
+// UIKit's settled state to the app (`settle`, NavigationSettleIOS.swift) —
+// compared with what the host last applied, so any difference is the
+// platform's, told to the app as the route it went back to, never as the
+// gesture that took it there. The bar a stack shows, what a route projects
+// into it and when the app module's hooks run are LLP 1075.003's
+// (NavigationBarIOS.swift, NativeHooks.swift).
 #if os(iOS) || os(tvOS)
 import UIKit
 
@@ -103,14 +108,11 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
     var tabsHooked = false, tabContainerAsked = false, routerTab = -1
     var tabNavigations: [UInt32: UINavigationController] = [:]
     var tabPanels: [UInt32] = []
-    /// How many routes the selected stack declared at the last projection.
-    private var selectedRouteCount = 0
     var adoptedTablist: UInt32?
     var tabItems: [String] = []
     /// The bar's tint as last written: the tablist's accent, light and dark.
     var tabTint: [[Double]?]?
     let tabProxy = TabDelegateProxy()
-    private(set) var changing = false
     /// While a push or pop runs: paints what each frame newly reveals.
     private var revealLink: CADisplayLink?
     /// LLP 1075.003: each stack Exact built, by controller; what each shown
@@ -124,10 +126,20 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
     private var coversPending = false
     /// Whether the session's view last took the whole of its own for a bar.
     var tookWholeView = false
-    private var pendingSync = false
-    private var interactiveSource: (node: NodeView, key: String)?
-    /// The stack's depth when the interactive pop began, source included.
-    private var interactiveDepth = 0
+    /// LLP 1035.001.000 D1 — the whole of the host's own navigation state:
+    /// what it last set on UIKit (`applied`), a change UIKit made that the
+    /// app has not been told yet (`owed`), and whether the app's tree moved
+    /// while projection waited (`dirty`). In flight is UIKit's to say.
+    var applied: NavigationRules.Snapshot?
+    var owed: NavigationRules.Change?
+    var dirty = false
+    var settling = false
+    var delivering = false
+    /// The last platform change told to the app, for `state.navigation`.
+    var reported: String?
+    /// A presentation refused because the owner already presents (an alert,
+    /// a popover, the share sheet): retried until it can start (D5).
+    var retrying = false
     /// The root key last journaled as matching no route, so a refusal is one
     /// line, not one per batch (LLP 1035.001 D6).
     private var refusedKey: String?
@@ -231,7 +243,6 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
             return nil
         }
         refusedKey = nil
-        selectedRouteCount = stacks[at].count
         let wanted = stacks.enumerated().map { index, routes in
             (index == at ? Array(routes[range]) : routes).map { node -> RouteController in
                 let c = controllers[node.id] ?? RouteController(node)
@@ -292,6 +303,7 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
         let parts = NavigationRules.segments(presentations: p.routes[...p.selected].map { $0.props["navigationPresentation"] })
         installPrimary(p, first: Array(p.chosen[parts[0]]))
         primaryOwner?.view.layoutIfNeeded()
+        applied = observe()
         // The content area the bar leaves reaches layout in this turn, before
         // the first frame (LLP 1075.003 Q3 (c)).
         reportCovers()
@@ -307,22 +319,35 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
     }
 
     func sync(_ batch: Batch) {
+        // A commit made while the host delivers or projects still moves the
+        // routes it will project next.
+        if container != nil {
+            for op in batch.ops where op.op == .children && logicalChildren[op.id] != nil { logicalChildren[op.id] = op.ids }
+        }
         // Installing or moving a controller can synchronously cause layout.
         // That layout must not start another containment handoff inside this one.
-        guard !syncing, presenter.session?.view?.window != nil else { return }
+        guard !syncing, !delivering, presenter.session?.view?.window != nil else { return }
         syncing = true
         defer { syncing = false; presenter.flushPendingFocus() }
         guard let p = projection(batch) else { return }
+        // LLP 1035.001.000 D5: nothing is projected over a platform change
+        // the app has not been told, nor under a transition (a tab switch
+        // included); the latest tree is projected once it settles. The first
+        // installation has nothing to wait for.
+        if holdsScreens, owed != nil || settling || inFlight {
+            dirty = true
+            return
+        }
+        dirty = false
         let root = p.root, wanted = p.chosen
         let parts = NavigationRules.segments(presentations: p.routes[...p.selected].map { $0.props["navigationPresentation"] })
         reshape(p)
         installPrimary(p, first: Array(wanted[parts[0]]))
         // The other tabs' stacks, the selected tab and its items (LLP 1075.003 §3.7).
         if p.tabs != nil { syncTabs(p) }
+        defer { applied = observe() }
         // Initial content draws before presentation takes over its viewport.
         if parts.count > 1, let session = presenter.session, session.firstDrawMs == nil { return }
-        guard !changing, !presenter.modals.inTransition else { pendingSync = true; return }
-        pendingSync = false
         let boundaries = parts.dropFirst().map { wanted[$0.lowerBound].node }
         let mounted = presenter.modals.routes
         let common = zip(boundaries, mounted).prefix {
@@ -332,9 +357,15 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
         // dismissal, so its editor can accept the batch's focus handoff.
         let owners = [primaryNavigation].compactMap { $0 } + presentedNavigations
         for index in 0...common where index < owners.count {
-            let nav = owners[index], stack = Array(wanted[parts[index]])
+            let nav = owners[index]
+            // The More list open at its root over the tab the app selects is
+            // UIKit's chrome, as a menu is: left as it is.
+            if index == 0, moreListOpen { continue }
+            let stack = Array(wanted[parts[index]])
             prepareRoutes(stack, in: nav)
-            let same = nav.viewControllers.count == stack.count && zip(nav.viewControllers, stack).allSatisfy { $0 === $1 }
+            // A stack tab shown inside the More list sits on UIKit's list.
+            let wantedStack = held(nav) + stack
+            let same = nav.viewControllers.count == wantedStack.count && zip(nav.viewControllers, wantedStack).allSatisfy { $0 === $1 }
             if !same {
                 // @ref LLP 1038 D6 — a tab change swaps immediately. A replacement within one stack
                 // whose new top was not on it (a finished screen giving way to its result) arrives
@@ -342,20 +373,27 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
                 let pushOrPop = NavigationRules.isPushOrPop(from: nav.viewControllers.map(ObjectIdentifier.init), to: stack.map(ObjectIdentifier.init))
                 let arrives = stack.count > 1 && nav.viewControllers.first === stack.first
                     && !nav.viewControllers.contains { $0 === stack.last }
-                nav.setViewControllers(stack, animated: (pushOrPop || arrives) && index == owners.count - 1 && mounted.count == boundaries.count && !ExactEnv.agentFreezes && nav.view.window != nil)
+                nav.setViewControllers(wantedStack, animated: (pushOrPop || arrives) && index == owners.count - 1 && mounted.count == boundaries.count && !ExactEnv.agentFreezes && nav.view.window != nil)
                 recordOwned(nav)
+                // D5: what UIKit reports is what was applied; a call it did
+                // not take is the host's, never mistaken for the person's.
+                if nav.viewControllers.count != wantedStack.count || !zip(nav.viewControllers, wantedStack).allSatisfy({ $0 === $1 }) {
+                    presenter.session?.log("navigation: UIKit did not take the stack the routes name")
+                }
             }
             nav.view.layoutIfNeeded()
         }
         if mounted.count > common {
-            pendingSync = true
+            dirty = true
             presenter.modals.closeTop()
             return
         }
         if boundaries.count > mounted.count, let background = modalNavigation ?? primaryOwner, let owner {
             let source = navigation?.topViewController as? RouteController
             let part = parts[mounted.count + 1], route = wanted[part.lowerBound].node
-            guard presenter.modals.canPresent(from: owner, route: route) else { return }
+            // D5: an alert, a popover or the share sheet over the owner defers
+            // the sheet; it starts once that has gone (B6).
+            guard presenter.modals.canPresent(from: owner, route: route) else { dirty = true; retry(); return }
             let nav = makeNavigation(first: route)
             owner.addChild(nav)
             root.addSubview(nav.view)
@@ -369,7 +407,7 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
             recordOwned(nav)
             watchPops(nav)
             nav.view.layoutIfNeeded()
-            pendingSync = boundaries.count > mounted.count + 1
+            dirty = boundaries.count > mounted.count + 1
             let preceding = part.lowerBound > 0 ? wanted[part.lowerBound - 1].node : nil
             presenter.modals.present(route, navigation: nav, from: background, node: source?.node,
                                      preceding: preceding, owner: owner)
@@ -475,12 +513,9 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
         }
     }
 
-    func modalDidDismiss() {
-        guard pendingSync else { return }
-        pendingSync = false
-        sync(Batch(ops: [], timers: false, motion: false, clock: nil, error: nil))
-        presenter.syncModal()
-    }
+    /// A presentation began, ended, or was dismissed by the platform: a
+    /// settle point (LLP 1035.001.000 D3).
+    func modalDidDismiss() { settle() }
 
     /// Retire only the named owner; a late completion cannot remove its
     /// successor or the retained owner beneath it.
@@ -511,22 +546,34 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
 
     /// Focus waits through controller installation as well as UIKit's push/pop.
     /// `clock settle` observes the asynchronous part under platform timing.
-    var defersFocus: Bool { changing || syncing || mounting }
-    var inTransition: Bool { defersFocus || pendingSync }
-    /// How the last transition ended — `completed` (the Back control was
-    /// pressed), `cancelled` (an interactive pop returned), `idle` (a
-    /// programmatic change, or nothing yet) — for `state.navigation`.
-    private var lastTransition = "idle"
-    private var interactiveTransition = false
+    var defersFocus: Bool { syncing || mounting || delivering || (holdsScreens && inFlight) }
+    var inTransition: Bool { defersFocus || dirty || settling || owed != nil }
 
-    /// For `state.navigation` (LLP 1035.002 D2): the route the root names,
-    /// UIKit's stack by key, and the transition's phase — observations.
+    /// For `state.navigation` (LLP 1035.002 D2; LLP 1035.001.000 D9): the
+    /// route the root names, UIKit's stack by key, what UIKit shows, what the
+    /// host last applied, what the app's tree asks, a change not yet told,
+    /// the last one that was, and the tabs in the order UIKit shows them —
+    /// observations.
     func observation() -> [String: Any] {
         let stack = (navigation?.viewControllers ?? []).compactMap { ($0 as? RouteController)?.key }
         let transition: [String: Any] = ["interactive": navigation?.transitionCoordinator?.isInteractive ?? false,
-                                         "phase": changing || pendingSync || presenter.modals.inTransition ? "in-progress" : lastTransition]
+                                         "phase": inTransition || presenter.modals.inTransition ? "in-progress" : "idle"]
         let root = container ?? presenter.root.subviews.first as? NodeView
-        return ["route": root?.props["navigationKey"] ?? NSNull(), "stack": stack, "transition": transition]
+        func json(_ s: NavigationRules.Snapshot?) -> Any {
+            guard let s else { return NSNull() }
+            return ["tab": s.tab ?? NSNull(), "stack": s.stack, "presented": s.presented] as [String: Any]
+        }
+        let change: (NavigationRules.Change?) -> Any = {
+            switch $0 {
+            case .backTo(let key)?: return "backTo \(key)"
+            case .select(let tab)?: return "select \(tab)"
+            case nil: return NSNull()
+            }
+        }
+        return ["route": root?.props["navigationKey"] ?? NSNull(), "stack": stack, "transition": transition,
+                "native": json(holdsScreens ? observe() : nil), "applied": json(applied), "app": json(appSnapshot()),
+                "owed": change(owed), "reported": reported ?? NSNull(),
+                "tabs": tabController.map { tabOrder(of: $0) } ?? NSNull()]
     }
 
     func move(to parent: UIViewController, mount: () -> Void) {
@@ -541,17 +588,8 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
         nav.didMove(toParent: parent)
     }
 
-    func invokeBack(from source: NodeView) {
-        guard presenter.session?.view?.window != nil,
-              presenter.views[source.id] === source, routeIDs.contains(source.id),
-              source.props["navigationKey"] == container?.props["navigationKey"] else { return }
-        if let control = backControl { presenter.press(control.id) }
-    }
-
-    var canInvokeBack: Bool { backControl != nil }
-
     var preservesKeyboardViewport: Bool {
-        NavigationRules.freezesViewport(modalActive: presenter.modals.active, changing: changing,
+        NavigationRules.freezesViewport(modalActive: presenter.modals.active, inFlight: inFlight,
                                         initiallyInteractive: navigation?.transitionCoordinator?.initiallyInteractive == true)
     }
 
@@ -574,9 +612,8 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
 
     /// D1: resolved at use, by HTML id, among live enabled press controls —
     /// never captured at a gesture's start (`NavigationRules.backControl`).
-    private var backControl: NodeView? {
-        guard let key = container?.props["navigationKey"],
-              let route = routeIDs.compactMap({ presenter.views[$0] }).first(where: { $0.props["navigationKey"] == key }) else { return nil }
+    var backControl: NodeView? {
+        guard let route = activeRoute else { return nil }
         return NavigationRules.backControl(named: container?.props["navigationBack"], among: presenter.carrying("id"),
                                            id: \.id, htmlID: { $0.props["id"] }, pressable: { $0.handlers.contains("press") }, disabled: \.disabled,
                                            inActiveRoute: { $0 === route || $0.isDescendant(of: route) })
@@ -633,12 +670,12 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
         #endif
         if let owner, owner !== navigation { return false }
         let depth = navigation?.viewControllers.count ?? 0
-        let control = backControl
-        guard NavigationRules.popMayBegin(depth: depth, changing: changing, modalActive: presenter.modals.inTransition,
-                                          hasBackControl: control != nil,
+        let permitted = backPermittedNow
+        guard NavigationRules.popMayBegin(depth: depth, inFlight: inFlight || owed != nil, modalActive: presenter.modals.inTransition,
+                                          permitted: permitted,
                                           contextPreviewActive: !presenter.chrome.ids("contextTarget").isEmpty) else {
-            if depth > 1, !changing, !presenter.modals.inTransition, control == nil {
-                presenter.session?.log("back gesture refused: no enabled navigationBack control in the active route")
+            if depth > 1, !inFlight, !permitted {
+                presenter.session?.log("back gesture refused: the active route does not permit leaving (no enabled navigationBack control)")
             }
             return false
         }
@@ -655,32 +692,19 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
     }
 
     func navigationController(_ navigationController: UINavigationController, willShow viewController: UIViewController, animated: Bool) {
-        guard navigationController === navigation else { return }
-        // A presented owner's appearance also calls willShow, using its
-        // enclosing presentation coordinator. Only a transition to this route
-        // belongs to navigation and has a matching didShow completion.
-        // @ref LLP 1038 D6/D11; LLP 1035.001 D2 — cancellation calls
-        // willShow again for the source, although the coordinator's .to is
-        // still the pop destination. Keep that contact's source until didShow.
-        if interactiveTransition, interactiveSource != nil { return }
+        guard owns(navigationController) else { return }
         let transition = navigationController.transitionCoordinator
-        changing = animated && transition?.viewController(forKey: .to) === viewController
-        interactiveTransition = changing && transition?.initiallyInteractive == true
-        interactiveSource = nil
-        if interactiveTransition,
-           let source = navigationController.transitionCoordinator?.viewController(forKey: .from) as? RouteController {
-            interactiveSource = (source.node, source.key)
-            interactiveDepth = navigationController.viewControllers.count + 1
-        }
         // The route coming into view was out of the window while it was
         // covered, so no scroll asked for its text; paint what shows of it
         // as the transition starts, not when the reader next scrolls.
-        transition?.animate(alongsideTransition: { [weak self] _ in self?.presenter.paintVisibleText() })
+        // Completed or cancelled, the transition's end is a settle point
+        // (LLP 1035.001.000 D3).
+        transition?.animate(alongsideTransition: { [weak self] _ in self?.presenter.paintVisibleText() }) { [weak self] _ in self?.settle() }
         // That paints what shows as it starts. A swipe reveals the route a
         // strip at a time, and painting stopped there until the swipe ended
         // (a back swipe showed the list's top half, then its bottom half).
         // Paint each frame's newly revealed text until the transition is over.
-        if changing { startRevealing() }
+        if animated, transition != nil { startRevealing() }
     }
 
     private func startRevealing() {
@@ -691,7 +715,7 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
     }
 
     fileprivate func revealTick() {
-        guard changing else { stopRevealing(); return }
+        guard inFlight else { stopRevealing(); return }
         presenter.paintVisibleText()
     }
 
@@ -701,67 +725,18 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
     }
 
     func navigationController(_ navigationController: UINavigationController, didShow viewController: UIViewController, animated: Bool) {
-        guard navigationController === navigation,
-              navigationController.topViewController === viewController else { return }
-        changing = false
+        guard owns(navigationController) else { return }
         stopRevealing()
-        defer {
-            // Tree updates during UIKit's transition retain their latest
-            // intent. Apply it once the native stack is available again.
-            if pendingSync {
-                pendingSync = false
-                sync(Batch(ops: [], timers: false, motion: false, clock: nil, error: nil))
-            }
-            presenter.session?.view?.fit()
-            presenter.syncModal()
-            // What the settled route shows has pixels (the swipe may have
-            // left a band of it unpainted, or a cancelled pop the source).
-            presenter.paintVisibleText()
-            presenter.flushPendingFocus()
-            recordPop(navigationController)
-            // At rest: a large title's insets are sampled now (§9.10).
-            coversChanged()
-        }
-        let source = interactiveSource
-        interactiveSource = nil
-        let sourceKey = source.flatMap { presenter.views[$0.node.id] === $0.node ? $0.key : nil }
-        // Replaced in place while the finger was down: the source's node is gone and the app's
-        // stack is as deep as it was when the swipe began.
-        let sourceReplaced = source != nil && sourceKey == nil
-            && selectedRouteCount == interactiveDepth
-        // How UIKit got here is not the question (the back button, its
-        // long-press menu, the swipe, a gesture yet to come): what it now
-        // shows is. A native stack that is the app's with screens taken off
-        // the top was popped by UIKit, and the app is told once per screen,
-        // through its Back control. A stack the app set itself already
-        // matches and reports nothing.
-        let native = navigationController.viewControllers.compactMap { ($0 as? RouteController)?.key }
-        // A swipe whose screen the app replaced while the finger was down
-        // ends on a stack no longer the app's prefix: it was still a back.
-        let replacedBack = sourceReplaced && (viewController as? RouteController).map {
-            NavigationRules.dispatchesBack(shownKey: $0.key, rootKey: container?.props["navigationKey"] ?? "",
-                                           sourceKey: nil, sourceReplaced: true, modalActive: presenter.modals.inTransition)
-        } == true
-        let pops = presenter.modals.inTransition ? 0
-            : (replacedBack ? 1 : NavigationRules.poppedByPlatform(native: native, app: appStackKeys()))
-        let cancelled = interactiveTransition && (viewController as? RouteController)?.node === source?.node
-        lastTransition = pops > 0 ? "completed" : (cancelled ? "cancelled" : "idle")
-        interactiveTransition = false
-        guard pops > 0, let control = backControl else { return }
-        for _ in 0..<pops { presenter.press(control.id) }
-    }
-
-    /// The app's stack for the shown navigation, by route key: the selected
-    /// tab's routes (or all, untabbed) through the route the root names.
-    private func appStackKeys() -> [String] {
-        guard let root = container else { return [] }
-        let rootKey = root.props["navigationKey"] ?? ""
-        for owner in NavigationTabs.of(root, presenter)?.panels ?? [root] {
-            let keys = (logicalChildren[owner.id] ?? []).compactMap { presenter.views[$0] }
-                .filter { $0.props["navigationKey"] != nil }.map { $0.props["navigationKey"] ?? "" }
-            if let range = NavigationRules.stack(routeKeys: keys, selected: rootKey) { return Array(keys[range]) }
-        }
-        return []
+        presenter.session?.view?.fit()
+        presenter.syncModal()
+        // What the settled route shows has pixels (the swipe may have
+        // left a band of it unpainted, or a cancelled pop the source).
+        presenter.paintVisibleText()
+        presenter.flushPendingFocus()
+        recordPop(navigationController)
+        // At rest: a large title's insets are sampled now (§9.10).
+        coversChanged()
+        settle()
     }
 
     /// A stack Exact retired: its handle goes.
@@ -791,11 +766,10 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
         refitForBars()
         controllers.removeAll()
         routeIDs = []
-        changing = false
-        pendingSync = false
-        interactiveSource = nil
-        interactiveTransition = false
-        lastTransition = "idle"
+        applied = nil
+        owed = nil
+        dirty = false
+        reported = nil
         if clearFocus { presenter.cancelPendingFocus() }
     }
 }
@@ -810,7 +784,7 @@ extension NavigationHost {
     /// Whether the Siri Remote's Menu goes back: a route to pop and a Back control.
     var menuGoesBack: Bool { (navigation?.viewControllers.count ?? 0) > 1 && backControl != nil }
     func menuBack() {
-        guard menuGoesBack, !changing, let control = backControl else { return }
+        guard menuGoesBack, !inFlight, let control = backControl else { return }
         presenter.press(control.id)
     }
 }
