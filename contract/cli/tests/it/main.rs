@@ -64,6 +64,7 @@ mod names;
 mod native_buttons;
 mod negative_margin;
 mod notify;
+mod observe_commands;
 mod packages;
 mod pan;
 mod pan_release;
