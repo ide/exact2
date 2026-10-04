@@ -85,9 +85,14 @@ export function projectRoots(history, navigate, say, after) {
  * while one is (D4), which the shell's rule reads, as the web host's glue;
  * and the page around the app (chrome.js), after each commit. */
 export const Docs = new Set();
-let Marked = false;
+let Marked = false, Touch = false;
 export function markDocument() {
   pageChrome();
+  // Presses as UIKit's (touch.js, as the web host's input glue loads it), after first paint.
+  if (!Touch && typeof requestAnimationFrame === "function" && !globalThis.__exactRender) {
+    Touch = true;
+    requestAnimationFrame(() => setTimeout(() => import("./touch.js").then(m => m.installTouch()).catch(() => {})));
+  }
   if (!Docs.size && !Marked) return;
   Marked = false;
   for (const e of Docs) if (!e.isConnected) Docs.delete(e); else Marked ||= e.getAttribute("data-scrolldocument") === "true";
