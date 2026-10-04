@@ -291,3 +291,72 @@ fn a_response_that_is_not_an_event_stream_ends_it() {
     assert!(!r.holds(ticket), "a response that is not a stream ends it");
     assert_eq!(value(&r, "progress"), Value::Number(-2.));
 }
+
+/// The settle ledger (Exact Observe design §3.5) counts a stream once, as a
+/// stream, until its first message; then nothing is outstanding.
+#[test]
+fn outstanding_counts_a_stream_until_its_first_message() {
+    let mut r = boot();
+    let ticket = one_stream(&mut r);
+    let before = r.outstanding();
+    assert_eq!(before.streams, vec!["progress".to_string()]);
+    assert!(before.requests.is_empty(), "a stream is not also a request");
+    assert!(!before.is_clear());
+    r.fulfill(ticket, message("10", 0)).unwrap();
+    let after = r.outstanding();
+    assert!(
+        after.is_clear(),
+        "an open stream is not outstanding: {after:?}"
+    );
+    assert!(after.data_ready && !after.poisoned);
+}
+
+/// A stream that closes in failure is terminal for its arguments, not
+/// outstanding: TTI can come with the error shown.
+#[test]
+fn outstanding_counts_a_failed_resource_as_settled() {
+    let mut r = boot();
+    let ticket = one_stream(&mut r);
+    let failed = Outcome::Failed {
+        kind: crate::FailureKind::Network,
+        message: "gone".into(),
+    };
+    r.fulfill(ticket, failed).unwrap();
+    let out = r.outstanding();
+    assert!(out.is_clear(), "{out:?}");
+}
+
+/// Load on appear: a short `after` task is startup work until it fires; a
+/// long one (a promotion in a minute) never gates.
+#[test]
+fn outstanding_counts_only_short_one_shot_tasks() {
+    let mut b = PlanBuilder::new(exact_kernel::SCHEMA_DIGEST, 1);
+    let number = b.primitive(TypeKind::Number);
+    let _ = number;
+    let body = b.code(Asm::new());
+    let soon = b.action("soon", &[], &[], body);
+    let body = b.code(Asm::new());
+    let later = b.action("later", &[], &[], body);
+    b.timer(10, soon, true);
+    b.timer(60_000, later, true);
+    b.node(NodeType::View as u8, None, None, 0, &[], &[], None);
+    let plan = b.finish().unwrap();
+    let mut r = Runner::boot(
+        plan,
+        Scripted::default(),
+        Kernel::with_monospace(),
+        Default::default(),
+        "/",
+    )
+    .unwrap();
+    assert_eq!(r.outstanding().one_shots, vec!["soon".to_string()]);
+    let _ = r.advance(20.);
+    assert!(r.outstanding().one_shots.is_empty(), "spent once it fired");
+}
+
+#[test]
+fn outstanding_answers_the_agent_as_json() {
+    let r = boot();
+    let reply = crate::agent::handle(&r, r#"{"op":"outstanding"}"#);
+    assert!(reply.starts_with(r#"{"clear":false,"dataReady":true,"poisoned":false,"requests":[],"streams":["progress"]"#), "{reply}");
+}
