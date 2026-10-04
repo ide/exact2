@@ -14,6 +14,8 @@ const TYPES = { TEMPLATE: 'Head', BUTTON: 'Pressable', INPUT: 'TextInput', TEXTA
  * screen's or an unselected tab's copy only when no active one carries it, as the runner's `target`. */
 const targetOf = (nodes, t) => { const named = nodes.filter(n => n.props.testId === t); return nodes.find(n => n.id === t) ?? named.find(n => !n.inactive) ?? named[0]; };
 export function install(exact) {
+  // The base sheet's fades are not the agent's (index.html): its clock holds every motion.
+  document.documentElement.setAttribute('data-exact-agent', '');
   const views = exact.views, id = exact.viewId;
   // A Markdown text's pieces are its content, not views.
   // A view leaving with its exit animation (presence-glue.js) is no view: the runner destroyed it.
