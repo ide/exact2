@@ -145,6 +145,9 @@ html[data-exact-docnav] {
      toolbar opaque. */
   &:has(dialog:modal) [data-exact-page]::after { opacity: 1; z-index: 2147483040; }
   & #exact-root#exact-root dialog:modal::backdrop { display: none; }
+  /* A popover (an action sheet) leaves the page as it is: its clear backdrop, the same
+     fixed box over the viewport, is not drawn either. */
+  & #exact-root#exact-root [popover]:popover-open::backdrop { display: none; }
 }
 /* A sheet locks the page (Safari still pans a hidden overflow by touch: nav-chrome.js holds
    those), and its scroller never hands its overscroll to the page. */
