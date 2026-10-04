@@ -8,6 +8,21 @@
     "app"
   ],
   "properties": {
+    "launch": {
+      "type": "array",
+      "description": "Module launch parts (Exact Observe design §4.6), in the order they run at launch: each names modules/<name>/ in the app, else in exact2. Its apple/launch/*.swift is linked into the executable; its apple/service/*.swift becomes lib<name>_service.dylib, loaded later.",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9]*$"
+      }
+    },
+    "moduleConfig": {
+      "type": "object",
+      "description": "Per-module settings a launch part reads at launch (the Info.plist key ExactModuleConfig): module name to its settings.",
+      "additionalProperties": {
+        "type": "object"
+      }
+    },
     "modules": {
       "type": "array",
       "description": "The native-module roster (LLP 1024 D1): the custom-element tags the app's module artifact serves (modules/apple/*.swift beside libexact_modules.dylib on Apple, modules/web/index.js on the web). A hyphenated tag in the Contract that this list lacks is bake-unknown-module.",
