@@ -857,8 +857,13 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
         changing = animated && transition?.viewController(forKey: .to) === viewController
         interactiveTransition = changing && transition?.initiallyInteractive == true
         interactiveSource = nil
-        if interactiveTransition,
-           let source = navigationController.transitionCoordinator?.viewController(forKey: .from) as? RouteController {
+        // The route being left by a swipe, or by UIKit's own back button (a
+        // pop the app has not made yet: the source has already left the
+        // stack): didShow tells Contract, through the Back control, as it
+        // does for the swipe. A pop the app made itself shows the route the
+        // app already selected, and dispatchesBack declines it.
+        if let source = navigationController.transitionCoordinator?.viewController(forKey: .from) as? RouteController,
+           interactiveTransition || (changing && !navigationController.viewControllers.contains(source)) {
             interactiveSource = (source.node, source.key)
             interactiveDepth = navigationController.viewControllers.count + 1
         }
