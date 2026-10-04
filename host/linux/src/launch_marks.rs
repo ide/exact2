@@ -173,6 +173,51 @@ impl LaunchMarks {
         fresh
     }
 
+    /// The startup report the journal carries (ExactKit's `report()`):
+    /// Observe's metrics in seconds — a Linux launch is always cold, measured
+    /// from the process start to launch end; TTR and TTI from launch end —
+    /// the marks in ms from process start, the TTI outcome and the ledger.
+    pub fn report(&self) -> serde_json::Map<String, serde_json::Value> {
+        use serde_json::{json, Map, Value};
+        let mut metrics = Map::new();
+        let mut metric = |name: &str, a: Option<f64>, b: Option<f64>| {
+            if let Some((a, b)) = a.zip(b) {
+                metrics.insert(name.into(), json!(a - b));
+            }
+        };
+        metric("coldLaunchTime", self.launch_end, self.process);
+        metric("timeToFirstRender", self.present, self.launch_end);
+        if self.outcome == Some("settled") {
+            metric("timeToInteractive", self.interactive, self.launch_end);
+        }
+        let mut marks = Map::new();
+        if let Some(p) = self.process {
+            for (name, at) in [
+                ("process", self.process),
+                // Launch end stands where Apple's didFinishLaunching and boot do.
+                ("didFinishLaunching", self.launch_end),
+                ("boot", self.launch_end),
+                ("commit", self.commit),
+                ("present", self.present),
+                ("activated", self.activated),
+                ("interactive", self.interactive),
+            ] {
+                if let Some(at) = at {
+                    marks.insert(name.into(), json!(((at - p) * 10_000.0).round() / 10.0));
+                }
+            }
+        }
+        let mut out = Map::new();
+        out.insert("metrics".into(), Value::Object(metrics));
+        out.insert("marks".into(), Value::Object(marks));
+        out.insert("launchType".into(), "cold".into());
+        out.insert("bootPath".into(), "display".into());
+        out.insert("tti".into(), self.outcome.unwrap_or("pending").into());
+        out.insert("trace".into(), json!(self.trace));
+        out.insert("processResolutionMs".into(), json!(self.resolution_ms));
+        out
+    }
+
     /// One line: Observe's metrics (ms) and the marks from process start.
     pub fn line(&self) -> String {
         let ms = |a: Option<f64>, b: Option<f64>| {
