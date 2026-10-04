@@ -1135,6 +1135,9 @@ pub(super) fn check_command(
     if name == "scrollIntoView" {
         return into_view_args(args, scope, shapes, span);
     }
+    if name.starts_with("observe") {
+        return observe_args(name, args, scope, shapes, span);
+    }
     if name == "postMessage" {
         // The web's argument order, `postMessage(message, target)`: the target
         // is a surface's literal name, checked against the app's canvases.
@@ -1164,6 +1167,59 @@ pub(super) fn check_command(
     }
     for arg in args {
         infer(arg, scope, shapes)?;
+    }
+    Ok(())
+}
+
+/// `observe(name)`, `observe(name, Shape(key=value))`, with a severity third;
+/// `observeAttributes(Shape(key=value))` (a declared shape's record); `observeError(message)` or
+/// `observeError(message, "TypeName")` (Exact Observe design §5.2).
+fn observe_args(
+    name: &str,
+    args: &[Expr],
+    scope: &Scope,
+    shapes: &Shapes,
+    span: Span,
+) -> Result<(), TypeError> {
+    let usage = match name {
+        "observe" => "`observe(name)`, `observe(name, Shape(key=value))` or `observe(name, Shape(key=value), \"warn\")`",
+        "observeAttributes" => "`observeAttributes(Shape(key=value))`",
+        _ => "`observeError(message)` or `observeError(message, \"TypeName\")`",
+    };
+    let (min, max) = match name {
+        "observe" => (1, 3),
+        "observeAttributes" => (1, 1),
+        _ => (1, 2),
+    };
+    if args.len() < min || args.len() > max {
+        return err("type-observe", usage.to_string(), span);
+    }
+    for (i, arg) in args.iter().enumerate() {
+        let ty = infer(arg, scope, shapes)?;
+        let record = name == "observeAttributes" || (name == "observe" && i == 1);
+        // The attributes are written as a construction, so their names reach
+        // the host (a record value alone carries none).
+        let constructed = matches!(arg, Expr::Call(_, fields, _)
+            if fields.iter().all(|f| matches!(f, Expr::NamedArg(..))));
+        if record && !constructed {
+            return err(
+                "type-observe",
+                format!("{usage}: the attributes are a shape constructed here, every field named"),
+                arg.span(),
+            );
+        }
+        let ok = if record {
+            !matches!(ty, Ty::String | Ty::Number | Ty::Bool)
+        } else {
+            matches!(ty, Ty::String)
+        };
+        if !ok {
+            return err(
+                "type-observe",
+                format!("{usage}: argument {} is `{ty}`", i + 1),
+                arg.span(),
+            );
+        }
     }
     Ok(())
 }
