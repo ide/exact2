@@ -40,7 +40,9 @@
 /* The bar: its material from the top edge (under the status bar) to its
    bottom, over the route's content; the title centred between its buttons. */
 [data-exact-navbar] { position: absolute; inset: 0 0 auto; z-index: 2147483000; pointer-events: none; font: 17px/1.3 var(--exact-nav-font); color: var(--exact-nav-text); -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
-[data-exact-navbar] > .bg { position: absolute; inset: 0 0 auto; height: calc(var(--exact-nav-safe-top) + var(--exact-nav-bar-height)); background: var(--exact-nav-material); -webkit-backdrop-filter: var(--exact-nav-filter); backdrop-filter: var(--exact-nav-filter); box-shadow: 0 .5px 0 var(--exact-nav-separator); }
+[data-exact-navbar] > .bg { position: absolute; inset: 0 0 auto; height: calc(var(--exact-nav-safe-top) + var(--exact-nav-bar-height)); background: var(--exact-nav-material); -webkit-backdrop-filter: var(--exact-nav-filter); backdrop-filter: var(--exact-nav-filter); }
+/* Its edge: a hairline, one device pixel (a thin border, which WebKit snaps). */
+[data-exact-navbar] > .bg::after { content: ""; position: absolute; left: 0; right: 0; top: 100%; height: 0; border-top: .5px solid var(--exact-nav-separator); }
 [data-exact-navbar] > .bar { position: absolute; left: 0; right: 0; top: var(--exact-nav-safe-top); height: var(--exact-nav-bar-height); display: flex; align-items: center; padding: 0 4px; box-sizing: border-box; }
 [data-exact-navbar] .title { position: absolute; left: 30%; right: 30%; text-align: center; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 [data-exact-navbar] .lead, [data-exact-navbar] .trail { display: flex; align-items: center; min-width: 0; max-width: 30%; }
@@ -50,6 +52,9 @@
 [data-exact-navbar] .large > h1 { margin: 0; padding: 0 16px; font: 700 34px/var(--exact-nav-large-height) var(--exact-nav-font); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 [data-exact-navbar] .grab { position: absolute; top: 5px; left: 50%; width: 36px; height: 5px; margin-left: -18px; border-radius: 3px; background: var(--exact-tertiary-label, light-dark(#3c3c434d, #ebebf54d)); }
 [data-exact-navbar][data-drag] { pointer-events: auto; touch-action: none; }
+/* The bars are chrome over the content, not in it (as UIKit's): a touch on one is the
+   bar's, held at once (touch.js), and a drag that starts there pans nothing. */
+[data-exact-navbar] > :is(.bg, .bar), [data-exact-tabbar] { pointer-events: auto; touch-action: none; }
 
 /* Bar buttons: borderless, in the tint; 44px targets. */
 [data-exact-navbar] button { all: unset; pointer-events: auto; box-sizing: border-box; display: inline-flex; align-items: center; gap: 2px; min-width: 44px; max-width: 100%; height: 44px; padding: 0 8px; border-radius: 10px; color: var(--exact-nav-tint); cursor: pointer; -webkit-tap-highlight-color: transparent; }
@@ -73,7 +78,14 @@
   html[data-exact-docnav] [data-exact-doc] > [data-exact-navbar][data-large] {
     & .large { animation: exact-nav-clip linear both; animation-timeline: scroll(root block); animation-range: 0 var(--exact-nav-large-height); }
     & .large > h1 { animation: none; }
-    & > .bg, & .title { animation-timeline: scroll(root block); }
+    & .title { animation-timeline: scroll(root block); }
+    /* Its material is always there, unseen over the canvas at rest, so it frosts what
+       slides under it from the first point (the large title, then the content), and the
+       box Safari colours its status bar from never changes: as Safari reads it now and
+       then, a fading material flashed the status bar from the canvas to the bar's colour.
+       The hairline arrives with the inline title. */
+    & > .bg { opacity: 1; animation: none; }
+    & > .bg::after { opacity: 0; animation: exact-nav-in linear both; animation-timeline: scroll(root block); animation-range: calc(var(--exact-nav-large-height) - 26px) calc(var(--exact-nav-large-height) - 10px); }
   }
   /* A route shown beside the page for a slide: its bar as at the offset it left at. */
   [data-exact-frozen] > [data-exact-navbar][data-large] {
@@ -109,11 +121,12 @@ html[data-exact-docnav] {
   scroll-padding-top: calc(env(safe-area-inset-top, 0px) + 44px);
   & body { height: auto; min-height: 100%; }
   & #exact-root { height: auto; min-height: 100%; overflow-x: clip; }
-  /* Safari 26 paints its status bar in one solid colour, a fixed box's at the top edge (the
-     bar's), which it reads only now and then (never as a scroll-driven animation fades it, and
-     kept when the box goes): the page's bars are the canvas's colour, a little clear, so the
-     status bar and the bar are one surface whatever Safari last read. */
-  & [data-exact-page] { height: auto !important; min-height: 100%; --exact-nav-material: rgb(from var(--exact-canvas, Canvas) r g b / .85); }
+  /* Safari 26 lays a tab's page out below its status bar and paints the status bar in one
+     solid colour, a fixed box's at the top edge (the bar's), which it reads only now and then
+     (never as a scroll-driven animation fades it, and kept when the box goes); a box with any
+     clearness it ignores, painting the status bar white over a dark page. The page's bars are
+     the canvas, solid, so the status bar and the bar are one surface. */
+  & [data-exact-page] { height: auto !important; min-height: 100%; --exact-nav-material: var(--exact-canvas, Canvas); }
   & [data-exact-page] > [data-exact-chromed], & [data-exact-page] > [data-exact-ghost] { position: fixed !important; }
   & [data-exact-page] > [data-exact-off] { display: none !important; }
   & [data-exact-page] > [data-exact-doc] [data-exact-overlay] { position: fixed !important; }
@@ -127,6 +140,14 @@ html[data-exact-docnav] {
   & [data-exact-page]::after { content: ""; position: absolute; inset: 0; z-index: 2147483015; pointer-events: none; background: var(--exact-sheet-dim); opacity: 0; transition: opacity .3s ease-out; }
   & [data-exact-page] > [data-exact-backdrop] { background: none; }
   &[data-exact-locked] [data-exact-page]::after { opacity: 1; }
+  /* A modal dialog (an alert) dims the page the same way, over every route and sheet: its
+     own backdrop, a clear fixed box at the bottom edge, had Safari paint the band under its
+     toolbar opaque. */
+  &:has(dialog:modal) [data-exact-page]::after { opacity: 1; z-index: 2147483040; }
+  & #exact-root#exact-root dialog:modal::backdrop { display: none; }
+  /* A popover (an action sheet) leaves the page as it is: its clear backdrop, the same
+     fixed box over the viewport, is not drawn either. */
+  & #exact-root#exact-root [popover]:popover-open::backdrop { display: none; }
 }
 /* A sheet locks the page (Safari still pans a hidden overflow by touch: nav-chrome.js holds
    those), and its scroller never hands its overscroll to the page. */

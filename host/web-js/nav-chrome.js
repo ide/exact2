@@ -168,10 +168,11 @@ const hold = ev => { if (!Pans && ev.cancelable) ev.preventDefault(); };
 navChrome(update);
 
 // Safari reads its status bar's colour from the bar again only as the bar's
-// box is new: as the scheme changes, each bar's material is a new box.
-if (Live) matchMedia("(prefers-color-scheme: dark)").addEventListener?.("change", () => {
+// box is new: as the scheme changes, each bar's material is a new box, made
+// once the page's canvas (chrome.js, a frame after the change) is the new one.
+if (Live) matchMedia("(prefers-color-scheme: dark)").addEventListener?.("change", () => requestAnimationFrame(() => requestAnimationFrame(() => {
   for (const bg of document.querySelectorAll("[data-exact-page] [data-exact-navbar] > .bg")) bg.replaceWith(el("div", "bg"));
-});
+})));
 
 function project(nav) {
   const routes = routesOf(nav);
