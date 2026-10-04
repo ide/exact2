@@ -667,11 +667,13 @@ fn path_errors_identify_names_and_ordered_parameters_without_changing_validation
     }
 }
 
-// LLP 1035.001.000: `back_to` is `back` repeated until the entry keyed `key`
-// is the top — over every recorded reachable value — and anything not in the
-// selected stack is refused without a change.
+// LLP 1035.001.000: `back_to` takes the selected stack to a destination —
+// the stack through the entry keyed `key`, every other tab and the counter
+// untouched — in one step, whatever lay above it (invariant I1: a way back
+// carries where it went, never a count); over every recorded reachable value.
+// Anything not in the selected stack is refused without a change.
 #[test]
-fn back_to_an_entry_is_back_until_it_is_the_top() {
+fn back_to_an_entry_leaves_the_stack_through_it() {
     let c = corpus();
     for sequence in &c.sequences {
         let t = &c.tables[&sequence.table];
@@ -680,12 +682,14 @@ fn back_to_an_entry_is_back_until_it_is_the_top() {
             let shown = stack(r).to_vec();
             for (i, entry) in shown.iter().enumerate() {
                 let reached = success(back_to(t, r.clone(), &entry.id.to_string()));
-                let mut popped = r.clone();
-                for _ in i + 1..shown.len() {
-                    popped = success(back(t, popped));
+                assert_eq!(stack(&reached), &shown[..=i]);
+                assert_eq!(reached.tab, r.tab);
+                assert_eq!(reached.next, r.next);
+                for (before, after) in r.tabs.iter().zip(&reached.tabs) {
+                    if before.name != r.tab {
+                        assert_eq!(before, after);
+                    }
                 }
-                assert_eq!(reached, popped);
-                assert_eq!(top(&reached), Some(entry));
             }
             let top_key = top(r).unwrap().id.to_string();
             assert_eq!(success(back_to(t, r.clone(), &top_key)), *r);
