@@ -20,6 +20,19 @@ function pressBack(nav) {
       && control.getClientRects().length && getComputedStyle(control).visibility === "visible") control.click();
 }
 
+// The fallback for a root without `traverse`: its Back control, resolved in
+// whatever route is selected now, until `key` is the selected route; a press
+// that leaves the selection where it was is a refusal.
+function pressBackTo(nav, key) {
+  for (let shown = nav.getAttribute("navigationKey"), n = routesOf(nav).length; shown !== key && n-- > 0;) {
+    const routes = routesOf(nav), at = routes.indexOf(selectedRoute(nav));
+    if (!routes.slice(0, Math.max(at, 0)).some(r => r.getAttribute("navigationKey") === key)) return;
+    pressBack(nav);
+    if (nav.getAttribute("navigationKey") === shown) return;
+    shown = nav.getAttribute("navigationKey");
+  }
+}
+
 function go(to, from, finish = () => {}) {
   const index = browserIndex();
   const current = index !== null && originIndex !== null ? index - originIndex : from;
@@ -64,17 +77,17 @@ function popped({ j, state, url }) {
   const target = owned ? entry.url : url;
   const nav = root.querySelector("[navigationBack]");
   const routes = routesOf(nav), selected = routes.indexOf(selectedRoute(nav));
-  const back = owned && j === cursor - 1 && selected > 0
-    && routes[selected - 1].getAttribute("navigationKey") === String(entry.id);
-  // @ref LLP 1035.001.000 — Back over any number of entries to a route still
-  // beneath the selected one is one `traverse` to its key, where the root
-  // declares it; otherwise one step presses Back and more navigate, as before.
+  // @ref LLP 1035.001.000 I1 — a Back to an entry still beneath the selected
+  // route goes to that route, however many entries it skipped: never counted
+  // as one screen per entry. One `traverse` to its key where the root
+  // declares it; else the app's Back control, pressed until it is the top.
   const beneath = owned && j < cursor
     && routes.slice(0, Math.max(selected, 0)).some(r => r.getAttribute("navigationKey") === String(entry.id));
   pop = {};
   try {
     const traversed = beneath && traverse(String(entry.id));
-    if (!traversed && back) pressBack(nav);
+    const back = beneath && !traversed;
+    if (back) pressBackTo(nav, String(entry.id));
     else if (!traversed) navigate(target);
     const accepted = back || traversed ? last?.top === entry.id : pop.op?.url === target;
     if (accepted) {
