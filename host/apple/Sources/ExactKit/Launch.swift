@@ -222,18 +222,23 @@ public final class ExactLaunch: NSObject {
     /// What is still outstanding for the launch session: the runner's ledger
     /// and the host's. Empty when the screen can be used.
     private func outstandingNow() -> [String]? {
-        guard let session = launchSession else { return nil }
+        guard let session = launchSession, let ledger = Self.ledger(session) else { return nil }
+        if ledger.poisoned { finish("logic_failed"); return nil }
+        failedResources = ledger.failed
+        return ledger.items + (activation != "ready" ? ["activation"] : [])
+    }
+
+    /// A session's settle ledger (§3.5): the runner's outstanding work and the
+    /// host's, as names; what failed; whether the runner is poisoned.
+    static func ledger(_ session: ExactSession) -> (items: [String], failed: [String], poisoned: Bool)? {
         guard let data = session.agent("{\"op\":\"outstanding\"}").data(using: .utf8),
               let o = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
-        if o["poisoned"] as? Bool == true { finish("logic_failed"); return nil }
-        failedResources = o["failed"] as? [String] ?? []
         var out: [String] = []
         for key in ["requests", "streams", "awaiting", "deferred", "oneShots", "thens", "busy"] {
             out += (o[key] as? [String] ?? []).map { "\(key):\($0)" }
         }
-        if activation != "ready" { out.append("activation") }
         out += session.hostOutstanding.map { "host:\($0)" }
-        return out
+        return (out, o["failed"] as? [String] ?? [], o["poisoned"] as? Bool == true)
     }
 
     /// At a completion barrier (the turn after an apply or an activation):
@@ -351,6 +356,7 @@ public final class ExactLaunch: NSObject {
         if !lastOutstanding.isEmpty { out["outstanding"] = lastOutstanding }
         if !failedResources.isEmpty { out["failed"] = failedResources }
         if !trace.isEmpty { out["trace"] = trace }
+        if !NavigationMarks.shared.recent.isEmpty { out["navigation"] = NavigationMarks.shared.recent }
         if let session { out["launchSession"] = session === launchSession }
         if facts.traced != 0 { out["debugger"] = true }
         if let p = marks[.process] {

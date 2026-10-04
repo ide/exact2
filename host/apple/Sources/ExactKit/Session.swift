@@ -967,7 +967,7 @@ public final class ExactSession {
         // owner's order, so the last one applied is the runner's now.
         canvasOwed = batch.canvasOwed
         if canvasOwed { askCanvasDraw() }
-        for op in batch.ops where op.op == .router { routerOp = op.payload }
+        for op in batch.ops where op.op == .router { routerOp = op.payload; NavigationMarks.shared.routerChanged(self, payload: op.payload) }
         // @ref LLP 1048.003 D1 — the head's title, for the app that owns the chrome.
         for op in batch.ops where op.op == .title { presenter.headTitle(op.payload["title"] as? String) }
         #if os(macOS)
@@ -1010,6 +1010,7 @@ public final class ExactSession {
             presenter.transformGeometry.changed()
             applying = false
             ExactLaunch.shared.applied(self, changed: !batch.ops.isEmpty)
+            NavigationMarks.shared.applied(self)
             #if os(macOS)
             regions.flush()
             #endif
