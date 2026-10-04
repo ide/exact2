@@ -916,6 +916,8 @@ Keep `id` and `testId` separate:
 Events bind actions (`press=save`, `input=edit(item.id)`). Captured arguments come
 before host payload arguments. Do not add an event object or a JavaScript closure.
 `navigate` is special: no captured arguments and zero or one location parameter.
+`traverse` (navigation root only) carries the key of the route the platform took
+the person back to — any depth, one event — for `nav = backTo(nav, key)`.
 `transformgeometry` and `transformrelease` must be paired. The complete payload
 matrix is in [events](contract-grammar.md#events).
 

@@ -388,6 +388,9 @@ pub const HANDLERS: [&str; 58] = [
     "nexttrack",
     "stop",
     "navigate",
+    // The platform took the person back to a route beneath the top (LLP
+    // 1035.001.000): its navigation key.
+    "traverse",
     "heightrelease",
     "transformgeometry",
     "transformrelease",
@@ -414,7 +417,9 @@ pub fn is_handler(name: &str, value: &Expr) -> bool {
 /// may then offer its record ([`contract_types::event_record`]).
 pub fn handler_payload(attr: &str) -> Option<&'static str> {
     match attr {
-        "change" | "input" | "key" | "message" | "navigate" | "error" => Some("string"),
+        "change" | "input" | "key" | "message" | "navigate" | "traverse" | "error" => {
+            Some("string")
+        }
         "timeupdate" | "durationchange" => Some("number"),
         "hover" | "fullscreenchange" => Some("bool"),
         "select" => Some("MarkdownSelection"),

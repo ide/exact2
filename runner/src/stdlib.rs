@@ -128,6 +128,7 @@ fn call_value(
         | Stdlib::Push
         | Stdlib::Replace
         | Stdlib::Back
+        | Stdlib::BackTo
         | Stdlib::Select
         | Stdlib::Go
         | Stdlib::Stack

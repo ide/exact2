@@ -1490,4 +1490,4 @@ ready = main();
 ready.catch((e) => { console.error(e); root.dataset.error = String(e); });
 // @ref LLP 1038 D7/D8/D11 — the mirror observes the handler's synchronous commit.
 function navigate(location) { return globalThis.exact.navigate(location); }
-navigation.connect(root, navigate, log);
+navigation.connect(root, navigate, log, (key, nav = root.firstElementChild) => inputReady && (nav?.exactHandlers ?? []).includes("traverse") && (applyBatch(JSON.parse(readOut(wasm.exact_dispatch(Number(nav.dataset.view), 35, writeIn(key), now())))), true)); // and the root's `traverse` (LLP 1035.001.000)
