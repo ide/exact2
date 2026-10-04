@@ -1,4 +1,5 @@
 // Input-only glue: loaded after the baked first pixel, independently of data readiness.
+import { installTouch, watchHeld, cancelHeld } from "./touch.js";
 /** An element whose `press` the keyboard reaches only through its tabindex:
  * not one the browser activates itself (the wasm host's handler list, or the
  * JS target's `data-exact-on`). */
@@ -117,29 +118,25 @@ export function createInputHandlers({ root, views, retiredViews, ready, inertAnc
     if (effect) effect.setKeyframes(frames);
     return box;
   };
-  let press = null;
-  const release = () => { if (press) showPress(press.el, false); press = null; };
+  // The press itself, its box and its slop are touch.js's (UIKit's rule for
+  // a touch in a scroller too); this draws the held node's `press-scale`, or
+  // a native-styled button's press.
+  installTouch();
+  const scaled = el => (!!el.style.getPropertyValue("--exact-press") || el.matches("button[data-button-style]")) && !el.closest(":disabled,[disabled='true']");
+  // @ref LLP 1077 D14 — `press-haptic` plays at the press, as Apple's does:
+  // `navigator.vibrate` where the browser has it (not desktop, not iOS
+  // Safari), with `haptic()`'s two lengths (workout F4).
   root.addEventListener("pointerdown", e => {
     if (e.button !== 0 || !e.isPrimary) return;
-    release(); // a press whose release never reached the page
     const el = e.target.closest?.("[data-exact-on~=press],button[data-button-style]");
     if (!el || !root.contains(el) || el.closest(":disabled,[disabled='true']")) return;
-    // @ref LLP 1077 D14 — `press-haptic` plays at the press, as Apple's does:
-    // `navigator.vibrate` where the browser has it (not desktop, not iOS
-    // Safari), with `haptic()`'s two lengths (workout F4).
     const haptic = el.style.getPropertyValue("--exact-press-haptic").trim();
     if (haptic && haptic !== "none") navigator.vibrate?.(haptic === "selection" ? 5 : 12);
-    if (!(el.style.getPropertyValue("--exact-press") || el.matches("button[data-button-style]"))) return;
-    const r = unpressedBox(el);
-    press = { el, id: e.pointerId, box: [r.left, r.top, r.right, r.bottom] };
-    showPress(el, true);
   }, true);
-  document.addEventListener("pointermove", e => {
-    if (e.pointerId !== press?.id) return;
-    const [l, t, r, b] = press.box;
-    showPress(press.el, e.clientX >= l && e.clientX <= r && e.clientY >= t && e.clientY <= b);
-  }, true);
-  for (const type of ["pointerup", "pointercancel"]) document.addEventListener(type, e => { if (e.pointerId === press?.id) release(); }, true);
+  watchHeld({
+    box: el => scaled(el) ? unpressedBox(el) : null,
+    held: (el, down) => { if (scaled(el) || feedback.has(el)) showPress(el, down); },
+  });
   return {
     // @ref LLP 1005 §3 — `pointerdown`/`pointerup`, DOM's own: the primary
     // button or a touch going down on the node, then up or cancelled (a
@@ -221,7 +218,7 @@ export function createInputHandlers({ root, views, retiredViews, ready, inertAnc
         const [x,y] = contact.to, [px,py] = contact.from;
         // exact_motion::gesture::SLOP; a pan-only plan links no motion export to ask.
         if (!contact.active && Math.max(Math.abs(x-px),Math.abs(y-py)) <= 4) return;
-        if (!contact.active) release(); // a pan ends a press, as it cancels a touch
+        if (!contact.active) cancelHeld(); // a pan ends a press, as it cancels a touch
         // The button's tap is over: the drag is the pan's, captured, so this node hears the rest.
         if (contact.watching) { watch(false); contact.watching = false; el.setPointerCapture(contact.pointer); }
         contact.active = true; contact.from = [x,y];

@@ -275,7 +275,7 @@ cpSync(resolve(root, 'host/web/collection-glue.js'), resolve(gen, 'collection-gl
 cpSync(resolve(root, 'host/web/image-glue.js'), resolve(gen, 'image-glue.js'));
 cpSync(resolve(root, 'host/web/navigation.js'), resolve(gen, 'navigation.js'));
 // The page around the app (document.js `markDocument`), the web host's own.
-cpSync(resolve(root, 'host/web/chrome.js'), resolve(gen, 'chrome.js'));
+for (const f of ['chrome.js', 'touch.js']) cpSync(resolve(root, 'host/web', f), resolve(gen, f));
 // The agent adapter reads its own copies of the modules it shares with the
 // entry: a module lives in one chunk, so what only the agent reads from
 // navigation.js (the guest outline and taps, the environment) or names.js
