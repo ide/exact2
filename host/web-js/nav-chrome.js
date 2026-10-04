@@ -146,6 +146,9 @@ export function update(root) {
   if (Live) {
     const page = [...States.keys()].find(n => n.hasAttribute("data-exact-page"));
     setAttr(document.documentElement, "data-exact-docnav", page ? "" : null);
+    // The page keeps each route's offset itself: the browser's own restoring, as its Back
+    // pops a route, would scroll the document under a slide's two boxes.
+    if (page && history.scrollRestoration !== "manual") history.scrollRestoration = "manual";
     const locked = !!page && States.get(page).locked;
     setAttr(document.documentElement, "data-exact-locked", locked ? "" : null);
     if (locked !== Locked) {
@@ -263,10 +266,13 @@ function page(nav, st, routes, stack) {
 
 /** Where the routes shown beside the page are boxes in the document: the
  * viewport's top and height, read while the page's route still holds the
- * document's offset (nav-chrome.css). */
+ * document's offset, and how far below it the browser may draw the page,
+ * under its toolbar (the screen's height past the viewport's; nav-chrome.css). */
 function place(nav) {
+  const h = tall(nav);
   nav.style.setProperty("--exact-page-y", `${-nav.getBoundingClientRect().top}px`);
-  nav.style.setProperty("--exact-page-h", `${tall(nav)}px`);
+  nav.style.setProperty("--exact-page-h", `${h}px`);
+  nav.style.setProperty("--exact-page-below", `${Math.min(Math.max(0, (screen?.height ?? 0) - h), 240)}px`);
 }
 
 /** A box the route lays over its scroller (absolute, outside the scroller:
