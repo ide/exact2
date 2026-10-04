@@ -1,5 +1,5 @@
 import { renderMarkup, reportPlace, onSelection, textField, settleRadios } from "./navigation.js"; export { animationClocks, launchLocation } from "./navigation.js"; // synced animations (LLP 1055.002, emit.rs `clocks`)
-import { Docs, Head, head, markDocument, projectRoots } from "./document.js"; export { Head }; import { conforms, eq, equal, failureCode } from "./shape.js"; import { pointer, record } from "./pointer.js"; import { commands } from "./commands.js"; import { autofocus, press } from "./focus.js";
+import { Docs, Head, head, markDocument, projectRoots } from "./document.js"; export { Head }; import { conforms, eq, equal, failureCode } from "./shape.js"; import { Kept } from "./kept.js"; import { pointer, record } from "./pointer.js"; import { commands } from "./commands.js"; import { autofocus, press } from "./focus.js";
 let Paint; export function usePaint(pass) { Paint = pass; } export { conforms, eq, equal }; // the compiler installs `Paint` only when a plan can layer boxes
 import * as Ov from "./overlay.js"; // optimistic writes shown over answers (the runner's writes.rs)
 export const writeRecords = () => Ov.Writes.list.map(w => ({ id: w.id, mutation: w.m.name, landed: !!w.landed })); // the agent's `state.writes`
@@ -291,7 +291,7 @@ export function time() { if (!clock.agent && !Timing && start) clock.now = Math.
 function tick() { if (Now.v !== clock.now) { Now.v = clock.now; for (const o of Now.obs) stale(o, DIRTY); } }
 // A release build never enters agent mode (LLP 1069.007 D2): its build
 // writes this false, as the wasm host's files are gated.
-const AGENT_ADMITTED = true;
+const AGENT_ADMITTED = true; const driven = () => !!globalThis.__exactRender || (AGENT_ADMITTED && new URLSearchParams(location.search).has("agent"));
 /** A timer: `every(ms, action, once)`, due from mount; `i` its plan order, which breaks ties (schedule.js inserts by it). */
 let Order = 0; export const order = () => Order++, Tasks = []; // every task, for the agent's `state.tasks`
 export function every(ms, action, once, name) {
@@ -381,15 +381,15 @@ function unpark() { if (Parked >= 0 && Rev !== Parked) { Parked = -1; paint(); }
  * a Promise (an executor-local continuation: TypeScript), or `null` while
  * the source is not ready; `ready(f)` calls `f` once it is. */
 export const data = { answer: () => null, parse: null, q: [], ready: f => data.q.push(f) };
-/** The durable store (LLP 1018): name → text, persisted as the web host
- * does (`localStorage` "exact.secret.<name>") after a commit stands. */
+/** The durable store (LLP 1018): name → text, persisted as the web host does (`localStorage`
+ * "exact.secret.<name>") after a commit stands, with the kept answers (kept.js) it forgets as its names change. */
 export const Store = {
   map: new Map(), writes: [], dirty: false,
   get(k) { return this.map.get(k); },
-  set(k, v) { if (v == null) this.map.delete(k); else this.map.set(k, v); this.writes.push([k, v]); this.dirty = true; Rev++; },
-  save() { return [new Map(this.map), this.writes.length]; },
-  restore([m, n]) { this.map = m; this.writes.length = n; this.dirty = false; },
-  persist() { for (const [k, v] of this.writes.splice(0)) try { v == null ? localStorage.removeItem("exact.secret." + k) : localStorage.setItem("exact.secret." + k, v); } catch {} },
+  set(k, v) { if (this.map.has(k) !== (v != null)) Kept.forget(); if (v == null) this.map.delete(k); else this.map.set(k, v); this.writes.push([k, v]); this.dirty = true; Rev++; },
+  save() { return [new Map(this.map), this.writes.length, Kept.save()]; },
+  restore([m, n, k]) { this.map = m; this.writes.length = n; this.dirty = false; Kept.restore(k); },
+  persist() { for (const [k, v] of this.writes.splice(0)) try { v == null ? localStorage.removeItem("exact.secret." + k) : localStorage.setItem("exact.secret." + k, v); } catch {} Kept.persist(); },
   load() { try { for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k.startsWith("exact.secret.")) this.map.set(k.slice(13), localStorage.getItem(k)); } } catch {} },
 };
 /** Every resource, in plan order: the checkpoint a render writes reads them. */
@@ -454,12 +454,12 @@ function reply(t, name, source, held, f, next, gone) {
   };
 }
 const revalidated = (name, same) => `${name} answered: ${same ? "equal to its build-time answer" : "replaces its build-time answer"}`; // runner lines.rs
-/** A resource: its value, the arguments it settled with, one ticket in flight. A bake's answer is a first frame: `baked` asks at launch, as a native runner at `data_ready` (LLP 1048.003 D6; feed F24); a document's `kept` was asked for its page. */
-export function res(name, source, args, initial, initialArgs, type, ph, carried = false) { // `carried`: settled, not a bake to ask again — a dev reload's (checkpoint.js), an `else` row's (emit.rs)
+/** A resource: its value, the arguments it settled with, one ticket in flight; `keep`: kept.js. A bake's answer is a first frame: `baked` asks at launch, as a native runner at `data_ready` (LLP 1048.003 D6; feed F24); a document's `kept` was asked for its page. */
+export function res(name, source, args, initial, initialArgs, type, ph, carried = false, keep) { // `carried`: settled, not a bake to ask again — a dev reload's (checkpoint.js), an `else` row's (emit.rs)
   const ver = sig(0), pend = sig(false), fail = sig(null);
-  const kept = checkpoint().kept?.get(name);
+  const kept = checkpoint().kept?.get(name), seed = !kept && keep && Kept.seed(name, source, type, keep[1], driven);
   if (kept) [initialArgs, initial] = kept;
-  const r = { name, source, type, value: initial, settled: initialArgs, baked: !kept && !carried && initialArgs !== undefined, ticket: null, forced: false, rev: false, store: false, origin: 0 };
+  const r = { name, source, type, value: initial, settled: initialArgs, baked: !kept && !carried && initialArgs !== undefined, ticket: null, forced: false, rev: false, store: false, origin: 0, seed };
   const flag = (s, v, undo) => { if (!eq(s.n.v, v)) { undo?.push([s.n, s.n.v]); write(s.n, v); } }, release = () => { if (r.ticket) { say(`forget ticket ${r.ticket.id} (${name})`); r.ticket = null; } flag(pend, false); }, fails = (args, error, code) => { r.failed = args; r.error = error; r.code = code; flag(fail, failure()); release(); say(`resource ${name} failed: ${error}`); return r.value; }, failure = () => r.failed ? [r.failed, r.code ?? "error", r.error ?? "it failed"] : null; // `fail` holds the message too: a `failure(x)` reader is asked again when only it changes
   // Nothing kept: the placeholder shows, pending (LLP 1048.003 D6).
   const hold = () => {
@@ -471,7 +471,7 @@ export function res(name, source, args, initial, initialArgs, type, ph, carried 
   const take = (v, a, origin) => { // `origin`: when it was asked (overlay.js)
     if (type && !conforms(v, type, [0], r.checked)) throw new Failed(`${name}: the answer does not conform to its shape`, "shape");
     r.checked = v;
-    r.value = v; r.settled = a; r.origin = origin;
+    r.value = v; r.settled = a; r.origin = origin; if (keep && (keep[2] || r.store)) Kept.keep(name, source, keep[1], a, v, type);
   };
   // A reply the source cannot take leaves the value, failed for its arguments (`r.failed`, the runner's `failed_args`).
   // A stream's message (`o.more`) is a settlement that keeps the ticket (LLP 1016.000 D1); a message
@@ -484,6 +484,7 @@ export function res(name, source, args, initial, initialArgs, type, ph, carried 
   const m = memo(() => Ov.shown(r, (() => {
     ver();
     const a = r.asked = args(); if (Restoring) return r.value; // `asked`: the overlay's arguments while a placeholder stands
+    if (r.seed) { if (Kept.stands(r.seed[0], a, keep[0])) { r.value = r.seed[1]; say(`kept ${name}`); } r.seed = null; } // shown until the first ask lands
     const forced = r.forced, rev = r.rev, reconciling = r.reconciling; // `reconciling`: asked after a write ended, a refusal fails it (overlay.js)
     r.forced = r.rev = r.reconciling = false;
     // A failure keeps the value for its arguments, asking nothing; `refresh` or new ones ask again (settlement.rs). `fail` follows.
@@ -1388,7 +1389,7 @@ export function mount(f) {
     if (!(t.closest?.("input, textarea, select") || t.isContentEditable) && t.closest?.('[retainFocus="true"]')) ev.preventDefault();
   });
   // Under the agent, and in a render, the clock is the driver's: no timer runs by itself.
-  clock.agent = !!globalThis.__exactRender || (AGENT_ADMITTED && new URLSearchParams(location.search).has("agent"));
+  clock.agent = driven();
   Store.load();
   let built = false;
   Adopt = !!(checkpoint().kept && root.firstElementChild);
@@ -1439,8 +1440,7 @@ export function checkpoint() {
   const cp = JSON.parse(el.textContent);
   Checkpoint.kept = new Map(cp.answers.map(([name, , args, value]) => [name, [value_(args), value_(value)]]));
   // A drive starts at zero even when its document was rendered on a wall clock.
-  const driven = AGENT_ADMITTED && typeof location !== "undefined" && new URLSearchParams(location.search).has("agent") && !globalThis.__exactRender;
-  Checkpoint.time = clock.now = driven ? 0 : cp.time || 0;
+  Checkpoint.time = clock.now = !globalThis.__exactRender && driven() ? 0 : cp.time || 0;
   return Checkpoint;
 }
 /** A checkpoint value (`push_value`, host/web/src/page.rs) as a runtime value:
