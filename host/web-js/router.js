@@ -6,7 +6,7 @@ const say = line => journal.push(`t=${clock.now} ${line}`);
 // A Router is [tab, tabs, next]; a Tab [name, stack]; an Entry
 // [id, name, url, tab, params], params positional in the table's
 // first-declaration order of distinct `:names`.
-let Routes = [], Names = [];
+export let Routes = [], Names = []; // read by marks.js for a navigation's route pattern
 const names = p => p.split("/").filter(s => s[0] === ":").map(s => s.slice(1));
 /** The plan's route table: [name, pattern, parent, tab, notfound] rows. */
 export function routes(table) {
