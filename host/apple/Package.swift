@@ -13,6 +13,10 @@ import Foundation
 let libDir = ProcessInfo.processInfo.environment["EXACT_LIB_DIR"] ?? (Context.packageDirectory + "/../../target/host-dev")
 let libName = ProcessInfo.processInfo.environment["EXACT_LIB"] ?? "caltrain_apple"
 
+// The app's module launch parts (Exact Observe design §4.6): `build.mjs`
+// generates their target when the manifest names any in `launch`.
+let launchParts = ProcessInfo.processInfo.environment["EXACT_LAUNCH_PARTS"] ?? "Sources/ExactLaunchParts"
+
 let composition = ProcessInfo.processInfo.environment["EXACT_APP_COMPOSITION"] ?? "embedded"
 precondition(["embedded", "updating"].contains(composition), "EXACT_APP_COMPOSITION must be embedded or updating")
 
@@ -34,13 +38,14 @@ let core: [Target] = [
         linkerSettings: [.unsafeFlags(["-L", libDir]), .linkedLibrary(libName), .linkedLibrary("c++")]
     ),
     .target(name: "ExactUpdates", dependencies: ["ExactKit", "CExact"], path: "Sources/ExactUpdates"),
+    .target(name: "ExactLaunchParts", dependencies: ["ExactKit"], path: launchParts),
     .target(name: "ExactComposition", dependencies: [.target(name: "ExactKit")] + (composition == "updating" ? [.target(name: "ExactUpdates")] : []),
             path: composition == "updating" ? "Sources/ExactUpdating" : "Sources/ExactEmbedded"),
 ]
 
 let executables: [Target] = [
-    .executableTarget(name: "ExactMac", dependencies: ["ExactKit", "ExactComposition"], path: "Sources/ExactMac"),
-    .executableTarget(name: "ExactIOS", dependencies: ["ExactKit", "ExactComposition"], path: "Sources/ExactIOS"),
+    .executableTarget(name: "ExactMac", dependencies: ["ExactKit", "ExactComposition", "ExactLaunchParts"], path: "Sources/ExactMac"),
+    .executableTarget(name: "ExactIOS", dependencies: ["ExactKit", "ExactComposition", "ExactLaunchParts"], path: "Sources/ExactIOS"),
     .executableTarget(name: "ExactHostMac", dependencies: ["ExactKit", "ExactComposition"], path: "Sources/ExactHostMac"),
     .executableTarget(name: "ExactHostIOS", dependencies: ["ExactKit", "ExactComposition"], path: "Sources/ExactHostIOS"),
 ]
