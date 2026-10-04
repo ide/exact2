@@ -168,11 +168,12 @@ function aim(ev) {
 const hold = ev => { if (!Pans && ev.cancelable) ev.preventDefault(); };
 navChrome(update);
 
-// Safari reads its status bar's colour from the bar again only as the bar's
-// box is new: as the scheme changes, each bar's material is a new box, made
-// once the page's canvas (chrome.js, a frame after the change) is the new one.
+// Safari reads its status bar's colour from the page's edge strip (`page`)
+// again only as the set of fixed boxes changes: as the scheme changes, the
+// strip is a new box, made once the page's canvas (chrome.js, a frame after
+// the change) is the new one.
 if (Live) matchMedia("(prefers-color-scheme: dark)").addEventListener?.("change", () => requestAnimationFrame(() => requestAnimationFrame(() => {
-  for (const bg of document.querySelectorAll("[data-exact-page] [data-exact-navbar] > .bg")) bg.replaceWith(el("div", "bg"));
+  for (const e of document.querySelectorAll("[data-exact-page] > [data-exact-edge]")) e.replaceWith(edge());
 })));
 
 function project(nav) {
@@ -181,7 +182,7 @@ function project(nav) {
   let st = States.get(nav);
   if (!chromed) {
     if (st) { settle(st); States.delete(nav); }
-    for (const k of kids(nav)) if (k.hasAttribute("data-exact-tabbar") || k.hasAttribute("data-exact-backdrop")) k.remove();
+    for (const k of kids(nav)) if (k.hasAttribute("data-exact-tabbar") || k.hasAttribute("data-exact-backdrop") || k.hasAttribute("data-exact-edge")) k.remove();
     for (const r of routes) for (const k of ["data-exact-doc", "data-exact-off"]) r.removeAttribute(k);
     nav.removeAttribute("data-exact-page");
     return;
@@ -189,6 +190,7 @@ function project(nav) {
   if (!st) { States.set(nav, st = { tab: null, top: null, stack: [], anims: [], shown: new Set(), doc: null, over: new Set() }); if (Live && !nav.$listened) { nav.$listened = true; listen(nav, st); } }
   const paged = Live && !Standalone && !nav.parentElement?.closest("[navigationKey], [data-scroll]");
   setAttr(nav, "data-exact-page", paged ? "" : null);
+  if (!paged) for (const k of kids(nav)) if (k.hasAttribute("data-exact-edge")) k.remove();
   const key = attr(nav, "navigationKey"), selected = routes.find(r => attr(r, "navigationKey") === key);
   if (!selected) return;
   const tabbed = routes.some(r => data(r, "tab"));
@@ -218,12 +220,16 @@ function project(nav) {
  * sheet (or a full-screen cover) is over. */
 const pageRoute = stack => stack.findLast(r => !presentation(r)) ?? null;
 
+/** The page's top edge, for Safari's status bar (nav-chrome.css). */
+const edge = () => el("div", "", { "data-exact-edge": "", "aria-hidden": "true" });
+
 /** Which route scrolls the document, which show beside it (each at its
  * own offset), and which are not displayed; on a change, the document has
  * the offset of the route that now scrolls it. During a slide none does:
  * both routes are boxes over the viewport (`place`), as a ghost is. */
 function page(nav, st, routes, stack) {
   const top = stack[stack.length - 1];
+  if (!kids(nav).some(k => k.hasAttribute("data-exact-edge"))) nav.append(edge());
   const want = st.anims.length && st.slide ? null : pageRoute(stack);
   const was = st.doc;
   let y = null;
