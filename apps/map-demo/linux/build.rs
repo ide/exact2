@@ -38,13 +38,14 @@ fn main() {
     std::fs::write(
         out_dir.join("entry.rs"),
         format!(
-            "{}\n{hatches}fn main() {{ std::process::exit({host}::{run}); }}\n",
+            "{}\n{}\n{hatches}fn main() {{ launch_parts(); std::process::exit({host}::{run}); }}\n",
             contract::rust_entry(
                 "map_demo_data::Map",
                 "map_demo_data::Map",
                 compat.inputs["rustMode"].as_str().unwrap()
             )
-            .unwrap()
+            .unwrap(),
+            contract::linux_launch_parts().unwrap_or_else(|e| panic!("launch parts: {e}"))
         ),
     )
     .unwrap();
