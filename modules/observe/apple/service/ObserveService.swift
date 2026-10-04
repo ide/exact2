@@ -16,6 +16,10 @@ final class ObserveService {
     let clientId: UUID
     let metadata: [String: Any]
     var device: [String: Any] = [:]
+    /// The launch route (its first router change) and whether the user had
+    /// navigated away before startup ended (then it gets no `tti`).
+    var launchRoute: [String: Any]?
+    var navigatedBeforeStartup = false
     var globals: [String: Any] = [:]
     var gate: (after: Date?, failures: Int) = (nil, 0)
     var sending = false
@@ -61,6 +65,8 @@ final class ObserveService {
             let wall = e["wall"] as? Double ?? Date().timeIntervalSince1970
             switch kind {
             case "startup": startup(e, wall: wall)
+            case "navigation.launch": launchRoute = e
+            case "navigation": navigation(e, wall: wall)
             case "app.attributes": globals = ObserveRules.attributes(e["attributes"] as? [String: Any] ?? [:]).kept
             case "app.event": log(e, wall: wall, error: false)
             case "app.error": log(e, wall: wall, error: true)
@@ -73,6 +79,7 @@ final class ObserveService {
 
     /// The launch's metrics, Observe's names, from ExactLaunch's report.
     func startup(_ e: [String: Any], wall: Double) {
+        launchNavigation(e, wall: wall)
         guard let store, let metrics = e["metrics"] as? [String: Double], !metrics.isEmpty else { return }
         let marks = e["marks"] as? [String: Double] ?? [:]
         let ms = { (a: String, b: String) -> NSDecimalNumber? in
@@ -99,6 +106,37 @@ final class ObserveService {
                 if let failed = e["failed"] as? [String] { params["exact.tti.failed"] = failed.count }
             }
             store.addMetric(session: session, time: wall, category: "appStartup", name: name, value: value, params: params)
+        }
+    }
+
+    /// Observe's navigation metrics (`expo.navigation.*`): routeName is the
+    /// route pattern; params are routeParams, url and isAppLaunch.
+    func navigation(_ e: [String: Any], wall: Double) {
+        guard let store, let name = e["name"] as? String, let value = e["value"] as? Double else { return }
+        navigatedBeforeStartup = true
+        var params = globals
+        params["isAppLaunch"] = false
+        params["routeParams"] = e["routeParams"] ?? [:]
+        params["url"] = e["url"] ?? ""
+        for (k, v) in e where k.hasPrefix("exact.") { params[k] = v }
+        store.addMetric(session: session, time: wall, category: "navigation", name: name, value: value, route: e["route"] as? String, params: params)
+    }
+
+    /// The launch route's own pair, from startup's marks: from boot (Exact's
+    /// nearest to Observe's integration start; a declared deviation) to the
+    /// first frame, and to TTI unless the user had navigated away by then.
+    func launchNavigation(_ e: [String: Any], wall: Double) {
+        guard let store, let route = launchRoute, let marks = e["marks"] as? [String: Double], let boot = marks["boot"] else { return }
+        var params = globals
+        params["isAppLaunch"] = true
+        params["routeParams"] = route["routeParams"] ?? [:]
+        params["url"] = route["url"] ?? ""
+        params["exact.nav.anchor"] = "boot"
+        if let present = marks["present"] {
+            store.addMetric(session: session, time: wall, category: "navigation", name: "cold_ttr", value: (present - boot) / 1000, route: route["route"] as? String, params: params)
+        }
+        if let interactive = marks["interactive"], !navigatedBeforeStartup, ["settled", "failed", "declared"].contains(e["tti"] as? String ?? "") {
+            store.addMetric(session: session, time: wall, category: "navigation", name: "tti", value: (interactive - boot) / 1000, route: route["route"] as? String, params: params)
         }
     }
 

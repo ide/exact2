@@ -225,7 +225,19 @@ impl Batch {
             }
             let _ = write!(s, "{id}");
         }
-        s.push_str("]}");
+        // The route pattern and parameters, for navigation metrics (Exact Observe design §3.6).
+        s.push_str("],\"pattern\":");
+        quote(&change.pattern, &mut s);
+        s.push_str(",\"params\":{");
+        for (i, (k, v)) in change.params.iter().enumerate() {
+            if i > 0 {
+                s.push(',');
+            }
+            quote(k, &mut s);
+            s.push(':');
+            quote(v, &mut s);
+        }
+        s.push_str("}}");
         self.ops.push(s);
     }
 
