@@ -13,7 +13,7 @@ import { resolve } from 'node:path';
 
 const dir = mkdtempSync(resolve(tmpdir(), 'exact-js-baked-'));
 const webJs = name => resolve(new URL(`../../web-js/${name}`, import.meta.url).pathname);
-for (const f of ['rt.js', 'roster.js', 'router.js', 'schedule.js', 'budget.js', 'shape.js', 'notify.js']) copyFileSync(webJs(f), resolve(dir, f));
+for (const f of ['rt.js', 'roster.js', 'router.js', 'schedule.js', 'budget.js', 'shape.js', 'notify.js', 'kept.js']) copyFileSync(webJs(f), resolve(dir, f));
 copyFileSync(resolve(new URL('../notify-glue.js', import.meta.url).pathname), resolve(dir, 'notify-glue.js'));
 for (const [file, names] of Object.entries({ 'navigation.js': ['renderMarkup', 'reportPlace', 'onSelection', 'textField', 'settleRadios', 'animationClocks', 'launchLocation'], 'pointer.js': ['pointer', 'record'], 'commands.js': ['commands'],
   'media.js': ['media', 'mediaProp', 'mediaOn', 'mediaPiece', 'requestFullscreen'], 'document.js': ['Docs', 'Head', 'head', 'markDocument', 'projectRoots'],
