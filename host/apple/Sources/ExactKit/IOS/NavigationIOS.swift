@@ -857,13 +857,8 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
         changing = animated && transition?.viewController(forKey: .to) === viewController
         interactiveTransition = changing && transition?.initiallyInteractive == true
         interactiveSource = nil
-        // The route being left by a swipe, or by UIKit's own back button (a
-        // pop the app has not made yet: the source has already left the
-        // stack): didShow tells Contract, through the Back control, as it
-        // does for the swipe. A pop the app made itself shows the route the
-        // app already selected, and dispatchesBack declines it.
-        if let source = navigationController.transitionCoordinator?.viewController(forKey: .from) as? RouteController,
-           interactiveTransition || (changing && !navigationController.viewControllers.contains(source)) {
+        if interactiveTransition,
+           let source = navigationController.transitionCoordinator?.viewController(forKey: .from) as? RouteController {
             interactiveSource = (source.node, source.key)
             interactiveDepth = navigationController.viewControllers.count + 1
         }
@@ -940,30 +935,48 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
         // stack is as deep as it was when the swipe began.
         let sourceReplaced = source != nil && sourceKey == nil
             && selectedRouteCount == interactiveDepth
-        // UIKit's own back button (a shown bar, LLP 1075.003 §3.7) pops with
-        // no gesture: the route the root names has left the native stack,
-        // which Exact never does itself. It is a completed pop from that route.
-        let rootKey = container?.props["navigationKey"] ?? ""
-        // A modal route is the root of its own presented stack, which no bar
-        // pops: one not presented yet (a sheet over a sheet that waits for the
-        // one under it, both pushed at once) is not this stack's popped route.
-        let rootPresents = routeIDs.lazy.compactMap { self.presenter.views[$0] }
-            .first { $0.props["navigationKey"] == rootKey }
-            .map { ["modal", "fullscreen"].contains($0.props["navigationPresentation"] ?? "") } ?? false
-        let poppedByBar = source == nil && !rootPresents && !navigationController.viewControllers.contains { ($0 as? RouteController)?.key == rootKey }
-        let dispatches = (viewController as? RouteController).map {
-            NavigationRules.dispatchesBack(shownKey: $0.key, rootKey: rootKey,
-                                           sourceKey: poppedByBar ? rootKey : sourceKey, sourceReplaced: sourceReplaced,
-                                           modalActive: presenter.modals.inTransition)
-        } ?? false
+        // How UIKit got here is not the question (the back button, its
+        // long-press menu, the swipe, a gesture yet to come): what it now
+        // shows is. A native stack that is the app's with screens taken off
+        // the top was popped by UIKit, and the app is told once per screen,
+        // through its Back control. A stack the app set itself already
+        // matches and reports nothing.
+        let native = navigationController.viewControllers.compactMap { ($0 as? RouteController)?.key }
+        // A swipe whose screen the app replaced while the finger was down
+        // ends on a stack no longer the app's prefix: it was still a back.
+        let replacedBack = sourceReplaced && (viewController as? RouteController).map {
+            NavigationRules.dispatchesBack(shownKey: $0.key, rootKey: container?.props["navigationKey"] ?? "",
+                                           sourceKey: nil, sourceReplaced: true, modalActive: presenter.modals.inTransition)
+        } == true
+        let pops = presenter.modals.inTransition ? 0
+            : (replacedBack ? 1 : NavigationRules.poppedByPlatform(native: native, app: appStackKeys()))
         let cancelled = interactiveTransition && (viewController as? RouteController)?.node === source?.node
         // A cancelled swipe returns to the route it began on: so does the
         // editor it put away, if it is still this session's and on screen.
         restoresEditor = cancelled
-        lastTransition = dispatches ? "completed" : (cancelled ? "cancelled" : "idle")
+        lastTransition = pops > 0 ? "completed" : (cancelled ? "cancelled" : "idle")
         interactiveTransition = false
-        guard dispatches else { return }
-        goBack()
+        guard pops > 0 else { return }
+        for _ in 0..<pops { goBack() }
+    }
+
+    /// The app's stack for the shown navigation, by route key: the selected
+    /// tab's routes (or all, untabbed) through the route the root names.
+    private func appStackKeys() -> [String] {
+        guard let root = container else { return [] }
+        let rootKey = root.props["navigationKey"] ?? ""
+        for owner in NavigationTabs.of(root, presenter)?.panels ?? [root] {
+            let routes = (logicalChildren[owner.id] ?? []).compactMap { presenter.views[$0] }
+                .filter { $0.props["navigationKey"] != nil }
+            let keys = routes.map { $0.props["navigationKey"] ?? "" }
+            // A modal route is the root of its own presented stack, which no
+            // bar pops: the shown stack ends before the first.
+            if let range = NavigationRules.stack(routeKeys: keys, selected: rootKey) {
+                return routes[range].prefix { !["modal", "fullscreen"].contains($0.props["navigationPresentation"] ?? "") }
+                    .map { $0.props["navigationKey"] ?? "" }
+            }
+        }
+        return []
     }
 
     /// A stack Exact retired: its handle goes.

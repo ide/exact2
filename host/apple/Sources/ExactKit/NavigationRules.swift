@@ -46,6 +46,15 @@ enum NavigationRules {
     /// node gone — a finished screen giving way to its result). The person
     /// swiped that position away, so the gesture applies to its replacement:
     /// otherwise the replacement is pushed back in the moment the pop lands.
+    /// How many screens the platform took off the app's stack: the native
+    /// stack is the app's with that many fewer on top. 0 when they match, or
+    /// when the native stack is anything else (a push, a replacement, a
+    /// presentation under way — the app's own changes, which sync applies).
+    static func poppedByPlatform(native: [String], app: [String]) -> Int {
+        guard !native.isEmpty, native.count < app.count, Array(app.prefix(native.count)) == native else { return 0 }
+        return app.count - native.count
+    }
+
     static func dispatchesBack(shownKey: String, rootKey: String, sourceKey: String?, sourceReplaced: Bool = false, modalActive: Bool) -> Bool {
         !modalActive && shownKey != rootKey && (sourceKey == rootKey || sourceReplaced)
     }
