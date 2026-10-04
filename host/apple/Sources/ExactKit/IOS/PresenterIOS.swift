@@ -455,6 +455,8 @@ final class Presenter {
         if viewport.contentSize != size { viewport.contentSize = size }
     }
     var onPress: ((UInt32) -> Void)?
+    /// The navigation root's `traverse` with a navigation key (LLP 1035.001.000).
+    var onTraverse: ((UInt32, String) -> Void)?
     var onChange: ((UInt32, String) -> Void)?
     /// Host intrinsic sizes, several at once under one layout.
     var onIntrinsic: (([(UInt32, CGSize?)]) -> Void)?

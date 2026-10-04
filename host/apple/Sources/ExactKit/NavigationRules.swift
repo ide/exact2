@@ -35,28 +35,52 @@ enum NavigationRules {
         return zip(starts, starts.dropFirst() + [presentations.count]).map { $0..<$1 }
     }
 
-    /// D2: a completed transition presses the Back control exactly once —
-    /// only for an interactive pop whose source is still selected. A
-    /// programmatic transition has no interactive source; its completion
-    /// must not dismiss a newer route selected while UIKit was animating.
-    /// A cancelled swipe shows the same key. Sheets have their own path.
-    ///
-    /// One exception to "the source is still selected": the app replaced the
-    /// source in place while the finger was down (same depth, the source's
-    /// node gone — a finished screen giving way to its result). The person
-    /// swiped that position away, so the gesture applies to its replacement:
-    /// otherwise the replacement is pushed back in the moment the pop lands.
-    /// How many screens the platform took off the app's stack: the native
-    /// stack is the app's with that many fewer on top. 0 when they match, or
-    /// when the native stack is anything else (a push, a replacement, a
-    /// presentation under way — the app's own changes, which sync applies).
-    static func poppedByPlatform(native: [String], app: [String]) -> Int {
-        guard !native.isEmpty, native.count < app.count, Array(app.prefix(native.count)) == native else { return 0 }
-        return app.count - native.count
+    /// LLP 1035.001.000 D2: what native navigation shows, by route key —
+    /// the selected tab, its stack, and each presented layer's stack, lowest
+    /// first. Alerts, popovers, menus and the share sheet are not in it, nor
+    /// a sheet's detent: they are not navigation.
+    struct Snapshot: Equatable {
+        var tab: String?
+        var stack: [String]
+        var presented: [[String]]
+        /// The selected path through every layer, root first.
+        var chain: [String] { stack + presented.flatMap { $0 } }
     }
 
-    static func dispatchesBack(shownKey: String, rootKey: String, sourceKey: String?, sourceReplaced: Bool = false, modalActive: Bool) -> Bool {
-        !modalActive && shownKey != rootKey && (sourceKey == rootKey || sourceReplaced)
+    /// What the platform did, as a destination (D3).
+    enum Change: Equatable {
+        /// The person went back to the route keyed so: a pop of any depth, a
+        /// dismissed sheet with whatever it had pushed, nested sheets at once.
+        case backTo(String)
+        /// UIKit selected this tab (the More list).
+        case select(String)
+    }
+
+    /// D3: the host changed nothing since it applied `applied`, so whatever
+    /// differs in `observed` is the platform's. How it happened — the back
+    /// button, its menu, a swipe, a sheet pulled down, a gesture yet to come —
+    /// is not the question; nil when nothing changed (a cancelled swipe) or
+    /// UIKit holds something the host never set.
+    static func platformChange(applied: Snapshot, observed: Snapshot) -> Change? {
+        if let tab = observed.tab, tab != applied.tab { return .select(tab) }
+        let a = applied.chain, o = observed.chain
+        guard let last = o.last, o.count < a.count, Array(a.prefix(o.count)) == o else { return nil }
+        return .backTo(last)
+    }
+
+    /// D4: how many of the app's own Backs take its chain to `key`; nil when
+    /// `key` is its top or not in it (the app has gone elsewhere: its state wins).
+    static func backs(app: [String], to key: String) -> Int? {
+        guard let index = app.firstIndex(of: key), index < app.count - 1 else { return nil }
+        return app.count - 1 - index
+    }
+
+    /// D6: leaving a route is the app's to permit. A Back control in the
+    /// route decides — enabled, it permits; disabled, it refuses. With none,
+    /// an app whose root hears `traverse` is told by that event, so leaving is
+    /// permitted; any other app has no way to be told, so it is not.
+    static func backPermitted(hasControl: Bool, controlEnabled: Bool, traverses: Bool) -> Bool {
+        hasControl ? controlEnabled : traverses
     }
 
     /// D1: the Back control is resolved at use, never captured at a
@@ -80,10 +104,10 @@ enum NavigationRules {
     }
 
     /// D1: whether an interactive pop may begin at all — a stack to pop, no
-    /// transition in flight, no sheet, a resolvable Back control, and no
-    /// context preview anywhere in the session.
-    static func popMayBegin(depth: Int, changing: Bool, modalActive: Bool, hasBackControl: Bool, contextPreviewActive: Bool) -> Bool {
-        depth > 1 && !changing && !modalActive && hasBackControl && !contextPreviewActive
+    /// transition in flight, no sheet in transition, leaving permitted (D6),
+    /// and no context preview anywhere in the session.
+    static func popMayBegin(depth: Int, inFlight: Bool, modalActive: Bool, permitted: Bool, contextPreviewActive: Bool) -> Bool {
+        depth > 1 && !inFlight && !modalActive && permitted && !contextPreviewActive
     }
 
     /// D1's arbitration for a pan: past the 20-point edge a pan that starts
@@ -133,8 +157,8 @@ enum NavigationRules {
     /// D5: the viewport freeze that keeps a composer beside a sideways-moving
     /// keyboard applies only to an initially interactive navigation
     /// transition outside a sheet — never to a sheet's vertical dismissal.
-    static func freezesViewport(modalActive: Bool, changing: Bool, initiallyInteractive: Bool) -> Bool {
-        !modalActive && changing && initiallyInteractive
+    static func freezesViewport(modalActive: Bool, inFlight: Bool, initiallyInteractive: Bool) -> Bool {
+        !modalActive && inFlight && initiallyInteractive
     }
 
     /// D3 (as it stands): why a `focus(id)` command cannot be delivered now,

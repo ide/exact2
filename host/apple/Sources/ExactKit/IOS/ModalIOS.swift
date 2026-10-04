@@ -198,7 +198,7 @@ final class ModalHost: NSObject, UIAdaptivePresentationControllerDelegate {
     }
     func dismissByBackdrop(_ id: UInt32) {
         guard canDismissByBackdrop(id), let route = layers.last?.route else { return }
-        presenter.navigation.invokeBack(from: route)
+        presenter.navigation.requestBack(from: route)
     }
 
     func prepare(_ batch: Batch) {
@@ -450,9 +450,12 @@ final class ModalHost: NSObject, UIAdaptivePresentationControllerDelegate {
         else { layer.controller.dismiss(animated: layer.animated, completion: completion) }
     }
 
+    /// LLP 1035.001.000 D6/D8: a sheet may be pulled down when its route
+    /// allows it (`closedby`) and the app permits leaving its active route —
+    /// the sheet's own, or a screen the sheet has pushed, which goes with it.
     private func refusesDismissal(of route: NodeView) -> Bool {
-        presenter.views[route.id] !== route || presenter.navigation.isInactiveRoute(containing: route) ||
-            NavigationRules.modalRefusesDismissal(closedby: route.props["closedby"]) || !presenter.navigation.canInvokeBack
+        presenter.views[route.id] !== route ||
+            NavigationRules.modalRefusesDismissal(closedby: route.props["closedby"]) || !presenter.navigation.backPermittedNow
     }
 
     func presentationControllerShouldDismiss(_ presentationController: UIPresentationController) -> Bool {
@@ -462,8 +465,8 @@ final class ModalHost: NSObject, UIAdaptivePresentationControllerDelegate {
 
     func presentationControllerDidAttemptToDismiss(_ presentationController: UIPresentationController) {
         guard layers.last?.controller === presentationController.presentedViewController,
-              !presenter.navigation.canInvokeBack else { return }
-        presenter.session?.log("modal dismissal refused: no enabled navigationBack control in the active route")
+              !presenter.navigation.backPermittedNow else { return }
+        presenter.session?.log("modal dismissal refused: the active route does not permit leaving (no enabled navigationBack control)")
     }
 
     func presentationControllerDidDismiss(_ presentationController: UIPresentationController) {
@@ -473,11 +476,13 @@ final class ModalHost: NSObject, UIAdaptivePresentationControllerDelegate {
         layer.presenting = false
         layer.alreadyDismissed = true
         // UIKit still uses this hierarchy on its callback stack. Remove its
-        // owner before dispatch, so an action may safely keep the same route.
+        // owner first, so an action may safely keep the same route. What the
+        // app is told is navigation's: with the layer gone, what UIKit shows
+        // is the route beneath it (LLP 1035.001.000 D3), however deep the
+        // sheet's own stack was and whatever dismissed it.
         DispatchQueue.main.async { [weak self, layer] in
             guard let self, layers.last === layer else { return }
             closeTop(animated: false, refit: false)
-            presenter.navigation.invokeBack(from: layer.route)
             presenter.navigation.modalDidDismiss()
             fit()
         }

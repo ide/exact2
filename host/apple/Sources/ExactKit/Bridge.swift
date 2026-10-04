@@ -451,6 +451,14 @@ final class Runtime {
             return read(exact_dispatch(rt, view, 14, n, now))
         }
     }
+    /// The navigation root's `traverse`: the key of the route the platform
+    /// went back to (LLP 1035.001.000; ABI kind 35).
+    func traverse(_ view: UInt32, _ key: String, now: Double) -> Batch {
+        return on {
+            let n = write(key)
+            return read(exact_dispatch(rt, view, 35, n, now))
+        }
+    }
     func advance(now: Double, untilRequest: Bool = false) -> Batch { on { read(exact_advance(rt, now, untilRequest ? 1 : 0)) } }
     /// The `then`s an agent's input settled, the clock unmoved (LLP 1012 §2).
     func landThen() -> Batch { on { read(exact_advance(rt, 0, 2)) } }

@@ -687,6 +687,9 @@ public final class ExactSession {
             apply(batch)
         }
         presenter.onPress = { [unowned self] id in apply(runtime.press(id, held: presenter.pressHeld, now: now())) }
+        #if os(iOS) || os(tvOS)
+        presenter.onTraverse = { [unowned self] id, key in apply(runtime.traverse(id, key, now: now())) }
+        #endif
         presenter.onChange = { [unowned self] id, value in apply(runtime.change(id, documentValue(id, value), now: now())) }
         presenter.onInput = { [unowned self] id, value in apply(runtime.input(id, value, now: now())) }
         // @ref LLP 1069.001 D4 — a toggle is HTML's `input` then `change`,
