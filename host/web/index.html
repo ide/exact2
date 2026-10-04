@@ -79,6 +79,10 @@
   /* Authored flex/grid display must not expose a closed native popover. */
   [popover]:not(:popover-open) { display: none !important; }
   dialog:not([open]) { display: none !important; }
+  /* A modal dialog is over the screen, as a native alert is: fixed to the viewport (its
+     out-of-flow `absolute` would place it in the top layer against the document, which
+     a page that scrolls the document moves away from the screen's middle). */
+  #exact-root#exact-root dialog:modal { position: fixed; }
   /* Gesture feedback is decorative, including when its opacity is zero. */
   [swipeIndicator="true"] { pointer-events: none; }
   /* Modal dimming belongs to the host; UIKit supplies its own backdrop. It dims the route the

@@ -349,7 +349,50 @@ fn css_text_in(
             }),
         }
     }
+    hairline(&mut out, style);
     (out, skipped)
+}
+
+/// A filled box thinner than a point (`box height=0.5 background-color=…`,
+/// a separator) is drawn as one device pixel wherever it lands, as UIKit
+/// draws a hairline: its background snapped to device pixels at its offset
+/// would be one pixel here and two there on a 3x screen. WebKit snaps a
+/// border's width once, to whole device pixels and at least one, so the box
+/// is its border in the colour, its own background clipped away. Where the
+/// browser draws a thin border a whole point (Chromium), chrome.js sets
+/// `--exact-hairline` to none and `--exact-hairline-fill` to one device
+/// pixel, which its layout, in device pixels, keeps whole.
+fn hairline(out: &mut String, style: &StyleProps) {
+    if !style.mask.has(StyleId::BackgroundColor) || style.mask.has(StyleId::BackgroundImage) {
+        return;
+    }
+    let thin = |id| match style.mask.has(id).then(|| style.get(id)) {
+        Some(RowValue::Dimension(Dimension::Points(p))) if p > 0.0 && p < 1.0 => Some(p),
+        _ => None,
+    };
+    let (row, side, width) = match (thin(StyleId::Height), thin(StyleId::Width)) {
+        (Some(p), None) => ("height", "top", p),
+        (None, Some(p)) => ("width", "left", p),
+        _ => return,
+    };
+    let authored = |id: StyleId| id.name().strip_prefix("border_width_") == Some(side);
+    if style.mask.iter().any(authored) {
+        return;
+    }
+    push_text!(
+        out,
+        "{}:var(--exact-hairline-fill,0);border-{}:var(--exact-hairline,",
+        row,
+        side
+    );
+    num_into(out, width);
+    out.push_str("px) solid ");
+    declared(
+        out,
+        StyleId::BackgroundColor,
+        &style.get(StyleId::BackgroundColor),
+    );
+    out.push_str(";background-clip:padding-box;");
 }
 
 /// Whether a node's press feedback composes through `--exact-scale`
@@ -1055,6 +1098,34 @@ mod declaration_tests {
                 css(&[(StyleId::Cursor, StyleValue::Text(value.into()))], &[]),
                 format!("cursor:{value};")
             );
+        }
+    }
+
+    /// A filled box under a point thick is its border, one device pixel
+    /// wherever it lands; an authored border on that side keeps the box.
+    #[test]
+    fn a_hairline_box_is_its_border() {
+        let n = StyleValue::Number;
+        let t = |s: &str| StyleValue::Text(s.into());
+        assert_eq!(
+            css(&[(StyleId::Height, n(0.5)), (StyleId::BackgroundColor, t("#102030"))], &[]),
+            "height:0.5px;background-color:rgba(16,32,48,1);height:var(--exact-hairline-fill,0);border-top:var(--exact-hairline,0.5px) solid rgba(16,32,48,1);background-clip:padding-box;"
+        );
+        assert!(css(&[(StyleId::Width, n(0.33)), (StyleId::BackgroundColor, t("#102030"))], &[])
+            .ends_with("width:var(--exact-hairline-fill,0);border-left:var(--exact-hairline,0.33px) solid rgba(16,32,48,1);background-clip:padding-box;"));
+        for rows in [
+            vec![
+                (StyleId::Height, n(1.0)),
+                (StyleId::BackgroundColor, t("#102030")),
+            ],
+            vec![(StyleId::Height, n(0.5))],
+            vec![
+                (StyleId::Height, n(0.5)),
+                (StyleId::BackgroundColor, t("#102030")),
+                (StyleId::BorderWidthTop, n(1.0)),
+            ],
+        ] {
+            assert!(!css(&rows, &[]).contains("border-top:"), "{rows:?}");
         }
     }
 
