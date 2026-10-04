@@ -367,7 +367,9 @@ extension NavigationHost {
             let back = container?.props["navigationBack"]
             // A route with no header, or a hidden one, has no bar (§9.10).
             let shape = shows ? HeaderShape(route: c.node, back: back, backIsUIKits: index > 0).flatMap(HeaderShape.shown) : nil
-            let canGoBack = index > 0 && canInvokeBack
+            // LLP 1035.001.000 D6: the back button and its menu show only
+            // where leaving is the app's to permit.
+            let canGoBack = index > 0 && backPermitted(in: c.node)
             let scroll = contentScroll(of: c)
             let dataset = c.node.props["dataset"]
             let source = "\(shape.map { "\($0.header.id)|\($0.title)|\($0.level)|\($0.leading.map(\.source))|\($0.trailing.map(\.source))|\($0.group?.source ?? "")" } ?? "-")|\(canGoBack)"
@@ -738,7 +740,7 @@ extension NavigationHost {
     /// detection, not enforcement; a change made and undone between two
     /// batches is not seen.
     func checkOwned() {
-        guard NavigationHost.checksOwnership, !changing, !syncing, presenter.session?.natives.hooksConnected == true else { return }
+        guard NavigationHost.checksOwnership, !inFlight, !syncing, presenter.session?.natives.hooksConnected == true else { return }
         func say(_ what: String, _ property: String) {
             let line = "\(what): \(property) changed outside Exact, which owns it"
             if ownedReported.insert(line).inserted { presenter.session?.log(line) }

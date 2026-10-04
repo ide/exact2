@@ -27,7 +27,13 @@ extension ExactSession {
         if let url = (request["url"] as? String).flatMap(URL.init(string:)) { items.append(url) }
         let (view, rect) = presenter.shareAnchor(source)
         guard let view, ShareSheet.present(items, title: request["title"] as? String, from: view, at: rect,
-                                           outcome: { [weak self] line in self?.log(line) }) != nil
+                                           outcome: { [weak self] line in
+                                               self?.log(line)
+                                               #if os(iOS)
+                                               // A sheet the share sheet held back may start (LLP 1035.001.000 D5).
+                                               self?.presenter.navigation.settle()
+                                               #endif
+                                           }) != nil
         else { log("share: refused: no window to present from"); return }
     }
 }
