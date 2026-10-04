@@ -1,0 +1,20 @@
+[package]
+name = "nav-fixture-apple"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "The native navigation fixture (LLP 1035.001.000) on iOS"
+publish = false
+build = "build.rs"
+
+[lib]
+name = "nav_fixture_apple"
+crate-type = ["rlib"]
+
+[dependencies]
+exact-logic = { path = "../../../logic" }
+exact-apple = { path = "../../../host/apple" }
+
+[build-dependencies]
+contract = { path = "../../../contract/cli" }
+exact-bake = { path = "../../../bake" }

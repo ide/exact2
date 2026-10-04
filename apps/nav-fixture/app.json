@@ -1,0 +1,32 @@
+{
+  "$schema": "../../scripts/app.schema.json",
+  "name": "Nav Fixture",
+  "short_name": "Nav Fixture",
+  "id": "com.exact.navfixture",
+  "start_url": "/",
+  "display": "standalone",
+  "theme_color": "#ffffff",
+  "background_color": "#ffffff",
+  "app": {
+    "id": "com.exact.navfixture",
+    "name": "Nav Fixture"
+  },
+  "rust": {
+    "mode": "off"
+  },
+  "host": {
+    "ios": {
+      "minimumOS": "17.0",
+      "deviceFamily": [
+        "iphone"
+      ]
+    },
+    "web": {}
+  },
+  "deploy": {
+    "store": {
+      "ios": "0",
+      "web": "0"
+    }
+  }
+}

@@ -162,6 +162,11 @@ extension NavigationHost {
     /// A tab by its panel: its HTML id, else its node.
     func tabName(_ panel: NodeView) -> String { panel.props["id"] ?? "#\(panel.id)" }
 
+    /// The tab stack whose screens the More list shows, while it does.
+    var moreHeldNavigation: UINavigationController? {
+        tabController.flatMap(moreTab(of:)).flatMap(navigation(ofTab:))
+    }
+
     private func navigation(ofTab tab: String) -> UINavigationController? {
         tabPanels.first { presenter.views[$0].map(tabName) == tab }.flatMap { tabNavigations[$0] }
     }

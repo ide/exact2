@@ -1,0 +1,94 @@
+// The native navigation fixture (LLP 1035.001.000): every way UIKit's chrome
+// can change what it shows — the back button and its menu three deep, the
+// swipe, a sheet pulled down with a screen it pushed, a sheet over a sheet,
+// an alert over a sheet, a sheet held back by an alert, and seven tabs, so
+// the More list — for `sim.mjs`, which drives them with real touches. Each
+// route is header-shaped (LLP 1075.003 §9): its heading is the bar's title,
+// its Back button UIKit's back button, and a `Next` button after the heading
+// the bar's trailing item, the way on. The tabs are a tablist naming one
+// tabpanel each, so each tab keeps its own stack.
+routes nav
+  tab home "/"
+    deep "/deep"
+      deeper "/deep/er"
+        deepest "/deep/er/est"
+    sheet "/sheet"
+      inner "/sheet/inner"
+  tab two "/two"
+  tab three "/three"
+  tab four "/four"
+  tab five "/five"
+  tab six "/six"
+    six2 "/six/2"
+  tab seven "/seven"
+
+component NavFixture
+  state alert = false
+  state traverses = 0
+  state backs = 0
+  action selectTab(name: string)
+    nav = select(nav, name)
+  action back
+    backs = backs + 1
+    nav = back(nav)
+  // The platform's Back of any depth: one event, its destination.
+  action returnTo(entry: string)
+    traverses = traverses + 1
+    nav = backTo(nav, entry)
+  action open(url: string)
+    nav = push(nav, url)
+  action openAlert
+    alert = true
+  // The alert's answer asks for a sheet while the alert is still leaving.
+  action sheetAfterAlert
+    alert = false
+    nav = push(nav, "/sheet")
+
+  view
+    main testId="fixture" navigationKey=`${top(nav).id}` navigationBack="back" traverse=returnTo width="100%" height="100%" display="flex" flex-direction="column" background-color="#ffffff"
+      column flex=1 min-height=0 position="relative"
+        each t in nav.tabs key=t.name
+          column role="tabpanel" id=`panel-${t.name}` position="absolute" top=0 right=0 bottom=0 left=0
+            each e in t.stack key=e.id
+              column navigationKey=`${e.id}` navigationPresentation=(e.name == "sheet" ? "modal" : "") position="absolute" top=0 right=0 bottom=0 left=0 background-color="#ffffff" display="flex" flex-direction="column"
+                header display="flex" flex-direction="row" align-items="center" gap=8 padding=12 flex-shrink=0
+                  // Before the heading: UIKit's back button stands in for it
+                  // on a pushed screen; the root of a sheet shows it as an item.
+                  when e.name != "home" and e.name != "two" and e.name != "three" and e.name != "four" and e.name != "five" and e.name != "six" and e.name != "seven"
+                    // A symbol alone: UIKit's minimal back button, whose menu
+                    // lists the screens beneath by their titles.
+                    button id="back" press=back aria-label="Back" testId=`back-${e.name}` padding=6
+                      image "symbol:sf/chevron.backward" width=20 height=20
+                  text e.name aria-level=2 flex=1 font-weight=700 font-size=20
+                  when e.name == "home"
+                    button id="next" press=open("/deep") aria-label="Next" testId="next-home" padding=6
+                      image "symbol:sf/chevron.forward" width=20 height=20
+                  when e.name == "deep"
+                    button id="next" press=open("/deep/er") aria-label="Next" testId="next-deep" padding=6
+                      image "symbol:sf/chevron.forward" width=20 height=20
+                  when e.name == "deeper"
+                    button id="next" press=open("/deep/er/est") aria-label="Next" testId="next-deeper" padding=6
+                      image "symbol:sf/chevron.forward" width=20 height=20
+                  when e.name == "two" or e.name == "three" or e.name == "five" or e.name == "seven"
+                    button id="next" press=open("/sheet") aria-label="Next" testId=`next-${e.name}` padding=6
+                      image "symbol:sf/chevron.forward" width=20 height=20
+                  when e.name == "sheet"
+                    button id="next" press=open("/sheet/inner") aria-label="Next" testId="next-sheet" padding=6
+                      image "symbol:sf/chevron.forward" width=20 height=20
+                  when e.name == "inner"
+                    button id="next" press=openAlert aria-label="Next" testId="next-inner" padding=6
+                      image "symbol:sf/chevron.forward" width=20 height=20
+                  when e.name == "six"
+                    button id="next" press=open("/six/2") aria-label="Next" testId="next-six" padding=6
+                      image "symbol:sf/chevron.forward" width=20 height=20
+                text `${e.name} traverses=${traverses} backs=${backs}` testId=`counts-${e.name}` padding=24
+                when e.name == "inner"
+                  dialog id="inner-alert" closedby="any" open=alert
+                    text "Alert over a sheet"
+                    button press=sheetAfterAlert commandfor="inner-alert" command="close" testId="alert-ok"
+                      text "OK"
+      row role="tablist" aria-label="Tabs" display="flex" flex-shrink=0 height=56 align-items="stretch"
+        each t in nav.tabs key=t.name
+          button role="tab" aria-controls=`panel-${t.name}` aria-selected=(nav.tab == t.name) press=selectTab(t.name) testId=`tab-${t.name}` flex=1 display="flex" flex-direction="column" align-items="center" justify-content="center" gap=2
+            image "symbol:sf/circle" width=22 height=22
+            text t.name font-size=11
