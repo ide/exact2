@@ -10,6 +10,7 @@
 import AppKit
 import ExactKit
 import ExactComposition
+import ExactLaunchParts
 
 // The process's own start (exec), from the kernel: what happened before
 // `main` — dyld, the Swift runtime, the static library's initializers.
@@ -413,6 +414,7 @@ Agent.hostState = {
 final class Delegate: NSObject, NSApplicationDelegate {
     override init() {
         ExactLaunch.shared.delegateInit()
+        ExactLaunch.shared.runLaunchParts(ExactLaunchParts.all)
         super.init()
     }
     /// A one-window app quits with its window; one whose documents each
