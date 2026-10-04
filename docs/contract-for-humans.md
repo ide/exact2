@@ -1041,8 +1041,9 @@ and browser history.
 it went: UIKit's back button or its long-press menu, the edge swipe, a sheet pulled
 down with whatever it had pushed, the browser's Back over several entries. It is one
 event carrying the `navigationKey` of the route the person is now on; `nav =
-backTo(nav, key)` makes it the top. Without `traverse=`, each screen left presses
-that screen's `navigationBack` control instead, once per screen. Either way a
+backTo(nav, key)` makes it the top. One way back is one destination, never a
+count of screens. Without `traverse=`, the host presses the `navigationBack`
+control of whatever screen is on top until the destination is. Either way a
 disabled Back control in a route keeps the platform from leaving it.
 
 `path("item", value)` checks the route and encodes its parameters. Always build
