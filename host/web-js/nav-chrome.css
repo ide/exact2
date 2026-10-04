@@ -28,14 +28,14 @@
 /* A route the chrome draws for: its own stacking context (its bar over its
    content, never over another route's), the scope its scroller's timeline
    is seen in, and its insets, which pad its first scroller. */
-[data-exact-chromed] { isolation: isolate; timeline-scope: --exact-nav; --exact-nav-top: 0px; --exact-nav-bottom: 0px; --exact-nav-large: 0px; }
+[data-exact-chromed] { isolation: isolate; timeline-scope: --exact-nav; --exact-nav-top: 0px; --exact-nav-bottom: 0px; --exact-nav-large: 0px; --exact-page-under: 0px; }
 [data-exact-chromed][data-exact-bar] { --exact-nav-top: calc(var(--exact-nav-safe-top) + var(--exact-nav-bar-height) + var(--exact-nav-large)); }
 [data-exact-chromed][data-exact-tabbed] { --exact-nav-bottom: calc(var(--exact-tabbar-bottom) + var(--exact-tabbar-height) + 8px); }
 [data-exact-inset] { scroll-timeline: --exact-nav block; scroll-padding-top: var(--exact-nav-top); scroll-padding-bottom: var(--exact-nav-bottom); }
 [data-exact-inset]:not([data-exact-inset="route"])::before,
 [data-exact-inset]:not([data-exact-inset="route"])::after { content: ""; display: block; flex: none; height: var(--exact-nav-top); }
-[data-exact-inset]:not([data-exact-inset="route"])::after { height: var(--exact-nav-bottom); }
-[data-exact-inset="route"] { box-sizing: border-box !important; padding-top: var(--exact-nav-top) !important; padding-bottom: var(--exact-nav-bottom) !important; }
+[data-exact-inset]:not([data-exact-inset="route"])::after { height: calc(var(--exact-nav-bottom) + var(--exact-page-under)); }
+[data-exact-inset="route"] { box-sizing: border-box !important; padding-top: var(--exact-nav-top) !important; padding-bottom: calc(var(--exact-nav-bottom) + var(--exact-page-under)) !important; }
 
 /* The bar: its material from the top edge (under the status bar) to its
    bottom, over the route's content; the title centred between its buttons. */
@@ -130,14 +130,19 @@ html[data-exact-docnav] {
   /* Every other route shown beside the page's (a slide's two, a pop's ghost) is a box in the
      document where the viewport is (nav-chrome.js `place`), never a fixed one: Safari paints
      the band under its toolbar in the colour of a fixed box that reaches the layout viewport's
-     bottom edge, and keeps that colour while the element is still in the page. Only a sheet,
-     which runs under the toolbar as UIKit's runs under the home indicator, is fixed. */
-  & [data-exact-page] > :is([data-exact-chromed], [data-exact-ghost]):not([data-exact-sheet], [data-exact-doc]) { position: absolute !important; inset: var(--exact-page-y, 0px) 0 auto !important; height: var(--exact-page-h, 100vh) !important; }
+     bottom edge, and keeps that colour while the element is still in the page. The box runs on
+     below the viewport as deep as the browser's toolbar may be (`--exact-page-below`), its
+     scroller padded as much, so its content goes on showing under the toolbar as the page's
+     does. Only a sheet, which runs under the toolbar as UIKit's runs under the home indicator,
+     is fixed. */
+  & [data-exact-page] > :is([data-exact-chromed], [data-exact-ghost]):not([data-exact-sheet], [data-exact-doc]) { position: absolute !important; inset: var(--exact-page-y, 0px) 0 auto !important; --exact-page-under: var(--exact-page-below, 0px); height: calc(var(--exact-page-h, 100vh) + var(--exact-page-under)) !important; }
   & [data-exact-page] > [data-exact-sheet] { position: fixed !important; }
   /* Safari colours its status bar from the topmost fixed box at the top edge that it can read,
      which the bar's material, under the bar's row, is not: a strip in the canvas over the routes
      (under the tab bar, a sheet and the dimming), shown while the page's route has a bar, whose
-     top it covers. nav-chrome.js makes it anew as the scheme changes. */
+     top it covers (through a slide, none: the status bar is the canvas the page's background
+     leaves, with no strip over the routes as they slide). nav-chrome.js makes it anew as the
+     scheme changes. */
   & [data-exact-page] > [data-exact-edge] { display: none; position: fixed; top: 0; left: 0; right: 0; height: 10px; z-index: 1; pointer-events: none; background: var(--exact-canvas, Canvas); }
   & [data-exact-page]:has(> [data-exact-doc][data-exact-bar]) > [data-exact-edge] { display: block; }
   & [data-exact-page] > [data-exact-off] { display: none !important; }
