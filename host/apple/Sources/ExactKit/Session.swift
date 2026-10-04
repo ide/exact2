@@ -1151,6 +1151,10 @@ public final class ExactSession {
                     continue
                 }
                 if name == "relaunch" { app.deliver { [weak self] in self?.relaunch() }; continue }
+                if name.hasPrefix("observe") {
+                    ExactEvents.hostCommand(name, args) // Exact Observe design §5.2
+                    continue
+                }
                 if name == "haptic" {
                     // @ref LLP 1077 D14 — feedback from app logic.
                     app.deliver { Haptics.play(args.first as? String ?? "") }

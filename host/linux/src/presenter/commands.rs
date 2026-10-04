@@ -66,6 +66,8 @@ impl<D: DataSource> Presenter<D> {
                 // Outside a bubbling event (a key's, focus's, the pointer's
                 // or a wheel's, which take theirs), nothing to prevent or stop.
                 "preventDefault" | "stopPropagation" => {}
+                // Exact Observe design §5.2: the Linux journal is not built yet.
+                "observe" | "observeAttributes" | "observeError" => {}
                 // The shell's share sheet; with no shell, refused into the
                 // journal. Held for the agent like every host (LLP 1069.003 D6).
                 "share" => self.share(&c.args, c.source),

@@ -96,6 +96,7 @@ mod negative_margin;
 mod notify;
 mod overlay;
 mod package_designs;
+mod observe_commands;
 mod packages;
 mod pan;
 mod pan_release;

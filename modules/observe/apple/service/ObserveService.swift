@@ -19,6 +19,18 @@ final class ObserveService {
     var globals: [String: Any] = [:]
     var gate: (after: Date?, failures: Int) = (nil, 0)
     var sending = false
+    var scheduled = false
+
+    /// New rows go out within `delay` (one timer at a time), besides the
+    /// background and terminal-outcome sends.
+    func scheduleDispatch(_ delay: Double = 5) {
+        guard !scheduled else { return }
+        scheduled = true
+        queue.asyncAfter(deadline: .now() + delay) { [weak self] in
+            self?.scheduled = false
+            self?.dispatch()
+        }
+    }
 
     init(config: [String: Any], handoff: Data) {
         self.config = config
@@ -38,7 +50,7 @@ final class ObserveService {
             store?.saveSession(session, start: config["sessionStart"] as? Double ?? Date().timeIntervalSince1970, metadata: metadata)
             ingestCrashes()
         }
-        queue.asyncAfter(deadline: .now() + 5) { [weak self] in self?.dispatch() }
+        queue.async { [weak self] in self?.scheduleDispatch() }
     }
 
     // MARK: Journal events
@@ -53,8 +65,9 @@ final class ObserveService {
             case "app.event": log(e, wall: wall, error: false)
             case "app.error": log(e, wall: wall, error: true)
             case "background": dispatch()
-            default: break
+            default: return
             }
+            if kind != "background" { scheduleDispatch() }
         }
     }
 

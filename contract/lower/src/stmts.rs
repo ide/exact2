@@ -112,6 +112,38 @@ impl Lowerer<'_> {
             // `let`s first, as a block of their own, whose locals drop before
             // the next statement. No call opcode: the plan never sees one.
             Stmt::Call { body, .. } => self.block(asm, body, scope, locals)?,
+            // Exact Observe design §5.2: a record's fields go to the host by
+            // name — `observe(name, Shape(a=x), sev)` is the command `observe`
+            // with `name, sev, "a", x`; `observeAttributes(Shape(a=x))` is
+            // `"a", x`. Hosts receive records positionally, so the names are
+            // made explicit here.
+            Stmt::Command { name, args, .. }
+                if name == "observe" || name == "observeAttributes" =>
+            {
+                let (head, record) = if name == "observe" {
+                    let severity = args
+                        .get(2)
+                        .cloned()
+                        .unwrap_or_else(|| Expr::Str("info".into(), args[0].span()));
+                    (vec![args[0].clone(), severity], args.get(1))
+                } else {
+                    (Vec::new(), args.first())
+                };
+                let mut flat = head;
+                if let Some(Expr::Call(_, fields, _)) = record {
+                    for field in fields {
+                        if let Expr::NamedArg(key, value, span) = field {
+                            flat.push(Expr::Str(key.clone(), *span));
+                            flat.push(value.as_ref().clone());
+                        }
+                    }
+                }
+                for arg in &flat {
+                    expr::compile_or_none(self, asm, Some(arg), scope, locals)?;
+                }
+                let name = self.b.str(name);
+                asm.command(name, flat.len() as u16);
+            }
             Stmt::Command { name, args, span } => {
                 // Said beside the rest, not in their place: a design's own
                 // refusal (an axis declared twice) comes first.
