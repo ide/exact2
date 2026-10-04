@@ -800,8 +800,9 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
 
     /// D4: tell the app what the platform did, once, through what the app
     /// declared — its root's `traverse` with the destination's key, or else
-    /// its Back control once per screen, each resolved anew — with
-    /// projection suspended until it has answered.
+    /// its Back control, resolved anew, until the destination is the top —
+    /// with projection suspended until it has answered. A destination, never
+    /// a count (I1).
     private func deliver() {
         guard let change = owed else { return }
         owed = nil
@@ -813,7 +814,7 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
             guard let control = tabRoutes.first(where: { $0.props["navigationTab"] == tab })?.props["navigationTabControl"] else { return }
             pressControl(named: control, in: nil)
         case .backTo(let key):
-            guard let chain = appSnapshot()?.chain, let count = NavigationRules.backs(app: chain, to: key) else {
+            guard let chain = appSnapshot()?.chain, NavigationRules.isBeneath(key, in: chain) else {
                 // The app has gone elsewhere since: its state wins.
                 return
             }
@@ -823,15 +824,18 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
                 if appSnapshot()?.chain.last != key { presenter.session?.log("navigation: traverse to \"\(key)\" left the app elsewhere") }
                 return
             }
-            for _ in 0..<count {
-                let before = appSnapshot()?.chain ?? []
-                guard before.last != key, before.contains(key) else { return }
+            // The fallback for an app that does not hear `traverse`: its own
+            // Back control, resolved anew in whatever route is now active,
+            // pressed until the app's top is the destination — never a count
+            // of screens taken from the transition (invariant I1). Each press
+            // must shorten the chain; one that does not is a refusal.
+            while let before = appSnapshot()?.chain, NavigationRules.isBeneath(key, in: before) {
                 guard let control = backControl else {
                     presenter.session?.log("navigation: back to \"\(key)\" refused: no enabled navigationBack control in the active route")
                     return
                 }
                 presenter.press(control.id)
-                if appSnapshot()?.chain == before {
+                if (appSnapshot()?.chain.count ?? 0) >= before.count {
                     presenter.session?.log("navigation: back to \"\(key)\" refused by the app")
                     return
                 }

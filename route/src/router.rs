@@ -203,7 +203,8 @@ pub fn back(_table: &Table, mut r: Router) -> (Router, Option<Refusal>) {
 
 /// Pop the selected stack to the entry whose id, as a navigation key writes
 /// it (`${e.id}`), is `key`: the destination a platform's own Back reached,
-/// however many screens it took off (LLP 1035.001.000). The top's own key is
+/// however many screens it took off, in one step: a way back is a
+/// destination, never a count (LLP 1035.001.000 I1). The top's own key is
 /// unchanged; a key not in the selected stack leaves the value unchanged and
 /// reports one refusal.
 pub fn back_to(_table: &Table, mut r: Router, key: &str) -> (Router, Option<Refusal>) {
