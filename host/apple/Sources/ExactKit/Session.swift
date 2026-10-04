@@ -414,6 +414,18 @@ public final class ExactSession {
     // main instead, and runs after the slice lands, in order.
     private(set) var fillInFlight = false
     private var afterFill: [() -> Void] = []
+    /// The host's half of the settle ledger (Exact Observe design §3.5): work
+    /// the owner or the presenter still owes this session's screen.
+    var hostOutstanding: [String] {
+        var out: [String] = []
+        if fillInFlight || !afterFill.isEmpty { out.append("fill") }
+        if tickInFlight || hasPublished { out.append("published") }
+        if canvasInFlight || canvasOwed || presenter.canvas2d.loadingCount > 0 { out.append("canvas") }
+        #if os(iOS)
+        if SvgFilterLive.inFlight > 0 { out.append("svgPicture") }
+        #endif
+        return out
+    }
     private let published = NSLock()
     /// What the owner committed without main waiting.
     private enum Published { case fill(UInt32), tick, canvas }
@@ -997,6 +1009,7 @@ public final class ExactSession {
             transformInputHold?.cancelIfInputIneligible()
             presenter.transformGeometry.changed()
             applying = false
+            ExactLaunch.shared.applied(self, changed: !batch.ops.isEmpty)
             #if os(macOS)
             regions.flush()
             #endif
