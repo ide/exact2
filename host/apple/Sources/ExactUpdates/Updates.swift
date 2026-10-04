@@ -123,9 +123,22 @@ public final class ExactUpdates: ExactAppLifecycle {
         }
         Updates.completed = { [weak self] line in
             self?.status = line
+            Self.journalDownload(line)
             FileHandle.standardError.write(Data("exact update: \(line)\n".utf8))
             self?.app?.refreshDelivery()
         }
+    }
+
+    /// A staged update's download (Exact Observe design §3.8): `staged seq N;
+    /// downloaded F files in T ms; entry E` becomes a journal event.
+    static func journalDownload(_ line: String) {
+        let parts = line.components(separatedBy: "; ")
+        guard parts.first?.hasPrefix("staged seq ") == true,
+              let d = parts.first(where: { $0.hasPrefix("downloaded ") })?.components(separatedBy: " "), d.count >= 5,
+              let files = Int(d[1]), let ms = Double(d[4]) else { return }
+        let entry = parts.first(where: { $0.hasPrefix("entry ") }).map { String($0.dropFirst(6)) } ?? ""
+        ExactEvents.journal("update.download", ["seconds": ms / 1000, "files": files, "entry": entry,
+                                                "seq": Int(parts[0].dropFirst(11)) ?? 0])
     }
 
     private func generation(_ selection: Updates.Selection, app: ExactApp) throws -> ExactGeneration {

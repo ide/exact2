@@ -284,6 +284,11 @@ public enum ExactEvents {
         ExactJournal.shared.record("app.attributes", ["attributes": attributes])
     }
 
+    /// A framework event for modules (an update's download, …).
+    public static func journal(_ kind: String, _ fields: [String: Any]) {
+        ExactJournal.shared.record(kind, fields)
+    }
+
     /// A caught error (Observe's `reportError`).
     public static func reportError(type: String, message: String, stack: String? = nil) {
         var f: [String: Any] = ["type": type, "message": message]
