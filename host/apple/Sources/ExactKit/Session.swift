@@ -692,6 +692,9 @@ public final class ExactSession {
             apply(batch)
         }
         presenter.onPress = { [unowned self] id in apply(runtime.press(id, held: presenter.pressHeld, now: now())) }
+        #if os(iOS) || os(tvOS)
+        presenter.onTraverse = { [unowned self] id, key in apply(runtime.traverse(id, key, now: now())) }
+        #endif
         // A text field's `input` and `change` carry the selection the edit
         // left, its `select` the one the person or a script made (x2apps
         // codeedit #2, `FieldSelections`).

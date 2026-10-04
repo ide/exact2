@@ -20,9 +20,29 @@ final class TabDelegateProxy: NSObject, UITabBarControllerDelegate {
 
     func tabBarController(_ tabs: UITabBarController, shouldSelect controller: UIViewController) -> Bool {
         if app?.tabBarController?(tabs, shouldSelect: controller) == false { return false }
+        // More is UIKit's chrome over the tabs past the bar, not a tab: it
+        // opens, and a tab chosen in it is observed (LLP 1035.001.000 D8).
+        #if os(iOS)
+        if controller === tabs.moreNavigationController { return true }
+        #endif
         host?.selectTab(controller)
         return false
     }
+
+    /// UIKit selected something itself (the More list): a settle point.
+    func tabBarController(_ tabs: UITabBarController, didSelect controller: UIViewController) {
+        host?.settle()
+        app?.tabBarController?(tabs, didSelect: controller)
+    }
+
+    #if os(iOS)
+    /// The person rearranged the tabs through More's Edit: UIKit keeps the
+    /// order (the observation reports it); what is selected is settled.
+    func tabBarController(_ tabs: UITabBarController, didEndCustomizing controllers: [UIViewController], changed: Bool) {
+        host?.settle()
+        app?.tabBarController?(tabs, didEndCustomizing: controllers, changed: changed)
+    }
+    #endif
 
     override func responds(to selector: Selector!) -> Bool {
         super.responds(to: selector) || (app?.responds(to: selector) ?? false)
@@ -119,6 +139,13 @@ extension NavigationHost {
             container.delegate = tabProxy
             container.setViewControllers(navs, animated: false)
             container.selectedIndex = p.at
+            #if os(iOS)
+            // The tabs past the bar: More's Edit may rearrange any of them,
+            // and the More list shows one by pushing it, which no tab bar
+            // delegate hears: its stack's own transitions settle.
+            container.customizableViewControllers = navs
+            container.moreNavigationController.delegate = self
+            #endif
             if ExactEnv.authoredChrome { hideTabBar(container) }
             tabController = container
             return container
@@ -223,13 +250,27 @@ extension NavigationHost {
                 recordOwned(nav)
             }
         }
-        // @ref LLP 1038 D6 — a tab change swaps immediately.
-        if let container = tabController, container.selectedIndex != p.at { container.selectedIndex = p.at }
+        // @ref LLP 1038 D6 — a tab change swaps immediately. Selected by
+        // identity: a tab past the bar shows inside the More list, and the
+        // More list itself, open over the tab the app still selects, is left
+        // open: it is the person's, as a menu is (LLP 1035.001.000 D8).
+        if let container = tabController, container.selectedViewController !== navs[p.at], !moreShows(navs[p.at], in: container) {
+            container.selectedViewController = navs[p.at]
+        }
         if routerTab != p.at {
             routerTab = p.at
             if tabController == nil { presenter.session?.natives.tabsHook(nil, event: 2, index: p.at) }
         }
         primaryNavigation = navs[p.at]
+        #if os(iOS)
+        // A stack tab past the bar is shown by the More list's own navigation
+        // controller, which UIKit hands its screens to (and gives them back
+        // when it leaves): that is the stack the routes drive while it does.
+        if let container = tabController, let tab = presenter.views[tabs.panels[p.at].id].map(tabName),
+           moreTab(of: container) == tab, container.moreNavigationController.viewControllers.dropFirst().first is RouteController {
+            primaryNavigation = container.moreNavigationController
+        }
+        #endif
         syncItems(tabs, navs: navs)
     }
 
@@ -274,6 +315,18 @@ extension NavigationHost {
                 source?.channels("accent_color", dark: traits.userInterfaceStyle == .dark).map { TextEngine.color($0) } ?? .tintColor
             }
         }
+    }
+
+    /// Whether the More list shows `nav` already, or is open over the tab
+    /// the app selects: either way, selecting `nav` again is not the host's.
+    private func moreShows(_ nav: UINavigationController, in container: UITabBarController) -> Bool {
+        #if os(iOS)
+        guard container.selectedViewController === container.moreNavigationController else { return false }
+        if moreListOpen { return true }
+        return moreTab(of: container) == tabNavigations.first(where: { $0.value === nav }).flatMap { presenter.views[$0.key] }.map(tabName)
+        #else
+        return false
+        #endif
     }
 
     /// The bar would select `controller`: press its authored tab.
