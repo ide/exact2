@@ -155,6 +155,8 @@ html[data-exact-docnav] {
   & [data-exact-page] > [data-exact-edge] { display: none; position: fixed; top: 0; left: 0; right: 0; height: 10px; z-index: 1; pointer-events: none; background: var(--exact-canvas, Canvas); }
   & [data-exact-page]:has(> [data-exact-doc][data-exact-bar]) > [data-exact-edge] { display: block; }
   & [data-exact-page] > [data-exact-off] { display: none !important; }
+  /* The strip nav-chrome.js `floor` shows for a moment as the page begins scrolling the document. */
+  & body > [data-exact-floor] { position: fixed; left: 0; right: 0; bottom: 0; height: 12px; z-index: 1; pointer-events: none; background: var(--exact-canvas, Canvas); }
   & [data-exact-page] > [data-exact-doc] [data-exact-overlay] { position: fixed !important; }
   & [data-exact-page] > [data-exact-doc] { position: relative !important; inset: auto !important; height: auto !important; min-height: 100vh; }
   & [data-exact-doc] [data-exact-inset]:not([data-exact-inset="route"]) { overflow-x: clip !important; overflow-y: visible !important; height: auto !important; max-height: none !important; scroll-timeline: none; }
