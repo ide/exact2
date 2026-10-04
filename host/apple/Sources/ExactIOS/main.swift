@@ -152,6 +152,7 @@ func printSmoke() {
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
         print("painted \(session.firstDrawMs.map { String(format: "%.1f", $0) } ?? "?") ms")
         print("stamps: " + ExactEnv.stamps.map { "\($0.0) \(String(format: "%.1f", $0.1))" }.joined(separator: " · ") + " · first layout \(session.firstLayoutMs.map { String(format: "%.1f", $0) } ?? "?") · first draw \(session.firstDrawMs.map { String(format: "%.1f", $0) } ?? "?")")
+        print("observe: \(ExactLaunch.shared.smokeLine(for: session))")
         print("gpu: \(session.gpuStatus)")
         print("web: \(session.webStatus)")
         print("smoke ok")
@@ -160,6 +161,10 @@ func printSmoke() {
 }
 
 final class AppDelegate: UIResponder, UIApplicationDelegate {
+    override init() {
+        ExactLaunch.shared.delegateInit()
+        super.init()
+    }
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
         ExactEnv.stamp("didFinishLaunching")
         session = exact.makeSession(delegate: adapter, label: "main")
@@ -167,6 +172,7 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
         session.hatchesOwnWindow = true
         session.hatchesOwnProcess = true
         if ExactEnv.agentFreezes { session.clock = 0 }
+        ExactLaunch.shared.didFinishLaunching()
         return true
     }
     func application(_ application: UIApplication, configurationForConnecting connectingSceneSession: UISceneSession, options: UIScene.ConnectionOptions) -> UISceneConfiguration {
@@ -209,6 +215,7 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     func scene(_ scene: UIScene, willConnectTo session: UISceneSession, options connectionOptions: UIScene.ConnectionOptions) {
         guard let ws = scene as? UIWindowScene else { return }
         ExactEnv.stamp("scene")
+        ExactLaunch.shared.sceneConnected()
         // @ref LLP 1038 D8 — consume the launch URL before constructing the view.
         let incoming = connectionOptions.urlContexts.first?.url
             ?? connectionOptions.userActivities.first(where: { $0.activityType == NSUserActivityTypeBrowsingWeb })?.webpageURL
