@@ -394,10 +394,11 @@ pub fn emit(plan: &Plan, site_attrs: bool) -> Result<Output, String> {
         } else {
             value_js(&Value::from_bytes(initial_args).map_err(|e| e.to_string())?)
         };
+        let keep = crate::facts::keep(plan, r);
         let res = em.uses.rt("res");
         let _ = write!(
             body,
-            "const r_{i}={res}({},{},()=>[{}],{initial},{initial_args},{},{placeholder});",
+            "const r_{i}={res}({},{},()=>[{}],{initial},{initial_args},{},{placeholder}{keep});",
             serde_json::to_string(plan.str(r.name)).unwrap(),
             serde_json::to_string(plan.str(r.source)).unwrap(),
             args.join(","),
@@ -812,7 +813,7 @@ pub(crate) fn type_json(plan: &Plan, ty: exact_plan::TypesId) -> String {
 
 /// A type as the data module client reads it: `n` number, `b` bool, `s`
 /// string, `u` unit, `?T` option, `[T` list, `{T…}` record.
-fn type_code(plan: &Plan, ty: exact_plan::TypesId) -> String {
+pub(crate) fn type_code(plan: &Plan, ty: exact_plan::TypesId) -> String {
     let t = &plan.types[ty.0 as usize];
     match t.kind {
         exact_plan::TypeKind::Number => "n".into(),

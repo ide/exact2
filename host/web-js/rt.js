@@ -1,5 +1,5 @@
 import { renderMarkup, reportPlace } from "./navigation.js"; export { animationClocks } from "./navigation.js"; // synced animations (LLP 1055.002, emit.rs `clocks`)
-import { conforms, eq } from "./shape.js";
+import { conforms, eq } from "./shape.js"; import { Kept } from "./kept.js";
 import { paintList, paintFacts, paintFlush } from "./paint.js";
 export { conforms, eq }; export { paintOwn } from "./paint.js";
 import { Docs, Head, head, markDocument, projectRoots } from "./document.js"; export { Head };
@@ -233,7 +233,7 @@ function stamp() {
 }
 // A release build never enters agent mode (LLP 1069.007 D2): its build
 // writes this false, as the wasm host's files are gated.
-const AGENT_ADMITTED = true;
+const AGENT_ADMITTED = true; const driven = () => !!globalThis.__exactRender || (AGENT_ADMITTED && new URLSearchParams(location.search).has("agent"));
 /** A timer: `every(ms, action, once)`, due from mount. */
 export function every(ms, action, once) {
   clock.timers.push({ due: clock.now + ms, ms, action, once });
@@ -314,15 +314,15 @@ function unpark() { if (Parked >= 0 && Rev !== Parked) { Parked = -1; paint(); }
  * a Promise (an executor-local continuation: TypeScript), or `null` while
  * the source is not ready; `ready(f)` calls `f` once it is. */
 export const data = { answer: () => null, parse: null, q: [], ready: f => data.q.push(f) };
-/** The durable store (LLP 1018): name → text, persisted as the web host
- * does (`localStorage` "exact.secret.<name>") after a commit stands. */
+/** The durable store (LLP 1018): name → text, persisted as the web host does (`localStorage`
+ * "exact.secret.<name>") after a commit stands, with the kept answers (kept.js) it forgets as its names change. */
 export const Store = {
   map: new Map(), writes: [], dirty: false,
   get(k) { return this.map.get(k); },
-  set(k, v) { if (v == null) this.map.delete(k); else this.map.set(k, v); this.writes.push([k, v]); this.dirty = true; Rev++; },
-  save() { return [new Map(this.map), this.writes.length]; },
-  restore([m, n]) { this.map = m; this.writes.length = n; this.dirty = false; },
-  persist() { for (const [k, v] of this.writes.splice(0)) try { v == null ? localStorage.removeItem("exact.secret." + k) : localStorage.setItem("exact.secret." + k, v); } catch {} },
+  set(k, v) { if (this.map.has(k) !== (v != null)) Kept.forget(); if (v == null) this.map.delete(k); else this.map.set(k, v); this.writes.push([k, v]); this.dirty = true; Rev++; },
+  save() { return [new Map(this.map), this.writes.length, Kept.save()]; },
+  restore([m, n, k]) { this.map = m; this.writes.length = n; this.dirty = false; Kept.restore(k); },
+  persist() { for (const [k, v] of this.writes.splice(0)) try { v == null ? localStorage.removeItem("exact.secret." + k) : localStorage.setItem("exact.secret." + k, v); } catch {} Kept.persist(); },
   load() { try { for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k.startsWith("exact.secret.")) this.map.set(k.slice(13), localStorage.getItem(k)); } } catch {} },
 };
 /** Every resource, in plan order: the checkpoint a render writes reads them. */
@@ -365,12 +365,12 @@ function reply(t, name, source, held, f, next, gone) {
     gone(); commit(() => {}, "a failed request");
   };
 }
-/** A resource: its value, the arguments it settled with, one ticket in flight. */
-export function res(name, source, args, initial, initialArgs, type, ph) {
+/** A resource: its value, the arguments it settled with, one ticket in flight; `keep`: kept.js. */
+export function res(name, source, args, initial, initialArgs, type, ph, keep) {
   const ver = sig(0), pend = sig(false), fail = sig(null);
-  const kept = checkpoint().kept?.get(name);
+  const kept = checkpoint().kept?.get(name), seed = !kept && keep && Kept.seed(name, source, type, keep[1], driven);
   if (kept) [initialArgs, initial] = kept;
-  const r = { name, source, type, value: initial, settled: initialArgs, ticket: null, forced: false, reread: false, rev: false, store: false };
+  const r = { name, source, type, value: initial, settled: initialArgs, ticket: null, forced: false, reread: false, rev: false, store: false, seed };
   const flag = (s, v, undo) => { if (!eq(s.n.v, v)) { undo?.push([s.n, s.n.v]); write(s.n, v); } };
   // Nothing kept: the placeholder shows, pending (LLP 1048.003 D6).
   const hold = () => {
@@ -382,7 +382,7 @@ export function res(name, source, args, initial, initialArgs, type, ph) {
   const take = (v, a) => {
     if (type && !conforms(v, type, [0], r.checked)) throw new Failed(`${name}: the answer does not conform to its shape`);
     r.checked = v;
-    r.value = v; r.settled = a;
+    r.value = v; r.settled = a; if (keep && (keep[2] || r.store)) Kept.keep(name, source, keep[1], a, v, type);
   };
   // A reply the source cannot take leaves the value, failed for its arguments (`r.failed`, the runner's `failed_args`).
   const land = t => reply(t, name, source, () => r.ticket === t, p => {
@@ -393,6 +393,7 @@ export function res(name, source, args, initial, initialArgs, type, ph) {
   const m = memo(() => {
     ver();
     const a = args();
+    if (r.seed) { if (Kept.stands(r.seed[0], a, keep[0])) { r.value = r.seed[1]; say(`kept ${name}`); } r.seed = null; } // shown until the first ask lands
     const forced = r.forced, reread = r.reread, rev = r.rev;
     r.forced = r.reread = r.rev = false;
     // A failure keeps the value for its arguments, asking nothing; `refresh` or new ones ask again (settlement.rs). `fail` follows.
@@ -1213,7 +1214,7 @@ export function mount(f) {
     if (!(t.closest?.("input, textarea, select") || t.isContentEditable) && t.closest?.('[retainFocus="true"]')) ev.preventDefault();
   });
   // Under the agent, and in a render, the clock is the driver's: no timer runs by itself.
-  clock.agent = !!globalThis.__exactRender || (AGENT_ADMITTED && new URLSearchParams(location.search).has("agent"));
+  clock.agent = driven();
   Store.load();
   let built = false;
   Adopt = !!(checkpoint().kept && root.firstElementChild);
@@ -1265,8 +1266,7 @@ export function checkpoint() {
   const cp = JSON.parse(el.textContent);
   Checkpoint.kept = new Map(cp.answers.map(([name, , args, value]) => [name, [value_(args), value_(value)]]));
   // A drive starts at zero even when its document was rendered on a wall clock.
-  const driven = AGENT_ADMITTED && typeof location !== "undefined" && new URLSearchParams(location.search).has("agent") && !globalThis.__exactRender;
-  Checkpoint.time = clock.now = driven ? 0 : cp.time || 0;
+  Checkpoint.time = clock.now = !globalThis.__exactRender && driven() ? 0 : cp.time || 0;
   return Checkpoint;
 }
 /** A checkpoint value (`push_value`, host/web/src/page.rs) as a runtime value:
