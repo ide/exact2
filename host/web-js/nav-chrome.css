@@ -103,6 +103,12 @@
 [data-exact-tabbar] button[aria-selected="true"] { color: var(--exact-tabbar-selected); }
 [data-exact-tabbar] button:is([data-held], :focus-visible:active) { opacity: .45; }
 [data-exact-tabbar] .icon { height: 26px; display: flex; align-items: center; justify-content: center; }
+/* A press dims at once and fades back, and the selected tab's tint fades in as the last one's
+   fades out (UIKit's), with motion and outside the agent's clock (index.html's buttons). */
+@media (prefers-reduced-motion: no-preference) {
+  html:not([data-exact-agent]) :is([data-exact-navbar], [data-exact-tabbar]) button { transition: opacity .2s ease-out, color .2s ease-out, background-color .2s ease-out; }
+  html:not([data-exact-agent]) :is([data-exact-navbar], [data-exact-tabbar]) button:is([data-held], :focus-visible:active) { transition-duration: .06s; }
+}
 
 /* Sheets, their backdrop, and what a transition keeps on screen. */
 [data-exact-chromed][data-exact-sheet] { --exact-nav-safe-top: 0px; --exact-nav-bar-height: 56px; --exact-nav-bottom: env(safe-area-inset-bottom, 0px); top: var(--exact-sheet-top, 0px) !important; z-index: 2147483030 !important; border-radius: var(--exact-sheet-radius) var(--exact-sheet-radius) 0 0; overflow: hidden; box-shadow: 0 0 30px #00000026; }

@@ -159,7 +159,7 @@ const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 const t0 = performance.now();
 const agentMode = AGENT_ADMITTED && new URL(location.href).searchParams.has("agent");
-let agentClock = agentMode ? 0 : null;
+let agentClock = agentMode ? 0 : null; if (agentMode) document.documentElement.setAttribute("data-exact-agent", ""); // index.html's fades are not the agent's: its clock holds every motion
 // A seek moves drag timelines' sources too (LLP 1057.003 D2): their consumers follow in it.
 const clocks = animationClocks(root), { register, seek: seekAnimations, settle: settleCandidate } = animationClock(() => agentClock, () => ask({ op: "settle" }).settle, () => { motion.followTimelines(); presence.live?.sync(); });
 const seek = to => { (imageHold ??= loadAfterPaint('./image-glue.js', 'holdImages').then(f => f({ root, now: () => agentClock }))).then(h => h.seek()); seekAnimations(to); };

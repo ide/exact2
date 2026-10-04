@@ -468,19 +468,23 @@ function tabBar(nav, routes, selected) {
   let bar = kids(nav).find(k => k.hasAttribute("data-exact-tabbar"));
   if (!tabs.length) { bar?.remove(); return; }
   bar ??= el("div", "", { "data-exact-tabbar": "", role: "tablist" });
-  const want = tabs.map(({ tab, r }) => [tab, data(r, "tabtitle"), data(r, "tabsymbol"), data(r, "tabselectedsymbol"), data(r, "tabcontrol"), tab === selected].join("|")).join("\n");
+  // The tabs are made again only as they change; a selection changes the buttons in place,
+  // so the tint fades from the last tab to the new one (nav-chrome.css).
+  const want = tabs.map(({ tab, r }) => [tab, data(r, "tabtitle"), data(r, "tabsymbol"), data(r, "tabselectedsymbol"), data(r, "tabcontrol")].join("|")).join("\n");
   if (attr(bar, "data-want") !== want) {
     bar.setAttribute("data-want", want); bar.textContent = "";
-    for (const { tab, r } of tabs) {
-      const on = tab === selected, title = data(r, "tabtitle") || tab;
-      const b = el("button", "", { type: "button", role: "tab", "aria-selected": String(on), "data-control": data(r, "tabcontrol") });
-      const g = glyph(on ? data(r, "tabselectedsymbol") || data(r, "tabsymbol") : data(r, "tabsymbol"), 22);
-      if (g) b.append(el("span", "icon", {}, g));
-      b.append(el("span", "", {}, title));
-      bar.append(b);
-    }
+    for (const { tab, r } of tabs) bar.append(el("button", "", { type: "button", role: "tab", "data-control": data(r, "tabcontrol") }, el("span", "", {}, data(r, "tabtitle") || tab)));
     bar.style.setProperty("--tabs", String(tabs.length));
   }
+  tabs.forEach(({ tab, r }, i) => {
+    const b = kids(bar)[i], on = tab === selected, symbol = on ? data(r, "tabselectedsymbol") || data(r, "tabsymbol") : data(r, "tabsymbol");
+    setAttr(b, "aria-selected", String(on));
+    if (attr(b, "data-symbol") === symbol && b.hasAttribute("data-symbol")) return;
+    b.setAttribute("data-symbol", symbol);
+    kids(b).find(k => attr(k, "class") === "icon")?.remove();
+    const g = glyph(symbol, 22);
+    if (g) b.prepend(el("span", "icon", {}, g));
+  });
   if (bar.parentNode !== nav) nav.append(bar);
   // Under a sheet the bar stays below it (the backdrop is appended after).
   const b = kids(nav).find(k => k.hasAttribute("data-exact-backdrop"));
