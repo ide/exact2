@@ -181,7 +181,7 @@ function route(nav, r, previous, sheet, tabbed) {
 
 function makeBar() {
   return el("div", "", { "data-exact-navbar": "" },
-    el("div", "edge"), el("div", "bg"),
+    el("div", "edge"), el("div", "bg"), el("div", "top"),
     el("div", "bar", {}, el("div", "lead"), el("div", "title", { role: "heading", "aria-level": "1" }), el("div", "trail")),
     el("div", "large", { "aria-hidden": "true" }, el("h1")));
 }
@@ -306,10 +306,12 @@ function listen(nav, st) {
   nav.addEventListener("pointercancel", end);
 }
 
+/** A sheet's backdrop, with the strip Safari's top bar takes its colour from (nav-chrome.css). */
+const dimmer = () => el("div", "", { "data-exact-backdrop": "" }, el("div", "top"));
 function backdrop(nav, st, sheet) {
   let b = kids(nav).find(k => k.hasAttribute("data-exact-backdrop"));
   if (!sheet) { if (b && !st.anims.length) b.remove(); return; }
-  b ??= el("div", "", { "data-exact-backdrop": "" });
+  b ??= dimmer();
   if (b.parentNode !== nav || b.nextSibling) nav.append(b);
 }
 
@@ -365,7 +367,7 @@ function transition(nav, st, tab, stack) {
   } else if (sheetOut) {
     show(leaving);
     run(leaving, [{ transform: `translateY(${leaving.$drop || 0}px)` }, { transform: "translateY(110%)" }], { duration: 320, fill: "forwards" });
-    const b = dim() ?? el("div", "", { "data-exact-backdrop": "" });
+    const b = dim() ?? dimmer();
     nav.insertBefore(b, leaving);
     run(b, [{ opacity: 1 }, { opacity: 0 }], { duration: 320, fill: "forwards" });
   } else if (pushed) {

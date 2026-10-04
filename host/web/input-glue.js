@@ -1,4 +1,5 @@
 // Input-only glue: loaded after the baked first pixel, independently of data readiness.
+import { installTouch, watchHeld, cancelHeld } from "./touch.js";
 const shortcutKeys = new Set(["Enter", "Tab", "Escape", "Backspace", "Delete", "Insert", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Home", "End", "PageUp", "PageDown"]);
 export function createInputHandlers({ root, views, retiredViews, ready, inertAncestor, dispatch, release: dispatchRelease = () => {}, velocity = {}, agentMode = false }) {
   // @ref LLP 1038 §7 — a plain click on a same-origin link to a declared
@@ -91,23 +92,14 @@ export function createInputHandlers({ root, views, retiredViews, ready, inertAnc
     if (effect) effect.setKeyframes(frames);
     return box;
   };
-  let press = null;
-  const release = () => { if (press) showPress(press.el, false); press = null; };
-  root.addEventListener("pointerdown", e => {
-    if (e.button !== 0 || !e.isPrimary) return;
-    release(); // a press whose release never reached the page
-    const el = e.target.closest?.("[data-exact-on~=press]");
-    if (!el || !root.contains(el) || !el.style.getPropertyValue("--exact-press") || el.closest(":disabled,[disabled='true']")) return;
-    const r = unpressedBox(el);
-    press = { el, id: e.pointerId, box: [r.left, r.top, r.right, r.bottom] };
-    showPress(el, true);
-  }, true);
-  document.addEventListener("pointermove", e => {
-    if (e.pointerId !== press?.id) return;
-    const [l, t, r, b] = press.box;
-    showPress(press.el, e.clientX >= l && e.clientX <= r && e.clientY >= t && e.clientY <= b);
-  }, true);
-  for (const type of ["pointerup", "pointercancel"]) document.addEventListener(type, e => { if (e.pointerId === press?.id) release(); }, true);
+  // The press itself, its box and its slop are touch.js's (UIKit's rule for
+  // a touch in a scroller too); this draws the held node's `press-scale`.
+  installTouch();
+  const scaled = el => !!el.style.getPropertyValue("--exact-press") && !el.closest(":disabled,[disabled='true']");
+  watchHeld({
+    box: el => scaled(el) ? unpressedBox(el) : null,
+    held: (el, down) => { if (scaled(el) || feedback.has(el)) showPress(el, down); },
+  });
   return {
     pan(el, id, on) {
       // @ref LLP 1043.000 §3 D8: one coalesced action per display frame.
@@ -123,7 +115,7 @@ export function createInputHandlers({ root, views, retiredViews, ready, inertAnc
         const [x,y] = contact.to, [px,py] = contact.from;
         // exact_motion::gesture::SLOP; a pan-only plan links no motion export to ask.
         if (!contact.active && Math.max(Math.abs(x-px),Math.abs(y-py)) <= 4) return;
-        if (!contact.active) release(); // a pan ends a press, as it cancels a touch
+        if (!contact.active) cancelHeld(); // a pan ends a press, as it cancels a touch
         contact.active = true; contact.from = [x,y];
         if (x !== px || y !== py) dispatch(id, `${x-px},${y-py}`);
       };

@@ -112,10 +112,21 @@
     overflow: hidden; touch-action: pan-x pan-y;
     & body { position: fixed; inset: 0; height: auto; overflow: hidden; }
   }
+  /* A Home Screen app on iOS 26 (`black-translucent`, under the status bar) reports a viewport
+     the status bar's height short of the screen and clips fixed boxes to it, so an opaque band
+     of the canvas sat over the home indicator. There the body is the large viewport, the whole
+     screen, from the top edge: placed, not fixed (chrome.js marks `data-standalone` where the
+     manifest's display mode is not the one launched). */
+  @media (display-mode: standalone) {
+    html:has(meta[name="viewport"][content*="viewport-fit=cover"]):not([data-scrolldocument]) body { position: absolute; bottom: auto; height: 100lvh; }
+  }
+  html[data-standalone]:has(meta[name="viewport"][content*="viewport-fit=cover"]):not([data-scrolldocument]) body { position: absolute; bottom: auto; height: 100lvh; }
   /* A held button dims its content, as UIKit's buttons do (NativeButtonIOS.swift: 0.5); one
-     with `press-scale` scales instead (LLP 1061), a native one is the browser's. No fade back:
-     a transition after every tap would hold the agent's settle (and its clock) for it. */
-  #exact-root button:not([data-button-style], [style*="--exact-press:"]):active:not(:disabled) > * { opacity: .5; }
+     with `press-scale` scales instead (LLP 1061), a native one is the browser's. Held is
+     touch.js's `data-held` (UIKit's timing: late in a scroller, never for a scroll), or
+     `:active` from the keyboard. No fade back: a transition after every tap would hold the
+     agent's settle (and its clock) for it. */
+  #exact-root button:not([data-button-style], [style*="--exact-press:"]):is([data-held], :focus-visible:active):not(:disabled) > * { opacity: .5; }
   /* `-exact-apple-button-style` (Apple's vendor row; element.rs writes its attribute): the
      web's approximation of UIButton.Configuration's styles from `accent-color`, under the
      author's box (its size, radius and content stay the author's, as UIKit draws them).
@@ -157,8 +168,8 @@
     &:has(> button ~ button ~ button) > button { flex-basis: 100%; }
     &:has(> button ~ button ~ button) > button:not([data-exact-on~="press"]) { order: 1; }
     & > button > * { color: inherit !important; font: inherit !important; }
-    & > button:active:not(:disabled) { background-color: light-dark(#78788040, #78788059); }
-    & > button:active:not(:disabled) > * { opacity: 1; }
+    & > button:is([data-held], :focus-visible:active):not(:disabled) { background-color: light-dark(#78788040, #78788059); }
+    & > button:is([data-held], :focus-visible:active):not(:disabled) > * { opacity: 1; }
   }
   #exact-root#exact-root dialog:modal::backdrop { background: #00000033; animation: exact-dim-in .3s ease-out; }
   @keyframes exact-alert-in { from { opacity: 0; scale: 1.1; } }
@@ -180,8 +191,8 @@
       background-color: light-dark(#7878801f, #78788033); color: inherit; }
     & > button[data-destructive="true"] { color: light-dark(#ff3b30, #ff453a); }
     & > button > * { color: inherit !important; font: inherit !important; }
-    & > button:active:not(:disabled) { background-color: light-dark(#78788040, #78788059); }
-    & > button:active:not(:disabled) > * { opacity: 1; }
+    & > button:is([data-held], :focus-visible:active):not(:disabled) { background-color: light-dark(#78788040, #78788059); }
+    & > button:is([data-held], :focus-visible:active):not(:disabled) > * { opacity: 1; }
   }
   @supports (position-area: top) {
     #exact-root#exact-root [popover][role="alertdialog"]:popover-open { inset: auto; margin: 8px 0; position-area: block-start; position-try-fallbacks: flip-block, block-start span-inline-start, block-end span-inline-start; }
