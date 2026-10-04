@@ -401,6 +401,10 @@ Agent.hostState = {
 }
 
 final class Delegate: NSObject, NSApplicationDelegate {
+    override init() {
+        ExactLaunch.shared.delegateInit()
+        super.init()
+    }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
     /// ⌘Q asks each window's app first (`beforeunload`, studio diary R17):
     /// the first that keeps itself open comes forward with whatever it asks
@@ -423,6 +427,9 @@ final class Delegate: NSObject, NSApplicationDelegate {
     var quitting: StorageHold?
     func applicationDidFinishLaunching(_ notification: Notification) {
         ExactEnv.stamp("didFinishLaunching")
+        // The session is already made; AppKit boots it inside this callback,
+        // so launch ends at its entry (Exact Observe design §3.2, macOS).
+        ExactLaunch.shared.didFinishLaunching(hidden: NSApp.isHidden)
         finishLaunching()
     }
     /// Launch Services brought something: a development link, or documents —
@@ -568,6 +575,7 @@ func finishLaunching() {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
             print("painted \(session.firstDrawMs.map { String(format: "%.1f", $0) } ?? "?") ms")
             print("stamps: " + ExactEnv.stamps.map { "\($0.0) \(String(format: "%.1f", $0.1))" }.joined(separator: " · ") + " · first layout \(session.firstLayoutMs.map { String(format: "%.1f", $0) } ?? "?") · first draw \(session.firstDrawMs.map { String(format: "%.1f", $0) } ?? "?")")
+            print("observe: \(ExactLaunch.shared.smokeLine(for: session))")
             print("gpu: \(session.gpuStatus)")
             print("web: \(session.webStatus)")
             print("smoke ok")

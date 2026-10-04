@@ -25,9 +25,11 @@ let testing = ProcessInfo.processInfo.environment["EXACT_TESTS"] == "1"
 
 let core: [Target] = [
     .systemLibrary(name: "CExact", path: "Sources/CExact"),
+    // The launch constructor (L, the process age, prewarm): C, so it runs before `main`.
+    .target(name: "CExactLaunch", path: "Sources/CExactLaunch"),
     .target(
         name: "ExactKit",
-        dependencies: ["CExact"],
+        dependencies: ["CExact", "CExactLaunch"],
         path: "Sources/ExactKit",
         linkerSettings: [.unsafeFlags(["-L", libDir]), .linkedLibrary(libName), .linkedLibrary("c++")]
     ),
