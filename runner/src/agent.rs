@@ -32,6 +32,8 @@ pub fn handle<D: DataSource>(runner: &Runner<D>, request: &str) -> String {
         Some("tags") => tags(runner),
         Some("frames") => frames(runner, request, &|_| false),
         Some("holds") => holds(runner),
+        // The settle ledger's runner half (Exact Observe design §3.5).
+        Some("outstanding") => runner.outstanding().json(),
         Some("perf") => crate::perf::reply(runner, request),
         // What `showPicker(id)` names (LLP 1069.002 D2): the file input's
         // view, `accept` and `multiple`, for the host that presents it.
