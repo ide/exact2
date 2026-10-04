@@ -35,13 +35,14 @@ fn main() {
     std::fs::write(
         out_dir.join("entry.rs"),
         format!(
-            "{}\nfn main() {{ std::process::exit({host}::run::<AppData>(PLAN, COMPAT)); }}\n",
+            "{}\n{}\nfn main() {{ launch_parts(); std::process::exit({host}::run::<AppData>(PLAN, COMPAT)); }}\n",
             contract::rust_entry(
                 "typetour_data::Tour",
                 "typetour_data::Tour",
                 compat.inputs["rustMode"].as_str().unwrap()
             )
-            .unwrap()
+            .unwrap(),
+            contract::linux_launch_parts().unwrap_or_else(|e| panic!("launch parts: {e}"))
         ),
     )
     .unwrap();
