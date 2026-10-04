@@ -134,6 +134,12 @@ html[data-exact-docnav] {
      which runs under the toolbar as UIKit's runs under the home indicator, is fixed. */
   & [data-exact-page] > :is([data-exact-chromed], [data-exact-ghost]):not([data-exact-sheet], [data-exact-doc]) { position: absolute !important; inset: var(--exact-page-y, 0px) 0 auto !important; height: var(--exact-page-h, 100vh) !important; }
   & [data-exact-page] > [data-exact-sheet] { position: fixed !important; }
+  /* Safari colours its status bar from the topmost fixed box at the top edge that it can read,
+     which the bar's material, under the bar's row, is not: a strip in the canvas over the routes
+     (under the tab bar, a sheet and the dimming), shown while the page's route has a bar, whose
+     top it covers. nav-chrome.js makes it anew as the scheme changes. */
+  & [data-exact-page] > [data-exact-edge] { display: none; position: fixed; top: 0; left: 0; right: 0; height: 10px; z-index: 1; pointer-events: none; background: var(--exact-canvas, Canvas); }
+  & [data-exact-page]:has(> [data-exact-doc][data-exact-bar]) > [data-exact-edge] { display: block; }
   & [data-exact-page] > [data-exact-off] { display: none !important; }
   & [data-exact-page] > [data-exact-doc] [data-exact-overlay] { position: fixed !important; }
   & [data-exact-page] > [data-exact-doc] { position: relative !important; inset: auto !important; height: auto !important; min-height: 100vh; }
