@@ -104,6 +104,8 @@ function replace_(r, location) {
   const out = copy(r), s = out[1][i][1]; s[s.length - 1] = entry(s.at(-1)[0], d); return out;
 }
 function back_(r) { const i = sel(r); if (i < 0 || r[1][i][1].length < 2) return r; const out = copy(r); out[1][i][1].pop(); return out; }
+// backTo: LLP 1035.001.000, route/src/router.rs `back_to`.
+function backTo_(r, key) { const s = stack_(r), at = s.findIndex(e => String(e[0]) === key); if (at < 0) return refuse(r, `no entry ${key} in the selected stack`); if (at === s.length - 1) return r; const out = copy(r); out[1][sel(r)][1].length = at + 1; return out; }
 function select_(r, name) {
   const i = r[1].findIndex(t => t[0] === name && t[1].length);
   if (i < 0) return refuse(r, `unknown tab ${name}`);
@@ -131,9 +133,9 @@ export const x_path = (name, ...values) => path(Routes.find(r => r.name === name
 /** The router slot's changes, to the browser's history (`navigation.js`,
  * the web host's own), and a popstate back as the navigation root's
  * `navigate` (LLP 1038 D7, D11). */
-let RouterSlot = null, Shown = null, Navigate = null, History = null; export const pageHistory = () => History; // the page's navigation.js, which the agent observes: its own copy's state is never written
+let RouterSlot = null, Shown = null, Navigate = null, Traverse = null, History = null; export const pageHistory = () => History; // the page's navigation.js, which the agent observes: its own copy's state is never written
 /** The plan's navigation roots, with a router or without (document.js `projectRoots`). */
-export function navigationRoots(history) { History = history; projectRoots(history, location => Navigate?.(location), say, After); }
+export function navigationRoots(history) { History = history; projectRoots(history, location => Navigate?.(location), say, After, key => Traverse ? (Traverse(key), true) : false); }
 export function router(slot, history) {
   RouterSlot = slot; navigationRoots(history);
   // @ref LLP 1038 §7 — a plain click on a same-origin link to a declared
@@ -162,6 +164,7 @@ export function router(slot, history) {
     history.apply({ top: top[0], url: top[2], removed });
   });
 }
+export const traverseTo = f => { Traverse = f; }; // the root's `traverse`: history's Back to a route beneath the top (LLP 1035.001.000)
 export const navigateTo = f => { Navigate = f; }, navigateRoot = location => Navigate ? (Navigate(location), true) : false; // the agent's `type <root> <location>` (LLP 1038 D11)
 export const routeAt = location => matchRoute(canonical(location))?.[0] ?? -1;
 // ---------------------------------------------------------------- validity
@@ -196,5 +199,5 @@ export function routerValid() {
 }
 /** A verb or read of an invalid router traps, as the runner's (its `call_verb`); `searchParam` reads any entry. */
 const checked = f => (r, ...a) => { if (!validRouter(r)) throw new Refusal("a router verb or read of an invalid router"); return f(r, ...a); };
-export const x_open = checked(open_), x_push = checked(push_), x_replace = checked(replace_), x_back = checked(back_), x_select = checked(select_), x_go = checked(go_);
+export const x_open = checked(open_), x_push = checked(push_), x_replace = checked(replace_), x_back = checked(back_), x_backTo = checked(backTo_), x_select = checked(select_), x_go = checked(go_);
 export const x_stack = checked(stack_), x_top = checked(top_), x_depth = checked(depth_), x_params = checked(params_);

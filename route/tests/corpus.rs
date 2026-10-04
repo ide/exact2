@@ -666,3 +666,34 @@ fn path_errors_identify_names_and_ordered_parameters_without_changing_validation
         );
     }
 }
+
+// LLP 1035.001.000: `back_to` is `back` repeated until the entry keyed `key`
+// is the top — over every recorded reachable value — and anything not in the
+// selected stack is refused without a change.
+#[test]
+fn back_to_an_entry_is_back_until_it_is_the_top() {
+    let c = corpus();
+    for sequence in &c.sequences {
+        let t = &c.tables[&sequence.table];
+        for step in &sequence.steps {
+            let r = &step.expected;
+            let shown = stack(r).to_vec();
+            for (i, entry) in shown.iter().enumerate() {
+                let reached = success(back_to(t, r.clone(), &entry.id.to_string()));
+                let mut popped = r.clone();
+                for _ in i + 1..shown.len() {
+                    popped = success(back(t, popped));
+                }
+                assert_eq!(reached, popped);
+                assert_eq!(top(&reached), Some(entry));
+            }
+            let top_key = top(r).unwrap().id.to_string();
+            assert_eq!(success(back_to(t, r.clone(), &top_key)), *r);
+            for key in [r.next.to_string(), String::new(), "x".into()] {
+                let (same, refusal) = back_to(t, r.clone(), &key);
+                assert_eq!(same, *r);
+                assert!(refusal.is_some(), "{key}");
+            }
+        }
+    }
+}

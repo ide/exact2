@@ -499,7 +499,7 @@ working fixture, not inferred from JavaScript's Event interface.
 
 | Payload appended to captured arguments | Handler names |
 | --- | --- |
-| One string | `change`, `input` (text field, textarea, `select`), `message`, `error` |
+| One string | `change`, `input` (text field, textarea, `select`), `message`, `error`, `traverse` (the navigation key of the route the platform went back to) |
 | A string, then optionally a `KeyboardEvent` | `key`: the key's name; an action taking one more parameter also hears the [modifiers](#keys) |
 | Two numbers, then optionally a `ScrollEvent` | `scroll`: left and top; an action taking one more parameter also hears the scroller's extents (below) |
 | One boolean | `hover`; `change`, `input` on a checkbox or `switch` |
@@ -550,8 +550,8 @@ presses. A nested text input or control keeps its own drags, and the innermost
 recognizer wins ([LLP 1057.001](../llp/1057.001-gesture-precedence-and-pinch.spec.md) §1).
 The compiler validates arity and
 available payload types; tags and hosts constrain where events make sense.
-`navigate` belongs on the first root element, outside any region, which must
-also carry `navigationKey` and `navigationBack`. Transform geometry/release
+`navigate` and `traverse` belong on the first root element, outside any region,
+which must also carry `navigationKey` and `navigationBack`. Transform geometry/release
 bindings are required as a pair. See
 [`handler_arity`](../contract/analyze/src/lib.rs) and the corresponding corpus/tests.
 
