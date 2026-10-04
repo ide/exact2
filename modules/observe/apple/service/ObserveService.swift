@@ -67,6 +67,7 @@ final class ObserveService {
             case "startup": startup(e, wall: wall)
             case "navigation.launch": launchRoute = e
             case "navigation": navigation(e, wall: wall)
+            case "update.download": updateDownload(e, wall: wall)
             case "app.attributes": globals = ObserveRules.attributes(e["attributes"] as? [String: Any] ?? [:]).kept
             case "app.event": log(e, wall: wall, error: false)
             case "app.error": log(e, wall: wall, error: true)
@@ -138,6 +139,15 @@ final class ObserveService {
         if let interactive = marks["interactive"], !navigatedBeforeStartup, ["settled", "failed", "declared"].contains(e["tti"] as? String ?? "") {
             store.addMetric(session: session, time: wall, category: "navigation", name: "tti", value: (interactive - boot) / 1000, route: route["route"] as? String, params: params)
         }
+    }
+
+    /// Observe's `updates/updateDownloadTime`: a staged update's blobs, from
+    /// the first request to staged. The id is Exact's envelope digest.
+    func updateDownload(_ e: [String: Any], wall: Double) {
+        guard let store, let seconds = e["seconds"] as? Double else { return }
+        store.run("INSERT INTO metrics (session, time, category, name, value, updateId, params) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                  [session, wall, "updates", "updateDownloadTime", seconds, e["entry"] as? String,
+                   String(decoding: (try? JSONSerialization.data(withJSONObject: ["exact.update.files_fetched": e["files"] ?? 0, "exact.update.seq": e["seq"] ?? 0, "exact.update.id_kind": "digest"], options: [.sortedKeys])) ?? Data(), as: UTF8.self)])
     }
 
     func log(_ e: [String: Any], wall: Double, error: Bool) {
