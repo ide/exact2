@@ -57,6 +57,7 @@ pub mod host;
 pub mod image;
 #[cfg(target_os = "linux")]
 pub mod input;
+pub mod launch_marks;
 pub mod navigation;
 pub mod paint;
 pub mod picker;
