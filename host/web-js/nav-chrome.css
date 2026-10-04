@@ -17,7 +17,10 @@
   --exact-tabbar-text: var(--exact-secondary-label, light-dark(#3c3c4399, #ebebf599));
   --exact-tabbar-selected: var(--exact-nav-tint);
   --exact-tabbar-border: var(--exact-nav-separator);
-  --exact-tabbar-shadow: 0 4px 20px #0000001a;
+  /* Soft and close, as iOS 26's floating bar's: it fades out within the 10 px the bar floats
+     above the viewport's bottom, where Safari clips its fixed boxes (in a tab, the toolbar's
+     band is below the viewport), so the shadow is never cut there. */
+  --exact-tabbar-shadow: 0 1px 2px light-dark(#0000000a, #0000002e), 0 3px 10px -3px light-dark(#0000001f, #00000066);
   --exact-tabbar-height: 56px;
   --exact-tabbar-item: 96px;
   --exact-tabbar-bottom: max(calc(env(safe-area-inset-bottom, 0px) - 12px), 10px);
