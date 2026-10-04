@@ -146,6 +146,9 @@ export function update(root) {
   if (Live) {
     const page = [...States.keys()].find(n => n.hasAttribute("data-exact-page"));
     setAttr(document.documentElement, "data-exact-docnav", page ? "" : null);
+    // The page keeps each route's offset itself: the browser's own restoring, as its Back
+    // pops a route, would scroll the document under a slide's two boxes.
+    if (page && history.scrollRestoration !== "manual") history.scrollRestoration = "manual";
     const locked = !!page && States.get(page).locked;
     setAttr(document.documentElement, "data-exact-locked", locked ? "" : null);
     if (locked !== Locked) {
@@ -263,10 +266,13 @@ function page(nav, st, routes, stack) {
 
 /** Where the routes shown beside the page are boxes in the document: the
  * viewport's top and height, read while the page's route still holds the
- * document's offset (nav-chrome.css). */
+ * document's offset, and how far below it the browser may draw the page,
+ * under its toolbar (the screen's height past the viewport's; nav-chrome.css). */
 function place(nav) {
+  const h = tall(nav);
   nav.style.setProperty("--exact-page-y", `${-nav.getBoundingClientRect().top}px`);
-  nav.style.setProperty("--exact-page-h", `${tall(nav)}px`);
+  nav.style.setProperty("--exact-page-h", `${h}px`);
+  nav.style.setProperty("--exact-page-below", `${Math.min(Math.max(0, (screen?.height ?? 0) - h), 240)}px`);
 }
 
 /** A box the route lays over its scroller (absolute, outside the scroller:
@@ -462,19 +468,23 @@ function tabBar(nav, routes, selected) {
   let bar = kids(nav).find(k => k.hasAttribute("data-exact-tabbar"));
   if (!tabs.length) { bar?.remove(); return; }
   bar ??= el("div", "", { "data-exact-tabbar": "", role: "tablist" });
-  const want = tabs.map(({ tab, r }) => [tab, data(r, "tabtitle"), data(r, "tabsymbol"), data(r, "tabselectedsymbol"), data(r, "tabcontrol"), tab === selected].join("|")).join("\n");
+  // The tabs are made again only as they change; a selection changes the buttons in place,
+  // so the tint fades from the last tab to the new one (nav-chrome.css).
+  const want = tabs.map(({ tab, r }) => [tab, data(r, "tabtitle"), data(r, "tabsymbol"), data(r, "tabselectedsymbol"), data(r, "tabcontrol")].join("|")).join("\n");
   if (attr(bar, "data-want") !== want) {
     bar.setAttribute("data-want", want); bar.textContent = "";
-    for (const { tab, r } of tabs) {
-      const on = tab === selected, title = data(r, "tabtitle") || tab;
-      const b = el("button", "", { type: "button", role: "tab", "aria-selected": String(on), "data-control": data(r, "tabcontrol") });
-      const g = glyph(on ? data(r, "tabselectedsymbol") || data(r, "tabsymbol") : data(r, "tabsymbol"), 22);
-      if (g) b.append(el("span", "icon", {}, g));
-      b.append(el("span", "", {}, title));
-      bar.append(b);
-    }
+    for (const { tab, r } of tabs) bar.append(el("button", "", { type: "button", role: "tab", "data-control": data(r, "tabcontrol") }, el("span", "", {}, data(r, "tabtitle") || tab)));
     bar.style.setProperty("--tabs", String(tabs.length));
   }
+  tabs.forEach(({ tab, r }, i) => {
+    const b = kids(bar)[i], on = tab === selected, symbol = on ? data(r, "tabselectedsymbol") || data(r, "tabsymbol") : data(r, "tabsymbol");
+    setAttr(b, "aria-selected", String(on));
+    if (attr(b, "data-symbol") === symbol && b.hasAttribute("data-symbol")) return;
+    b.setAttribute("data-symbol", symbol);
+    kids(b).find(k => attr(k, "class") === "icon")?.remove();
+    const g = glyph(symbol, 22);
+    if (g) b.prepend(el("span", "icon", {}, g));
+  });
   if (bar.parentNode !== nav) nav.append(bar);
   // Under a sheet the bar stays below it (the backdrop is appended after).
   const b = kids(nav).find(k => k.hasAttribute("data-exact-backdrop"));
