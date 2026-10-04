@@ -242,6 +242,10 @@ extension ExactLaunch {
     }
 
     static let launchBudget = 0.0005
+
+    /// The window dispatched an input (touch ended, press, mouse up, key):
+    /// its platform timestamp, a navigation's cause (§3.6).
+    public func input(at timestamp: TimeInterval) { NavigationMarks.shared.input(at: timestamp) }
 }
 
 /// What an app (its native modules, its host adapter) reports for a module
