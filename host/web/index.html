@@ -32,6 +32,9 @@
   body { font: 16px system-ui, sans-serif; }
   button, input, textarea { all: unset; display: block; box-sizing: content-box; cursor: default; }
   select { display: block; }
+  /* A control is pressed, not read: a long press on it selects nothing and shows no callout,
+     as UIKit's controls; text an author marks `user-select: text` (and every field) still selects. */
+  button, a[data-view], summary, [data-exact-on~="press"] { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
   /* A link is a bare node too: the UA's link colour, underline and pointer
      go, as a button's control styling does. A \`link\` is block-level like any
      node; a run with an \`href\` stays inline in its paragraph. Markdown's own
@@ -115,13 +118,14 @@
   /* The page around the app is the app's (chrome.js paints <html> and theme-color in its
      backgrounds): Safari's grey tap rectangle is never drawn (a held control draws its own
      state, below), and the document never rubber-bands or chains a scroller's overscroll. */
-  html:not([data-scrolldocument]) { overscroll-behavior: none; }
+  html:not([data-scrolldocument], [data-exact-docnav]) { overscroll-behavior: none; }
   /* A root that covers the screen (`viewport-fit=cover`, whose viewport emit.rs also keeps
      from zooming) is an app's, as on the native hosts: the body is the viewport, fixed, so
      the document cannot scroll, bounce or be pulled down; only the app's scrollers scroll;
      pinch and double-tap zoom are refused. The root draws under the safe areas, which its
-     boxes read as `env(safe-area-inset-*)`. */
-  html:has(meta[name="viewport"][content*="viewport-fit=cover"]):not([data-scrolldocument]) {
+     boxes read as `env(safe-area-inset-*)`. A navigation root's page scrolls the document
+     instead, as a scroll document's does (`data-exact-docnav`, nav-chrome.css). */
+  html:has(meta[name="viewport"][content*="viewport-fit=cover"]):not([data-scrolldocument], [data-exact-docnav]) {
     overflow: hidden; touch-action: pan-x pan-y;
     & body { position: fixed; inset: 0; height: auto; overflow: hidden; }
   }
@@ -131,9 +135,9 @@
      screen, from the top edge: placed, not fixed (chrome.js marks `data-standalone` where the
      manifest's display mode is not the one launched). */
   @media (display-mode: standalone) {
-    html:has(meta[name="viewport"][content*="viewport-fit=cover"]):not([data-scrolldocument]) body { position: absolute; bottom: auto; height: 100lvh; }
+    html:has(meta[name="viewport"][content*="viewport-fit=cover"]):not([data-scrolldocument], [data-exact-docnav]) body { position: absolute; bottom: auto; height: 100lvh; }
   }
-  html[data-standalone]:has(meta[name="viewport"][content*="viewport-fit=cover"]):not([data-scrolldocument]) body { position: absolute; bottom: auto; height: 100lvh; }
+  html[data-standalone]:has(meta[name="viewport"][content*="viewport-fit=cover"]):not([data-scrolldocument], [data-exact-docnav]) body { position: absolute; bottom: auto; height: 100lvh; }
   /* A held button dims its content, as UIKit's buttons do (NativeButtonIOS.swift: 0.5); one
      with `press-scale` scales instead (LLP 1061), a native one is the browser's. Held is
      touch.js's `data-held` (UIKit's timing: late in a scroller, never for a scroll), or

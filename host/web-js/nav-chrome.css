@@ -39,9 +39,8 @@
 
 /* The bar: its material from the top edge (under the status bar) to its
    bottom, over the route's content; the title centred between its buttons. */
-[data-exact-navbar] { position: absolute; inset: 0 0 auto; z-index: 2147483000; pointer-events: none; font: 17px/1.3 var(--exact-nav-font); color: var(--exact-nav-text); -webkit-user-select: none; user-select: none; }
+[data-exact-navbar] { position: absolute; inset: 0 0 auto; z-index: 2147483000; pointer-events: none; font: 17px/1.3 var(--exact-nav-font); color: var(--exact-nav-text); -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
 [data-exact-navbar] > .bg { position: absolute; inset: 0 0 auto; height: calc(var(--exact-nav-safe-top) + var(--exact-nav-bar-height)); background: var(--exact-nav-material); -webkit-backdrop-filter: var(--exact-nav-filter); backdrop-filter: var(--exact-nav-filter); box-shadow: 0 .5px 0 var(--exact-nav-separator); }
-[data-exact-navbar] > .edge { display: none; position: absolute; inset: 0 0 auto; height: var(--exact-nav-safe-top); background: var(--exact-nav-material); -webkit-backdrop-filter: var(--exact-nav-filter); backdrop-filter: var(--exact-nav-filter); }
 [data-exact-navbar] > .bar { position: absolute; left: 0; right: 0; top: var(--exact-nav-safe-top); height: var(--exact-nav-bar-height); display: flex; align-items: center; padding: 0 4px; box-sizing: border-box; }
 [data-exact-navbar] .title { position: absolute; left: 30%; right: 30%; text-align: center; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 [data-exact-navbar] .lead, [data-exact-navbar] .trail { display: flex; align-items: center; min-width: 0; max-width: 30%; }
@@ -56,7 +55,7 @@
 [data-exact-navbar] button { all: unset; pointer-events: auto; box-sizing: border-box; display: inline-flex; align-items: center; gap: 2px; min-width: 44px; max-width: 100%; height: 44px; padding: 0 8px; border-radius: 10px; color: var(--exact-nav-tint); cursor: pointer; -webkit-tap-highlight-color: transparent; }
 [data-exact-navbar] button > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 [data-exact-navbar] button svg { flex: none; }
-[data-exact-navbar] button:active { opacity: .45; }
+[data-exact-navbar] button:is([data-held], :focus-visible:active) { opacity: .45; }
 #exact-root [data-exact-navbar] button:focus-visible, #exact-root [data-exact-tabbar] button:focus-visible { outline: 2px solid var(--exact-nav-tint); outline-offset: -2px; }
 @media (hover: hover) { [data-exact-navbar] button:hover, [data-exact-tabbar] button:hover { background: var(--exact-nav-hover); } }
 
@@ -67,17 +66,30 @@
   [data-exact-chromed][data-exact-large] { --exact-nav-large: var(--exact-nav-large-height); }
   [data-exact-navbar][data-large] .large { display: block; }
   [data-exact-navbar][data-large] .large > h1 { animation: exact-nav-lift linear both; animation-timeline: --exact-nav; animation-range: 0 var(--exact-nav-large-height); }
-  [data-exact-navbar][data-large] > .bg, [data-exact-navbar][data-large] .title { opacity: 0; animation: exact-nav-in linear both; animation-timeline: --exact-nav; animation-range: calc(var(--exact-nav-large-height) - 10px) var(--exact-nav-large-height); }
-  [data-exact-navbar][data-large] > .edge { display: block; opacity: 0; animation: exact-nav-in linear both; animation-timeline: --exact-nav; animation-range: 0 8px; }
+  [data-exact-navbar][data-large] > .bg, [data-exact-navbar][data-large] .title { opacity: 0; animation: exact-nav-in linear both; animation-timeline: --exact-nav; animation-range: calc(var(--exact-nav-large-height) - 26px) calc(var(--exact-nav-large-height) - 10px); }
+  /* On the page (below), the large title is the document's and the bar
+     follows the root's scroll: the title rides up under the bar, clipped at
+     its edge, the material and the inline title arriving as it goes. */
+  html[data-exact-docnav] [data-exact-doc] > [data-exact-navbar][data-large] {
+    & .large { animation: exact-nav-clip linear both; animation-timeline: scroll(root block); animation-range: 0 var(--exact-nav-large-height); }
+    & .large > h1 { animation: none; }
+    & > .bg, & .title { animation-timeline: scroll(root block); }
+  }
+  /* A route shown beside the page for a slide: its bar as at the offset it left at. */
+  [data-exact-frozen] > [data-exact-navbar][data-large] {
+    & .large > h1 { animation: none; transform: translateY(var(--exact-frozen-lift, 0px)); }
+    & > .bg, & .title { animation: none; opacity: var(--exact-frozen-in, 0); }
+  }
 }
+@keyframes exact-nav-clip { to { clip-path: inset(var(--exact-nav-large-height) 0 -200px 0); } }
 @keyframes exact-nav-lift { to { transform: translateY(calc(-1 * var(--exact-nav-large-height))); } }
 @keyframes exact-nav-in { from { opacity: 0; } to { opacity: 1; } }
 
 /* The tab bar: a floating bar; the selected tab in the tint. */
-[data-exact-tabbar] { position: absolute; left: 50%; transform: translateX(-50%); bottom: var(--exact-tabbar-bottom); width: min(calc(100% - 32px), calc(var(--tabs, 3) * var(--exact-tabbar-item))); height: var(--exact-tabbar-height); z-index: 2147483010; display: flex; padding: 0 4px; box-sizing: border-box; border-radius: calc(var(--exact-tabbar-height) / 2); background: var(--exact-tabbar-background); box-shadow: var(--exact-tabbar-shadow), 0 0 0 .5px var(--exact-tabbar-border); font: 500 11px/1.2 var(--exact-nav-font); -webkit-user-select: none; user-select: none; }
+[data-exact-tabbar] { position: absolute; left: 50%; transform: translateX(-50%); bottom: var(--exact-tabbar-bottom); width: min(calc(100% - 32px), calc(var(--tabs, 3) * var(--exact-tabbar-item))); height: var(--exact-tabbar-height); z-index: 2147483010; display: flex; padding: 0 4px; box-sizing: border-box; border-radius: calc(var(--exact-tabbar-height) / 2); background: var(--exact-tabbar-background); box-shadow: var(--exact-tabbar-shadow), 0 0 0 .5px var(--exact-tabbar-border); font: 500 11px/1.2 var(--exact-nav-font); -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
 [data-exact-tabbar] button { all: unset; flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; margin: 4px 0; border-radius: calc(var(--exact-tabbar-height) / 2 - 4px); color: var(--exact-tabbar-text); cursor: pointer; -webkit-tap-highlight-color: transparent; }
 [data-exact-tabbar] button[aria-selected="true"] { color: var(--exact-tabbar-selected); }
-[data-exact-tabbar] button:active { opacity: .45; }
+[data-exact-tabbar] button:is([data-held], :focus-visible:active) { opacity: .45; }
 [data-exact-tabbar] .icon { height: 26px; display: flex; align-items: center; justify-content: center; }
 
 /* Sheets, their backdrop, and what a transition keeps on screen. */
@@ -86,3 +98,36 @@
 [data-exact-sheet]::before { content: none !important; }
 [data-exact-backdrop] { position: absolute; inset: 0; z-index: 2147483020; background: var(--exact-sheet-dim); -webkit-tap-highlight-color: transparent; }
 [data-exact-ghost] { pointer-events: none; }
+
+/* The page's root scrolls the document (nav-chrome.js): the body and the
+   root grow with its route, whose first scroller is a plain block, so Safari
+   draws it under its bars and a tap on the status bar scrolls it up; the
+   bars, the tab bar and every other route shown are fixed boxes over it.
+   Zoom stays refused and the page never pans sideways; a sheet locks it. */
+html[data-exact-docnav] {
+  touch-action: pan-x pan-y;
+  scroll-padding-top: calc(env(safe-area-inset-top, 0px) + 44px);
+  & body { height: auto; min-height: 100%; }
+  & #exact-root { height: auto; min-height: 100%; overflow-x: clip; }
+  /* Safari 26 paints its status bar in one solid colour, a fixed box's at the top edge (the
+     bar's), which it reads only now and then (never as a scroll-driven animation fades it, and
+     kept when the box goes): the page's bars are the canvas's colour, a little clear, so the
+     status bar and the bar are one surface whatever Safari last read. */
+  & [data-exact-page] { height: auto !important; min-height: 100%; --exact-nav-material: rgb(from var(--exact-canvas, Canvas) r g b / .85); }
+  & [data-exact-page] > [data-exact-chromed], & [data-exact-page] > [data-exact-ghost] { position: fixed !important; }
+  & [data-exact-page] > [data-exact-off] { display: none !important; }
+  & [data-exact-page] > [data-exact-doc] { position: relative !important; inset: auto !important; height: auto !important; min-height: 100vh; }
+  & [data-exact-doc] [data-exact-inset]:not([data-exact-inset="route"]) { overflow-x: clip !important; overflow-y: visible !important; height: auto !important; max-height: none !important; scroll-timeline: none; }
+  & [data-exact-doc] > [data-exact-navbar] { display: contents; }
+  & [data-exact-doc] > [data-exact-navbar] > :is(.bg, .bar, .grab) { position: fixed; z-index: 2147483000; }
+  & [data-exact-page] > :is([data-exact-tabbar], [data-exact-backdrop]) { position: fixed; }
+  /* A tab's Safari draws the page under its toolbar, below the viewport, where it clips the
+     fixed boxes: the page itself dims under a sheet (its backdrop only takes the taps). */
+  & [data-exact-page]::after { content: ""; position: absolute; inset: 0; z-index: 2147483015; pointer-events: none; background: var(--exact-sheet-dim); opacity: 0; transition: opacity .3s ease-out; }
+  & [data-exact-page] > [data-exact-backdrop] { background: none; }
+  &[data-exact-locked] [data-exact-page]::after { opacity: 1; }
+}
+/* A sheet locks the page (Safari still pans a hidden overflow by touch: nav-chrome.js holds
+   those), and its scroller never hands its overscroll to the page. */
+html[data-exact-docnav][data-exact-locked] { overflow: hidden; }
+html[data-exact-docnav] [data-exact-sheet] [data-exact-inset] { overscroll-behavior: contain; }
