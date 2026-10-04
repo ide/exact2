@@ -762,14 +762,14 @@ impl<'a> Lowerer<'a> {
                 }
                 controls::check_zero_size(tag, expanded, children, *span)?;
                 // @ref LLP 1038 D8 — only the first root selects navigation.
-                if has(&["navigate"])
+                if (has(&["navigate"]) || has(&["traverse"]))
                     && (parent_tag.is_some()
                         || arm.is_some()
                         || order != 0
                         || !has(&["navigationKey"])
                         || !has(&["navigationBack"]))
                 {
-                    return err("lower-navigate-root", "`navigate` belongs to the navigation root (navigationKey and navigationBack)", *span);
+                    return err("lower-navigate-root", "`navigate` and `traverse` belong to the navigation root (navigationKey and navigationBack)", *span);
                 }
                 let mut bindings: Vec<BindingsRow> = Vec::new();
                 let mut handlers: Vec<(EventKind, exact_plan::ActionsId, Vec<Code>)> = Vec::new();
@@ -1354,6 +1354,7 @@ impl<'a> Lowerer<'a> {
                                 "key" => " plus the key's name",
                                 "change" | "input" => " plus the new value",
                                 "message" => " plus the message",
+                                "traverse" => " plus the destination's navigation key",
                                 "scroll" => " plus scrollLeft and scrollTop",
                                 "heightrelease" => " plus height and velocity",
                                 "panrelease" => " plus vx and vy",

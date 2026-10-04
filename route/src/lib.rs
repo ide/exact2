@@ -1,4 +1,4 @@
-//! A location, a retained stack per tab, and six pure verbs.
+//! A location, a retained stack per tab, and seven pure verbs.
 //!
 //! @ref LLP 1038 §3 (the whole core), D1–D3 (URLs and patterns), D9 (one crate).
 //!
@@ -25,7 +25,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 
 pub use location::{canonical, encode_uri_component, location_of, search_param};
-pub use router::{back, depth, go, open, params, push, replace, select, stack, top};
+pub use router::{back, back_to, depth, go, open, params, push, replace, select, stack, top};
 pub use table::encode_route_segment;
 
 /// Every table parameter, including unbound names as `""`. JSON keys are sorted;

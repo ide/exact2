@@ -6,7 +6,7 @@ let written = [], gone = new Set(), cursor = 0, first = null, originIndex = null
 let echo = null, pop = null, draining = false;
 const queue = [];
 const waiters = new Set();
-let root, navigate, log;
+let root, navigate, traverse, log;
 const routesOf = nav => nav ? [...nav.children].filter(r => r.hasAttribute("navigationKey")) : [];
 const selectedRoute = nav => routesOf(nav).find(r => r.getAttribute("navigationKey") === nav.getAttribute("navigationKey"));
 const browserIndex = () => globalThis.navigation?.currentEntry?.index ?? null;
@@ -66,11 +66,17 @@ function popped({ j, state, url }) {
   const routes = routesOf(nav), selected = routes.indexOf(selectedRoute(nav));
   const back = owned && j === cursor - 1 && selected > 0
     && routes[selected - 1].getAttribute("navigationKey") === String(entry.id);
+  // @ref LLP 1035.001.000 — Back over any number of entries to a route still
+  // beneath the selected one is one `traverse` to its key, where the root
+  // declares it; otherwise one step presses Back and more navigate, as before.
+  const beneath = owned && j < cursor
+    && routes.slice(0, Math.max(selected, 0)).some(r => r.getAttribute("navigationKey") === String(entry.id));
   pop = {};
   try {
-    if (back) pressBack(nav);
-    else navigate(target);
-    const accepted = back ? last?.top === entry.id : pop.op?.url === target;
+    const traversed = beneath && traverse(String(entry.id));
+    if (!traversed && back) pressBack(nav);
+    else if (!traversed) navigate(target);
+    const accepted = back || traversed ? last?.top === entry.id : pop.op?.url === target;
     if (accepted) {
       cursor = j ?? cursor;
       first = Math.min(first, cursor);
@@ -84,7 +90,8 @@ function popped({ j, state, url }) {
         commit(op);
       }
     } else {
-      if (back) log("history: Back refused; restoring the entry");
+      if (traversed) log(`history: traverse to ${entry.id} refused; restoring the entry`);
+      else if (back) log("history: Back refused; restoring the entry");
       else log(`history: navigate ${JSON.stringify(target)} refused; restoring the entry`);
       if (j !== null && j !== cursor) go(cursor, j);
       else history.replaceState(written[cursor], "", location.origin + written[cursor].url);
@@ -109,8 +116,8 @@ function settled() {
 }
 
 export const navigation = {
-  connect(hostRoot, dispatch, journal) {
-    root = hostRoot; navigate = dispatch; log = journal;
+  connect(hostRoot, dispatch, journal, traverseTo = () => false) {
+    root = hostRoot; navigate = dispatch; log = journal; traverse = traverseTo;
     addEventListener("popstate", event => {
       if (!last) return;
       const index = browserIndex();

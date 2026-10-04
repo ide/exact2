@@ -322,6 +322,8 @@ uint32_t exact_set_launch_location(ExactRuntime rt, size_t len);
  * 5 = blur, 6 = key, 7 = submit, 8 = iframe load, 9 = iframe message,
  * 10 = contextmenu, 11 = dblclick, 12 = swiperight, 13 = scroll (UTF-8 scrollLeft,scrollTop),
  * 14 = navigate (UTF-8 location; navigation root only, LLP 1038 D8),
+ * 29 = traverse (UTF-8 navigation key of the route the platform went back
+ *      to; navigation root only, LLP 1035.001.000),
  * 15 = heightrelease, 16 = transformgeometry, 17 = transformrelease,
  * 18 = reorder (collection move payload),
  * 20 = pan (UTF-8 dx,dy; incremental viewport CSS pixels, LLP 1043.000 D8),

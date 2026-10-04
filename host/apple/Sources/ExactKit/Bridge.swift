@@ -410,6 +410,14 @@ final class Runtime {
             return read(exact_dispatch(rt, view, 14, n, now))
         }
     }
+    /// The navigation root's `traverse`: the key of the route the platform
+    /// went back to (LLP 1035.001.000; ABI kind 29).
+    func traverse(_ view: UInt32, _ key: String, now: Double) -> Batch {
+        return on {
+            let n = write(key)
+            return read(exact_dispatch(rt, view, 29, n, now))
+        }
+    }
     func advance(now: Double, untilRequest: Bool = false) -> Batch { on { read(exact_advance(rt, now, untilRequest ? 1 : 0)) } }
     func frame(now: Double) -> Batch { on { read(exact_frame(rt, now)) } }
     func presentFrames(_ yes: Bool) { on { () -> Void in _ = exact_present_frames(rt, yes ? 1 : 0) } }

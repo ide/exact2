@@ -20,6 +20,9 @@ protocol TabContainer: AnyObject {
     var controller: UIViewController { get }
     /// A stack container's navigation controller; nil for the others.
     var stack: UINavigationController? { get }
+    /// The screens it shows now, root first: a stack's own, or what it was
+    /// last given (LLP 1035.001.000 D2 reads it back).
+    var screens: [UIViewController] { get }
     /// The tab's screens, root first. A stack container's selected tab is
     /// NavigationHost's to drive, with animation; this is the plain swap.
     func show(_ screens: [UIViewController])
@@ -31,6 +34,7 @@ final class StackContainer: TabContainer {
     init(_ navigation: UINavigationController) { self.navigation = navigation }
     var controller: UIViewController { navigation }
     var stack: UINavigationController? { navigation }
+    var screens: [UIViewController] { navigation.viewControllers }
     func show(_ screens: [UIViewController]) {
         let current = navigation.viewControllers
         if current.count != screens.count || !zip(current, screens).allSatisfy({ $0 === $1 }) {
@@ -52,6 +56,7 @@ final class ScreenContainer: UIViewController, TabContainer {
     required init?(coder: NSCoder) { nil }
     var controller: UIViewController { self }
     var stack: UINavigationController? { nil }
+    var screens: [UIViewController] { shown.map { [$0] } ?? [] }
     func show(_ screens: [UIViewController]) {
         let root = screens.first
         guard root !== shown else { return }
@@ -80,6 +85,12 @@ final class ModuleContainer: TabContainer {
     var kind: String { native.name }
     var controller: UIViewController { native.controller }
     var stack: UINavigationController? { nil }
-    func show(_ screens: [UIViewController]) { native.setScreens(screens) }
+    /// What the module was given: its container shows the app's screens, and
+    /// any navigation inside it is the module's own, not a route.
+    private(set) var screens: [UIViewController] = []
+    func show(_ screens: [UIViewController]) {
+        self.screens = screens
+        native.setScreens(screens)
+    }
 }
 #endif
