@@ -101,3 +101,36 @@ fn observe_arguments_are_checked() {
         );
     }
 }
+
+const SCREEN: &str = r#"component App
+  state loaded = false
+  action load
+    loaded = true
+  view
+    column aria-busy=(not loaded) testId="forecast"
+      button press=load testId="load"
+        text "Load"
+"#;
+
+/// `aria-busy` (Exact Observe design §3.5): a mounted busy element holds the
+/// settle ledger, named by its test id, until it is no longer busy.
+#[test]
+fn aria_busy_holds_the_ledger_until_cleared() {
+    let mut r = Runner::boot(
+        contract::compile(SCREEN).unwrap(),
+        NoData,
+        exact_kernel::Kernel::with_monospace(),
+        Default::default(),
+        "/",
+    )
+    .unwrap();
+    assert_eq!(
+        r.outstanding().busy,
+        vec!["forecast".to_string()],
+        "busy at boot"
+    );
+    assert!(!r.outstanding().is_clear());
+    r.act("load", vec![]).unwrap();
+    assert!(r.outstanding().busy.is_empty(), "not busy once loaded");
+    assert!(r.outstanding().is_clear());
+}
