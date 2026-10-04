@@ -435,9 +435,20 @@ fn run_check_with(transport: &dyn ibex2::stdlib::fetch::Transport) -> String {
             .ok_or_else(|| "no store is open".to_string())
             .and_then(Client::begin_check)
     };
+    // Exact Observe design §3.8: the download is the blobs, from the first
+    // request after the head was admitted to the update staged; a check that
+    // fetched no blob (current, or every file already held) downloaded nothing.
+    let mut first_blob: Option<std::time::Instant> = None;
+    let mut blobs = 0usize;
     let downloaded = request.map(|request| {
         let head = request.head_url().to_string();
-        request.fetch(&mut |url| fetch_one(transport, Some(&head), url))
+        request.fetch(&mut |url| {
+            if url != head {
+                first_blob.get_or_insert_with(std::time::Instant::now);
+                blobs += 1;
+            }
+            fetch_one(transport, Some(&head), url)
+        })
     });
     let mut guard = lock(&CLIENT);
     let outcome = match (guard.as_mut(), downloaded) {
@@ -445,7 +456,13 @@ fn run_check_with(transport: &dyn ibex2::stdlib::fetch::Transport) -> String {
         (_, Err(why)) => exact_update::Outcome::Refused(why),
         (None, _) => exact_update::Outcome::Refused("no store is open".into()),
     };
-    let line = outcome.to_string();
+    let mut line = outcome.to_string();
+    if let (exact_update::Outcome::Staged { entry, .. }, Some(started)) = (&outcome, first_blob) {
+        line.push_str(&format!(
+            "; downloaded {blobs} files in {:.1} ms; entry {entry}",
+            started.elapsed().as_secs_f64() * 1000.0
+        ));
+    }
     let mut snap = lock(&SNAPSHOT);
     snap.status = guard.as_ref().map(Client::status);
     snap.line = Some(format!("exact update: {line}"));
@@ -722,7 +739,13 @@ mod tests {
             let response = responsive_rx.recv_timeout(std::time::Duration::from_secs(2));
             release_tx.send(()).unwrap();
             foreground.join().unwrap();
-            assert_eq!(checking.join().unwrap(), "staged seq 2");
+            // The download is timed and counted (Exact Observe design §3.8).
+            let line = checking.join().unwrap();
+            assert!(
+                line.starts_with("staged seq 2; downloaded 1 files in "),
+                "{line}"
+            );
+            assert!(line.contains(" ms; entry "), "{line}");
             assert_eq!(response.unwrap(), (1, false));
             let mut delivery = Delivery::default();
             status_into(&mut delivery);
