@@ -135,6 +135,10 @@ impl Display {
     fn sequence(&self) -> Option<u32> {
         self.flips.sequence
     }
+    /// The kernel's timestamp of the last completed flip (CLOCK_MONOTONIC).
+    fn last_flip(&self) -> Option<std::time::Duration> {
+        self.flips.at
+    }
     fn fd(&self) -> i32 {
         self.card.0.as_raw_fd()
     }
@@ -187,6 +191,7 @@ struct FlipState {
     first: bool,
     pending: Option<(usize, SubmittedFrame)>,
     sequence: Option<u32>,
+    at: Option<std::time::Duration>,
 }
 impl Default for FlipState {
     fn default() -> Self {
@@ -195,6 +200,7 @@ impl Default for FlipState {
             first: true,
             pending: None,
             sequence: None,
+            at: None,
         }
     }
 }
@@ -226,7 +232,7 @@ impl FlipState {
         crtc: crtc::Handle,
         read: impl FnOnce() -> std::io::Result<Vec<Event>>,
     ) -> std::io::Result<Option<SubmittedFrame>> {
-        let Some(sequence) = receive_flip(crtc, self.sequence, read)? else {
+        let Some((sequence, at)) = receive_flip(crtc, self.sequence, read)? else {
             return Ok(None);
         };
         let Some((back, frame)) = self.pending.take() else {
@@ -234,6 +240,7 @@ impl FlipState {
         };
         self.front = back;
         self.sequence = Some(sequence);
+        self.at = Some(at);
         Ok(Some(frame))
     }
 }
@@ -246,7 +253,7 @@ fn receive_flip(
     crtc: crtc::Handle,
     last_sequence: Option<u32>,
     read: impl FnOnce() -> std::io::Result<Vec<Event>>,
-) -> std::io::Result<Option<u32>> {
+) -> std::io::Result<Option<(u32, std::time::Duration)>> {
     let events = match read() {
         Ok(events) => events,
         Err(e)
@@ -267,7 +274,8 @@ fn receive_flip(
                     distance != 0 && distance < 1 << 31
                 }) =>
         {
-            Some(e.frame)
+            // `duration` is the kernel's flip timestamp (tv_sec/tv_usec).
+            Some((e.frame, e.duration))
         }
         _ => None,
     }))
@@ -337,6 +345,10 @@ pub fn run<D: DataSource + Default>(config: &mut Config, started: Instant) -> i3
     let (pw, ph) = display.size();
     let viewport = (pw as f32 / config.scale, ph as f32 / config.scale);
     let wall = || started.elapsed().as_secs_f64() * 1000.0;
+    // Exact Observe design §3.2–3.5: the launch marks, on BOOTTIME.
+    let mut marks = crate::launch_marks::LaunchMarks::new();
+    let observe_log = std::env::var("EXACT_OBSERVE_LOG").as_deref() == Ok("1");
+    marks.launch_end();
     let (mut p, error) = match crate::app::boot_presenter::<D>(config, viewport) {
         Ok(v) => v,
         Err(e) => {
@@ -403,7 +415,12 @@ pub fn run<D: DataSource + Default>(config: &mut Config, started: Instant) -> i3
             if measured {
                 frames.submitted(wall(), p.host().runner().seq(), p.hosts);
             }
-            match display.submit(frame) {
+            let first = first_pixel.is_none();
+            let submitted = display.submit(frame);
+            if submitted.is_ok() {
+                marks.submitted(first);
+            }
+            match submitted {
                 Ok(Some(frame)) => presented(
                     &mut p,
                     frame,
@@ -420,6 +437,15 @@ pub fn run<D: DataSource + Default>(config: &mut Config, started: Instant) -> i3
         }
         if p.module_pending() {
             p.first_pixel();
+        }
+        if first_pixel.is_some() && !p.module_pending() && !marks.done() {
+            marks.activated();
+            marks.turn(&crate::launch_marks::items(
+                &p.host().runner().outstanding(),
+            ));
+        }
+        if observe_log && marks.take_done() {
+            eprintln!("observe: startup {}", marks.line());
         }
         let now = wall();
         let mut timeout = work_timeout(
@@ -461,6 +487,10 @@ pub fn run<D: DataSource + Default>(config: &mut Config, started: Instant) -> i3
         match poll(&fds, display.fd(), timeout) {
             Ok(true) => match display.ready() {
                 Ok(Some(frame)) => {
+                    if let Some(at) = display.last_flip() {
+                        let ledger = crate::launch_marks::items(&p.host().runner().outstanding());
+                        marks.flipped(at, Some(&ledger));
+                    }
                     presented(
                         &mut p,
                         frame,
