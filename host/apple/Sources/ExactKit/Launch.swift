@@ -22,7 +22,7 @@ public final class ExactLaunch: NSObject {
     public static let shared = ExactLaunch()
 
     public enum Mark: String, CaseIterable {
-        case process, constructor, delegateInit, didFinishLaunching, scene, boot, commit, present, activated
+        case process, constructor, delegateInit, didFinishLaunching, scene, boot, commit, present, activated, interactive
     }
 
     let facts = exact_launch_constructor_facts()
@@ -39,6 +39,19 @@ public final class ExactLaunch: NSObject {
     private var link: CADisplayLink?
     /// The last display-link sample: its vsync time and its observed interval.
     private var vsync: (at: Double, interval: Double)?
+    /// TTI (§3.5): how startup ended, what was still outstanding, whether the
+    /// screen changed since its last presented frame, and the vsync a ready
+    /// candidate waits for.
+    private(set) var ttiOutcome: String?
+    private(set) var lastOutstanding: [String] = []
+    /// Each distinct outstanding set the ledger passed through, with its time
+    /// from process start: how TTI was reached (`state.observe`, the smoke).
+    private(set) var trace: [String] = []
+    private(set) var failedResources: [String] = []
+    private var contentDirty = false
+    private var candidate: Double?
+    private var evaluateScheduled = false
+    static let ttiTimeout = 30.0
 
     private override init() {
         super.init()
@@ -72,6 +85,11 @@ public final class ExactLaunch: NSObject {
         guard suppressed == nil, !ExactEnv.agentMode else { return }
         watchVsync()
         watchInterruption()
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.ttiTimeout) { [weak self] in
+            guard let self, ttiOutcome == nil, suppressed == nil else { return }
+            if let o = outstandingNow() { lastOutstanding = o }
+            finish("timeout")
+        }
     }
 
     /// The first scene connected. UIKit connects a foreground launch's scene
@@ -113,7 +131,16 @@ public final class ExactLaunch: NSObject {
     func activated(_ session: ExactSession, ok: Bool) {
         guard session === launchSession, activation == "pending" else { return }
         activation = ok ? "ready" : "failed"
-        if ok { marks[.activated] = CACurrentMediaTime() }
+        if ok { marks[.activated] = CACurrentMediaTime() } else { finish("activation_failed") }
+        scheduleEvaluate()
+    }
+
+    /// A batch applied to the launch session: re-read the ledger once this
+    /// turn (and the commit that ends it) is done.
+    func applied(_ session: ExactSession, changed: Bool) {
+        guard session === launchSession, ttiOutcome == nil else { return }
+        if changed { contentDirty = true; candidate = nil }
+        scheduleEvaluate()
     }
 
     // MARK: Commit and vsync
@@ -148,6 +175,7 @@ public final class ExactLaunch: NSObject {
         let interval = link.targetTimestamp - link.timestamp
         vsync = (link.timestamp, interval > 0 ? interval : link.duration)
         resolvePresent()
+        confirmCandidate()
     }
 
     /// F0: the first vsync strictly after the commit, on the grid of the
@@ -158,6 +186,77 @@ public final class ExactLaunch: NSObject {
         var g = v.at + ((c0 - v.at) / v.interval).rounded(.up) * v.interval
         if g <= c0 { g += v.interval }
         marks[.present] = g
+        scheduleEvaluate()
+    }
+
+    /// The first vsync strictly after `t`, on the last sample's grid.
+    private func nextVsync(after t: Double) -> Double? {
+        guard let v = vsync, v.interval > 0 else { return nil }
+        var g = v.at + ((t - v.at) / v.interval).rounded(.up) * v.interval
+        if g <= t { g += v.interval }
+        return g
+    }
+
+    // MARK: TTI (§3.5)
+
+    private func scheduleEvaluate() {
+        guard !evaluateScheduled, ttiOutcome == nil, suppressed == nil, !ExactEnv.agentMode else { return }
+        evaluateScheduled = true
+        DispatchQueue.main.async { [weak self] in
+            self?.evaluateScheduled = false
+            self?.evaluate()
+        }
+    }
+
+    /// What is still outstanding for the launch session: the runner's ledger
+    /// and the host's. Empty when the screen can be used.
+    private func outstandingNow() -> [String]? {
+        guard let session = launchSession else { return nil }
+        guard let data = session.agent("{\"op\":\"outstanding\"}").data(using: .utf8),
+              let o = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        if o["poisoned"] as? Bool == true { finish("logic_failed"); return nil }
+        failedResources = o["failed"] as? [String] ?? []
+        var out: [String] = []
+        for key in ["requests", "streams", "awaiting", "deferred", "oneShots", "thens"] {
+            out += (o[key] as? [String] ?? []).map { "\(key):\($0)" }
+        }
+        if activation != "ready" { out.append("activation") }
+        out += session.hostOutstanding.map { "host:\($0)" }
+        return out
+    }
+
+    /// At a completion barrier (the turn after an apply or an activation):
+    /// when nothing is outstanding, I is the screen's next presentation if it
+    /// changed since its last one, else now; never before the first frame.
+    private func evaluate() {
+        guard ttiOutcome == nil, suppressed == nil, let outstanding = outstandingNow() else { return }
+        if outstanding != lastOutstanding || trace.isEmpty, trace.count < 32, let p = marks[.process] {
+            trace.append("\(String(format: "%.1f", (CACurrentMediaTime() - p) * 1000)) [\(outstanding.joined(separator: ", "))]")
+        }
+        lastOutstanding = outstanding
+        guard outstanding.isEmpty, let f0 = marks[.present] else { candidate = nil; return }
+        let now = CACurrentMediaTime()
+        if contentDirty {
+            candidate = nextVsync(after: now)
+            return
+        }
+        marks[.interactive] = max(now, f0)
+        finish(failedResources.isEmpty ? "settled" : "failed")
+    }
+
+    /// A ready candidate holds if nothing came outstanding before its vsync.
+    private func confirmCandidate() {
+        guard let target = candidate, let v = vsync, v.at >= target, ttiOutcome == nil else { return }
+        candidate = nil
+        guard let outstanding = outstandingNow(), outstanding.isEmpty else { scheduleEvaluate(); return }
+        contentDirty = false
+        marks[.interactive] = max(target, marks[.present] ?? target)
+        finish(failedResources.isEmpty ? "settled" : "failed")
+    }
+
+    private func finish(_ outcome: String) {
+        guard ttiOutcome == nil else { return }
+        ttiOutcome = outcome
         stopWatching()
     }
 
@@ -173,7 +272,7 @@ public final class ExactLaunch: NSObject {
         let name = UIApplication.didEnterBackgroundNotification
         #endif
         NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
-            guard let self, marks[.present] == nil, suppressed == nil else { return }
+            guard let self, ttiOutcome == nil, suppressed == nil else { return }
             suppressed = "interrupted"
             stopWatching()
         }
@@ -210,6 +309,10 @@ public final class ExactLaunch: NSObject {
         if let launchType { out["launchType"] = launchType }
         if let suppressed { out["suppressed"] = suppressed }
         if let bootPath { out["bootPath"] = bootPath }
+        if let ttiOutcome { out["tti"] = ttiOutcome }
+        if !lastOutstanding.isEmpty { out["outstanding"] = lastOutstanding }
+        if !failedResources.isEmpty { out["failed"] = failedResources }
+        if !trace.isEmpty { out["trace"] = trace }
         if let session { out["launchSession"] = session === launchSession }
         if facts.traced != 0 { out["debugger"] = true }
         if let p = marks[.process] {
@@ -226,6 +329,7 @@ public final class ExactLaunch: NSObject {
             m["\(type)LaunchTime"] = (l - p) + (dfl - md)
         }
         if let f0 = marks[.present] { m["timeToFirstRender"] = f0 - dfl }
+        if let i = marks[.interactive], ttiOutcome == "settled" || ttiOutcome == "failed" { m["timeToInteractive"] = i - dfl }
         return m
     }
 }
@@ -239,6 +343,7 @@ extension ExactLaunch {
         let order = Mark.allCases.map(\.rawValue)
         let marks = (r["marks"] as? [String: Double] ?? [:]).sorted { order.firstIndex(of: $0.key)! < order.firstIndex(of: $1.key)! }
             .map { "\($0.key) \(String(format: "%.1f", $0.value))" }.joined(separator: " · ")
-        return "\(r["launchType"] ?? "?") \(r["bootPath"] ?? "?") \(r["suppressed"].map { "suppressed: \($0) " } ?? "")activation \(r["activation"] ?? "?"); \(metrics.isEmpty ? "no metrics" : metrics); marks \(marks)"
+        let trace = (r["trace"] as? [String] ?? []).joined(separator: " → ")
+        return "\(r["launchType"] ?? "?") \(r["bootPath"] ?? "?") tti \(r["tti"] ?? "pending")\((r["outstanding"] as? [String]).map { " outstanding \($0)" } ?? "") \(r["suppressed"].map { "suppressed: \($0) " } ?? "")activation \(r["activation"] ?? "?"); \(metrics.isEmpty ? "no metrics" : metrics); marks \(marks); ledger \(trace)"
     }
 }
