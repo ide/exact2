@@ -60,6 +60,7 @@ pub mod image;
 #[cfg(target_os = "linux")]
 pub mod input;
 mod media_session;
+pub mod launch_marks;
 pub mod navigation;
 pub mod paint;
 pub mod picker;
