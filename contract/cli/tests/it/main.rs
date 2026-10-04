@@ -83,6 +83,7 @@ mod navigation_split;
 mod negative_margin;
 mod notify;
 mod overlay;
+mod observe_commands;
 mod packages;
 mod pan;
 mod pan_release;
