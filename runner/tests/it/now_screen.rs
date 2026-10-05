@@ -827,6 +827,30 @@ fn the_timer_fires_under_the_seekable_clock() {
 }
 
 #[test]
+fn back_from_the_background_a_timer_fires_once_for_the_beats_it_missed() {
+    let mut r = boot();
+    assert_eq!(
+        r.advance(2_500.0).unwrap().len(),
+        2,
+        "ticks at 1000 and 2000"
+    );
+    // An hour away: without coalescing, 3,600 ticks would fire on return.
+    r.coalesce_missed(3_602_500.0);
+    let receipts = r.advance(3_602_500.0).unwrap();
+    assert_eq!(receipts.len(), 1, "one tick for the hour slept through");
+    assert_eq!(
+        r.slot("nowMs"),
+        Some(&Value::Number(3_602_000.0)),
+        "at the last beat missed, so the app sees how long it was away"
+    );
+    assert_eq!(
+        r.advance(3_603_000.0).unwrap().len(),
+        1,
+        "the beat keeps its phase"
+    );
+}
+
+#[test]
 fn commands_exit_the_side_and_refusals_leave_the_kernel_untouched() {
     let mut r = boot();
     r.act("setDark", vec![Value::str("dark")]).unwrap();

@@ -83,8 +83,11 @@ enum PageFacts {
         let workspace = [NSApplication.didHideNotification, NSApplication.didUnhideNotification,
                          NSWindow.didChangeOcclusionStateNotification, agentChanged]
         #else
+        // didBecomeActive too: at willEnterForeground UIKit still reports the
+        // background (its "will" notifications precede the state), so the
+        // page read hidden then, and nothing after it said visible again.
         let workspace = [UIApplication.didEnterBackgroundNotification, UIApplication.willEnterForegroundNotification,
-                         UIContentSizeCategory.didChangeNotification, agentChanged]
+                         UIApplication.didBecomeActiveNotification, UIContentSizeCategory.didChangeNotification, agentChanged]
         #endif
         return workspace.map {
             NotificationCenter.default.addObserver(forName: $0, object: nil, queue: .main) { _ in

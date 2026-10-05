@@ -140,6 +140,26 @@ impl<D: DataSource> Runner<D> {
         self.advance_within(now_ms, false)
     }
 
+    /// The host was suspended (an app in the background, a page hidden) and
+    /// is back at `now_ms`: an interval timer that slept through several of
+    /// its beats fires once, at the last of them, when the clock next moves —
+    /// as UIKit's and the browser's timers do — rather than once per beat
+    /// missed. Its later beats keep their phase. An advance alone still
+    /// fires every beat due (the agent's seekable clock, tests).
+    pub fn coalesce_missed(&mut self, now_ms: f64) {
+        if !now_ms.is_finite() {
+            return;
+        }
+        for (i, t) in self.timers.iter_mut().enumerate() {
+            let row = &self.plan.timers[i];
+            let interval = row.interval_ms as f64;
+            if row.once || row.frame || interval <= 0.0 || t.next_ms > now_ms {
+                continue;
+            }
+            t.next_ms += ((now_ms - t.next_ms) / interval).floor() * interval;
+        }
+    }
+
     /// Whether the host presents frames (LLP 1073 D4): while it does, frame
     /// tasks fire only at [`Runner::frame`]; while it doesn't (the default:
     /// tests, and the agent's seekable clock), every advance fires their

@@ -1118,7 +1118,15 @@ public final class ExactSession {
     /// notification, in the same turn.
     func tellPage() {
         guard booted, state != .destroyed else { return }
-        apply(runtime.setPage(PageFacts.bits))
+        let bits = PageFacts.bits
+        // Back from the background: a timer that slept through several
+        // beats fires once, as UIKit's do, not once per beat missed (which
+        // also hid the gap an app reads to know it was away). The agent's
+        // clock is its own.
+        let hidden = bits & 1 != 0
+        if pageHidden, !hidden, !ExactEnv.agentMode { runtime.coalesceMissed(now: now()) }
+        pageHidden = hidden
+        apply(runtime.setPage(bits))
         apply(runtime.setRootFontSize(PageFacts.rootFontSize))
     }
     public func resize(_ size: CGSize) { guard booted, state != .destroyed else { return }; apply(runtime.resize(width: size.width, height: size.height)) }
@@ -1127,6 +1135,8 @@ public final class ExactSession {
     public func scheme(dark: Bool) { guard booted, state != .destroyed else { return }; schemeDark = dark; apply(runtime.scheme(dark: dark)); apply(runtime.reportColors()) }
     /// The appearance last reported for the session, and each node view
     /// found painting motion in another (a sheet's override, say), by id.
+    /// Whether the page was hidden at the last report (`tellPage`).
+    private var pageHidden = false
     private(set) var schemeDark: Bool?
     private(set) var viewDark: [UInt32: Bool] = [:]
     private var pendingViewDark: [(UInt32, Bool)] = []
