@@ -22,11 +22,13 @@ final class ObserveService {
     var sending = false
     var scheduled = false
 
-    /// Sends new rows within `delay` seconds. Only one timer is pending at a time.
-    func scheduleDispatch(_ delay: Double = 5) {
+    static let logEnabled = ProcessInfo.processInfo.environment["EXACT_OBSERVE_LOG"] == "1"
+
+    /// Sends new rows within 5 seconds. Only one timer is pending at a time.
+    func scheduleDispatch() {
         guard !scheduled else { return }
         scheduled = true
-        queue.asyncAfter(deadline: .now() + delay) { [weak self] in
+        queue.asyncAfter(deadline: .now() + 5) { [weak self] in
             self?.scheduled = false
             self?.dispatch()
         }
@@ -45,12 +47,12 @@ final class ObserveService {
         for record in Self.records(handoff) {
             if record["kind"] as? String == "device" { device = record["params"] as? [String: Any] ?? [:] }
         }
-        if ProcessInfo.processInfo.environment["EXACT_OBSERVE_LOG"] == "1" { fputs("observe: service started, session \(session)\n", stderr) }
+        if Self.logEnabled { fputs("observe: service started, session \(session)\n", stderr) }
         queue.async { [self] in
             store?.saveSession(session, start: config["sessionStart"] as? Double ?? Date().timeIntervalSince1970, metadata: metadata)
             ingestCrashes()
+            scheduleDispatch()
         }
-        queue.async { [weak self] in self?.scheduleDispatch() }
     }
 
     // MARK: Journal events
@@ -110,10 +112,7 @@ final class ObserveService {
     func navigation(_ e: [String: Any], wall: Double) {
         guard let store, let name = e["name"] as? String, let value = e["value"] as? Double else { return }
         navigatedBeforeStartup = true
-        var params = globals
-        params["isAppLaunch"] = false
-        params["routeParams"] = e["routeParams"] ?? [:]
-        params["url"] = e["url"] ?? ""
+        var params = navigationParams(e, launch: false)
         for (k, v) in e where k.hasPrefix("exact.") { params[k] = v }
         store.addMetric(session: session, time: wall, category: "navigation", name: name, value: value, route: e["route"] as? String, params: params)
     }
@@ -122,10 +121,7 @@ final class ObserveService {
     /// its integration start, which Exact has no equivalent of; boot is the closest mark.
     func launchNavigation(_ e: [String: Any], wall: Double) {
         guard let store, let route = launchRoute, let marks = e["marks"] as? [String: Double], let boot = marks["boot"] else { return }
-        var params = globals
-        params["isAppLaunch"] = true
-        params["routeParams"] = route["routeParams"] ?? [:]
-        params["url"] = route["url"] ?? ""
+        var params = navigationParams(route, launch: true)
         params["exact.nav.anchor"] = "boot"
         if let present = marks["present"] {
             store.addMetric(session: session, time: wall, category: "navigation", name: "cold_ttr", value: (present - boot) / 1000, route: route["route"] as? String, params: params)
@@ -133,6 +129,11 @@ final class ObserveService {
         if let interactive = marks["interactive"], !navigatedBeforeStartup, ["settled", "failed", "declared"].contains(e["tti"] as? String ?? "") {
             store.addMetric(session: session, time: wall, category: "navigation", name: "tti", value: (interactive - boot) / 1000, route: route["route"] as? String, params: params)
         }
+    }
+
+    /// Observe's navigation params, on top of the global attributes.
+    func navigationParams(_ e: [String: Any], launch: Bool) -> [String: Any] {
+        globals.merging(["isAppLaunch": launch, "routeParams": e["routeParams"] ?? [:], "url": e["url"] ?? ""]) { $1 }
     }
 
     /// Observe's `updates/updateDownloadTime`: from the first request to the update being staged.
@@ -158,7 +159,7 @@ final class ObserveService {
         var attrs = globals
         for (k, v) in user.kept { attrs[k] = v }
         if let display = ObserveRules.displayName(e["displayName"] as? String) { attrs["expo.log.display_name"] = display }
-        let severity = ObserveWire.severities[e["severity"] as? String ?? ""] != nil ? e["severity"] as! String : "info"
+        let severity = (e["severity"] as? String).flatMap { ObserveWire.severities[$0] != nil ? $0 : nil } ?? "info"
         store.addLog(session: session, time: wall, severity: severity, name: name, body: ObserveRules.body(e["body"] as? String),
                      attributes: attrs, dropped: user.dropped)
     }
@@ -185,13 +186,12 @@ final class ObserveService {
 
     // MARK: Dispatch
 
-    var development: Bool { config["fact.development"] as? Bool == true || config["fact.agent"] as? Bool == true }
-
     /// Observe's gate: dispatching enabled, this install in the sample, and not a development
     /// build unless `dispatchInDebug`. When it fails, rows are dropped, not kept for later.
     var shouldDispatch: Bool {
         let enabled = config["dispatchingEnabled"] as? Bool ?? true
         let rate = min(max(config["sampleRate"] as? Double ?? 1, 0), 1)
+        let development = config["fact.development"] as? Bool == true || config["fact.agent"] as? Bool == true
         return enabled && ObserveWire.uniform(clientId) < rate && (!development || config["dispatchInDebug"] as? Bool == true)
     }
 
@@ -220,10 +220,11 @@ final class ObserveService {
             : store.rows("SELECT id, session, time, severity, name, body, attributes, dropped FROM logs WHERE id > ? ORDER BY id LIMIT ?", [cursor, limit])
         guard !rows.isEmpty, let highest = rows.last?.first as? Int64 else { return done() }
         var sessions: [String: [String: Any]] = [:]
-        for r in rows { if let s = r[1] as? String, sessions[s] == nil { sessions[s] = store.session(s)?.metadata } }
+        for r in rows { if let s = r[1] as? String, sessions[s] == nil { sessions[s] = store.metadata(s) } }
+        let id = clientId.uuidString.lowercased()
         let body = signal == "metrics"
-            ? ObserveWire.metricsBody(rows, sessions: sessions, clientId: clientId.uuidString.lowercased())
-            : ObserveWire.logsBody(rows, sessions: sessions, clientId: clientId.uuidString.lowercased())
+            ? ObserveWire.metricsBody(rows, sessions: sessions, clientId: id)
+            : ObserveWire.logsBody(rows, sessions: sessions, clientId: id)
         guard let data = try? JSONSerialization.data(withJSONObject: body), let endpoint = URL(string: url) else { return done() }
         var request = URLRequest(url: endpoint)
         request.httpMethod = "POST"
@@ -236,16 +237,16 @@ final class ObserveService {
                 let result: ObserveWire.Result = error != nil || status == nil
                     ? .retryable(nil)
                     : ObserveWire.classify(status: status!, retryAfter: (response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Retry-After"))
-                if ProcessInfo.processInfo.environment["EXACT_OBSERVE_LOG"] == "1" { fputs("observe: \(signal) \(rows.count) rows → \(status.map(String.init) ?? "transport error")\n", stderr) }
+                if Self.logEnabled { fputs("observe: \(signal) \(rows.count) rows → \(status.map(String.init) ?? "transport error")\n", stderr) }
                 switch result {
-                case .success, .nonRetryable:
+                case .payloadTooLarge where rows.count > 1:
+                    gate.failures = 0
+                    send(signal, url: url, limit: rows.count / 2, done: done)
+                // Success, a lone 413 row, or a status Observe does not retry: skip the chunk.
+                case .success, .nonRetryable, .payloadTooLarge:
                     gate.failures = 0
                     store.setCursor(signal, highest)
                     send(signal, url: url, limit: ObserveWire.chunk, done: done)
-                case .payloadTooLarge:
-                    gate.failures = 0
-                    if rows.count > 1 { send(signal, url: url, limit: max(1, rows.count / 2), done: done) }
-                    else { store.setCursor(signal, highest); send(signal, url: url, limit: ObserveWire.chunk, done: done) }
                 case .retryable(let after):
                     gate.failures += 1
                     gate.after = Date().addingTimeInterval(after ?? ObserveWire.backoff(attempt: gate.failures))
