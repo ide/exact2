@@ -3327,7 +3327,7 @@
       "_comment": "`-exact-apple-button-style`, a vendor property only the Apple hosts read (each platform has its own; a button may carry several): the system style a `button` (always a UIButton there) is drawn in, in UIKit's own names — UIButton.Configuration glass, prominentGlass, filled, gray, tinted or plain — from its one text and one symbol image. `none`: the author's box. Not inherited."
     },
     {
-      "bit": 178,
+      "bit": 155,
       "field": "exact_apple_glass_container",
       "codec": "f32",
       "default": -1,
