@@ -481,7 +481,11 @@ pub fn style_writes(id: u16, timeline: bool) -> Result<Vec<Write>, String> {
         | StyleId::ContentTransition
         | StyleId::ScrollEdgeEffect
         | StyleId::HoverEffect
-        | StyleId::SmartInvert => vec![],
+        | StyleId::SmartInvert
+        // Apple's button style is an attribute (rows.rs `style_row`), and a
+        // glass container groups only native glass.
+        | StyleId::ExactAppleButtonStyle
+        | StyleId::ExactAppleGlassContainer => vec![],
         StyleId::Animation => vec![with("animation", NONE)],
         // @ref LLP 1069.011 D8 — and the custom property a native button reads.
         StyleId::AccentColor => vec![
