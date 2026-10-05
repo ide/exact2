@@ -524,7 +524,7 @@ both axes as CSS's `center` is; no public API does that short of a custom
 A permitted direction makes UIKit draw its arrow toward the invoker; no
 public API places a popover on a side without one short of a custom
 `popoverBackgroundViewClass`, which this does not take on.
-`none` keeps the arrowless placement measured above. `UIMenu` exposes no
+`none` anchors at the whole invoker with UIKit's own arrow, on the side UIKit picks, never over the invoker (UIKit's default for a sheet from a control; the arrowless placement measured above covered a row's text), until the platform default `position-area: auto` lands (QUEUE). `UIMenu` exposes no
 public placement control: a menu-shaped popover presented as the system
 menu is placed by UIKit whatever its `position-area`. Linux has no popover
 presentation yet (`POPOVER_UNSUPPORTED`), so nothing there reads the row.
