@@ -53,7 +53,7 @@ final class AccessibilityTests: XCTestCase {
         let nav = NodeView(id: 3, kind: "view", presenter: p)
         let hidden = NodeView(id: 4, kind: "view", presenter: p)
         let active = NodeView(id: 5, kind: "view", presenter: p)
-        nav.props = ["navigationBack": "back", "navigationKey": "active"]
+        nav.props = ["navigationKey": "active"]
         hidden.props["navigationKey"] = "hidden"
         active.props["navigationKey"] = "active"
         p.root.addSubview(nav); nav.addSubview(hidden); nav.addSubview(active)

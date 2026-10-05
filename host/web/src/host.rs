@@ -1413,9 +1413,7 @@ impl<D: DataSource> Host<D> {
         }
         if !self.heads.is_empty() {
             let props = self.runner.kernel().node(id).expect("live").props;
-            if props.str(PropId::NavigationBack).is_some()
-                || props.str(PropId::NavigationKey).is_some()
-            {
+            if props.str(PropId::NavigationKey).is_some() {
                 self.head_dirty = true;
             }
         }

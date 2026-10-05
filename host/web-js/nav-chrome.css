@@ -1,8 +1,9 @@
 /* The navigation chrome nav-chrome.js draws (LLP 1038): in the page's sheet
    (host/web-js/build.mjs adds it when the app's module imports the chrome),
    so the bars and the tab bar are styled in the first paint. Restyle through
-   the custom properties on the navigation root. */
-[navigationBack] {
+   the custom properties on the navigator (LLP 1035.001.001 D2: keyed, with
+   keyed routes). */
+[navigationKey]:has(> [navigationKey]) {
   --exact-nav-tint: var(--exact-accent, AccentColor);
   --exact-nav-text: var(--exact-label, light-dark(#000, #fff));
   --exact-nav-material: light-dark(#f9f9f9e6, #1c1c1ee6);
@@ -70,6 +71,15 @@
    bar's, held at once (touch.js), and a drag that starts there pans nothing. */
 [data-exact-navbar] > :is(.bg, .bar), [data-exact-tabbar] { pointer-events: auto; touch-action: none; }
 
+/* A route's toolbar (LLP 1035.001.001 D6), its own authored buttons, laid in
+   its bar's row over the title: `toolbarPlacement="navigation"` ones leading,
+   after the back button (`--exact-nav-lead`, its width), the rest trailing. */
+[data-exact-bar] > [data-exact-toolbar] { position: absolute !important; left: 0 !important; right: 0 !important; top: var(--exact-nav-safe-top) !important; bottom: auto !important; height: var(--exact-nav-bar-height) !important; margin: 0 !important; padding: 0 4px 0 calc(4px + var(--exact-nav-lead, 0px)) !important; box-sizing: border-box; display: flex !important; flex-direction: row !important; align-items: center; z-index: 2147483001; pointer-events: none; background: none !important; }
+[data-exact-toolbar] > * { pointer-events: auto; }
+[data-exact-toolbar] > [data-exact-leading] { order: -1; }
+[data-exact-toolbar] > :not([data-exact-leading]):not(:not([data-exact-leading]) ~ *) { margin-left: auto; }
+:where([data-exact-toolbar]) > :where(button) { min-width: 44px; min-height: 44px; color: var(--exact-nav-tint); }
+
 /* Bar buttons: borderless, in the tint; 44px targets. */
 [data-exact-navbar] button { all: unset; pointer-events: auto; box-sizing: border-box; display: inline-flex; align-items: center; gap: 2px; min-width: 44px; max-width: 100%; height: 44px; padding: 0 8px; border-radius: 10px; color: var(--exact-nav-tint); cursor: pointer; -webkit-tap-highlight-color: transparent; }
 [data-exact-navbar] button > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -114,7 +124,7 @@
 /* The tab bar: a floating bar; the selected tab in the tint. */
 [data-exact-tabbar] { position: absolute; left: 50%; transform: translateX(-50%); bottom: var(--exact-tabbar-bottom); width: min(calc(100% - 32px), calc(var(--tabs, 3) * var(--exact-tabbar-item))); height: var(--exact-tabbar-height); z-index: 2147483010; display: flex; padding: 0 4px; box-sizing: border-box; border-radius: calc(var(--exact-tabbar-height) / 2); background: var(--exact-tabbar-background); box-shadow: var(--exact-tabbar-shadow), 0 0 0 .5px var(--exact-tabbar-border); font: 500 11px/1.2 var(--exact-nav-font); -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
 [data-exact-tabbar] button { all: unset; flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; margin: 4px 0; border-radius: calc(var(--exact-tabbar-height) / 2 - 4px); color: var(--exact-tabbar-text); cursor: pointer; -webkit-tap-highlight-color: transparent; }
-[data-exact-tabbar] button[aria-selected="true"] { color: var(--exact-tabbar-selected); }
+[data-exact-tabbar] button[aria-current="page"] { color: var(--exact-tabbar-selected); }
 [data-exact-tabbar] button:is([data-held], :focus-visible:active) { opacity: .45; }
 [data-exact-tabbar] .icon { height: 26px; display: flex; align-items: center; justify-content: center; }
 /* A press dims at once and fades back, and the selected tab's tint fades in as the last one's
@@ -173,6 +183,7 @@ html[data-exact-docnav] {
   & [data-exact-doc] [data-exact-inset]:not([data-exact-inset="route"]) { overflow-x: clip !important; overflow-y: visible !important; height: auto !important; max-height: none !important; scroll-timeline: none; }
   & [data-exact-doc] > [data-exact-navbar] { display: contents; }
   & [data-exact-doc] > [data-exact-navbar] > :is(.bg, .bar, .grab) { position: fixed; z-index: 2147483000; }
+  & [data-exact-doc][data-exact-bar] > [data-exact-toolbar] { position: fixed !important; }
   & [data-exact-page] > :is([data-exact-tabbar], [data-exact-backdrop]) { position: fixed; }
   /* A tab's Safari draws the page under its toolbar, below the viewport, where it clips the
      fixed boxes: the page itself dims under a sheet (its backdrop only takes the taps). */

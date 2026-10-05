@@ -43,6 +43,8 @@ component Interview
     nav = replace(nav, url)
   action back
     nav = back(nav)
+  action returnTo(entry: string)
+    nav = backTo(nav, entry)
   action selectTab(name: string)
     nav = select(nav, name)
   action go(url: string)
@@ -52,7 +54,7 @@ component Interview
   action home
     nav = open(nav, "/")
   view
-    main navigationKey=`${current.id}` navigationBack="back" navigate=followLink testId="navigation" width="100%" height="100%"
+    main navigationKey=`${current.id}` navigate=followLink traverse=returnTo testId="navigation" width="100%" height="100%"
       text nav.tab testId="tab"
       each e in stack(nav) key=e.id
         column navigationKey=`${e.id}` navigationPresentation=(e.name == "ask" ? "modal" : "") testId=`route-${e.id}` position="absolute" top=0 bottom=0 left=0 right=0 padding=16 gap=12 box-sizing="border-box" background-color="#ffffff" display="flex" flex-direction="column"

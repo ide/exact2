@@ -2,8 +2,9 @@
 // `navigation*` props (LLP 1038; NavigationIOS.swift, ModalIOS.swift), drawn
 // by the page: a tab bar over the tabs' rows (`navigationTab…`), a bar per
 // route that declares a `navigationTitle` (large or inline, with its
-// `navigationSubtitle` under it, a back button, a `navigationTrailing` bar
-// button), push and pop as slides, and a
+// `navigationSubtitle` under it, a back button, and the route's own
+// `role="toolbar" toolbarPlacement="navigation-bar"` laid in it), push and
+// pop as slides, and a
 // `navigationPresentation="modal"` route as a sheet at its
 // `navigationDetent` heights. An app's module imports this when its plan
 // names a title or a tab (emit.rs); it draws in each projection
@@ -27,11 +28,11 @@
 // scroller at that offset, and a sheet a fixed box. A sheet locks the
 // document while it is up.
 //
-// Contract owns every route, as on iOS: a tab tap presses the tab's
-// `navigationTabControl`, a back button (or the sheet's backdrop, or a drag
-// down) presses the root's `navigationBack` control in the active route, a
-// bar button the control its `navigationTrailing` names — the hidden
-// controls an app authors for UIKit's chrome.
+// Contract owns every route, as on iOS, and the chrome speaks for itself
+// (LLP 1035.001.001): a tab tap is the navigator's `tabselect`, a back
+// button (or a sheet's backdrop, or a drag down) its `traverse`, through
+// navigation.js, which refuses a Back a route's `closedby="none"` forbids;
+// a route's toolbar is its own authored buttons, which the bar lays out.
 import { navChrome } from "./document.js";
 import * as Symbols from "./symbols.js";
 
@@ -99,49 +100,33 @@ function glyph(name, size) {
   return svg;
 }
 
-/** Presses the control with HTML id `id` (in `scope`), as a UIKit bar
- * button or tab would; false when there is none to press. */
-function press(scope, id) {
-  if (!id) return false;
-  const c = [...scope.querySelectorAll("[id]")].find(n => n.id === id && !n.closest("[data-exact-ghost]"));
-  if (!c || c.matches(":disabled") || c.closest("[inert]")) return false;
-  c.click();
-  return true;
-}
-/** The root's back, from its active route (navigation.js `pressBack`). */
-function back(nav, route) {
-  if (presentation(route) && attr(route, "closedby") === "none") return false;
-  return press(route, attr(nav, "navigationBack"));
-}
-/** The control with HTML id `id` in a route (outside its bar and popovers). */
-function control(route, id) {
-  const stack = kids(route);
-  while (stack.length) {
-    const e = stack.pop();
-    if (e.hasAttribute("data-exact-navbar") || e.hasAttribute("popover")) continue;
-    if (id && attr(e, "id") === id) return e;
-    stack.push(...kids(e));
+/** The page's history (navigation.js): Back and tab choices go through it. */
+let Nav = null;
+/** A navigator: keyed, with keyed children — its routes (LLP 1035.001.001 D2). */
+const isNavigator = e => e.hasAttribute("navigationKey") && kids(e).some(r => r.hasAttribute("navigationKey"));
+/** The chrome's own actions, which the agent's root-scoped taps use
+ * (agent.js; LLP 1035.001.001 D7): the shown back button, a tab. */
+function chromeTap(nav, what, name) {
+  if (!States.has(nav)) return { error: "the navigator draws no chrome" };
+  if (document.querySelector("dialog:modal, :popover-open")) return { error: "a presentation covers the chrome" };
+  if (States.get(nav).anims.length) return { error: "a transition is in flight" };
+  if (what === "back") {
+    const top = routesOf(nav).find(r => attr(r, "navigationKey") === attr(nav, "navigationKey"));
+    const b = top?.querySelector(":scope > [data-exact-navbar] [data-exact-nav=back]");
+    if (!b) return { error: "no back button is shown" };
+    return Nav?.back(nav, b.getAttribute("data-to")) ? { delivery: "chrome" } : { error: "Back refused" };
   }
-  return null;
+  const tab = kids(nav).find(k => k.hasAttribute("data-exact-tabbar"))?.querySelector(`[data-tab="${CSS.escape(name ?? "")}"]`);
+  if (!tab) return { error: `no tab ${JSON.stringify(name)} in the tab bar` };
+  if (kids(nav).some(k => k.hasAttribute("data-exact-backdrop"))) return { error: "a sheet covers the tab bar" };
+  return Nav?.select(nav, name) ? { delivery: "chrome" } : { error: "tabselect refused" };
 }
 
-/** Whether `el` is a control this chrome presses (a tab's, a route's
- * `navigationTrailing`, the root's back under a bar's back button): the
- * agent's tap on it is delivered as the chrome's (agent.js), as the iOS
- * host's `activate`. */
-function standsIn(e) {
-  const nav = e.id && e.closest("[navigationBack]");
-  if (!nav || !States.has(nav)) return false;
-  const routes = routesOf(nav), route = routes.find(r => r.contains(e));
-  if (routes.some(r => data(r, "tabcontrol") === e.id)) return true;
-  if (route && data(route, "trailing") === e.id) return true;
-  return !!route && e.id === attr(nav, "navigationBack") && !!route.querySelector(":scope > [data-exact-navbar] [data-exact-nav=back]");
-}
-
-/** The chrome of every navigation root under `root`, after a projection. */
-export function update(root) {
-  if (Live) (globalThis.exact ??= {}).chrome ??= { standsIn };
-  const navs = Live ? root.querySelectorAll("[navigationBack]") : root.getElementsByTagName("*").filter(e => e.hasAttribute("navigationBack"));
+/** The chrome of every navigator under `root`, after a projection. */
+export function update(root, mirror) {
+  Nav = mirror ?? Nav;
+  if (Live) (globalThis.exact ??= {}).chrome ??= { tap: chromeTap };
+  const navs = (Live ? [...root.querySelectorAll("[navigationKey]")] : root.getElementsByTagName("*").filter(e => e.hasAttribute("navigationKey"))).filter(isNavigator);
   for (const nav of navs) project(nav);
   for (const [nav, st] of States) if (!nav.isConnected) States.delete(nav);
   if (Live) {
@@ -344,35 +329,78 @@ function fillBar(nav, r, bar, title, subtitle, large, previous, grabber) {
   setText(part(inline, "sub"), subtitle);
   setText(kids(big)[0], t);
   setText(part(big, "sub"), subtitle);
-  // Back: over a route below it in its stack (and with an enabled back
-  // control to press), the chevron with the previous title, or alone when
-  // `navigationBackButton` is "minimal".
-  const lead = part(row, "lead");
-  const backs = control(r, attr(nav, "navigationBack"));
-  const label = !previous || !backs || backs.hasAttribute("disabled") ? null
+  // Back: over a route below it in its stack, where leaving is the app's
+  // to permit (it hears `traverse`, and no route the Back removes says
+  // `closedby="none"`: navigation.js), the chevron with the previous title,
+  // or alone when `navigationBackButton` is "minimal".
+  const lead = part(row, "lead"), to = previous ? attr(previous, "navigationKey") : "";
+  const label = !previous || !Nav?.permits(nav, to) ? null
     : data(r, "backbutton") === "minimal" ? "" : ((previous.getAttribute("data-navigationtitle") ?? "").trim() || "Back");
-  if (attr(lead, "data-want") !== (label == null ? "" : `back:${label}`)) {
-    lead.setAttribute("data-want", label == null ? "" : `back:${label}`); lead.textContent = "";
+  const want = label == null ? "" : `back:${to}:${label}`;
+  if (attr(lead, "data-want") !== want) {
+    lead.setAttribute("data-want", want); lead.textContent = "";
     if (label != null) {
-      const b = el("button", "", { type: "button", "data-exact-nav": "back", "aria-label": label ? `Back to ${label}` : "Back" }, glyph("chevron.left", 22));
+      const b = el("button", "", { type: "button", "data-exact-nav": "back", "data-to": to, "aria-label": label ? `Back to ${label}` : "Back" }, glyph("chevron.left", 22));
       if (label) b.append(el("span", "", {}, label));
       lead.append(b);
     }
   }
-  const trail = part(row, "trail"), target = data(r, "trailing"), symbol = data(r, "trailingsymbol");
-  const want = target ? `${target}|${symbol}` : "";
-  if (attr(trail, "data-want") !== want) {
-    trail.setAttribute("data-want", want); trail.textContent = "";
-    if (target) {
-      const g = glyph(symbol, 20), b = el("button", "", { type: "button", "data-exact-nav": "trailing", "aria-label": control(r, target)?.getAttribute("aria-label") || symbol || target });
-      if (g) b.append(g); else b.append(el("span", "", {}, target));
-      trail.append(b);
-    }
-  }
+  toolbar(r, lead);
   const grab = part(bar, "grab");
   if (grabber && !grab) bar.prepend(el("div", "grab"));
   else if (!grabber && grab) grab.remove();
   setAttr(bar, "data-drag", r.hasAttribute("data-exact-sheet") && presentation(r) === "modal" ? "" : null);
+}
+
+/** The route's toolbar (LLP 1035.001.001 D6): its first direct child
+ * `role="toolbar" toolbarPlacement="navigation-bar"`, its own buttons, laid
+ * in the bar row where the route shows a bar — `toolbarPlacement="navigation"`
+ * buttons leading, after the back button, the rest trailing (nav-chrome.css);
+ * elsewhere as authored. Arrow keys move within it, one tab stop (the APG's
+ * toolbar). */
+function toolbar(r, lead) {
+  const bar = kids(r).filter(k => attr(k, "role") === "toolbar" && attr(k, "data-toolbarplacement") === "navigation-bar");
+  for (const t of bar.slice(1)) retire(t);
+  // Its bounded shape, as on iOS: direct buttons only; else it is left as authored.
+  const t = r.hasAttribute("data-exact-bar") && bar[0] && kids(bar[0]).length && kids(bar[0]).every(b => b.localName === "button") ? bar[0] : null;
+  if (!t) { if (bar[0]) retire(bar[0]); return; }
+  setAttr(t, "data-exact-toolbar", "");
+  for (const b of kids(t)) setAttr(b, "data-exact-leading", attr(b, "data-toolbarplacement") === "navigation" ? "" : null);
+  if (Live) {
+    r.style.setProperty("--exact-nav-lead", `${lead.offsetWidth}px`);
+    // One tab stop: the item focused last, else the first that can be —
+    // read from the items themselves, not from whether the route is laid
+    // out yet (a tab coming back is still undisplayed here). The authored
+    // tab index is kept for a fallback to give back.
+    const items = kids(t).filter(usable), stop = items.find(b => b === t.$stop) ?? items[0];
+    for (const b of kids(t)) { if (!("$tab" in b)) b.$tab = b.getAttribute("tabindex"); b.tabIndex = b === stop ? 0 : -1; }
+    if (!t.$keys) {
+      t.$keys = true;
+      t.addEventListener("keydown", ev => {
+        const all = kids(t).filter(usable), at = all.indexOf(ev.target.closest?.("[data-exact-toolbar] > *"));
+        const step = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[ev.key], end = { Home: 0, End: all.length - 1 }[ev.key];
+        if (at < 0 || (step == null && end == null)) return;
+        ev.preventDefault();
+        const next = all[end ?? (at + step + all.length) % all.length];
+        for (const b of all) b.tabIndex = b === next ? 0 : -1;
+        t.$stop = next; next.focus();
+      });
+    }
+  }
+}
+
+/** A toolbar item that can take the focus. */
+const usable = b => !b.matches(":disabled") && !b.closest("[inert]") && (!Live || getComputedStyle(b).visibility !== "hidden");
+/** A toolbar no longer laid in the bar: as authored again (its tab
+ * indexes, no leading marks). */
+function retire(t) {
+  if (!t.hasAttribute("data-exact-toolbar")) return;
+  setAttr(t, "data-exact-toolbar", null);
+  for (const b of kids(t)) {
+    setAttr(b, "data-exact-leading", null);
+    if ("$tab" in b) { setAttr(b, "tabindex", b.$tab); delete b.$tab; }
+  }
+  t.$stop = null;
 }
 
 /** The route's first scroller (`data-scroll`, outside a popover), or the
@@ -418,19 +446,20 @@ function sheetTop(nav, r, sheet) {
   if (r.style.getPropertyValue("--exact-sheet-top") !== v) r.style.setProperty("--exact-sheet-top", v);
 }
 
-/** A root's behaviour, once: presses on its bars and tab bar, a sheet bar's
- * drag, the backdrop's tap, and each scroller's resting offset (for a
- * route's exit, kept as it leaves). */
+/** A navigator's behaviour, once: its back buttons and tab bar, a sheet
+ * bar's drag, the backdrop's tap, and each scroller's resting offset (for a
+ * route's exit, kept as it leaves). A Back is the navigator's `traverse`
+ * and a tab its `tabselect` (navigation.js), never a control pressed. */
 function listen(nav, st) {
   nav.addEventListener("click", ev => {
-    const b = ev.target.closest?.("[data-exact-navbar] button, [data-exact-tabbar] button, [data-exact-backdrop]");
-    if (!b || !nav.contains(b)) return;
+    const b = ev.target.closest?.("[data-exact-navbar] [data-exact-nav=back], [data-exact-tabbar] button, [data-exact-backdrop]");
+    // This navigator's own chrome, not a nested one's.
+    if (!b || b.closest("[data-exact-chromed], [data-exact-tabbar], [data-exact-backdrop]")?.parentNode !== nav) return;
     ev.stopPropagation();
-    const r = b.closest("[navigationKey]");
-    if (b.hasAttribute("data-exact-backdrop")) { const top = routesOf(nav).find(x => attr(x, "navigationKey") === attr(nav, "navigationKey")); if (top) back(nav, top); }
-    else if (b.getAttribute("data-exact-nav") === "back") back(nav, r);
-    else if (b.getAttribute("data-exact-nav") === "trailing") { if (!press(r, data(r, "trailing"))) press(nav, data(r, "trailing")); }
-    else press(nav, b.getAttribute("data-control"));
+    // The backdrop is a close request on the sheet, as UIKit's dimming view.
+    if (b.hasAttribute("data-exact-backdrop")) Nav?.back(nav);
+    else if (b.hasAttribute("data-exact-nav")) Nav?.back(nav, b.getAttribute("data-to"));
+    else Nav?.select(nav, b.getAttribute("data-tab"));
   });
   nav.addEventListener("scrollend", ev => { const s = ev.target; if (s.hasAttribute?.("data-exact-inset")) s.$y = s.scrollTop; }, { capture: true, passive: true });
   // The page's offset, as a press or the browser's Back may take its route
@@ -464,7 +493,7 @@ function listen(nav, st) {
     const top = drag.top + (drag.last - drag.y) + Math.max(-2.5, Math.min(2.5, drag.v)) * 80;
     drag = null;
     r.style.transition = reduced() ? "" : "top .3s cubic-bezier(.2,.8,.2,1), transform .3s cubic-bezier(.2,.8,.2,1)";
-    if (top > max + (H - max) * 0.35 && back(nav, r)) return;
+    if (top > max + (H - max) * 0.35 && Nav?.back(nav)) return;
     let best = 0;
     tops.forEach((t, i) => { if (Math.abs(t - top) < Math.abs(tops[best] - top)) best = i; });
     r.$detent = best; r.$drop = 0; r.style.transform = "";
@@ -484,24 +513,26 @@ function backdrop(nav, st, sheet) {
 }
 
 /** The tab bar: one item per tab, in its rows' order, from its first
- * row's `navigationTab…`; a tap presses that tab's control. */
+ * row's `navigationTab…`; a tap is the navigator's `tabselect` (LLP
+ * 1035.001.001 D5). App navigation, not ARIA tabs: a `nav` of buttons,
+ * the shown tab `aria-current="page"`, each a tab stop. */
 function tabBar(nav, routes, selected) {
   const tabs = [];
   for (const r of routes) { const t = data(r, "tab"); if (t && !tabs.some(x => x.tab === t)) tabs.push({ tab: t, r }); }
   let bar = kids(nav).find(k => k.hasAttribute("data-exact-tabbar"));
   if (!tabs.length) { bar?.remove(); return; }
-  bar ??= el("div", "", { "data-exact-tabbar": "", role: "tablist" });
+  bar ??= el("nav", "", { "data-exact-tabbar": "", "aria-label": "Tabs" });
   // The tabs are made again only as they change; a selection changes the buttons in place,
   // so the tint fades from the last tab to the new one (nav-chrome.css).
-  const want = tabs.map(({ tab, r }) => [tab, data(r, "tabtitle"), data(r, "tabsymbol"), data(r, "tabselectedsymbol"), data(r, "tabcontrol")].join("|")).join("\n");
+  const want = tabs.map(({ tab, r }) => [tab, data(r, "tabtitle"), data(r, "tabsymbol"), data(r, "tabselectedsymbol")].join("|")).join("\n");
   if (attr(bar, "data-want") !== want) {
     bar.setAttribute("data-want", want); bar.textContent = "";
-    for (const { tab, r } of tabs) bar.append(el("button", "", { type: "button", role: "tab", "data-control": data(r, "tabcontrol") }, el("span", "", {}, data(r, "tabtitle") || tab)));
+    for (const { tab, r } of tabs) bar.append(el("button", "", { type: "button", "data-tab": tab }, el("span", "", {}, data(r, "tabtitle") || tab)));
     bar.style.setProperty("--tabs", String(tabs.length));
   }
   tabs.forEach(({ tab, r }, i) => {
     const b = kids(bar)[i], on = tab === selected, symbol = on ? data(r, "tabselectedsymbol") || data(r, "tabsymbol") : data(r, "tabsymbol");
-    setAttr(b, "aria-selected", String(on));
+    setAttr(b, "aria-current", on ? "page" : null);
     if (attr(b, "data-symbol") === symbol && b.hasAttribute("data-symbol")) return;
     b.setAttribute("data-symbol", symbol);
     kids(b).find(k => attr(k, "class") === "icon")?.remove();

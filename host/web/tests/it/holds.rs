@@ -252,7 +252,7 @@ fn real_wasm_swipe_takeover_style_commits_and_deletion() {
         text "Switch retained route"
       button press=enable testId="enable"
         text "Enable and return"
-      column navigationBack="back" navigationKey=(blocked ? "other" : "held")
+      column navigationKey=(blocked ? "other" : "held")
         column navigationKey="held" testId="held-route"
           when shown
             column testId="row" disabled=disabled swiperight=swipe touch-action="pan-y" width=300 height=90 background-color=tint transition=returning

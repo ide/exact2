@@ -20,6 +20,8 @@ component Heads
     nav = push(nav, url)
   action back
     nav = back(nav)
+  action returnTo(entry: string)
+    nav = backTo(nav, entry)
   action toggle
     deep = not deep
   action rename
@@ -44,7 +46,7 @@ component Heads
           text "toggle"
         button press=rename testId="rename"
           text "rename"
-      main navigationKey=`${current.id}` navigationBack="back" testId="navigation" flex=1
+      main navigationKey=`${current.id}` traverse=returnTo testId="navigation" flex=1
         each e in stack(nav) key=e.id
           column navigationKey=`${e.id}` testId=`route-${e.name}` padding=8
             text e.name testId=`entry-${e.name}`

@@ -73,9 +73,15 @@ final class NativeButtonIOSTests: XCTestCase {
             ["op": "roots", "ids": [1]],
         ])
         let tip = try XCTUnwrap(p.views[2]), menu = try XCTUnwrap(p.views[5])
-        XCTAssertTrue(p.menus.contentPopover(invokedBy: tip) === p.views[3])
-        XCTAssertTrue(tip.invokesConfirmation, "its invoker is pressable as itself")
-        XCTAssertNil(p.menus.contentPopover(invokedBy: menu), "a popover of pressing rows is a menu")
+        XCTAssertTrue(p.menus.invokes(tip), "a content popover's invoker commands it")
+        XCTAssertTrue(tip.activatable, "its invoker is pressable as itself, with no press of its own (LLP 1035.001.001 D1)")
+        XCTAssertFalse(p.menus.invokes(menu), "a popover of pressing rows is a menu, opened by UIKit's button")
+        XCTAssertFalse(menu.activatable)
+        // HTML's commands, distinctly: `show-modal` names a dialog, not a popover.
+        p.apply(wireBatch([["op": "props", "id": 2, "set": ["commandfor": "tip", "command": "show-modal"], "clear": ["popovertarget"]]]))
+        XCTAssertFalse(p.menus.invokes(tip))
+        p.apply(wireBatch([["op": "props", "id": 2, "set": ["command": "toggle-popover"], "clear": []]]))
+        XCTAssertTrue(p.menus.invokes(tip))
     }
 
     func testUserSelectTextOffersCopyOfTheWholeText() throws {

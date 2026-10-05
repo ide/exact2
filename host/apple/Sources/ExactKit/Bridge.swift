@@ -418,6 +418,14 @@ final class Runtime {
             return read(exact_dispatch(rt, view, 29, n, now))
         }
     }
+    /// A navigator's `tabselect`: the name of the tab the person chose in
+    /// the platform's tab bar (LLP 1035.001.001 D5; ABI kind 30).
+    func tabSelect(_ view: UInt32, _ tab: String, now: Double) -> Batch {
+        return on {
+            let n = write(tab)
+            return read(exact_dispatch(rt, view, 30, n, now))
+        }
+    }
     func advance(now: Double, untilRequest: Bool = false) -> Batch { on { read(exact_advance(rt, now, untilRequest ? 1 : 0)) } }
     func frame(now: Double) -> Batch { on { read(exact_frame(rt, now)) } }
     func presentFrames(_ yes: Bool) { on { () -> Void in _ = exact_present_frames(rt, yes ? 1 : 0) } }

@@ -589,6 +589,9 @@ final class Presenter {
         viewport.acceptDocumentFit()
     }
     var onPress: ((UInt32) -> Void)?
+    /// A navigator's `traverse` and `tabselect` (LLP 1035.001.001 D4, D5).
+    var onTraverse: ((UInt32, String) -> Void)?
+    var onTabSelect: ((UInt32, String) -> Void)?
     var onChange: ((UInt32, String) -> Void)?
     /// Images' intrinsic sizes, several at once under one layout.
     var onIntrinsic: (([(UInt32, CGSize?)]) -> Void)?
@@ -696,11 +699,14 @@ final class Presenter {
     weak var hovered: NodeView?
     var hoveredInline: UInt32?
 
+    /// HTML activation (LLP 1035.001.001 D1), as on iOS: an eligible node's
+    /// action, then — if it is still live and eligible — its command, read
+    /// from its attributes as the action left them.
     func press(_ id: UInt32, fromNativeMenu: Bool = false) {
         guard let node = textHost(id), !node.inert, !node.disabled else { return }
-        let command = dialogs.command(node, fromNativeMenu: fromNativeMenu)
-        if command == nil || node.handlers.contains("press") { onPress?(id) }
-        command?()
+        if (node.props["commandfor"] ?? "").isEmpty || node.handlers.contains("press") { onPress?(id) }
+        guard textHost(id) === node, !node.inert, !node.disabled else { return }
+        dialogs.command(node, fromNativeMenu: fromNativeMenu)?()
         // An invoker's press also drops its menu (LLP 1021 D3).
         menus.pressed(id)
     }

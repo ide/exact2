@@ -5,7 +5,7 @@
 /// those. A scrolling list applies a batch many times a second, so the passes
 /// were a fifth of its long frames (LLP 1044 F4). They visit what this names.
 struct ChromeIndex {
-    static let keys = ["navigationBack", "inert", "popover", "popovertarget",
+    static let keys = ["navigationKey", "inert", "popover", "popovertarget",
                        "contextTarget", "toolbarPlacement", "accessibilityKeyShortcuts",
                        "commandfor", "swipeContent", "id", "accessibilityLive", "autofocus"]
     /// Props a pass reads for one value. Every list row has a role and every
@@ -63,7 +63,7 @@ struct ChromeIndex {
     /// Whether anything that can hide a view or make it inert is mounted:
     /// only the passes over these ever set either.
     var hidesOrInerts: Bool {
-        ["navigationBack", "inert", "tag:dialog", "popover", "toolbarPlacement", "role:tablist"]
+        ["navigationKey", "inert", "tag:dialog", "popover", "toolbarPlacement", "role:tablist"]
             .contains { !(byKey[$0]?.isEmpty ?? true) }
     }
 }

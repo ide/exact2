@@ -238,6 +238,10 @@ pub enum Event {
     /// Back — at the navigation root: the destination's navigation key.
     /// @ref LLP 1035.001.000
     Traverse(String),
+    /// The person chose a tab in the platform's tab bar — the one shown
+    /// included — at a navigator: the tab's `navigationTab`.
+    /// @ref LLP 1035.001.001 D5
+    TabSelect(String),
     /// An authored sheet handle released: logical height and signed pixels/second.
     HeightRelease {
         /// Finite logical pixels in [0, f32::MAX].
@@ -782,6 +786,7 @@ impl<D: DataSource> Runner<D> {
                 Event::Media(kind, _) => kind.name(),
                 Event::Navigate(_) => "navigate",
                 Event::Traverse(_) => "traverse",
+                Event::TabSelect(_) => "tabselect",
                 Event::HeightRelease { .. } => "heightrelease",
                 Event::TransformGeometry { .. } => "transformgeometry",
                 Event::TransformRelease { .. } => "transformrelease",
@@ -884,6 +889,7 @@ impl<D: DataSource> Runner<D> {
                 (EventKind::Navigate, Some(Value::str(location)), "navigate")
             }
             Event::Traverse(key) => (EventKind::Traverse, Some(Value::str(key)), "traverse"),
+            Event::TabSelect(tab) => (EventKind::Tabselect, Some(Value::str(tab)), "tabselect"),
         };
         let row = self.plan.node(node);
         let handler = row

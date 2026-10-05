@@ -106,7 +106,7 @@ extension Agent {
         let keyboard: [String: Any] = ["visible": false, "overlap": 0, "policy": "resizes-visual", "interactive": false]
         var navigation: [String: Any] = ["route": NSNull(), "stack": [] as [String], "presentation": NSNull(), "closedby": NSNull(),
                                          "transition": ["interactive": false, "phase": "idle"]]
-        if let container = presenter.views.values.filter({ $0.props["navigationBack"] != nil }).min(by: { $0.id < $1.id }) {
+        if let container = presenter.views.values.filter({ $0.props["navigationKey"] != nil && $0.container.subviews.contains { ($0 as? NodeView)?.props["navigationKey"] != nil } }).min(by: { $0.id < $1.id }) {
             let key = container.props["navigationKey"] ?? ""
             let routes = container.container.subviews.compactMap { $0 as? NodeView }.filter { $0.props["navigationKey"] != nil }
             let keys = routes.map { $0.props["navigationKey"] ?? "" }
@@ -574,7 +574,7 @@ extension Agent {
         if req["key"] == nil, let reply = presenter.controls.type(v, req["text"] as? String ?? "") { return reply }
         if v.props["editable"] == "false", req["key"] == nil { return ["error": "view \(v.id) is readonly"] }
         // @ref LLP 1038 D11 — type on the root delivers a location.
-        if v.props["navigationBack"] != nil, req["key"] == nil {
+        if v.props["navigationKey"] != nil, v.handlers.contains("navigate"), req["key"] == nil {
             let location = req["text"] as? String ?? ""
             return session.navigate(location) ? ["typed": Int(v.id), "value": location, "delivery": "recognized"] : ["error": "navigate refused"]
         }

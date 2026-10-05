@@ -90,7 +90,7 @@ component App
   provide
     accent = "#fff"
   view
-    column navigationBack="entry"
+    column commandfor="entry"
       input id="entry" testId="entry-test" value=textValue change=edit
       each item in items key=item.id
         Row(item=item, onPick=save)

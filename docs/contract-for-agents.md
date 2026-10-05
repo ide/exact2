@@ -351,8 +351,13 @@ Keep `id` and `testId` separate:
 Events bind actions (`press=save`, `input=edit(item.id)`). Captured arguments come
 before host payload arguments. Do not add an event object or a JavaScript closure.
 `navigate` is special: no captured arguments and zero or one location parameter.
-`traverse` (navigation root only) carries the key of the route the platform took
-the person back to — any depth, one event — for `nav = backTo(nav, key)`.
+`traverse` (a navigator's) carries the key of the route the platform took the
+person back to — any depth, one event — for `nav = backTo(nav, key)`; `tabselect`
+carries the tab chosen in the tab bar, for `nav = select(nav, name)`. Never author
+a hidden 1×1 control for the platform's chrome: a navigator is the keyed element
+with keyed routes, a route refuses Back with `closedby="none"`, and its bar buttons
+are real buttons in its `role="toolbar" toolbarPlacement="navigation-bar"`
+(LLP 1035.001.001).
 `transformgeometry` and `transformrelease` must be paired. The complete payload
 matrix is in [events](contract-grammar.md#events).
 

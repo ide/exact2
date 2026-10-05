@@ -568,7 +568,7 @@ async function flowInputFixture() {
   createInputHandlers({ root, views, retiredViews: new WeakSet(), ready: () => true, inertAncestor: () => false, dispatch() {} });
   for (const [press, navigate, modified] of [[true, true, false], [true, false, false], [false, true, false], [true, true, true]]) {
     presses = navigates = 0;
-    root.innerHTML = '<div navigationBack="/" style="position:relative"><div id="paragraph" style="width:200px;height:100px;font:16px/24px serif"><a href="/story">flowed link</a></div><div id="ball" style="position:absolute;left:80px;top:0;width:20px;height:20px"></div></div>';
+    root.innerHTML = '<div navigationKey="/" style="position:relative"><div id="paragraph" style="width:200px;height:100px;font:16px/24px serif"><a href="/story">flowed link</a></div><div id="ball" style="position:absolute;left:80px;top:0;width:20px;height:20px"></div></div>';
     const parent = root.firstElementChild, paragraph = parent.firstElementChild, ball = parent.lastElementChild;
     parent.exactHandlers = navigate ? ['navigate'] : [];
     // Static insets must stay inert when absolute flow fragments mount.

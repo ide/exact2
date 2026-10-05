@@ -637,9 +637,8 @@ impl<S: Source> Walk<'_, '_, S> {
 
     /// Mark the routes under a navigation root as `navigation.project` does.
     fn route_children(&mut self, node: &NodeFacts<'_>, children: &[ViewId]) {
-        if node.props.str(PropId::NavigationBack).is_none() {
-            return;
-        }
+        // @ref LLP 1035.001.001 D2 — a navigator: keyed, with keyed children;
+        // a key that names none of them leaves them as they are.
         let src = self.src;
         let key = node.props.str(PropId::NavigationKey);
         let routes: Vec<NodeFacts<'_>> = children

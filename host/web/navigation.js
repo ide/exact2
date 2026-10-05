@@ -6,31 +6,47 @@ let written = [], gone = new Set(), cursor = 0, first = null, originIndex = null
 let echo = null, pop = null, draining = false;
 const queue = [];
 const waiters = new Set();
-let root, navigate, traverse, log;
+let root, navigate, traverse, tabselect, log;
 const routesOf = nav => nav ? [...nav.children].filter(r => r.hasAttribute("navigationKey")) : [];
 const selectedRoute = nav => routesOf(nav).find(r => r.getAttribute("navigationKey") === nav.getAttribute("navigationKey"));
+// @ref LLP 1035.001.001 D2 — a navigator is keyed, with keyed children (its
+// routes); the first, in document order, is the page's.
+export const isNavigator = e => e.hasAttribute("navigationKey") && [...e.children].some(c => c.hasAttribute("navigationKey"));
+export const navigators = within => [...within.querySelectorAll("[navigationKey]")].filter(isNavigator);
+const pageNavigator = () => navigators(root).at(0) ?? null;
+const hears = (e, event) => (e.exactHandlers ?? e.dataset?.exactOn?.split(" ") ?? []).includes(event);
+const presented = r => ["modal", "fullscreen"].includes(r?.getAttribute("navigationPresentation"));
 const browserIndex = () => globalThis.navigation?.currentEntry?.index ?? null;
 const stamp = (index, op) => ({ exact: index, id: op.top, url: op.url });
 
-function pressBack(nav) {
-  const route = selectedRoute(nav);
-  if (!route || ["modal", "fullscreen"].includes(route.getAttribute("navigationPresentation")) && route.getAttribute("closedby") === "none") return;
-  const control = [...route.querySelectorAll("[id]")].find(node => node.id === nav.getAttribute("navigationBack"));
-  if (control && !control.matches(":disabled") && !control.closest("[inert]")
-      && control.getClientRects().length && getComputedStyle(control).visibility === "visible") control.click();
+/** The selected route's stack: its tab's routes (`navigationTab`, as the
+ * web target writes it) through the selected one. */
+function chain(nav) {
+  const routes = routesOf(nav), top = selectedRoute(nav);
+  if (!top) return [];
+  const tab = top.getAttribute("data-navigationtab") ?? top.getAttribute("navigationTab");
+  const lane = tab == null ? routes : routes.filter(r => (r.getAttribute("data-navigationtab") ?? r.getAttribute("navigationTab")) === tab);
+  return lane.slice(0, lane.indexOf(top) + 1);
 }
-
-// The fallback for a root without `traverse`: its Back control, resolved in
-// whatever route is selected now, until `key` is the selected route; a press
-// that leaves the selection where it was is a refusal.
-function pressBackTo(nav, key) {
-  for (let shown = nav.getAttribute("navigationKey"), n = routesOf(nav).length; shown !== key && n-- > 0;) {
-    const routes = routesOf(nav), at = routes.indexOf(selectedRoute(nav));
-    if (!routes.slice(0, Math.max(at, 0)).some(r => r.getAttribute("navigationKey") === key)) return;
-    pressBack(nav);
-    if (nav.getAttribute("navigationKey") === shown) return;
-    shown = nav.getAttribute("navigationKey");
-  }
+/** @ref LLP 1035.001.001 D3 — the platform may take the person back to
+ * `key` when the navigator hears `traverse` and no route that removes —
+ * each above `key` in the selected stack — refuses close requests. */
+function permits(nav, key) {
+  const stack = chain(nav), at = stack.findIndex(r => r.getAttribute("navigationKey") === key);
+  return at >= 0 && at < stack.length - 1 && hears(nav, "traverse")
+    && !stack.slice(at + 1).some(r => r.getAttribute("closedby") === "none");
+}
+/** The platform's Back to `key`, delivered once as `traverse` (D4), or refused. */
+function backTo(nav, key) {
+  if (!key || !permits(nav, key)) { log?.(`navigation: Back to ${JSON.stringify(key)} refused: the navigator does not hear traverse, or a route it removes has closedby="none"`); return false; }
+  return traverse(key, nav);
+}
+/** Where a close request on the topmost presentation goes: beneath its
+ * boundary (the lowest route of the sheet or cover on top), so a sheet that
+ * pushed screens leaves whole; null with none presented. */
+function beneathPresentation(nav) {
+  const stack = chain(nav), at = stack.findLastIndex(presented);
+  return at > 0 ? stack[at - 1].getAttribute("navigationKey") : null;
 }
 
 function go(to, from, finish = () => {}) {
@@ -75,21 +91,20 @@ function popped({ j, state, url }) {
   const entry = written[j];
   const owned = entry && state?.exact === j && state.id === entry.id && state.url === entry.url;
   const target = owned ? entry.url : url;
-  const nav = root.querySelector("[navigationBack]");
-  const routes = routesOf(nav), selected = routes.indexOf(selectedRoute(nav));
+  const nav = pageNavigator();
   // @ref LLP 1035.001.000 I1 — a Back to an entry still beneath the selected
   // route goes to that route, however many entries it skipped: never counted
-  // as one screen per entry. One `traverse` to its key where the root
-  // declares it; else the app's Back control, pressed until it is the top.
-  const beneath = owned && j < cursor
-    && routes.slice(0, Math.max(selected, 0)).some(r => r.getAttribute("navigationKey") === String(entry.id));
+  // as one screen per entry. One `traverse` to its key, where the navigator
+  // hears it and no route it removes refuses (LLP 1035.001.001 D3, D4): a
+  // refused one is restored, never delivered; a navigator without
+  // `traverse` takes the location instead.
+  const beneath = owned && j < cursor && chain(nav).slice(0, -1).some(r => r.getAttribute("navigationKey") === String(entry.id));
+  const refused = beneath && hears(nav, "traverse") && !permits(nav, String(entry.id));
   pop = {};
   try {
-    const traversed = beneath && traverse(String(entry.id));
-    const back = beneath && !traversed;
-    if (back) pressBackTo(nav, String(entry.id));
-    else if (!traversed) navigate(target);
-    const accepted = back || traversed ? last?.top === entry.id : pop.op?.url === target;
+    const traversed = beneath && !refused && traverse(String(entry.id), nav);
+    if (!traversed && !refused) navigate(target);
+    const accepted = traversed ? last?.top === entry.id : !refused && pop.op?.url === target;
     if (accepted) {
       cursor = j ?? cursor;
       first = Math.min(first, cursor);
@@ -104,7 +119,7 @@ function popped({ j, state, url }) {
       }
     } else {
       if (traversed) log(`history: traverse to ${entry.id} refused; restoring the entry`);
-      else if (back) log("history: Back refused; restoring the entry");
+      else if (refused) log(`history: Back to ${entry.id} refused (closedby="none"); restoring the entry`);
       else log(`history: navigate ${JSON.stringify(target)} refused; restoring the entry`);
       if (j !== null && j !== cursor) go(cursor, j);
       else history.replaceState(written[cursor], "", location.origin + written[cursor].url);
@@ -129,8 +144,8 @@ function settled() {
 }
 
 export const navigation = {
-  connect(hostRoot, dispatch, journal, traverseTo = () => false) {
-    root = hostRoot; navigate = dispatch; log = journal; traverse = traverseTo;
+  connect(hostRoot, dispatch, journal, traverseTo = () => false, tabSelectTo = () => false) {
+    root = hostRoot; navigate = dispatch; log = journal; traverse = traverseTo; tabselect = tabSelectTo;
     addEventListener("popstate", event => {
       if (!last) return;
       const index = browserIndex();
@@ -150,9 +165,11 @@ export const navigation = {
       if (event.key !== "Escape" || event.defaultPrevented) return;
       if (!root.contains(event.target) && event.target !== document.body && event.target !== document.documentElement) return;
       if (document.querySelector("dialog:modal") || [...document.querySelectorAll(":popover-open")].some(p => p.popover === "auto" || p.popover === "hint")) return;
-      for (const nav of root.querySelectorAll("[navigationBack]")) {
-        if (!["modal", "fullscreen"].includes(selectedRoute(nav)?.getAttribute("navigationPresentation"))) continue;
-        event.preventDefault(); pressBack(nav); return;
+      // A close request on the topmost presentation (LLP 1035.001.001 D4).
+      for (const nav of navigators(root).reverse()) {
+        const key = beneathPresentation(nav);
+        if (key == null) continue;
+        event.preventDefault(); backTo(nav, key); return;
       }
     });
   },
@@ -169,9 +186,33 @@ export const navigation = {
     if (pop) { pop.op = op; for (const id of op.removed) gone.add(id); }
     else { queue.push({ op }); drain(); }
   },
+  /** The chrome's Back (its back button, a sheet's backdrop or drag): to
+   * `key`, or past the topmost presentation when `key` is null (D4). */
+  back(nav, key = null) { return backTo(nav, key ?? beneathPresentation(nav)); },
+  /** Whether the chrome offers a Back to `key` (D3): its back button shows. */
+  permits(nav, key) { return permits(nav, key); },
+  /** The agent's root-scoped chrome taps where no chrome is drawn (the
+   * wasm host; LLP 1035.001.001 D7): Back from the top, or a tab. */
+  chromeTap(nav, { what, name }) {
+    if (!nav || !isNavigator(nav)) return { error: "chrome taps address a navigator" };
+    if (document.querySelector("dialog:modal, :popover-open")) return { error: "a presentation covers the chrome" };
+    if (what === "tab") {
+      const tabs = routesOf(nav).map(r => r.getAttribute("data-navigationtab") ?? r.getAttribute("navigationTab")).filter(Boolean);
+      if (!tabs.includes(name)) return { error: `no tab ${JSON.stringify(name)}` };
+      if (chain(nav).some(presented)) return { error: "a sheet covers the tab bar" };
+      return navigation.select(nav, name) ? { delivery: "chrome" } : { error: "tabselect refused" };
+    }
+    const stack = chain(nav), to = stack.at(-2)?.getAttribute("navigationKey");
+    return to != null && backTo(nav, to) ? { delivery: "chrome" } : { error: "no Back is offered" };
+  },
+  /** The person chose tab `name` in the chrome's tab bar (D5). */
+  select(nav, name) {
+    if (!hears(nav, "tabselect")) { log?.(`navigation: tab ${JSON.stringify(name)} refused: the navigator does not hear tabselect`); return false; }
+    return tabselect(name, nav);
+  },
   // @ref LLP 1038 D11 — the agent uses the real browser traversal.
   travel(nav, delta) {
-    if (nav !== root.querySelector("[navigationBack]")) return { error: "history target is not the navigation root" };
+    if (nav !== pageNavigator()) return { error: "history target is not the navigation root" };
     if (!Number.isInteger(delta) || delta === 0) return { error: "history must be a nonzero integer" };
     return new Promise(resolve => {
       const timer = setTimeout(finish, 1000);
@@ -183,7 +224,7 @@ export const navigation = {
     });
   },
   project(root, log) {
-    for (const nav of root.querySelectorAll("[navigationBack]")) {
+    for (const nav of navigators(root)) {
       const routes = [...nav.children].filter(route => route.hasAttribute("navigationKey"));
       const selected = routes.findIndex(route => route.getAttribute("navigationKey") === nav.getAttribute("navigationKey"));
       if (selected < 0) {
@@ -205,7 +246,7 @@ export const navigation = {
     }
   },
   observation(root) {
-    const nav = root.querySelector("[navigationBack]");
+    const nav = navigators(root).at(0);
     const routes = nav ? [...nav.children].filter((r) => r.hasAttribute("navigationKey")) : [];
     const key = nav?.getAttribute("navigationKey") ?? null;
     const index = routes.findIndex((r) => r.getAttribute("navigationKey") === key);
@@ -217,6 +258,8 @@ export const navigation = {
       presentation: ["modal", "fullscreen"].includes(selected?.getAttribute("navigationPresentation")) ? selected.getAttribute("navigationPresentation") : null,
       source: selected?.getAttribute("navigationSource") ?? null,
       closedby: selected?.getAttribute("closedby") ?? null,
+      // Whether the chrome offers a Back now (LLP 1035.001.001 D3, D7).
+      back: !!nav && chain(nav).length > 1 && permits(nav, chain(nav).at(-2).getAttribute("navigationKey")),
       transition: { interactive: false, phase: "idle" },
     };
   },

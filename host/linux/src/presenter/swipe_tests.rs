@@ -335,7 +335,7 @@ fn navigation_cancels_a_held_view_without_waiting_for_the_next_pointer_event() {
   action reply
     count = count + 1
   view
-    main navigationKey=selected navigationBack="back"
+    main navigationKey=selected
       column navigationKey="a"
         box testId="row" width=400 height=100 swiperight=reply touch-action="pan-y" transition="translate spring(300, 30, 1)"
           text "swipe me"

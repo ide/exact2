@@ -17,8 +17,10 @@ component Site
   resource post = loadPost(params(nav, "post")) as shape Post
   action back
     nav = back(nav)
+  action returnTo(entry: string)
+    nav = backTo(nav, entry)
   view
-    main navigationKey=`${top(nav).id}` navigationBack="back" testId="navigation"
+    main navigationKey=`${top(nav).id}` traverse=returnTo testId="navigation"
       head title="Site" description="Every post" image="/assets/site.png" robots="index"
       each e in stack(nav) key = e.id
         column navigationKey=`${e.id}` testId=`route-${e.name}`

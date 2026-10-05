@@ -2,7 +2,7 @@
 //
 // @ref LLP 1007 §3. This is host code, not app code: it knows nothing about
 // the app. The app is the wasm (runner + kernel + data crate + baked plan).
-import { grantOrigins, deferredFulfill, refusal, guestOutline, guestTap, guestType, focusController, runFocusCommands, environment, preferences, onPreferences, inertAncestor, navigation, afterPaintPieces, presenceLoader, animationClock, animationClocks, scrollFollowers, renderMarkup, navigableURL, navigates, refuseURL, devFirst, reportPlace, reportTime, pageReporter, valuedControl, settleValue, typeControl, viewBox } from "./navigation.js"; import { pageChrome } from './chrome.js';
+import { grantOrigins, deferredFulfill, refusal, guestOutline, guestTap, guestType, focusController, runFocusCommands, environment, preferences, onPreferences, inertAncestor, navigation, isNavigator, afterPaintPieces, presenceLoader, animationClock, animationClocks, scrollFollowers, renderMarkup, navigableURL, navigates, refuseURL, devFirst, reportPlace, reportTime, pageReporter, valuedControl, settleValue, typeControl, viewBox } from "./navigation.js"; import { pageChrome } from './chrome.js';
 const AGENT_ADMITTED = true; // false in a production bake: host/web/build.mjs rewrites this line (LLP 1069.007 D2)
 let httpModule, pickerModule, documentsModule; // the file picker (LLP 1069.002) and documents (LLP 1069.010), loaded on first use
 const picker = () => pickerModule ??= loadAfterPaint('./picker-glue.js', 'picker').then(install => install({ appId: globalThis.exact.compat?.inputs?.app, dispatch: (id, kind, payload) => { if (views.has(id)) send(wasm.exact_dispatch(id, kind, writeIn(payload), now())); }, pickedPath: (name) => loadStage('inspection').then(() => ask({ op: "pickedPath", name }).path), log }));
@@ -1168,14 +1168,14 @@ function agentReply(request) {
         const i = request.into; // @ref LLP 1070.000 §5 — the runner's request, its batch applied now
         if (i) { send(wasm.exact_into_view(request.id, writeIn(`${i.key ?? ''}\n${i.block ?? 'start'}\n${i.inline ?? 'nearest'}`))); return tagged({ tapped: request.id, into: i }); }
         const frame = views.get(request.id);
-        if (request.history !== undefined) return navigation.travel(frame, request.history);
+        if (request.history !== undefined) return navigation.travel(frame, request.history); if (request.chrome) return { handled: true, tapped: request.id, ...(frame?.closest("[inert]") ? { error: `view ${request.id} is inert` } : navigation.chromeTap(frame, request.chrome)) };
         if (frame && (frame.closest("[inert]") || ["hidden", "collapse"].includes(getComputedStyle(frame).visibility)))
           return { handled: true, error: `view ${request.id} is hidden or inert` };
         return frame instanceof HTMLIFrameElement ? guestTap(frame, request) : { guest: false };
       }
       case "type": {
         const frame = views.get(request.id);
-        if (frame?.hasAttribute("navigationBack") && request.key == null) {
+        if (frame && isNavigator(frame) && request.key == null) {
           const batch = globalThis.exact.navigate(request.text ?? "");
           return { typed: request.id, delivery: "recognized", handled: true, ...(batch.error ? { error: batch.error } : {}) };
         }
@@ -1377,7 +1377,7 @@ globalThis.exact = { ...globalThis.exact, mutate, devFirst: () => devFirst(),
   // @ref LLP 1038 D8/D11 — synchronous for the serialized popstate caller.
   navigate: (location) => {
     const nav = root.firstElementChild;
-    if (!inputReady || !nav?.hasAttribute("navigationBack")) return { ops: [], error: "no navigation root" };
+    if (!inputReady || !nav || !isNavigator(nav)) return { ops: [], error: "no navigation root" };
     const batch = JSON.parse(readOut(wasm.exact_dispatch(Number(nav.dataset.view), 14, writeIn(location), now())));
     applyBatch(batch); return batch;
   },
@@ -1496,4 +1496,4 @@ ready.catch((e) => { console.error(e); root.dataset.error = String(e); });
 
 // @ref LLP 1038 D7/D8/D11 — the mirror observes the handler's synchronous commit.
 function navigate(location) { return globalThis.exact.navigate(location); }
-navigation.connect(root, navigate, log, (key, nav = root.firstElementChild) => inputReady && (nav?.exactHandlers ?? []).includes("traverse") && (applyBatch(JSON.parse(readOut(wasm.exact_dispatch(Number(nav.dataset.view), 29, writeIn(key), now())))), true)); // and the root's `traverse` (LLP 1035.001.000)
+const toNavigator = (kind, event) => (payload, nav = root.firstElementChild) => inputReady && (nav?.exactHandlers ?? []).includes(event) && (applyBatch(JSON.parse(readOut(wasm.exact_dispatch(Number(nav.dataset.view), kind, writeIn(payload), now())))), true); navigation.connect(root, navigate, log, toNavigator(29, "traverse"), toNavigator(30, "tabselect")); // the navigator's `traverse` and `tabselect` (LLP 1035.001.000, 1035.001.001 D5)

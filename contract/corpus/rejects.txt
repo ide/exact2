@@ -781,7 +781,7 @@ component A
   action follow(url: string)
     location = url
   view
-    main navigationKey="home" navigationBack="back"
+    main navigationKey="home"
       column navigate=follow navigationKey="home"
         text "Home"
 ---

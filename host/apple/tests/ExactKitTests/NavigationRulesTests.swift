@@ -196,38 +196,16 @@ final class NavigationRulesTests: XCTestCase {
         }
     }
 
-    /// D6: leaving is the app's to permit.
-    func testLeavingIsPermittedByTheBackControlOrByTraverse() {
-        XCTAssertTrue(NavigationRules.backPermitted(hasControl: true, controlEnabled: true, traverses: false))
-        XCTAssertFalse(NavigationRules.backPermitted(hasControl: true, controlEnabled: false, traverses: true))
-        XCTAssertTrue(NavigationRules.backPermitted(hasControl: false, controlEnabled: false, traverses: true))
-        XCTAssertFalse(NavigationRules.backPermitted(hasControl: false, controlEnabled: false, traverses: false))
-    }
-
-    /// D1: the Back control is resolved by id among enabled, pressable, live
-    /// controls, lowest view id first; a disabled one blocks nothing but
-    /// resolves to nothing.
-    func testTheBackControlIsResolvedAtUseByHTMLId() {
-        struct C { let id: UInt32; let html: String?; let press: Bool; let disabled: Bool; var active = true }
-        let controls = [
-            C(id: 1, html: "back", press: true, disabled: false, active: false),
-            C(id: 9, html: "back", press: true, disabled: true),
-            C(id: 12, html: "back", press: true, disabled: false),
-            C(id: 4, html: "back", press: false, disabled: false),
-            C(id: 3, html: "close", press: true, disabled: false),
-        ]
-        let resolve = { (target: String?) -> UInt32? in
-            NavigationRules.backControl(named: target, among: controls, id: \.id, htmlID: \.html, pressable: \.press, disabled: \.disabled, inActiveRoute: \.active)?.id
-        }
-        XCTAssertEqual(resolve("back"), 12)
-        XCTAssertEqual(resolve("close"), 3)
-        XCTAssertNil(resolve("missing"))
-        XCTAssertNil(resolve(nil))
-        // All disabled: nothing may begin.
-        let disabled = [C(id: 1, html: "back", press: true, disabled: true)]
-        XCTAssertNil(NavigationRules.backControl(named: "back", among: disabled, id: \.id, htmlID: \.html, pressable: \.press, disabled: \.disabled, inActiveRoute: \.active))
-        let inactive = controls.filter { !$0.active }
-        XCTAssertNil(NavigationRules.backControl(named: "back", among: inactive, id: \.id, htmlID: \.html, pressable: \.press, disabled: \.disabled, inActiveRoute: \.active))
+    /// LLP 1035.001.001 D3: a platform Back is permitted when the navigator
+    /// hears `traverse` and no route it removes says `closedby="none"` — a
+    /// deep Back through a refusing route is refused, as is any Back no one
+    /// could be told of.
+    func testLeavingIsRefusedByAnyRemovedRouteOrWithoutTraverse() {
+        XCTAssertTrue(NavigationRules.backPermitted(removing: [nil], traverses: true))
+        XCTAssertTrue(NavigationRules.backPermitted(removing: ["closerequest", "any", nil], traverses: true))
+        XCTAssertFalse(NavigationRules.backPermitted(removing: ["none"], traverses: true))
+        XCTAssertFalse(NavigationRules.backPermitted(removing: [nil, "none", nil], traverses: true))
+        XCTAssertFalse(NavigationRules.backPermitted(removing: [nil], traverses: false))
     }
 
     /// D1: an interactive pop needs a stack to pop, no transition, no sheet,
@@ -248,13 +226,6 @@ final class NavigationRulesTests: XCTestCase {
         XCTAssertFalse(NavigationRules.panMayBegin(startX: 40, overSwipeRight: true, velocity: CGPoint(x: 300, y: 20)))
         XCTAssertTrue(NavigationRules.panMayBegin(startX: 40, overSwipeRight: false, velocity: CGPoint(x: 300, y: 20)))
         XCTAssertFalse(NavigationRules.panMayBegin(startX: 40, overSwipeRight: false, velocity: CGPoint(x: 20, y: 300)))
-    }
-
-    /// D1: `closedby="none"` refuses the sheet gesture; anything else permits it.
-    func testClosedByNoneRefusesDismissal() {
-        XCTAssertTrue(NavigationRules.modalRefusesDismissal(closedby: "none"))
-        XCTAssertFalse(NavigationRules.modalRefusesDismissal(closedby: "closerequest"))
-        XCTAssertFalse(NavigationRules.modalRefusesDismissal(closedby: nil))
     }
 
     /// D4: deferred geometry replays frames before contents, ids ascending.
@@ -526,11 +497,11 @@ final class MacShortcutTests: XCTestCase {
         apply([["op": "props", "id": 2, "set": [:], "clear": ["popover", "accessibilityRole"]]])
         XCTAssertFalse(presenter.chrome.hidesOrInerts)
         apply([
-            ["op": "props", "id": 2, "set": ["navigationBack": "true"], "clear": []],
+            ["op": "props", "id": 2, "set": ["navigationKey": "true"], "clear": []],
             ["op": "children", "id": 1, "ids": []],
             ["op": "destroy", "id": 2],
         ])
-        XCTAssertTrue(presenter.carrying("navigationBack").isEmpty)
+        XCTAssertTrue(presenter.carrying("navigationKey").isEmpty)
         XCTAssertFalse(presenter.chrome.hidesOrInerts)
     }
 

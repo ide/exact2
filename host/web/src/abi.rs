@@ -457,7 +457,8 @@ impl<D: DataSource> Bridge<D> {
     /// key's name, or a guest message — is the input buffer's first `len`
     /// bytes, UTF-8).
     /// Kind 14 is navigate: one UTF-8 location at the navigation root (LLP 1038 D8);
-    /// 29 traverse, the navigation key the platform went back to (LLP 1035.001.000).
+    /// 29 traverse, the navigation key the platform went back to (LLP 1035.001.000);
+    /// 30 tabselect, the name of the tab the person chose (LLP 1035.001.001 D5).
     /// Kind 20 is pan (`dx,dy`); 28 panrelease (`vx,vy`, px/s; LLP 1057 §10.6).
     /// Kind 23 is a text field's `input`; 24 and 25 a checkbox's `change`
     /// and `input`, the payload `true` or `false` (LLP 1069.001 D4).
@@ -486,6 +487,8 @@ impl<D: DataSource> Bridge<D> {
             14 => Event::Navigate(payload),
             // @ref LLP 1035.001.000 — the destination's navigation key.
             29 => Event::Traverse(payload),
+            // @ref LLP 1035.001.001 D5 — the chosen tab's name.
+            30 => Event::TabSelect(payload),
             15 => {
                 let Some(event) = Event::height_release_payload(&payload) else {
                     return self.emit(r#"{"ops":[],"error":"invalid height release"}"#.into());

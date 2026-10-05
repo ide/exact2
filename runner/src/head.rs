@@ -152,9 +152,8 @@ fn selected_route<'a>(
     at: &HeadNode<'a>,
 ) -> Option<&'a str> {
     let props: &'a PropList = at.1;
-    let key = props
-        .str(PropId::NavigationBack)
-        .and(props.str(PropId::NavigationKey))?;
+    // @ref LLP 1035.001.001 D2 — keyed, with a keyed child: a navigator.
+    let key = props.str(PropId::NavigationKey)?;
     at.2.iter()
         .any(|c| node(*c).is_some_and(|(_, c, _)| c.str(PropId::NavigationKey) == Some(key)))
         .then_some(key)

@@ -387,6 +387,8 @@ final class Presenter {
     var onPress: ((UInt32) -> Void)?
     /// The navigation root's `traverse` with a navigation key (LLP 1035.001.000).
     var onTraverse: ((UInt32, String) -> Void)?
+    /// A navigator's `tabselect` (LLP 1035.001.001 D5).
+    var onTabSelect: ((UInt32, String) -> Void)?
     var onChange: ((UInt32, String) -> Void)?
     /// Host intrinsic sizes, several at once under one layout.
     var onIntrinsic: (([(UInt32, CGSize?)]) -> Void)?
@@ -452,7 +454,7 @@ final class Presenter {
         if v.disabled || v.bounds.width == 0 || v.bounds.height == 0 { return false }
         let index = Int(v.props["tabIndex"] ?? "0") ?? 0
         if index < 0 { return false }
-        return v.field != nil || v.textArea != nil || v.handlers.contains("press") || v.canBecomeFirstResponder || index > 0
+        return v.field != nil || v.textArea != nil || v.activatable || v.canBecomeFirstResponder || index > 0
     }
 
     /// The action's focus(html-id), delivered only after the batch is mounted.
@@ -557,7 +559,52 @@ final class Presenter {
     weak var hovered: NodeView?
     var hoveredInline: UInt32?
 
-    func press(_ id: UInt32) { onPress?(id) }
+    /// HTML activation (LLP 1035.001.001 D1), the one way any input — a
+    /// touch, a key, VoiceOver, a native or bar button, a menu row, the
+    /// agent — activates a node, as `PresenterMac.press` is on macOS: an
+    /// eligible node's action, then, if it is still eligible, its default
+    /// behaviour read after the action ran (an invoker's command,
+    /// `MenuHost.activated`). An id that is
+    /// not a view (an SVG element, an inline run) has its action only.
+    /// True when the activation ran to its default behaviour (the node
+    /// still eligible after its action).
+    @discardableResult
+    func press(_ id: UInt32) -> Bool {
+        guard let node = views[id] else { onPress?(id); return true }
+        if let refusal = activationRefusal(node) { session?.log("activation of #\(id) refused: \(refusal)"); return false }
+        if node.handlers.contains("press") { onPress?(id) }
+        // HTML runs a button's command only if its action left it enabled:
+        // disabled, removed, or out of the selected route ends it here.
+        guard views[id] === node, activationRefusal(node) == nil else { return false }
+        menus.activated(node)
+        return true
+    }
+    /// Why `node` cannot be activated now: disabled (itself or a container),
+    /// inert (except above a modal dialog, which escapes the inertness
+    /// around it, as HTML's `showModal` does), or in a route not selected.
+    /// Containers are the logical tree's: UIKit holds a route's view under
+    /// its controller, so the walk continues from the navigator it belongs to.
+    func activationRefusal(_ node: NodeView, routeSelected: Bool = true) -> String? {
+        var ancestor: UIView? = node
+        var checksInert = true
+        var crossed = false, borrowed = false
+        while let view = ancestor {
+            if let n = view as? NodeView {
+                if n.disabled { return "disabled" }
+                if checksInert && n.props["inert"] == "true" { return "inert" }
+                if n.props["semanticTag"] == "dialog" { checksInert = false }
+            }
+            ancestor = view.superview
+            // A content popover's boxes, shown in UIKit's popover, sit where
+            // they were borrowed from.
+            if ancestor == nil, !borrowed, let home = menus.logicalHome(of: node) { borrowed = true; ancestor = home }
+            if ancestor == nil, !crossed, navigation.routeKey(containing: node) != nil {
+                crossed = true
+                ancestor = navigation.navigator
+            }
+        }
+        return routeSelected && navigation.isInactiveRoute(containing: node) ? "its route is not selected" : nil
+    }
     func change(_ id: UInt32, _ value: String) { onChange?(id, value) }
     /// A text field typed into since it took the focus: its `change` fires
     /// when the editing ends or Enter commits it, HTML's `change` (LLP

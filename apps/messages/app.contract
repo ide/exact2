@@ -91,6 +91,15 @@ component Messages
     choosing = false
     editing = false
     flightPhase = 0
+  // The platform's Back (LLP 1035.001.001 D4): what the Back button does,
+  // to the destination the platform went to.
+  action returnTo(entry: string)
+    nav = backTo(nav, entry)
+    panel = false
+    selected = ""
+    choosing = false
+    editing = false
+    flightPhase = 0
   action navigate(location: string)
     nav = open(nav, location)
     draftThread = ""
@@ -239,7 +248,7 @@ component Messages
     every(frame, animate)
 
   view
-    main testId="messages" id="messages-root" navigationKey=`${top(nav).id}` navigationBack="back" navigate=navigate viewport-fit="cover" interactive-widget="resizes-content" width="100%" height="100%" display="flex" flex-direction="column" overflow="hidden" class=Canvas font-family="system-ui" color="light-dark(#000000, #ffffff)"
+    main testId="messages" id="messages-root" navigationKey=`${top(nav).id}` navigate=navigate traverse=returnTo viewport-fit="cover" interactive-widget="resizes-content" width="100%" height="100%" display="flex" flex-direction="column" overflow="hidden" class=Canvas font-family="system-ui" color="light-dark(#000000, #ffffff)"
       each entry in stack(nav) key=entry.id
         column navigationKey=`${entry.id}` class=Screen height=viewport.height
           when entry.name == "inbox"

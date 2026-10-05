@@ -661,16 +661,9 @@ fn navigate_delivers_one_location_or_lets_the_action_ignore_it() {
 
 #[test]
 fn traverse_delivers_the_destination_key_and_back_to_pops_to_it() {
-    // @ref LLP 1035.001.000 — one event for a platform Back of any depth.
-    let source = SOURCE
-        .replace(
-            "navigate=followLink",
-            "navigate=followLink traverse=returnTo",
-        )
-        .replace(
-            "  view\n    main",
-            "  action returnTo(entry: string)\n    nav = backTo(nav, entry)\n  view\n    main",
-        );
+    // @ref LLP 1035.001.000 — one event for a platform Back of any depth;
+    // the corpus's navigator hears it (LLP 1035.001.001 D4).
+    let source = SOURCE.to_string();
     let mut runner = boot(contract::compile(&source).unwrap(), "/prompt/5/write");
     let root = runner.kernel().roots()[0];
     let ids: Vec<String> = selected(&state(&runner)["slots"]["nav"])
@@ -701,5 +694,52 @@ fn traverse_delivers_the_destination_key_and_back_to_pops_to_it() {
             .replace("button id=\"back\"", "button traverse=returnTo id=\"back\""),
     ] {
         assert!(contract::compile(&bad).is_err());
+    }
+}
+
+#[test]
+fn tabselect_delivers_the_chosen_tab_and_a_reselect_pops_it_to_its_root() {
+    // @ref LLP 1035.001.001 D5 — the tab bar's choice, the tab shown included.
+    let source = SOURCE.replace("traverse=returnTo", "traverse=returnTo tabselect=selectTab");
+    let mut runner = boot(contract::compile(&source).unwrap(), "/prompt/5/write");
+    let root = runner.kernel().roots()[0];
+    assert_eq!(selected(&state(&runner)["slots"]["nav"]).len(), 3);
+    runner
+        .dispatch(root, exact_runner::Event::TabSelect("home".into()))
+        .unwrap();
+    assert_eq!(state(&runner)["slots"]["nav"]["tab"], "home");
+    runner
+        .dispatch(root, exact_runner::Event::TabSelect("prompts".into()))
+        .unwrap();
+    // The retained stack comes back, then a reselect takes it to its root.
+    assert_eq!(selected(&state(&runner)["slots"]["nav"]).len(), 3);
+    runner
+        .dispatch(root, exact_runner::Event::TabSelect("prompts".into()))
+        .unwrap();
+    assert_eq!(selected(&state(&runner)["slots"]["nav"]).len(), 1);
+    // A navigator's, one string; the deleted proxies name their replacements.
+    for bad in [
+        source.replace("tabselect=selectTab", "tabselect=selectTab(\"home\")"),
+        source.replace(
+            "action selectTab(name: string)",
+            "action selectTab(name: number)",
+        ),
+        source.replace("tabselect=selectTab", "").replace(
+            "button id=\"back\"",
+            "button tabselect=selectTab id=\"back\"",
+        ),
+    ] {
+        assert!(contract::compile(&bad).is_err());
+    }
+    for (old, hint) in [
+        ("navigationBack=\"back\"", "traverse"),
+        ("navigationTabControl=\"tab\"", "tabselect"),
+        ("navigationTrailing=\"x\"", "toolbar"),
+    ] {
+        let error = contract::compile(
+            &source.replace("traverse=returnTo", &format!("traverse=returnTo {old}")),
+        )
+        .unwrap_err();
+        assert!(error.message.contains(hint), "{}", error.message);
     }
 }

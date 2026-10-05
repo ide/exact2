@@ -426,11 +426,6 @@
       "kind": "str"
     },
     {
-      "id": 52,
-      "name": "navigationBack",
-      "kind": "str"
-    },
-    {
       "id": 53,
       "name": "contextTarget",
       "kind": "str"
@@ -473,7 +468,8 @@
     {
       "id": 61,
       "name": "closedby",
-      "kind": "str"
+      "kind": "str",
+      "_comment": "HTML's dialog attribute: which requests close it — `any` (light dismiss, close requests, the app), `closerequest`, `none` (the app only). Exact extends it to every navigation route (LLP 1035.001.001 D3): a platform Back (back button, swipe, sheet pull-down, Escape, the browser's Back) is a close request on each route it removes, refused where one says `none`; a route's default is `closerequest`; a sheet's backdrop is a close request, as UIKit's dimming view is."
     },
     {
       "id": 62,
@@ -592,16 +588,6 @@
       "_comment": "A route's navigation bar subtitle, under its title (large or inline): a status line, as iOS 26's UINavigationItem `subtitle`. Empty or blank shows none."
     },
     {
-      "id": 221,
-      "name": "navigationTrailing",
-      "kind": "str"
-    },
-    {
-      "id": 222,
-      "name": "navigationTrailingSymbol",
-      "kind": "str"
-    },
-    {
       "id": 223,
       "name": "navigationBackButton",
       "kind": "str"
@@ -624,11 +610,6 @@
     {
       "id": 227,
       "name": "navigationTabSelectedSymbol",
-      "kind": "str"
-    },
-    {
-      "id": 228,
-      "name": "navigationTabControl",
       "kind": "str"
     },
     {

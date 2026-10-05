@@ -486,14 +486,15 @@ pub fn emit(plan: &Plan, site_attrs: bool) -> Result<Output, String> {
         let language = em.uses.rt("language");
         let _ = write!(body, "{language}(s_{});", slot.0);
     }
-    // A navigation root (an element with `navigationBack`) is projected
-    // with a router or without one, as the web host projects every batch.
+    // A navigator (LLP 1035.001.001 D2: keyed, with keyed routes) is
+    // projected with a router or without one, as the web host projects
+    // every batch: any keyed node means there may be one.
     let roots = plan.router.is_some()
         || plan.nodes.iter().any(|n| {
             n.bindings
                 .iter()
                 .map(|b| plan.binding(b))
-                .any(|b| b.kind == BindingKind::Prop && b.id == PropId::NavigationBack as u16)
+                .any(|b| b.kind == BindingKind::Prop && b.id == PropId::NavigationKey as u16)
         });
     // The chrome a root's routes ask for (`navigationTitle`, `navigationTab`:
     // nav-chrome.js, its rules in the page's sheet) is drawn with the first
@@ -1168,6 +1169,7 @@ impl Em<'_> {
             match h.event {
                 EventKind::Navigate
                 | EventKind::Traverse
+                | EventKind::Tabselect
                 | EventKind::Press
                 | EventKind::Change
                 | EventKind::Input
@@ -1253,7 +1255,12 @@ impl Em<'_> {
             }
             if h.event == EventKind::Traverse {
                 let traverse = self.uses.rt("traverseTo");
-                let _ = write!(self.out, "{traverse}({handler});");
+                let _ = write!(self.out, "{traverse}({e},{handler});");
+                continue;
+            }
+            if h.event == EventKind::Tabselect {
+                let select = self.uses.rt("tabSelectTo");
+                let _ = write!(self.out, "{select}({e},{handler});");
                 continue;
             }
             // A list's edges are the runner's, from its window (list.js).

@@ -152,6 +152,8 @@ component RealWorld
     nav = push(nav, url)
   action back
     nav = back(nav)
+  action returnTo(entry: string)
+    nav = backTo(nav, entry)
   action followLink(url: string)
     page = 1
     nav = go(nav, url)
@@ -235,7 +237,7 @@ component RealWorld
 
   view
     main navigationKey=`${current.id}`
-      navigationBack="back"
+      traverse=returnTo
       navigate=followLink
       width="100%"
       min-height="100%"

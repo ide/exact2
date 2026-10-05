@@ -423,7 +423,7 @@ fn inactive_retained_route_retires_hold_then_readopts_generation_on_return() {
   action back
     selected = "panel"
   view
-    main width=400 height=300 navigationKey=selected navigationBack="back"
+    main width=400 height=300 navigationKey=selected
       button press=away testId="away"
         text "away"
       button press=back testId="back"

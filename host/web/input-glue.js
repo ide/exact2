@@ -19,7 +19,7 @@ export function createInputHandlers({ root, views, retiredViews, ready, inertAnc
     const { wasm, writeIn, navigate } = globalThis.exact;
     if (url.origin !== location.origin || (here && url.hash) || wasm.exact_route_match(writeIn(to)) !== 1) return;
     const nav = root.firstElementChild;
-    if (!press && !(nav?.hasAttribute("navigationBack") && nav.exactHandlers?.includes("navigate"))) return;
+    if (!press && !(nav?.hasAttribute("navigationKey") && nav.exactHandlers?.includes("navigate"))) return;
     event.preventDefault();
     if (press || here) return;
     if (!navigate(to)?.ops?.some(op => op.op === "router")) wasm.exact_log(writeIn(`history: link ${JSON.stringify(to)} refused`));

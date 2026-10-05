@@ -20,7 +20,7 @@ component App
   action back
     nav = back(nav)
   view
-    main navigationKey=`${top(nav).id}` navigationBack=\"back\" testId=\"navigation\"
+    main navigationKey=`${top(nav).id}` testId=\"navigation\"
       each e in stack(nav) key=e.id
         column navigationKey=`${e.id}` testId=`route-${e.name}`
           button testId=\"dup\" press=back

@@ -82,32 +82,13 @@ enum NavigationRules {
         return index < app.count - 1
     }
 
-    /// D6: leaving a route is the app's to permit. A Back control in the
-    /// route decides — enabled, it permits; disabled, it refuses. With none,
-    /// an app whose root hears `traverse` is told by that event, so leaving is
-    /// permitted; any other app has no way to be told, so it is not.
-    static func backPermitted(hasControl: Bool, controlEnabled: Bool, traverses: Bool) -> Bool {
-        hasControl ? controlEnabled : traverses
-    }
-
-    /// D1: the Back control is resolved at use, never captured at a
-    /// gesture's start: the lowest view id among live controls whose HTML
-    /// `id` is the container's `navigationBack`, that handle `press`, and are
-    /// enabled and owned by the active route. `nil` when no such control is live — and
-    /// then no gesture may begin and no dismissal may complete.
-    static func backControl<Control>(
-        named target: String?,
-        among controls: [Control],
-        id: (Control) -> UInt32,
-        htmlID: (Control) -> String?,
-        pressable: (Control) -> Bool,
-        disabled: (Control) -> Bool,
-        inActiveRoute: (Control) -> Bool
-    ) -> Control? {
-        guard let target else { return nil }
-        return controls
-            .filter { htmlID($0) == target && pressable($0) && !disabled($0) && inActiveRoute($0) }
-            .min { id($0) < id($1) }
+    /// LLP 1035.001.001 D3: leaving is the app's to permit. A platform Back
+    /// is a close request on every route it removes (HTML's `closedby`,
+    /// which Exact extends to routes): permitted when the navigator hears
+    /// `traverse` — else nothing could tell the app — and none of the routes
+    /// it removes, given by their `closedby`, says `none`.
+    static func backPermitted(removing closedby: [String?], traverses: Bool) -> Bool {
+        traverses && !closedby.contains("none")
     }
 
     /// D1: whether an interactive pop may begin at all — a stack to pop, no
@@ -123,13 +104,6 @@ enum NavigationRules {
     static func panMayBegin(startX: CGFloat, overSwipeRight: Bool, velocity: CGPoint) -> Bool {
         if startX >= 20 && overSwipeRight { return false }
         return velocity.x > abs(velocity.y)
-    }
-
-    /// D1: `closedby="none"` refuses the platform's dismissal gesture and
-    /// Escape; anything else (`closerequest`, absent) permits them. Explicit
-    /// Close is the app's own control either way.
-    static func modalRefusesDismissal(closedby: String?) -> Bool {
-        closedby == "none"
     }
 
     /// D4: geometry deferred behind a sheet replays as a batch would apply

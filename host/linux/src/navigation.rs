@@ -61,7 +61,8 @@ impl Navigation {
                 continue;
             };
             self.popovers |= nav.props.str(PropId::Popover).is_some();
-            if nav.props.str(PropId::NavigationBack).is_none() {
+            // @ref LLP 1035.001.001 D2 — a navigator: keyed, with keyed children.
+            if !nav.is_navigator() {
                 continue;
             }
             let children = nav.children();

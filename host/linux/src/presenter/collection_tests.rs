@@ -658,7 +658,7 @@ fn interaction_release_cancel_and_navigation_clear_the_pin() {
   action back
     selected = "list"
   view
-    main navigationKey=selected navigationBack="back"
+    main navigationKey=selected
       button press=away testId="away"
         text "away"
       button press=back testId="back"

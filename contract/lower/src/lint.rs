@@ -29,6 +29,9 @@ pub(crate) fn unknown_attr(tag: &str, a: &Attr) -> LowerError {
             "; `{}` is spelled `{new}` here, the web's name (LLP 1017 §8.1)",
             a.name
         ),
+        None if tags::removed(&a.name).is_some() => {
+            format!("; {}", tags::removed(&a.name).unwrap_or_default())
+        }
         None if a.name == "className" => {
             "; `class` names a `style` declared in this file, as in `class=Card`".into()
         }

@@ -896,8 +896,8 @@ impl<D: DataSource> Bridge<D> {
             },
             // @ref LLP 1038 D8 — the next ABI kind after scroll.
             14 => Event::Navigate(payload),
-            // @ref LLP 1035.001.000 — the destination's navigation key.
-            29 => Event::Traverse(payload),
+            29 => Event::Traverse(payload), // @ref LLP 1035.001.000 — the destination's key
+            30 => Event::TabSelect(payload), // @ref LLP 1035.001.001 D5 — the chosen tab
             15 => {
                 let Some(event) = Event::height_release_payload(&payload) else {
                     let out = self.host.as_ref().map_or_else(not_booted, |h| {
@@ -1469,11 +1469,11 @@ pub fn with_entry<D: DataSource>(
 
 mod exports;
 
+mod clock;
 #[path = "abi/colors.rs"]
 mod colors;
 #[path = "abi/commands.rs"]
 mod commands;
-mod clock;
 
 #[cfg(test)]
 #[path = "abi_tests.rs"]

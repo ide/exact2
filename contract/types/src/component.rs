@@ -446,6 +446,7 @@ fn refine_params_from_view(
                             | "canplay"
                             | "navigate"
                             | "traverse"
+                            | "tabselect"
                             | "cancel"
                     ) {
                         let (name, args): (&str, &[Expr]) = match &a.value {
@@ -493,7 +494,7 @@ fn refine_params_from_view(
                                     vec![Ty::List(Box::new(Ty::Record("Picked".into())))]
                                 }
                                 "change" | "input" | "key" | "message" | "navigate"
-                                | "traverse" | "error" => {
+                                | "traverse" | "tabselect" | "error" => {
                                     vec![Ty::String]
                                 }
                                 "timeupdate" | "durationchange" => vec![Ty::Number],

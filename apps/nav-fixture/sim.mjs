@@ -51,7 +51,7 @@ function at(name, traverses, backs = 0) {
 }
 const tap = ([x, y]) => axe('tap', '-x', String(Math.round(x)), '-y', String(Math.round(y)), '--tap-style', 'physical');
 const element = (what, test) => until(what, all => all.find(test));
-const next = () => tap(centre(element('the bar\'s next button', n => n.AXUniqueId?.startsWith('next|'))));
+const next = () => tap(centre(element('the bar\'s next button', n => n.AXUniqueId?.startsWith('next-'))));
 const backButton = () => element('the back button', n => n.AXUniqueId === 'BackButton');
 const tab = label => tap(centre(element(`the ${label} tab`, n => n.type === 'RadioButton' && n.AXLabel === label)));
 const swipe = (from, to) => axe('swipe', '--start-x', String(from[0]), '--start-y', String(from[1]), '--end-x', String(to[0]), '--end-y', String(to[1]), '--duration', '0.4');
@@ -99,6 +99,18 @@ at('six', 7);
 next(); at('six2', 7); tap(centre(backButton())); at('six', 8);
 tap(centre(backButton()));
 until('the More list again', all => title(all) === 'More');
+tab('home'); at('home', 8);
+
+// A tab chosen again in the More list is a choice (LLP 1035.001.001 D5): one
+// `tabselect`, and the app's `select` takes that tab back to its root.
+tab('More');
+until('the More list', all => title(all) === 'More');
+tap(centre(element('six in the More list', n => n.type === 'StaticText' && n.AXLabel === 'six')));
+at('six', 8); next(); at('six2', 8);
+tab('More');
+until('the More list', all => title(all) === 'More');
+tap(centre(element('six in the More list', n => n.type === 'StaticText' && n.AXLabel === 'six')));
+at('six', 8);
 tab('home'); at('home', 8);
 
 // More's Edit: the person puts six on the bar; UIKit keeps that order.

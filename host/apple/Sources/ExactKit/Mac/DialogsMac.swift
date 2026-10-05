@@ -40,7 +40,8 @@ final class DialogHost {
         }
         return view
     }
-    /// Capture the command before the press's app code can replace its source.
+    /// The command `source` gives now — after its action ran (LLP
+    /// 1035.001.001 D1) — still checked as it runs.
     func command(_ source: NodeView, fromNativeMenu: Bool = false) -> (() -> Void)? {
         guard !source.disabled, !source.inert, (fromNativeMenu || !source.isHiddenOrHasHiddenAncestor || presenter?.toolbar.contains(source) == true),
               let name = source.props["commandfor"], let command = source.props["command"],

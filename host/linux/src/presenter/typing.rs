@@ -12,7 +12,7 @@ impl<D: DataSource> Presenter<D> {
         let kernel = self.host.kernel();
         let node = kernel.node(id).ok_or_else(|| format!("no view {id}"))?;
         // @ref LLP 1038 D11 — the agent's root text is a location.
-        if node.props.str(PropId::NavigationBack).is_some() {
+        if node.is_navigator() {
             if node.props.bool(PropId::Disabled) == Some(true) {
                 return Err(format!("view {id} is disabled"));
             }

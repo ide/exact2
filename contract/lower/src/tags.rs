@@ -552,6 +552,7 @@ pub fn attr(name: &str) -> Option<AttrTarget> {
         "panrelease" => AttrTarget::Handler("panrelease"),
         "navigate" => AttrTarget::Handler("navigate"),
         "traverse" => AttrTarget::Handler("traverse"),
+        "tabselect" => AttrTarget::Handler("tabselect"),
         "heightrelease" => AttrTarget::Handler("heightrelease"),
         "transformgeometry" => AttrTarget::Handler("transformgeometry"),
         "transformrelease" => AttrTarget::Handler("transformrelease"),
@@ -611,7 +612,6 @@ pub fn attr(name: &str) -> Option<AttrTarget> {
         "virtualized" => AttrTarget::Prop(p("virtualized")),
         "testId" => AttrTarget::Prop(p("testId")),
         "navigationKey" => AttrTarget::Prop(p("navigationKey")),
-        "navigationBack" => AttrTarget::Prop(p("navigationBack")),
         "navigationPresentation" => AttrTarget::Prop(p("navigationPresentation")),
         "navigationDetent" => AttrTarget::Prop(p("navigationDetent")),
         // @ref LLP 1038 — a route's native navigation bar (iOS): its title,
@@ -620,8 +620,6 @@ pub fn attr(name: &str) -> Option<AttrTarget> {
         "navigationTitle" => AttrTarget::Prop(p("navigationTitle")),
         "navigationLargeTitle" => AttrTarget::Prop(p("navigationLargeTitle")),
         "navigationSubtitle" => AttrTarget::Prop(p("navigationSubtitle")),
-        "navigationTrailing" => AttrTarget::Prop(p("navigationTrailing")),
-        "navigationTrailingSymbol" => AttrTarget::Prop(p("navigationTrailingSymbol")),
         "navigationBackButton" => AttrTarget::Prop(p("navigationBackButton")),
         // A route's tab (iOS: one navigation controller per tab under a
         // UITabBarController), and on a tab's root route its tab bar item and
@@ -630,7 +628,6 @@ pub fn attr(name: &str) -> Option<AttrTarget> {
         "navigationTabTitle" => AttrTarget::Prop(p("navigationTabTitle")),
         "navigationTabSymbol" => AttrTarget::Prop(p("navigationTabSymbol")),
         "navigationTabSelectedSymbol" => AttrTarget::Prop(p("navigationTabSelectedSymbol")),
-        "navigationTabControl" => AttrTarget::Prop(p("navigationTabControl")),
         // What shows a tab's routes: "stack" (a navigation controller, the
         // default), "screen" (its root alone), or a screen container the
         // app's native module registers, with its props as a JSON object.
@@ -1060,6 +1057,17 @@ pub fn attr(name: &str) -> Option<AttrTarget> {
         "smart-invert" => styles(&[StyleId::SmartInvert]),
         // @ref LLP 1061 D1 — host-owned press feedback; not a motion target.
         "press-scale" => styles(&[StyleId::PressScale]),
+        _ => return None,
+    })
+}
+
+/// What an attribute Exact deleted became (LLP 1035.001.001 D8): the
+/// platform's chrome speaks for itself, with no proxy control to press.
+pub fn removed(name: &str) -> Option<&'static str> {
+    Some(match name {
+        "navigationBack" => "`navigationBack` is gone: a navigator is the element whose `navigationKey` selects among its keyed children; the platform's Back arrives as its `traverse` (`nav = backTo(nav, entry)`), and a route refuses it with `closedby=\"none\"` (LLP 1035.001.001)",
+        "navigationTabControl" => "`navigationTabControl` is gone: a tab chosen in the tab bar arrives as the navigator's `tabselect` with the tab's name (`nav = select(nav, name)`) (LLP 1035.001.001 D5)",
+        "navigationTrailing" | "navigationTrailingSymbol" => "a bar button is a real button in the route's `row role=\"toolbar\" toolbarPlacement=\"navigation-bar\"`, its symbol a child `image \"symbol:sf/…\"` (LLP 1035.001.001 D6)",
         _ => return None,
     })
 }

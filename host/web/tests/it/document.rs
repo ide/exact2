@@ -370,7 +370,7 @@ component App
   action back
     nav = back(nav)
   view
-    main navigationKey=`${top(nav).id}` navigationBack="back" width="100%" height="100%"
+    main navigationKey=`${top(nav).id}` width="100%" height="100%"
       each e in stack(nav) key=e.id
         column navigationKey=`${e.id}` testId=`route-${e.name}`
           text e.name

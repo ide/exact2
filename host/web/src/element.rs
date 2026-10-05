@@ -724,7 +724,6 @@ pub fn props_of(node: &NodeFacts<'_>) -> SortedMap<String, String> {
             PropId::ViewportFit => "viewportFit",
             PropId::InteractiveWidget => "interactiveWidget",
             PropId::NavigationKey => "navigationKey",
-            PropId::NavigationBack => "navigationBack",
             PropId::NavigationPresentation => "navigationPresentation",
             PropId::NavigationSource => "navigationSource",
             PropId::Closedby => "closedby",

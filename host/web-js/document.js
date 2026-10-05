@@ -5,8 +5,8 @@
 // The head is the runner's (runner/src/head.rs): the innermost active `head`
 // wins field by field, a deeper head over a shallower one and, at one depth,
 // the later in document order; a head inside a route its navigation root has
-// not selected is inactive. A root is an element with `navigationBack` and
-// `navigationKey`, its routes its children with a `navigationKey`, and the
+// not selected is inactive. A navigator is an element with a `navigationKey`
+// whose routes are its children with one (LLP 1035.001.001 D2), and the
 // selected one the route whose key is the root's, when one is: read from
 // those attributes, never from what the projection hides (`projectRoots`).
 // After each commit's tree update, once the page has had a head, the active
@@ -37,7 +37,8 @@ export function head(t, fields, effect, after) {
 /** Whether `c`, a child of `p`, is a route `p` has not selected. */
 function covered(p, c) {
   const key = p.getAttribute?.("navigationKey"), own = c.getAttribute?.("navigationKey");
-  return key != null && own != null && own !== key && p.hasAttribute("navigationBack")
+  // @ref LLP 1035.001.001 D2 — `p` is a navigator: keyed, its routes keyed children.
+  return key != null && own != null && own !== key
     && [].some.call(p.childNodes, r => r.getAttribute?.("navigationKey") === key);
 }
 function publish() {
@@ -75,9 +76,9 @@ function publish() {
  * the covered hidden and inert, now and after every commit's tree (`after`,
  * rt.js `After`), as the web host projects after every batch; Escape on a
  * modal route presses its back, and `navigate` takes a popstate's location. */
-export function projectRoots(history, navigate, say, after, traverse) {
-  const root = document.getElementById("exact-root"), project = () => { history.project(root, say); Chrome?.(root); };
-  history.connect(root, navigate, say, traverse);
+export function projectRoots(history, navigate, say, after, traverse, tabselect) {
+  const root = document.getElementById("exact-root"), project = () => { history.project(root, say); Chrome?.(root, history); };
+  history.connect(root, navigate, say, traverse, tabselect);
   after.push(project); project();
 }
 

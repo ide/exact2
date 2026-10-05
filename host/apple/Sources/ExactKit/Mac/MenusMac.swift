@@ -34,7 +34,8 @@ final class MenuHost: NSObject {
         for v in presenter.carrying("popovertarget") {
             // A row that only hides its popover (a menu item closing
             // itself, the spec's way) is not an invoker.
-            if let target = v.props["popovertarget"], popovers[target] != nil,
+            // `commandfor` wins over `popovertarget` (HTML's precedence).
+            if (v.props["commandfor"] ?? "").isEmpty, let target = v.props["popovertarget"], popovers[target] != nil,
                v.props["popovertargetaction"] != "hide" {
                 invokers[v.id] = target
             }
@@ -47,8 +48,12 @@ final class MenuHost: NSObject {
     func pressed(_ id: UInt32) {
         guard let target = invokers[id], let popId = popovers[target] else { return }
         DispatchQueue.main.async { [weak self] in
+            // Still the invoker of that menu, and still activatable, as the
+            // action left it (LLP 1035.001.001 D1).
             guard let self, let presenter = self.presenter,
-                  let invoker = presenter.views[id], let pop = presenter.views[popId]
+                  let invoker = presenter.views[id], let pop = presenter.views[popId],
+                  !invoker.disabled, !invoker.inert, (invoker.props["commandfor"] ?? "").isEmpty,
+                  invoker.props["popovertarget"] == target, invoker.props["popovertargetaction"] != "hide"
             else { return }
             self.menu(of: pop).popUp(
                 positioning: nil,

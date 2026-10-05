@@ -409,6 +409,20 @@ extension Agent {
     }
 
     func tap(_ req: [String: Any]) -> [String: Any] {
+        // LLP 1035.001.001 D7 — the navigator's chrome, as a person taps it.
+        if let chrome = req["chrome"] as? [String: Any], let node = view(req) {
+            return ["tapped": Int(node.id)].merging(presenter.navigation.chromeTap(node, what: chrome["what"] as? String ?? "", name: chrome["name"] as? String)) { $1 }
+        }
+        // A route toolbar's button shown as a bar item (D6) is activated as
+        // its item's tap is: its own view is the hidden authored rendering.
+        if let node = view(req), req["phase"] == nil, req["wheel"] == nil, req["hover"] == nil,
+           let item = presenter.navigation.barItem(for: node) {
+            guard item.isEnabled else { return ["error": "bar item #\(node.id) is disabled"] }
+            guard !presenter.navigation.chromeCovered else { return ["error": "a presentation covers bar item #\(node.id)"] }
+            if item.menu != nil { return ["tapped": Int(node.id), "delivery": "unsupported", "reason": "a bar item's menu opens only from UIKit's button; drive it with a real tap"] }
+            presenter.press(node.id)
+            return ["tapped": Int(node.id), "delivery": "host-activation", "native": "bar-item"]
+        }
         if view(req)?.placedAncestor?.placementHidden == true { return ["error": "placed child is hidden"] }
         if req["phase"] == nil, req["wheel"] == nil,
            let node = view(req), node.isDescendant(of: presenter.viewport) {
@@ -456,12 +470,6 @@ extension Agent {
            let activated = presenter.segments.activate(node) {
             return activated ? ["tapped": id, "delivery": "host-activation", "native": "segmented-control"]
                 : ["error": "native segment #\(id) is unavailable"]
-        }
-        if let id = req["id"] as? Int, let node = presenter.views[UInt32(id)],
-           req["wheel"] == nil, req["hover"] == nil, req["contextmenu"] == nil, req["dblclick"] == nil,
-           let activated = presenter.navigation.activate(node) {
-            return activated ? ["tapped": id, "delivery": "host-activation", "native": "navigation"]
-                : ["error": "navigation control #\(id) is disabled"]
         }
         if let id = req["id"] as? Int, presenter.swipeActions.ownsAction(UInt32(id)),
            req["wheel"] == nil, req["hover"] == nil, req["contextmenu"] == nil, req["dblclick"] == nil {
@@ -633,6 +641,11 @@ extension Agent {
         guard let v = view(req), v.window != nil else { return ["error": "no view \(req["id"] ?? "?") on screen"] }
         guard !v.disabled else { return ["error": "view \(v.id) is disabled"] }
         if session.canvases.wantsInput(v.id) { return canvasType(v, req) }
+        // LLP 1035.001.001 D7 — Escape on the navigator is the close request
+        // on its topmost presentation, as a hardware Escape.
+        if req["key"] as? String == "Escape", v === presenter.root.subviews.first, v.props["navigationKey"] != nil {
+            return ["typed": Int(v.id), "key": "Escape"].merging(presenter.navigation.chromeTap(v, what: "escape", name: nil)) { $1 }
+        }
         if v.isSurfaceControl, let key = req["key"] as? String, let code = KeyCodes.device(key)?.code, ["Space", "Enter", "NumpadEnter"].contains(code) {
             let phase = req["phase"] as? String
             guard phase == nil || phase == "down" || phase == "up" else { return ["error":"key: not a phase: \(phase!)"] }
@@ -651,7 +664,7 @@ extension Agent {
         if req["key"] == nil, let reply = presenter.controls.type(v, req["text"] as? String ?? "") { return reply }
         if v.props["editable"] == "false", req["key"] == nil || ["Enter", "Backspace"].contains(req["key"] as? String ?? "") { return ["error": "view \(v.id) is readonly"] }
         // @ref LLP 1038 D11 — type on the root delivers a location.
-        if v.props["navigationBack"] != nil, req["key"] == nil {
+        if v.props["navigationKey"] != nil, v === presenter.root.subviews.first, req["key"] == nil {
             let location = req["text"] as? String ?? ""
             return session.navigate(location) ? ["typed": Int(v.id), "value": location, "delivery": "recognized"] : ["error": "navigate refused"]
         }
@@ -672,7 +685,7 @@ extension Agent {
             }
             return ["typed": v.id, "key": key, "delivery": "recognized"]
         }
-        if let key = req["key"] as? String, ["Space", " ", "Enter"].contains(key), v.handlers.contains("press") {
+        if let key = req["key"] as? String, ["Space", " ", "Enter"].contains(key), v.activatable {
             _ = v.becomeFirstResponder()
             if req["phase"] as? String != "up" { presenter.press(v.id) }
             return ["typed": v.id, "key": key, "delivery": "recognized"]

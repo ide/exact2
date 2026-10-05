@@ -1463,9 +1463,9 @@ export const x_path = (name, ...values) => path(Routes.find(r => r.name === name
 /** The router slot's changes, to the browser's history (`navigation.js`,
  * the web host's own), and a popstate back as the navigation root's
  * `navigate` (LLP 1038 D7, D11). */
-let RouterSlot = null, Shown = null, Navigate = null, Traverse = null, History = null; export const pageHistory = () => History; // the page's navigation.js, which the agent observes: its own copy's state is never written
+let RouterSlot = null, Shown = null, Navigate = null, History = null; export const pageHistory = () => History; // the page's navigation.js, which the agent observes: its own copy's state is never written
 /** The plan's navigation roots, with a router or without (document.js `projectRoots`). */
-export function navigationRoots(history) { History = history; projectRoots(history, location => Navigate?.(location), say, After, key => Traverse ? (Traverse(key), true) : false); }
+export function navigationRoots(history) { History = history; projectRoots(history, location => Navigate?.(location), say, After, (key, nav) => nav?.$traverse ? (nav.$traverse(key), true) : false, (name, nav) => nav?.$tabselect ? (nav.$tabselect(name), true) : false); }
 export function router(slot, history) {
   RouterSlot = slot; navigationRoots(history);
   // @ref LLP 1038 §7 — a plain click on a same-origin link to a declared
@@ -1494,6 +1494,6 @@ export function router(slot, history) {
     history.apply({ top: top[0], url: top[2], removed });
   });
 }
-export const navigateTo = f => { Navigate = f; }, traverseTo = f => { Traverse = f; }; // and the root's `traverse`: history's Back to a route beneath the top (LLP 1035.001.000)
+export const navigateTo = f => { Navigate = f; }, traverseTo = (e, f) => { e.$traverse = f; }, tabSelectTo = (e, f) => { e.$tabselect = f; }; // and each navigator's own `traverse` (a Back to a route beneath the top, LLP 1035.001.000) and `tabselect` (LLP 1035.001.001 D5)
 /** The route a location matches: its row index (renderers pick a policy by it). */
 export const routeAt = location => matchRoute(canonical(location))?.[0] ?? -1;

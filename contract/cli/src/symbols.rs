@@ -763,7 +763,7 @@ impl<'a> Resolver<'a> {
                     }
                 }
             }
-            ("navigationBack" | "contextTarget" | "popovertarget", Expr::Str(id, span)) => {
+            ("contextTarget" | "popovertarget" | "commandfor", Expr::Str(id, span)) => {
                 self.graph.id(id, *span)
             }
             (name, Expr::Call(action, args, span))

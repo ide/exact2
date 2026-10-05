@@ -114,7 +114,7 @@ fn slot_fills_keep_the_callers_provider_context() {
 
 #[test]
 fn navigate_optional_arity_survives_multiple_bindings_and_intersection() {
-    let nav = "component Page\n  props\n    callback: action\n  view\n    view navigationKey=\"home\" navigationBack=\"back\" navigate=callback\n";
+    let nav = "component Page\n  props\n    callback: action\n  view\n    view navigationKey=\"home\" navigate=callback\n";
     let zero = "component App\n  action zero\n    focus(\"nothing\")\n  action one(path: string)\n    focus(path)\n  view\n    view\n      Page(callback=zero)\n      Page(callback=one)\n";
     // Two navigation roots cannot both lower into one app; inspect the shared
     // interface with both bindings, then compile each legal root separately.
@@ -129,8 +129,8 @@ fn navigate_optional_arity_survives_multiple_bindings_and_intersection() {
         contract::compile(&source).unwrap();
     }
     let exact = nav.replace(
-        "    view navigationKey=\"home\" navigationBack=\"back\" navigate=callback",
-        "    view navigationKey=\"home\" navigationBack=\"back\" navigate=callback\n      button \"run\" press=callback()",
+        "    view navigationKey=\"home\" navigate=callback",
+        "    view navigationKey=\"home\" navigate=callback\n      button \"run\" press=callback()",
     );
     refusal(&(zero.to_owned() + &exact));
     let invalid = nav.replace("navigate=callback", "navigate=callback(\"/bad\")");

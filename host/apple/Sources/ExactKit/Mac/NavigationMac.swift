@@ -28,8 +28,10 @@ final class NavigationHost {
                 subtrees.formUnion(op.ids)
             }
         }
-        for nav in presenter.carrying("navigationBack") {
+        // LLP 1035.001.001 D2 — a navigator: keyed, with keyed children.
+        for nav in presenter.carrying("navigationKey") {
             let routes = nav.container.subviews.compactMap { $0 as? NodeView }.filter { $0.props["navigationKey"] != nil }
+            if routes.isEmpty { continue }
             let key = nav.props["navigationKey"] ?? ""
             guard let prefix = NavigationRules.stack(routeKeys: routes.map { $0.props["navigationKey"] ?? "" }, selected: key) else {
                 if refused[nav.id] != key {

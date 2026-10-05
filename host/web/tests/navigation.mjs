@@ -255,7 +255,7 @@ try {
     assert.equal(again.calls.filter(c => c.name === 'pushState').length, 0, 'a same-URL push writes no history entry');
     await historyTap(-1); await until(`location.pathname==='/'`);
     const back = await record('browser Back', '/', n + 1, 1, 1);
-    if (!js) assert.equal(back.logs.lines.filter(l => l.includes('(back)')).length, 1);
+    if (!js) assert.equal(back.logs.lines.filter(l => l.includes('(returnTo)')).length, 1);
     assert.equal(back.calls.filter(c => c.name === 'go').length, 1, 'completed pop emits no second go');
     await historyTap(1); await until(`location.pathname==='/post/42'`);
     const forward = await record('Forward follows link', '/post/42', n + 1, 2, 1);
@@ -308,16 +308,16 @@ try {
   await run('in-document reboot retains the carried history mirror', async () => {
     const n = await fresh(); await tap('push-post');
     const pushed = await record('reload prelude', '/post/42', n + 1, 2, 0);
-    // The replacement plan has no navigate handler: only the Back control
+    // The replacement plan has no navigate handler: only its `traverse`
     // can accept the traversal and perform the app's Back-side effects.
     await evaluate(`exact.reload(new Uint8Array(${JSON.stringify(noNavigate)}))`);
     const reloaded = await record('carried router after reload', '/post/42', n + 1, 2, 0);
     assert.deepEqual(reloaded.stamp, pushed.stamp);
     assert.equal(reloaded.calls.length, 0, 'a carried boot writes no History entry');
     await historyTap(-1);
-    const back = await record('Back after reload presses the new control', '/', n + 1, 1, 1);
+    const back = await record('Back after reload is the new plan\'s traverse', '/', n + 1, 1, 1);
     assert.equal(back.navigatePresses, 0);
-    assert.equal(back.logs.lines.filter(l => l.includes('(back)')).length, 1);
+    assert.equal(back.logs.lines.filter(l => l.includes('(returnTo)')).length, 1);
     assert.deepEqual(back.calls.filter(c => c.name === 'go').map(c => c.args[0]), [-1]);
     const m = await fresh('/post/42');
     const freshBoot = await record('fresh document starts at index zero', '/post/42', m, 2, 0);
@@ -352,13 +352,14 @@ try {
     const n = await fresh(); await tap('push-post'); await tap('push-person');
     await record('two pushes', '/people/7', n + 2, 3, 0);
     await historyTap(-2); await until(`location.pathname==='/'`);
-    const traversed = await record('two-step Back follows link', '/', n + 2, 1, 0);
-    followed(traversed);
+    // One Back of two entries is one `traverse` to its destination (I1).
+    const traversed = await record('two-step Back is one traverse', '/', n + 2, 1, 1);
+    assert.equal(traversed.navigatePresses, 0);
     assert.deepEqual(traversed.calls.filter(c => c.name === 'go').map(c => c.args[0]), [-2]);
     await tap('push-post'); await tap('push-person');
-    await record('two pushes after browser Back', '/people/7', n + 2, 3, 0);
+    await record('two pushes after browser Back', '/people/7', n + 2, 3, 1);
     await tap('go-home'); await until(`location.pathname==='/'`);
-    const go = await record('commit pops two written ids', '/', n + 2, 1, 0);
+    const go = await record('commit pops two written ids', '/', n + 2, 1, 1);
     assert.deepEqual(go.calls.filter(c => c.name === 'go').map(c => c.args[0]), [-2]);
   });
   await run('tabs retain ids and push history', async () => {
@@ -373,10 +374,10 @@ try {
     await tap('back'); const back = await record('Back after tab switch pushes', '/', n + 4, 1, 1);
     assert.equal(back.calls.filter(c => c.name === 'pushState').length, 1);
   });
-  await run('disabled Back restores once', async () => {
-    const n = await fresh(); await tap('push-post'); await tap('refuse'); await record('disabled fixture', '/post/42', n + 1, 2, 0);
+  await run('a Back closedby="none" refuses restores once', async () => {
+    const n = await fresh(); await tap('push-post'); await tap('refuse'); await record('refusing fixture', '/post/42', n + 1, 2, 0);
     await historyTap(-1); await until(`location.pathname==='/post/42'`);
-    const back = await record('refused Back', '/post/42', n + 1, 2, 0, 'history: Back refused');
+    const back = await record('refused Back', '/post/42', n + 1, 2, 0, 'refused (closedby="none")');
     assert.deepEqual(back.calls.filter(c => c.name === 'go').map(c => c.args[0]), [-1, 1]);
     assert.equal(back.logs.lines.length, 1);
   });
@@ -427,7 +428,7 @@ try {
     const result = await evaluate(`(async()=>{
       const {navigation:m}=await import('/navigation.js');
       const host=document.querySelector('#host'), nav=document.createElement('main');host.append(nav);
-      nav.setAttribute('navigationBack','back');
+      nav.dataset.exactOn='traverse';
       const journals=[], calls=[]; let supersede=false, refuseNavigate=false;
       addEventListener('popstate',e=>{if(supersede&&e.state?.exact===2){supersede=false;history.go(-1);}});
       const original=history.go.bind(history);
@@ -441,7 +442,7 @@ try {
         nav.setAttribute('navigationKey',next.at(-1).id);
         m.apply({top:next.at(-1).id,url:next.at(-1).url,removed});m.project(host,s=>journals.push(s));
       };
-      m.connect(host,url=>{if(refuseNavigate){journals.push('navigate refused');return {};}emit([root,post,person].slice(0,[root,post,person].findIndex(e=>e.url===url)+1));},s=>journals.push(s));
+      m.connect(host,url=>{if(refuseNavigate){journals.push('navigate refused');return {};}emit([root,post,person].slice(0,[root,post,person].findIndex(e=>e.url===url)+1));},s=>journals.push(s),key=>{emit(stack.slice(0,stack.findIndex(e=>String(e.id)===key)+1));return true;});
       emit([root,post,person]);await m.travel(nav,-1);await m.travel(nav,-1);
       const before=history.length;emit([root,{id:7,url:'/post/43'}]);
       calls.length=0;nav.lastElementChild.firstElementChild.click();
@@ -452,7 +453,7 @@ try {
       await new Promise(resolve=>addEventListener('popstate',()=>queueMicrotask(resolve),{once:true}));
       const queued={location:location.pathname,stamp:history.state,url:m.observation(host).url,calls:[...calls]};
       m.reset();stack=[];emit([root]);emit([root,post]);emit([root,post,person]);emit([root,post,person,{id:8,url:'/people/8'}]);
-      nav.lastElementChild.firstElementChild.disabled=true;
+      nav.lastElementChild.setAttribute('closedby','none');
       calls.length=0;supersede=true;refuseNavigate=true;
       await m.travel(nav,-1);
       return {negative,before,queued,superseded:{location:location.pathname,stamp:history.state,url:m.observation(host).url,calls},journals};
@@ -463,7 +464,8 @@ try {
     assert.equal(result.queued.location,'/people/8');assert.equal(result.queued.url,'/people/8');
     assert.equal(result.queued.stamp.exact,-1);
     assert.equal(result.superseded.location,'/people/8');assert.equal(result.superseded.url,'/people/8');
-    assert.equal(result.superseded.stamp.exact,3);assert.equal(result.journals.length,3);
+    assert.equal(result.superseded.stamp.exact,3);// Each Back the top route's closedby="none" refuses is restored, never delivered.
+    assert.deepEqual(result.journals.map(l=>l.replace(/to \d+ /,'')),Array(2).fill('history: Back refused (closedby="none"); restoring the entry'),JSON.stringify(result.journals));
   });
   await run('raw request targets cannot normalize into public files or app fallback', async () => {
     const targets = ['/.exact/%2e%2e/post/42', '/assets/%2e%2e/app.wasm',

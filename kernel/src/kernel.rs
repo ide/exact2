@@ -171,6 +171,19 @@ impl<'a> NodeRef<'a> {
         runs
     }
 
+    /// Whether this node is a navigator (LLP 1035.001.001 D2): it has a
+    /// `navigationKey`, and so does at least one of its children — its
+    /// routes, in the logical tree. A keyed node without keyed children is
+    /// a route, or nothing.
+    pub fn is_navigator(&self) -> bool {
+        self.props.str(PropId::NavigationKey).is_some()
+            && self
+                .arena
+                .children(self.slot)
+                .iter()
+                .any(|c| self.arena.props(*c).str(PropId::NavigationKey).is_some())
+    }
+
     /// Child wire ids, in order.
     pub fn children(&self) -> Vec<ViewId> {
         self.arena

@@ -222,16 +222,21 @@ parsed commands and fill rule (`{"rule", "commands"}`), applies a layer mask to 
 tests the same path for pointer hits. Web emits CSS. Linux masks by it.
 Messages uses it for transparent curved tails over the focused reply material.
 
-`navigationKey` and `navigationBack` declare a host navigation container on the
-first root. Its direct children carry unique `navigationKey` values; the root's
-key selects one, with preceding children retained as its back stack.
-`navigationBack` names the HTML `id` of a press control in the active route.
-UIKit presents those existing Contract views through `UINavigationController`
-and presses that control after a completed native pop; cancellation changes no
-Contract state. The browser hides and makes inactive routes inert. This is an
-explicit platform navigation policy, not a CSS style or an engine-owned gesture
-or interactive transition model. Other hosts currently retain their ordinary
-stacked rendering; callers supply opaque, absolutely positioned route surfaces.
+`navigationKey` declares a navigator (LLP 1035.001.001 D2): an element with a
+`navigationKey` whose direct children carry unique `navigationKey` values (its
+routes, in the logical tree); its key selects one, with preceding children
+retained as its back stack. The first navigator is the document's, projected by
+UIKit through `UINavigationController` on the first root. The platform's Back
+reaches the app as the navigator's `traverse` event (the destination's key),
+and a tab chosen in the platform's tab bar as `tabselect` (the tab's name); no
+control is pressed for either, and cancellation changes no Contract state.
+`closedby` (61), HTML's dialog attribute, is extended to routes: `none` refuses
+a platform Back that would remove the route (an explicit deviation; HTML defines
+it for dialogs only). The browser hides and makes inactive routes inert. This
+is an explicit platform navigation policy, not a CSS style or an engine-owned
+gesture or interactive transition model. Other hosts currently retain their
+ordinary stacked rendering; callers supply opaque, absolutely positioned route
+surfaces.
 
 `swipeContent` (65), `swipeLeading` (66) and `swipeTrailing` (67) are
 explicit native row presentation requests (2026-09-10, Messages). The first
@@ -257,8 +262,10 @@ implies the flag.
 `commandfor` (69) and `command` (70) are HTML string attributes. A `dialog`
 semantic tag defaults to absolute positioning; `show-modal` and `close` name
 browser-owned presentation commands, not runner state. UIKit supports the narrow
-confirmation grammar and `closedby="any"`; AppKit/Linux do not present dialogs
-(LLP 1021 D2). No arbitrary dialog or additional command capability is implied.
+confirmation grammar and `closedby="any"`; AppKit presents a modal dialog in
+the session's top layer (`DialogsMac`); Linux does not present dialogs (LLP 1021
+D2). Activation reads the command after the invoker's action (LLP 1035.001.001
+D1). No arbitrary dialog or additional command capability is implied.
 
 `emojiPicker` (prop 63, boolean, absent/false by default) is an explicit
 selection-input policy on `input`, not an HTML `inputmode` value. A single emoji

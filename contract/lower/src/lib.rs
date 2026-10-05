@@ -761,15 +761,19 @@ impl<'a> Lowerer<'a> {
                     );
                 }
                 controls::check_zero_size(tag, expanded, children, *span)?;
-                // @ref LLP 1038 D8 — only the first root selects navigation.
-                if (has(&["navigate"]) || has(&["traverse"]))
+                // @ref LLP 1038 D8 — only the first root takes locations;
+                // @ref LLP 1035.001.001 D2 — any navigator (keyed, with
+                // keyed routes) hears its Backs and its tab choices.
+                if has(&["navigate"])
                     && (parent_tag.is_some()
                         || arm.is_some()
                         || order != 0
-                        || !has(&["navigationKey"])
-                        || !has(&["navigationBack"]))
+                        || !has(&["navigationKey"]))
                 {
-                    return err("lower-navigate-root", "`navigate` and `traverse` belong to the navigation root (navigationKey and navigationBack)", *span);
+                    return err("lower-navigate-root", "`navigate` belongs to the navigation root: the first root, with a navigationKey", *span);
+                }
+                if (has(&["traverse"]) || has(&["tabselect"])) && !has(&["navigationKey"]) {
+                    return err("lower-navigate-root", "`traverse` and `tabselect` belong to a navigator: the element whose navigationKey selects among its keyed routes", *span);
                 }
                 let mut bindings: Vec<BindingsRow> = Vec::new();
                 let mut handlers: Vec<(EventKind, exact_plan::ActionsId, Vec<Code>)> = Vec::new();
@@ -1355,6 +1359,7 @@ impl<'a> Lowerer<'a> {
                                 "change" | "input" => " plus the new value",
                                 "message" => " plus the message",
                                 "traverse" => " plus the destination's navigation key",
+                                "tabselect" => " plus the chosen tab's name",
                                 "scroll" => " plus scrollLeft and scrollTop",
                                 "heightrelease" => " plus height and velocity",
                                 "panrelease" => " plus vx and vy",

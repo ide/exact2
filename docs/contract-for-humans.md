@@ -737,12 +737,18 @@ component App
     nav = push(nav, path("item", "42"))
   action back
     nav = back(nav)
+  action returnTo(entry: string)
+    nav = backTo(nav, entry)
   action followLink(url: string)
     nav = go(nav, url)
   view
-    main navigationKey=`${current.id}` navigationBack="back" navigate=followLink
+    main navigationKey=`${current.id}` navigate=followLink traverse=returnTo
       each e in stack(nav) key=e.id
-        column navigationKey=`${e.id}` gap=8
+        column navigationKey=`${e.id}` navigationTitle=e.name gap=8
+          when e.name == "item"
+            row role="toolbar" toolbarPlacement="navigation-bar" position="absolute" top=0 right=0
+              button press=showItem aria-label="Next item" testId=`next-${e.id}`
+                image "symbol:sf/chevron.forward"
           text e.name testId=`route-${e.id}`
           when e.name == "item"
             text e.params.id
@@ -753,20 +759,35 @@ component App
 ```
 
 A navigation stack is built this way: one row per entry of `stack(nav)`, keyed by
-the entry's id, so a retained screen keeps its state. The root's `navigationKey`
-names the top entry, and each row's `navigationKey` names its own; the host
-presents the stack from them. `navigationBack` names the `id` of the back control.
-`navigate=` receives locations the host navigates to itself, such as link clicks
-and browser history.
+the entry's id, so a retained screen keeps its state. An element with a
+`navigationKey` whose children have one too is a navigator: its `navigationKey`
+names the top entry, each row's names its own, and the host presents the stack
+from them. `navigate=` receives locations the host navigates to itself, such as
+link clicks and browser history.
 
 `traverse=` receives the platform's own Back, however it happened and however far
 it went: UIKit's back button or its long-press menu, the edge swipe, a sheet pulled
 down with whatever it had pushed, the browser's Back over several entries. It is one
 event carrying the `navigationKey` of the route the person is now on; `nav =
 backTo(nav, key)` makes it the top. One way back is one destination, never a
-count of screens. Without `traverse=`, the host presses the `navigationBack`
-control of whatever screen is on top until the destination is. Either way a
-disabled Back control in a route keeps the platform from leaving it.
+count of screens. Without `traverse=` nothing could tell the app, so the platform
+offers no Back (no back button, no swipe). A route with `closedby="none"` — HTML's
+dialog attribute, which Exact extends to routes — refuses the platform's Back while
+it would be removed (an editor saving sets `closedby=(saving ? "none" :
+"closerequest")`); the app's own buttons work either way.
+
+`tabselect=` receives a tab chosen in the platform's tab bar — the tab already
+shown included — as its `navigationTab` name: `nav = select(nav, name)` shows that
+tab's retained stack, or takes the shown tab back to its root.
+
+A route's bar buttons are its own buttons: its first direct child `row
+role="toolbar" toolbarPlacement="navigation-bar"` holds them (a button with
+`toolbarPlacement="navigation"` goes to the leading side), and where the route shows
+a native bar (`navigationTitle`) the host shows them there — on iOS as the bar's
+items, each activating its button as a tap would, a popover it opens pointing at
+the item. Elsewhere it renders as authored, so place it out of flow
+(`position="absolute"`). No hidden control stands in for the platform's chrome
+(LLP 1035.001.001).
 
 `path("item", value)` checks the route and encodes its parameters. Always build
 locations with it: a template literal as a location is refused and a string

@@ -333,12 +333,12 @@ final class ModalHost: NSObject, UIAdaptivePresentationControllerDelegate {
         else { layer.controller.dismiss(animated: layer.animated, completion: completion) }
     }
 
-    /// LLP 1035.001.000 D6/D8: a sheet may be pulled down when its route
-    /// allows it (`closedby`) and the app permits leaving its active route —
-    /// the sheet's own, or a screen the sheet has pushed, which goes with it.
+    /// LLP 1035.001.001 D3: a sheet may be pulled down when leaving it is
+    /// permitted — the navigator hears `traverse`, and neither the sheet's
+    /// route nor any screen it has pushed (which go with it) says
+    /// `closedby="none"`.
     private func refusesDismissal(of route: NodeView) -> Bool {
-        presenter.views[route.id] !== route ||
-            NavigationRules.modalRefusesDismissal(closedby: route.props["closedby"]) || !presenter.navigation.backPermittedNow
+        presenter.views[route.id] !== route || !presenter.navigation.leavingPermitted(route)
     }
 
     func presentationControllerShouldDismiss(_ presentationController: UIPresentationController) -> Bool {
@@ -347,9 +347,9 @@ final class ModalHost: NSObject, UIAdaptivePresentationControllerDelegate {
     }
 
     func presentationControllerDidAttemptToDismiss(_ presentationController: UIPresentationController) {
-        guard layers.last?.controller === presentationController.presentedViewController,
-              !presenter.navigation.backPermittedNow else { return }
-        presenter.session?.log("modal dismissal refused: the active route does not permit leaving (no enabled navigationBack control)")
+        guard let layer = layers.last, layer.controller === presentationController.presentedViewController,
+              !presenter.navigation.leavingPermitted(layer.route) else { return }
+        presenter.session?.log("modal dismissal refused: the navigator does not hear traverse, or a route it removes says closedby=\"none\"")
     }
 
     func presentationControllerDidDismiss(_ presentationController: UIPresentationController) {

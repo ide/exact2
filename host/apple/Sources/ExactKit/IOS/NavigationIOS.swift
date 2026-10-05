@@ -33,13 +33,13 @@ private final class RouteController: UIViewController {
     /// is "false", and `navigationSubtitle` under it (iOS 26's subtitle,
     /// which the large title shows too); `navigationBackButton` "minimal"
     /// shows the chevron alone;
-    /// `navigationTrailing` names (by HTML id) an authored control a trailing
-    /// bar button presses, drawn as the `navigationTrailingSymbol` SF Symbol.
+    /// the route's own `role="toolbar" toolbarPlacement="navigation-bar"`
+    /// shows its buttons as the bar's items (`projectToolbar`).
     /// A route with no title keeps the bar hidden, as before; a blank one
     /// (" ", a title still loading) shows the bar with no words in it —
     /// UIKit draws a whitespace title as a pair of quotes.
     var hasBar: Bool { !(node.props["navigationTitle"] ?? "").isEmpty }
-    func configure(backHidden: Bool, press: @escaping (String, UIBarButtonItem) -> Void) {
+    func configure(backHidden: Bool, presenter: Presenter) {
         let item = navigationItem
         // D6: the back button and its menu show only where leaving is the
         // app's to permit; a route that refuses it has none to tap.
@@ -54,17 +54,7 @@ private final class RouteController: UIViewController {
         }
         item.largeTitleDisplayMode = node.props["navigationLargeTitle"] == "false" ? .never : .always
         item.backButtonDisplayMode = node.props["navigationBackButton"] == "minimal" ? .minimal : .default
-        if let target = node.props["navigationTrailing"], !target.isEmpty {
-            let symbol = node.props["navigationTrailingSymbol"] ?? ""
-            if item.rightBarButtonItem?.accessibilityIdentifier != "\(target)|\(symbol)" {
-                let button = UIBarButtonItem(image: UIImage(systemName: symbol))
-                button.primaryAction = UIAction(image: button.image) { [weak button] _ in if let button { press(target, button) } }
-                button.accessibilityIdentifier = "\(target)|\(symbol)"
-                item.rightBarButtonItem = button
-            }
-        } else if item.rightBarButtonItem != nil {
-            item.rightBarButtonItem = nil
-        }
+        projectToolbar(presenter)
         // Large titles collapse as the route's own scroll view scrolls under
         // the bar: UIKit insets it and tracks it as the content scroll view.
         guard hasBar, isViewLoaded, let scroll = firstScroll(in: node) else { return }
@@ -80,6 +70,100 @@ private final class RouteController: UIViewController {
         }
         return nil
     }
+    // MARK: The route's toolbar (LLP 1035.001.001 D6)
+
+    /// The bar item each projected toolbar button is shown as, by view id —
+    /// what a presentation it opens points at (`NavigationHost.barItem`).
+    private(set) var barItems: [UInt32: UIBarButtonItem] = [:]
+    private weak var projected: NodeView?
+    private weak var host: Presenter?
+    private var faces: [UInt32: String] = [:]
+    private var refusal: String?
+    /// The route's first direct child `role="toolbar"
+    /// toolbarPlacement="navigation-bar"`, where the route shows UIKit's bar:
+    /// its direct buttons become the bar's items — `toolbarPlacement=
+    /// "navigation"` ones leading, after the back button, the rest trailing,
+    /// in authored order — each mirroring its button every projection (its
+    /// symbol or text, label, test id, enabled) and activating it as a tap
+    /// would (`Presenter.press`; a menu's invoker opens the menu). The
+    /// authored toolbar is hidden only once its items are installed;
+    /// anything else (no bar, a second toolbar, a child that is not a
+    /// button) keeps its authored rendering, refused in the journal once.
+    private func projectToolbar(_ presenter: Presenter) {
+        host = presenter
+        let toolbars = node.container.subviews.compactMap { $0 as? NodeView }
+            .filter { $0.props["accessibilityRole"] == "toolbar" && $0.props["toolbarPlacement"] == "navigation-bar" }
+        let toolbar = toolbars.first
+        let buttons = toolbar.map { $0.container.subviews.compactMap { $0 as? NodeView } } ?? []
+        var why: String?
+        if toolbar != nil && !hasBar { why = "the route shows no navigation bar (navigationTitle)" }
+        else if toolbars.count > 1 { why = "a route has one navigation-bar toolbar; the first is projected" }
+        if toolbar != nil, hasBar, buttons.isEmpty || !buttons.allSatisfy(\.isButton) { why = "a navigation-bar toolbar holds direct buttons only; keeping its authored rendering" }
+        if why != refusal, let why { presenter.session?.log("toolbar refused: \(why)") }
+        refusal = why
+        guard let toolbar, hasBar, !buttons.isEmpty, buttons.allSatisfy(\.isButton) else {
+            restoreToolbar()
+            if !barItems.isEmpty { barItems = [:]; navigationItem.leftBarButtonItems = nil; navigationItem.rightBarButtonItems = nil }
+            faces = [:]
+            return
+        }
+        var next: [UInt32: UIBarButtonItem] = [:]
+        for button in buttons {
+            if barItems[button.id] == nil { faces[button.id] = nil }
+            let item = barItems[button.id] ?? UIBarButtonItem()
+            next[button.id] = item
+            let face = button.isNativeButton ? button.face : nil
+            let symbol = face?.symbol ?? button.container.subviews.compactMap { $0 as? NodeView }.first { $0.kind == "image" }?.props["symbolName"]
+            let text = face?.shown ?? NavigationHost.text(of: button)
+            let face_ = symbol.flatMap { $0.isEmpty ? nil : "symbol:\($0)" } ?? "text:\(text)"
+            let label = button.props["accessibilityLabel"] ?? text
+            if item.accessibilityLabel != label { item.accessibilityLabel = label }
+            // Each property is set only as it changes: a reassigned item
+            // rebuilds its button, which drops a touch already down on it.
+            let identifier = button.props["testId"] ?? button.props["id"]
+            if item.accessibilityIdentifier != identifier { item.accessibilityIdentifier = identifier }
+            // UIKit shows a route's items only while it is on top; whether
+            // the app has caught up with a pop is not the item's to say (a
+            // tap in that moment activates once the route is selected).
+            let enabled = presenter.activationRefusal(button, routeSelected: false) == nil
+            if item.isEnabled != enabled { item.isEnabled = enabled }
+            // Its face (a symbol, else its words) and what a tap does: the
+            // button's activation, or its menu, which UIKit opens.
+            let menu = presenter.menus.menu(for: button) != nil
+            if faces[button.id] != face_ || (item.menu != nil) != menu {
+                faces[button.id] = face_
+                let image = face_.hasPrefix("symbol:") ? UIImage(systemName: String(face_.dropFirst(7))) : nil
+                let title = image == nil ? text : ""
+                if menu {
+                    item.primaryAction = nil
+                    item.image = image; item.title = image == nil ? text : nil
+                    item.menu = presenter.menus.menu(for: button)
+                } else {
+                    item.menu = nil
+                    let id = button.id
+                    item.primaryAction = UIAction(title: title, image: image) { [weak self] _ in self?.host?.press(id) }
+                }
+            }
+        }
+        barItems = next
+        faces = faces.filter { next[$0.key] != nil }
+        let leading = buttons.filter { $0.props["toolbarPlacement"] == "navigation" }.compactMap { next[$0.id] }
+        let trailing = buttons.filter { $0.props["toolbarPlacement"] != "navigation" }.compactMap { next[$0.id] }
+        let item = navigationItem
+        if !(item.leftBarButtonItems ?? []).elementsEqual(leading, by: ===) { item.leftBarButtonItems = leading.isEmpty ? nil : leading }
+        if !(item.rightBarButtonItems ?? []).elementsEqual(trailing.reversed(), by: ===) { item.rightBarButtonItems = trailing.isEmpty ? nil : trailing.reversed() }
+        if item.leftItemsSupplementBackButton != !leading.isEmpty { item.leftItemsSupplementBackButton = !leading.isEmpty }
+        if projected !== toolbar { restoreToolbar(); projected = toolbar }
+        toolbar.isHidden = true
+        toolbar.accessibilityElementsHidden = true
+    }
+    private func restoreToolbar() {
+        guard let toolbar = projected else { return }
+        projected = nil
+        toolbar.isHidden = false
+        toolbar.accessibilityElementsHidden = false
+    }
+
     // A button can remove a route before UIKit starts its pop. Preserve its
     // outgoing pixels for that transition; an interactive pop uses live views.
     func freeze() {
@@ -130,13 +214,15 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
     /// The root key last journaled as matching no route, so a refusal is one
     /// line, not one per batch (LLP 1035.001 D6).
     private var refusedKey: String?
+    /// A tab the person chose in the More list, owed at the next settle.
+    private var moreChoice: String?
 
     init(presenter: Presenter) { self.presenter = presenter }
 
     /// Logical child-list edits leave declared, retained routes inside their
     /// controllers; newly added or no-longer-declared nodes use normal mounting.
     func ownsContainment(of node: NodeView, under parent: NodeView) -> Bool {
-        parent === container && parent.props["navigationBack"] != nil &&
+        parent === container && parent.props["navigationKey"] != nil &&
             node.props["navigationKey"] != nil && controllers[node.id]?.node === node
     }
 
@@ -150,8 +236,10 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
     /// Resolve the declared route stack once for both structural installation
     /// and later presentation. UIKit containment never becomes route state.
     private func projection(_ batch: Batch) -> (NodeView, [NodeView], Int, [RouteController])? {
+        // LLP 1035.001.001 D2 — the first root is the page's navigator when
+        // it is keyed; with no keyed child it is dormant (below).
         guard let root = presenter.root.subviews.first as? NodeView,
-              root.props["navigationBack"] != nil else {
+              root.props["navigationKey"] != nil else {
             // Retiring native ownership must not remove surviving content.
             // Restore the logical children before detaching the controller so
             // an editor remains in the same window through the handoff.
@@ -219,7 +307,7 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
         let c = controllers[node.id] ?? RouteController(node)
         controllers[node.id] = c
         c.mount()
-        c.configure(backHidden: !backPermitted(in: node)) { [weak self] target, item in self?.pressControl(named: target, in: node, from: item) }
+        c.configure(backHidden: !leavingPermitted(node), presenter: presenter)
         return c
     }
 
@@ -354,30 +442,72 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
         }
     }
 
-    /// Agent activation (LLP 1012) of a control UIKit's chrome stands in for
-    /// — a tab's `navigationTabControl`, a route's `navigationTrailing`, the
-    /// Back control under a native back button — presses it as the tab bar
-    /// or bar button would; nil for anything else.
-    func activate(_ node: NodeView) -> Bool? {
-        guard let id = node.props["id"], !id.isEmpty else { return nil }
-        let routes = routeIDs.compactMap { presenter.views[$0] }
-        let stands = routes.contains { $0.props["navigationTabControl"] == id || $0.props["navigationTrailing"] == id }
-            || (id == container?.props["navigationBack"] && navigation?.isNavigationBarHidden == false)
-        guard stands else { return nil }
-        guard node.handlers.contains("press"), !node.disabled else { return false }
-        presenter.press(node.id)
-        return true
+    /// The agent's root-scoped taps on the chrome (LLP 1035.001.001 D7): the
+    /// back button UIKit shows, popped as UIKit's own button pops (observed
+    /// and delivered as any other Back), or a tab, chosen as the tab bar
+    /// chooses it. Refused where a person could not: no back button, a
+    /// presentation over the bar, a transition in flight, no such tab.
+    func chromeTap(_ node: NodeView, what: String, name: String?) -> [String: Any] {
+        guard node === container else { return ["error": "chrome taps address the navigator (the first root, keyed)"] }
+        if chromeCovered || inFlight || owed != nil { return ["error": "a presentation or transition covers the chrome"] }
+        if what == "escape" {
+            // The close request on the topmost presentation: back beneath
+            // the sheet (or cover) on top, whatever it pushed (D4).
+            guard let chain = appSnapshot()?.chain, let routes = Optional(routeIDs.compactMap { presenter.views[$0] }),
+                  let at = chain.lastIndex(where: { k in ["modal", "fullscreen"].contains(routes.first { $0.props["navigationKey"] == k }?.props["navigationPresentation"] ?? "") }),
+                  at > 0 else { return ["error": "nothing is presented"] }
+            guard permitsBack(to: chain[at - 1]) else { return ["error": "Back refused: closedby=\"none\", or the navigator does not hear traverse"] }
+            owed = .backTo(chain[at - 1])
+            deliver()
+            sync(Batch(ops: [], timers: false, motion: false, clock: nil, error: nil))
+            return ["delivery": "chrome"]
+        }
+        if what == "tab" {
+            guard let name, tabRoutes.contains(where: { $0.props["navigationTab"] == name }) else { return ["error": "no tab \(name ?? "") in the tab bar"] }
+            guard presentedNavigations.isEmpty else { return ["error": "a sheet covers the tab bar"] }
+            return selectTab(name) ? ["delivery": "chrome"] : ["error": "tabselect refused: the navigator does not hear it"]
+        }
+        guard backButtonShown, let nav = navigation else { return ["error": "no back button is shown"] }
+        nav.popViewController(animated: !ExactEnv.agentFreezes)
+        return ["delivery": "chrome"]
+    }
+    /// Whether UIKit shows a back button on the top screen: what a person
+    /// could tap, and what `state.navigation.back` reports.
+    private var backButtonShown: Bool {
+        guard let nav = navigation, nav.presentedViewController == nil, !nav.isNavigationBarHidden,
+              let top = nav.topViewController as? RouteController else { return false }
+        return nav.viewControllers.count > held(nav).count + 1 && !top.navigationItem.hidesBackButton
+    }
+    /// Something that is not a route covers the chrome — an alert, a
+    /// popover, a menu, the share sheet — so a person could not reach it.
+    var chromeCovered: Bool {
+        if presenter.menus.observation() != nil { return true }
+        var controller: UIViewController? = tabs ?? primaryNavigation
+        while let presented = controller?.presentedViewController, !presented.isBeingDismissed {
+            if !presentedNavigations.contains(where: { $0 === presented }) { return true }
+            controller = presented
+        }
+        return false
     }
 
-    /// A tab is chosen in Contract: a tap presses the tab's root route's
-    /// `navigationTabControl` (by HTML id), whose action selects it, and the
-    /// projection follows. More is UIKit's chrome over the tabs past the bar,
-    /// not a tab: it opens, and a tab chosen in it is observed (D3).
+    /// LLP 1035.001.001 D5: a tab chosen in the tab bar — or the More list,
+    /// the one shown included — is the navigator's `tabselect`; the app
+    /// selects (`select`: the tab's retained stack, or its root on a
+    /// reselect) and the projection follows. Opening More is UIKit's chrome.
+    @discardableResult
+    private func selectTab(_ tab: String) -> Bool {
+        reported = "select \(tab)"
+        guard let root = container, root.handlers.contains("tabselect") else {
+            presenter.session?.log("navigation: tab \"\(tab)\" refused: the navigator does not hear tabselect")
+            return false
+        }
+        presenter.onTabSelect?(root.id, tab)
+        return true
+    }
     func tabBarController(_ tabBarController: UITabBarController, shouldSelect viewController: UIViewController) -> Bool {
         if viewController === tabBarController.moreNavigationController { return true }
-        guard let tab = tabContainers.first(where: { $0.value.controller === viewController })?.key,
-              let control = tabRoutes.first(where: { $0.props["navigationTab"] == tab })?.props["navigationTabControl"] else { return false }
-        pressControl(named: control, in: nil)
+        guard let tab = tabContainers.first(where: { $0.value.controller === viewController })?.key else { return false }
+        selectTab(tab)
         return false
     }
 
@@ -552,20 +682,15 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
         if nav.isNavigationBarHidden != hidden { nav.setNavigationBarHidden(hidden, animated: animated) }
     }
 
-    /// A bar button presses the authored control the route names by HTML id
-    /// (anywhere, for a tab's control). A popover it opens points at `item`,
-    /// the bar button, as UIKit's own bar button popovers do.
-    private func pressControl(named target: String, in route: NodeView?, from item: UIBarButtonItem? = nil) {
-        guard let control = presenter.carrying("id").first(where: { node in
-            node.props["id"] == target && (route.map { node === $0 || node.isDescendant(of: $0) } ?? true)
-                && (node.handlers.contains("press") || node.invokesConfirmation) && !node.disabled
-        }) else {
-            presenter.session?.log("navigationTrailing \"\(target)\" names no enabled control in its route")
-            return
-        }
-        // As a tap on the control would: one that opens a confirmation or a
-        // popover (`popovertarget`, `commandfor`) opens it; else its press.
-        if presenter.menus.invokeConfirmation(control, anchor: item) != true { presenter.press(control.id) }
+    /// The bar item a route's toolbar button is shown as (LLP 1035.001.001
+    /// D6): what a presentation it opens points at.
+    func barItem(for node: NodeView) -> UIBarButtonItem? {
+        controllers.values.lazy.compactMap { $0.barItems[node.id] }.first
+    }
+    /// A button's words, for a bar item that has no symbol.
+    static func text(of node: NodeView) -> String {
+        if node.kind == "text" { return node.paragraphSpec().runs.map(\.text).joined() }
+        return node.container.subviews.compactMap { ($0 as? NodeView).map(text(of:)) }.filter { !$0.isEmpty }.joined(separator: " ")
     }
 
     func willMount() { mounting = true }
@@ -659,6 +784,7 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
         return ["route": root?.props["navigationKey"] ?? NSNull(), "stack": stack, "transition": transition,
                 "native": json(holdsScreens ? observe() : nil), "applied": json(applied), "app": json(appSnapshot()),
                 "owed": change(owed), "reported": reported ?? NSNull(),
+                "back": backButtonShown && !chromeCovered && !inFlight && owed == nil,
                 "tabs": tabs.map { tabOrder(of: $0) } ?? NSNull()]
     }
 
@@ -675,8 +801,8 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
         nav.didMove(toParent: parent)
     }
 
-    /// A sheet's backdrop (`closedby="any"`) asks to leave the presentation
-    /// the route opens, as pulling it down does: back to the route beneath it.
+    /// A sheet's backdrop asks to leave the presentation the route opens, as
+    /// pulling it down does: back to the route beneath it.
     func requestBack(from source: NodeView) {
         guard presenter.session?.view?.window != nil, presenter.views[source.id] === source,
               let key = source.props["navigationKey"], let chain = appSnapshot()?.chain,
@@ -686,24 +812,30 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
         sync(Batch(ops: [], timers: false, motion: false, clock: nil, error: nil))
     }
 
-    /// D6: whether the app permits leaving its active route — what the swipe
-    /// and a sheet's pull-down ask before they may begin.
+    /// LLP 1035.001.001 D3: whether the platform may take the person back to
+    /// `key` — the navigator hears `traverse`, and no route that Back removes
+    /// (each above `key` in the app's chain) says `closedby="none"`.
+    func permitsBack(to key: String) -> Bool {
+        guard let chain = appSnapshot()?.chain, let at = chain.firstIndex(of: key), at < chain.count - 1 else { return false }
+        let routes = routeIDs.compactMap { presenter.views[$0] }
+        let removed = chain[(at + 1)...].map { k in routes.first { $0.props["navigationKey"] == k }?.props["closedby"] }
+        return NavigationRules.backPermitted(removing: removed, traverses: container?.handlers.contains("traverse") == true)
+    }
+    /// Whether the platform may take the person off `route` — what its back
+    /// button, a swipe from it, or (for a sheet's lowest route) its pull-down
+    /// asks: back to the route beneath it in the chain.
+    func leavingPermitted(_ route: NodeView) -> Bool {
+        guard let key = route.props["navigationKey"], let chain = appSnapshot()?.chain,
+              let at = chain.firstIndex(of: key), at > 0 else {
+            return NavigationRules.backPermitted(removing: [route.props["closedby"]], traverses: container?.handlers.contains("traverse") == true)
+        }
+        return permitsBack(to: chain[at - 1])
+    }
+    /// Whether leaving the active route is permitted: what the swipe asks
+    /// before it may begin.
     var backPermittedNow: Bool {
-        guard let route = activeRoute else { return false }
-        return backPermitted(in: route)
-    }
-
-    private var activeRoute: NodeView? {
-        guard let key = container?.props["navigationKey"] else { return nil }
-        return routeIDs.compactMap({ presenter.views[$0] }).first(where: { $0.props["navigationKey"] == key })
-    }
-
-    private func backPermitted(in route: NodeView) -> Bool {
-        let name = container?.props["navigationBack"]
-        let named = presenter.carrying("id").filter { $0.props["id"] == name && ($0 === route || $0.isDescendant(of: route)) }
-        return NavigationRules.backPermitted(hasControl: !named.isEmpty,
-                                             controlEnabled: named.contains { $0.handlers.contains("press") && !$0.disabled },
-                                             traverses: container?.handlers.contains("traverse") == true)
+        guard let chain = appSnapshot()?.chain, chain.count > 1 else { return false }
+        return permitsBack(to: chain[chain.count - 2])
     }
 
     var preservesKeyboardViewport: Bool {
@@ -722,20 +854,15 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
         return nil
     }
 
+    /// The navigator whose routes UIKit holds, in the logical tree.
+    var navigator: NodeView? { container }
+
     func isInactiveRoute(containing view: UIView) -> Bool {
         guard let selected = container?.props["navigationKey"],
               let key = routeKey(containing: view) else { return false }
         return key != selected
     }
 
-    /// D1: resolved at use, by HTML id, among live enabled press controls —
-    /// never captured at a gesture's start (`NavigationRules.backControl`).
-    private var backControl: NodeView? {
-        guard let route = activeRoute else { return nil }
-        return NavigationRules.backControl(named: container?.props["navigationBack"], among: presenter.carrying("id"),
-                                           id: \.id, htmlID: { $0.props["id"] }, pressable: { $0.handlers.contains("press") }, disabled: \.disabled,
-                                           inActiveRoute: { $0 === route || $0.isDescendant(of: route) })
-    }
 
     func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
         let depth = navigation?.viewControllers.count ?? 0
@@ -744,7 +871,7 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
                                           permitted: permitted,
                                           contextPreviewActive: !presenter.chrome.ids("contextTarget").isEmpty) else {
             if depth > 1, !inFlight, !permitted {
-                presenter.session?.log("back gesture refused: the active route does not permit leaving (no enabled navigationBack control)")
+                presenter.session?.log("back gesture refused: the navigator does not hear traverse, or the route says closedby=\"none\"")
             }
             return false
         }
@@ -766,6 +893,18 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
 
     func navigationController(_ navigationController: UINavigationController, willShow viewController: UIViewController, animated: Bool) {
         guard stacks.contains(where: { $0 === navigationController }) else { return }
+        // LLP 1035.001.001 D5: a tab chosen in the More list, the one shown
+        // included, is a choice — seen as UIKit shows it from the list, not
+        // inferred from what the stack became — owed at the settle.
+        // The host's own projection through More (`syncing`, a delivery's
+        // batch) is not a choice.
+        if let tabs, navigationController === tabs.moreNavigationController, !syncing, !delivering,
+           let list = navigationController.viewControllers.first, viewController !== list,
+           (navigationController.transitionCoordinator?.viewController(forKey: .from)
+               ?? (animated ? nil : navigationController.viewControllers.count == 2 ? list : nil)) === list {
+            moreChoice = (viewController as? RouteController)?.node.props["navigationTab"]
+                ?? tabContainers.first(where: { $0.value.controller === viewController })?.key
+        }
         showBar(navigationController, for: viewController, animated: animated)
         // Completed or cancelled, the transition's end is a settle point.
         navigationController.transitionCoordinator?.animate(alongsideTransition: nil) { [weak self] _ in self?.settle() }
@@ -798,7 +937,10 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
                 return
             }
             let observed = observe()
-            if let applied, owed == nil, let change = NavigationRules.platformChange(applied: applied, observed: observed) {
+            if let tab = moreChoice {
+                moreChoice = nil
+                if owed == nil { owed = .select(tab) }
+            } else if let applied, owed == nil, let change = NavigationRules.platformChange(applied: applied, observed: observed) {
                 owed = change
             }
             applied = observed
@@ -821,36 +963,23 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
         defer { delivering = false }
         switch change {
         case .select(let tab):
-            reported = "select \(tab)"
-            guard let control = tabRoutes.first(where: { $0.props["navigationTab"] == tab })?.props["navigationTabControl"] else { return }
-            pressControl(named: control, in: nil)
+            selectTab(tab)
         case .backTo(let key):
             guard let chain = appSnapshot()?.chain, NavigationRules.isBeneath(key, in: chain) else {
                 // The app has gone elsewhere since: its state wins.
                 return
             }
             reported = "backTo \(key)"
-            if let root = container, root.handlers.contains("traverse") {
-                presenter.onTraverse?(root.id, key)
-                if appSnapshot()?.chain.last != key { presenter.session?.log("navigation: traverse to \"\(key)\" left the app elsewhere") }
+            // LLP 1035.001.001 D3/D4: one `traverse`, where leaving is
+            // permitted; a refused Back (a route it removes says
+            // `closedby="none"`, or nothing hears it) is not delivered, and
+            // the projection that follows puts the screens back.
+            guard let root = container, permitsBack(to: key) else {
+                presenter.session?.log("navigation: back to \"\(key)\" refused: the navigator does not hear traverse, or a route it removes says closedby=\"none\"")
                 return
             }
-            // The fallback for an app that does not hear `traverse`: its own
-            // Back control, resolved anew in whatever route is now active,
-            // pressed until the app's top is the destination — never a count
-            // of screens taken from the transition (invariant I1). Each press
-            // must shorten the chain; one that does not is a refusal.
-            while let before = appSnapshot()?.chain, NavigationRules.isBeneath(key, in: before) {
-                guard let control = backControl else {
-                    presenter.session?.log("navigation: back to \"\(key)\" refused: no enabled navigationBack control in the active route")
-                    return
-                }
-                presenter.press(control.id)
-                if (appSnapshot()?.chain.count ?? 0) >= before.count {
-                    presenter.session?.log("navigation: back to \"\(key)\" refused by the app")
-                    return
-                }
-            }
+            presenter.onTraverse?(root.id, key)
+            if appSnapshot()?.chain.last != key { presenter.session?.log("navigation: traverse to \"\(key)\" left the app elsewhere") }
         }
     }
 
@@ -928,6 +1057,7 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
     }
 
     func reset(clearFocus: Bool = true) {
+        moreChoice = nil
         presenter.modals.reset()
         for nav in presentedNavigations { retireNavigation(nav, preserving: false) }
         for container in tabContainers.values { container.stack?.delegate = nil }

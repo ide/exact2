@@ -282,7 +282,7 @@ fn check_tasks(c: &Component) -> Result<(), AnalyzeError> {
 
 /// The handler attributes (the web's events, LLP 1005 §3): `press`,
 /// `change`, `input`, `hover`, `focus`, `blur`, `key`, `submit`, `load`, `message`.
-pub const HANDLERS: [&str; 41] = [
+pub const HANDLERS: [&str; 42] = [
     "press",
     "change",
     "input",
@@ -322,6 +322,9 @@ pub const HANDLERS: [&str; 41] = [
     // The platform took the person back to a route beneath the top (LLP
     // 1035.001.000): its navigation key.
     "traverse",
+    // The person chose a tab, the one shown included (LLP 1035.001.001
+    // D5): its `navigationTab`.
+    "tabselect",
     "heightrelease",
     "transformgeometry",
     "transformrelease",
@@ -336,9 +339,8 @@ pub const HANDLERS: [&str; 41] = [
 /// key's name, `message` the posted string; the others nothing.
 pub fn handler_payload(attr: &str) -> Option<&'static str> {
     match attr {
-        "change" | "input" | "key" | "message" | "navigate" | "traverse" | "error" => {
-            Some("string")
-        }
+        "change" | "input" | "key" | "message" | "navigate" | "traverse" | "tabselect"
+        | "error" => Some("string"),
         "timeupdate" | "durationchange" => Some("number"),
         "hover" => Some("bool"),
         "select" => Some("MarkdownSelection"),
@@ -485,6 +487,7 @@ fn check_handler(attr: &str, value: &Expr, scope: &Scope, span: Span) -> Result<
                         Some(_) if attr == "key" => " plus the key's name",
                         Some(_) if attr == "message" => " plus the message",
                         Some(_) if attr == "traverse" => " plus the destination's navigation key",
+                        Some(_) if attr == "tabselect" => " plus the chosen tab's name",
                         Some(_) => " plus the new value",
                         None if attr == "scroll" => " plus scrollLeft and scrollTop",
                         None if attr == "heightrelease" => " plus height and velocity",
