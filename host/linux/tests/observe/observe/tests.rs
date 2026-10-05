@@ -3,11 +3,11 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpListener;
 use std::sync::{Arc, Mutex};
 
-/// Each request the sink saw: its path, its rows and its body.
+/// Requests the sink received: path, row count and JSON body.
 type Seen = Arc<Mutex<Vec<(String, usize, Value)>>>;
 
-/// A sink on a free port: each request's path and row count is kept, and
-/// `answer(rows)` says the status and headers to reply with.
+/// A local HTTP sink on a free port. It replies with the status and headers
+/// that `answer(row count)` returns.
 fn sink(answer: impl Fn(usize) -> (u16, &'static str) + Send + 'static) -> (String, Seen) {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let url = format!("http://{}", listener.local_addr().unwrap());
@@ -129,7 +129,7 @@ fn startup_becomes_observes_metrics_on_its_wire() {
 
 #[test]
 fn a_413_halves_the_chunk_and_drops_a_lone_row() {
-    // More than two rows is too large; then every row is, once the queue is down to one.
+    // The sink rejects any request with more than two rows.
     let (url, seen) = sink(|rows| if rows > 2 { (413, "") } else { (200, "") });
     let mut s = service(&url, "large");
     startup(&mut s, 2); // six rows
@@ -257,7 +257,7 @@ fn a_second_launch_of_the_same_build_in_the_same_boot_is_warm() {
         .iter()
         .map(|m| m["name"].as_str().unwrap().to_string())
         .collect();
-    // No boot_id off Linux: every launch there is cold.
+    // Warm launches are detected through /proc's boot_id, so without it every launch is cold.
     let second = if std::path::Path::new("/proc/sys/kernel/random/boot_id").exists()
         && !std::io::IsTerminal::is_terminal(&std::io::stdin())
     {
@@ -273,7 +273,7 @@ fn a_second_launch_of_the_same_build_in_the_same_boot_is_warm() {
 
 #[test]
 fn sampling_matches_eas_client_ids_uniform_value() {
-    // The same id through web/service.js's BigInt splitmix64.
+    // The value web/service.js's BigInt splitmix64 gives for the same id.
     assert_eq!(
         uniform("f0e0ebad-d595-40fe-aa76-5ac43756f758"),
         0.2509529660831642
