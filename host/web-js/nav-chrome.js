@@ -1,18 +1,25 @@
-// The navigation chrome the native hosts project from a navigation root's
-// `navigation*` props (LLP 1038; NavigationIOS.swift, ModalIOS.swift), drawn
-// by the page: a tab bar over the tabs' rows (`navigationTab…`), a bar per
-// route that declares a `navigationTitle` (large or inline, a back button,
-// a `navigationTrailing` bar button), push and pop as slides, and a
-// `navigationPresentation="modal"` route as a sheet at its
-// `navigationDetent` heights. An app's module imports this when its plan
-// names a title or a tab (emit.rs); it draws in each projection
-// (document.js `projectRoots`, after navigation.js `project`, which stays
-// the authority for which route shows), the first one included, so the
-// chrome is in the app's first paint, and its rules are in the page's sheet
-// (nav-chrome.css). Its markup is built from attributes alone, with the
-// DOM a render has (dom.js); a page's own copy takes over markup it finds.
-// The browser animates the large title on scroll (the CSS); script adds
-// only behaviour: presses, transitions, a sheet's drag.
+// The navigation chrome the iOS host projects from a navigation root's
+// routes (LLP 1075.003; NavigationBarIOS.swift, NavigationTabsIOS.swift),
+// drawn by the page where the app asks for it (app.json
+// `host.web.navigationChrome: "ios"`; the build then imports this): a bar
+// per header-shaped route — its first child a `header` holding one heading,
+// which is the bar's title (large for a level-1 heading, inline otherwise),
+// the header's buttons before the heading its leading items and those after
+// it its trailing ones, the root's Back control in the route UIKit's back
+// button — and a tab bar from the root's own tablist (each tab names its
+// tabpanel with `aria-controls`; the panel's routes are the tab's stack),
+// push and pop as slides, and a `navigationPresentation="modal"` route as a
+// sheet at its `navigationDetent` heights. The header and the tablist it
+// stands in for are not painted while it does (`data-exact-lifted`), as iOS
+// lifts them; under the agent (`?agent`) it draws nothing and the page paints
+// them as authored (LLP 1021 D4). It draws in each projection (document.js
+// `projectRoots`, after navigation.js `project`, which stays the authority
+// for which route shows), the first one included, so the chrome is in the
+// app's first paint, and its rules are in the page's sheet (nav-chrome.css).
+// Its markup is built from attributes alone, with the DOM a render has
+// (dom.js); a page's own copy takes over markup it finds. The browser
+// animates the large title on scroll (the CSS); script adds only behaviour:
+// presses, transitions, a sheet's drag.
 //
 // In a browser, the page's own root (the outermost, in no route or scroller)
 // scrolls the document, as UIKit's window scrolls its top screen: its top
@@ -26,11 +33,10 @@
 // scroller at that offset, and a sheet a fixed box. A sheet locks the
 // document while it is up.
 //
-// Contract owns every route, as on iOS: a tab tap presses the tab's
-// `navigationTabControl`, a back button (or the sheet's backdrop, or a drag
-// down) presses the root's `navigationBack` control in the active route, a
-// bar button the control its `navigationTrailing` names — the hidden
-// controls an app authors for UIKit's chrome.
+// Contract owns every route, as on iOS: a tab tap clicks the authored tab, a
+// back button (or the sheet's backdrop, or a drag down) presses the root's
+// `navigationBack` control in the active route, a bar item the authored
+// button it stands for.
 import { navChrome } from "./document.js";
 import * as Symbols from "./symbols.js";
 
@@ -43,16 +49,52 @@ const OWN = {
 };
 
 const attr = (e, k) => e.getAttribute(k) ?? "";
-const data = (e, k) => e.getAttribute("data-navigation" + k) ?? "";
 const presentation = r => ["modal", "fullscreen"].includes(attr(r, "navigationPresentation")) ? attr(r, "navigationPresentation") : "";
 const kids = e => [...e.childNodes].filter(n => n.nodeType === 1);
-const routesOf = nav => kids(nav).filter(r => r.hasAttribute("navigationKey"));
+/** Every element under `e` in document order, not entering `stop`. */
+function* below(e, stop = () => false) { for (const k of kids(e)) { yield k; if (!stop(k)) yield* below(k, stop); } }
+const isRoute = e => e.hasAttribute("navigationKey");
+const routesIn = e => kids(e).filter(isRoute);
+/** The root's own tablist (not one inside a route) and the tabs naming a
+ * tabpanel of this root, in tab order — the stacks, as navigation.js and
+ * the iOS host find them (NavigationTabs.swift). */
+function tabsOf(nav) {
+  const list = [...below(nav, isRoute)].find(e => attr(e, "role") === "tablist");
+  if (!list) return [];
+  const panels = new Map([...below(nav, isRoute)].filter(e => attr(e, "role") === "tabpanel").map(e => [attr(e, "id"), e]));
+  return kids(list).filter(t => attr(t, "role") === "tab" && panels.has(attr(t, "aria-controls")))
+    .map(tab => ({ tab, panel: panels.get(attr(tab, "aria-controls")), name: attr(tab, "aria-controls") }));
+}
+const tablistOf = nav => [...below(nav, isRoute)].find(e => attr(e, "role") === "tablist") ?? null;
+const routesOf = nav => { const tabs = tabsOf(nav); return tabs.length ? tabs.flatMap(t => routesIn(t.panel)) : routesIn(nav); };
+/** A route's tab: the tabpanel holding it, by id ("" without tabs). */
+const tabOf = r => attr(r.parentNode, "role") === "tabpanel" ? attr(r.parentNode, "id") : "";
+/** The SF name a node's symbol image draws, if it has one. */
+const symbolIn = e => { const i = [e, ...below(e)].find(k => attr(k, "data-symbol-source").startsWith("symbol:sf/")); return i ? attr(i, "data-symbol-source").slice(10) : ""; };
+const pressable = e => e.localName === "button" || attr(e, "data-exact-on").split(" ").includes("press");
+const heading = e => /^h[1-6]$/.test(e.localName) || e.hasAttribute("aria-level");
+/** A header-shaped route's bar (HeaderShape, NavigationBarIOS.swift): its
+ * first child a `header` holding exactly one heading; the header's buttons
+ * before the heading lead, those after it trail. */
+function shapeOf(r) {
+  const header = kids(r).find(k => !k.hasAttribute("data-exact-navbar"));
+  if (header?.localName !== "header") return null;
+  const heads = [], lead = [], trail = [];
+  for (const e of below(header, k => pressable(k) || heading(k) || attr(k, "role") === "tablist")) {
+    if (heading(e)) heads.push(e);
+    else if (pressable(e)) (heads.length ? trail : lead).push(e);
+  }
+  if (heads.length !== 1) return null;
+  const level = Number(attr(heads[0], "aria-level") || heads[0].localName.slice(1)) || 2;
+  return { header, title: heads[0].textContent.trim(), large: level === 1, lead, trail };
+}
 const reduced = () => Live && matchMedia("(prefers-reduced-motion: reduce)").matches;
 const States = new Map();
 // A Home Screen app keeps its routes' own scrollers: there iOS 26 lays the
 // page out in a viewport the status bar's height short of the screen and
 // pans the fixed bars away with the document's first scroll.
 const Standalone = Live && (navigator.standalone === true || matchMedia("(display-mode: standalone)").matches);
+const Agent = Live && new URLSearchParams(location.search).has("agent");
 let Probe = null;
 
 /** An element of `tag` with class `cls`, attributes and children. */
@@ -124,21 +166,20 @@ function control(route, id) {
   return null;
 }
 
-/** Whether `el` is a control this chrome presses (a tab's, a route's
- * `navigationTrailing`, the root's back under a bar's back button): the
- * agent's tap on it is delivered as the chrome's (agent.js), as the iOS
- * host's `activate`. */
+/** Whether `el` is a control this chrome stands in for (a lifted tab or
+ * header button): a tap on it is delivered as the chrome's (agent.js), as
+ * the iOS host's `activate`. Under the agent the chrome draws nothing, so
+ * there it is never one. */
 function standsIn(e) {
-  const nav = e.id && e.closest("[navigationBack]");
+  const nav = e.closest("[navigationBack]");
   if (!nav || !States.has(nav)) return false;
-  const routes = routesOf(nav), route = routes.find(r => r.contains(e));
-  if (routes.some(r => data(r, "tabcontrol") === e.id)) return true;
-  if (route && data(route, "trailing") === e.id) return true;
-  return !!route && e.id === attr(nav, "navigationBack") && !!route.querySelector(":scope > [data-exact-navbar] [data-exact-nav=back]");
+  return !!e.closest("[data-exact-lifted]");
 }
 
 /** The chrome of every navigation root under `root`, after a projection. */
 export function update(root) {
+  // Under the agent the page paints the authored header and tablist (LLP 1021 D4).
+  if (Agent) return;
   if (Live) (globalThis.exact ??= {}).chrome ??= { standsIn };
   const navs = Live ? root.querySelectorAll("[navigationBack]") : root.getElementsByTagName("*").filter(e => e.hasAttribute("navigationBack"));
   for (const nav of navs) project(nav);
@@ -197,13 +238,14 @@ if (Live) matchMedia("(prefers-color-scheme: dark)").addEventListener?.("change"
 })));
 
 function project(nav) {
-  const routes = routesOf(nav);
-  const chromed = routes.some(r => r.hasAttribute("data-navigationtitle") || data(r, "tab"));
+  const routes = routesOf(nav), tabs = tabsOf(nav);
+  const chromed = tabs.length > 0 || routes.some(r => shapeOf(r));
   let st = States.get(nav);
   if (!chromed) {
     if (st) { settle(st); States.delete(nav); }
     for (const k of kids(nav)) if (k.hasAttribute("data-exact-tabbar") || k.hasAttribute("data-exact-backdrop") || k.hasAttribute("data-exact-edge")) k.remove();
     for (const r of routes) for (const k of ["data-exact-doc", "data-exact-off"]) r.removeAttribute(k);
+    for (const e of below(nav)) if (e.hasAttribute("data-exact-lifted")) e.removeAttribute("data-exact-lifted");
     nav.removeAttribute("data-exact-page");
     return;
   }
@@ -213,15 +255,15 @@ function project(nav) {
   if (!paged) for (const k of kids(nav)) if (k.hasAttribute("data-exact-edge")) k.remove();
   const key = attr(nav, "navigationKey"), selected = routes.find(r => attr(r, "navigationKey") === key);
   if (!selected) return;
-  const tabbed = routes.some(r => data(r, "tab"));
-  const tab = tabbed ? data(selected, "tab") : null;
-  const lane = tab == null ? routes : routes.filter(r => data(r, "tab") === tab);
+  const tabbed = tabs.length > 0;
+  const tab = tabbed ? tabOf(selected) : null;
+  const lane = tab == null ? routes : routes.filter(r => tabOf(r) === tab);
   const stack = lane.slice(0, lane.indexOf(selected) + 1);
   // The page's offset, kept by the route leaving it while it is still there.
   if (paged && st.doc && (st.doc !== pageRoute(stack) || st.top !== stack[stack.length - 1]) && st.doc.isConnected && st.doc.hasAttribute("data-exact-doc")) st.doc.$docY = scrollY;
   // Each route's bar, insets and sheet, the hidden tabs' too (they keep theirs).
   const lanes = new Map();
-  for (const r of routes) { const t = tab == null ? "" : data(r, "tab"); if (!lanes.has(t)) lanes.set(t, []); lanes.get(t).push(r); }
+  for (const r of routes) { const t = tab == null ? "" : tabOf(r); if (!lanes.has(t)) lanes.set(t, []); lanes.get(t).push(r); }
   for (const rows of lanes.values()) {
     let sheet = null;
     rows.forEach((r, i) => {
@@ -229,7 +271,7 @@ function project(nav) {
       route(nav, r, i > 0 && !presentation(r) ? rows[i - 1] : null, sheet, tabbed);
     });
   }
-  tabBar(nav, tabbed ? routes : [], tab);
+  tabBar(nav, tabs, tab);
   backdrop(nav, st, stack.find(r => presentation(r) === "modal"));
   if (Live) transition(nav, st, tab, stack);
   for (const e of st.shown) if (e.isConnected) e.style.visibility = "";
@@ -277,6 +319,13 @@ function page(nav, st, routes, stack) {
   for (const r of st.over) if (!over.has(r)) freeze(r, null);
   st.over = over;
   st.locked = !!presentation(top);
+  // The boxes between the root and the page's route (a tab's panel) are in
+  // flow and grow with it, as the root does (nav-chrome.css `data-exact-docpath`).
+  const path = new Set();
+  for (let e = want?.parentNode; e && e !== nav; e = e.parentNode) path.add(e);
+  for (const e of st.path ?? []) if (!path.has(e)) e.removeAttribute("data-exact-docpath");
+  for (const e of path) setAttr(e, "data-exact-docpath", "");
+  st.path = path;
   if (want) overlays(want);
   if (y != null && Math.abs(scrollY - y) > 0.5) scrollTo(0, y);
 }
@@ -309,8 +358,12 @@ function overlays(r) {
 /** One route's bar (when it has a title), its sheet, and the attributes
  * its insets follow (nav-chrome.css). */
 function route(nav, r, previous, sheet, tabbed) {
-  const title = r.getAttribute("data-navigationtitle") ?? "";
-  const large = title !== "" && data(r, "largetitle") !== "false";
+  const shape = shapeOf(r);
+  const title = shape ? shape.title || " " : "";
+  const large = !!shape?.large;
+  // The header the bar stands in for is not painted (iOS lifts it into its bar).
+  if (shape) setAttr(shape.header, "data-exact-lifted", "");
+  else for (const k of kids(r)) if (k.hasAttribute("data-exact-lifted")) k.removeAttribute("data-exact-lifted");
   setAttr(r, "data-exact-chromed", "");
   setAttr(r, "data-exact-bar", title !== "" ? "" : null);
   setAttr(r, "data-exact-large", large ? "" : null);
@@ -321,7 +374,7 @@ function route(nav, r, previous, sheet, tabbed) {
   if (title === "") bar?.remove();
   else {
     if (!bar) { bar = makeBar(); r.append(bar); }
-    fillBar(nav, r, bar, title, large, previous, !!sheet && presentation(sheet) === "modal" && r === sheet && attr(sheet, "data-navigationdetent").trim().split(/\s+/).length > 1);
+    fillBar(nav, r, bar, shape, title, large, previous, !!sheet && presentation(sheet) === "modal" && r === sheet && attr(sheet, "data-navigationdetent").trim().split(/\s+/).length > 1);
   }
   scroller(r, bar);
 }
@@ -333,36 +386,52 @@ function makeBar() {
     el("div", "large", { "aria-hidden": "true" }, el("h1")));
 }
 
-function fillBar(nav, r, bar, title, large, previous, grabber) {
+/** A bar item for an authored button: its symbol, else its label or text. */
+function item(c, nav) {
+  const label = attr(c, "aria-label") || c.textContent.trim();
+  const g = glyph(symbolIn(c), 20), b = el("button", "", { type: "button", "data-exact-nav": nav, "aria-label": label });
+  if (g) b.append(g); else b.append(el("span", "", {}, label));
+  b.$control = c;
+  if (c.matches?.(":disabled")) b.setAttribute("disabled", "");
+  return b;
+}
+/** Items for these buttons, rebuilt only when what they show changes. */
+function items(box, controls, nav, extra = "") {
+  const want = extra + controls.map(c => `${attr(c, "id")}|${attr(c, "aria-label")}|${symbolIn(c)}|${c.textContent.trim()}|${c.matches?.(":disabled") ?? false}`).join("\n");
+  if (attr(box, "data-want") === want && kids(box).length === controls.length + (extra ? 1 : 0)) {
+    // The same faces: their controls may be other nodes now (a re-render).
+    kids(box).slice(extra ? 1 : 0).forEach((b, i) => { b.$control = controls[i]; });
+    return false;
+  }
+  box.setAttribute("data-want", want); box.textContent = "";
+  return true;
+}
+
+function fillBar(nav, r, bar, shape, title, large, previous, grabber) {
   setAttr(bar, "data-large", large ? "" : null);
   const row = part(bar, "bar"), t = title.trim();
   setText(part(row, "title"), t);
   setText(kids(part(bar, "large"))[0], t);
   // Back: over a route below it in its stack (and with an enabled back
-  // control to press), the chevron with the previous title, or alone when
-  // `navigationBackButton` is "minimal".
-  const lead = part(row, "lead");
-  const backs = control(r, attr(nav, "navigationBack"));
-  const label = !previous || !backs || backs.hasAttribute("disabled") ? null
-    : data(r, "backbutton") === "minimal" ? "" : ((previous.getAttribute("data-navigationtitle") ?? "").trim() || "Back");
-  if (attr(lead, "data-want") !== (label == null ? "" : `back:${label}`)) {
-    lead.setAttribute("data-want", label == null ? "" : `back:${label}`); lead.textContent = "";
+  // control to press), UIKit's back button: the chevron alone when the
+  // control's face is a symbol alone, else with its text (LLP 1075.003,
+  // the iOS host's projection). Without a route below (a sheet's root), the
+  // Back control is a leading item like the others.
+  const lead = part(row, "lead"), back = attr(nav, "navigationBack");
+  const backs = control(r, back);
+  const text = backs?.textContent.trim() ?? "";
+  const label = !previous || !backs || backs.hasAttribute("disabled") ? null : text;
+  const leading = (shape?.lead ?? []).filter(c => !(previous && attr(c, "id") === back));
+  if (items(lead, leading, "lead", label == null ? "" : `back:${label}\n`)) {
     if (label != null) {
       const b = el("button", "", { type: "button", "data-exact-nav": "back", "aria-label": label ? `Back to ${label}` : "Back" }, glyph("chevron.left", 22));
       if (label) b.append(el("span", "", {}, label));
       lead.append(b);
     }
+    for (const c of leading) lead.append(item(c, "item"));
   }
-  const trail = part(row, "trail"), target = data(r, "trailing"), symbol = data(r, "trailingsymbol");
-  const want = target ? `${target}|${symbol}` : "";
-  if (attr(trail, "data-want") !== want) {
-    trail.setAttribute("data-want", want); trail.textContent = "";
-    if (target) {
-      const g = glyph(symbol, 20), b = el("button", "", { type: "button", "data-exact-nav": "trailing", "aria-label": control(r, target)?.getAttribute("aria-label") || symbol || target });
-      if (g) b.append(g); else b.append(el("span", "", {}, target));
-      trail.append(b);
-    }
-  }
+  const trail = part(row, "trail"), trailing = shape?.trail ?? [];
+  if (items(trail, trailing, "trail")) for (const c of trailing) trail.append(item(c, "item"));
   const grab = part(bar, "grab");
   if (grabber && !grab) bar.prepend(el("div", "grab"));
   else if (!grabber && grab) grab.remove();
@@ -396,7 +465,7 @@ function freeze(r, y) {
   r.style.setProperty("--exact-frozen-in", String(Math.min(1, Math.max(0, (y - (L - 26)) / 16))));
 }
 
-/** `navigationDetent`'s heights, in points, smallest first. */
+/** `navigationDetent`'s heights, in points, in its order. */
 function detents(sheet) {
   if (presentation(sheet) === "fullscreen") return [Infinity];
   const H = (sheet.parentNode && tall(sheet.parentNode)) || innerHeight, { top, bottom } = safe();
@@ -406,7 +475,8 @@ function detents(sheet) {
 }
 function sheetTop(nav, r, sheet) {
   const heights = detents(sheet), H = tall(nav);
-  sheet.$detent = Math.min(sheet.$detent ?? heights.length - 1, heights.length - 1);
+  // It opens at its first height, as the iOS host's sheet does (ModalIOS.swift).
+  sheet.$detent = Math.min(sheet.$detent ?? 0, heights.length - 1);
   const top = heights[sheet.$detent] === Infinity ? 0 : Math.max(0, H - heights[sheet.$detent]);
   const v = `${top}px`;
   if (r.style.getPropertyValue("--exact-sheet-top") !== v) r.style.setProperty("--exact-sheet-top", v);
@@ -423,8 +493,7 @@ function listen(nav, st) {
     const r = b.closest("[navigationKey]");
     if (b.hasAttribute("data-exact-backdrop")) { const top = routesOf(nav).find(x => attr(x, "navigationKey") === attr(nav, "navigationKey")); if (top) back(nav, top); }
     else if (b.getAttribute("data-exact-nav") === "back") back(nav, r);
-    else if (b.getAttribute("data-exact-nav") === "trailing") { if (!press(r, data(r, "trailing"))) press(nav, data(r, "trailing")); }
-    else press(nav, b.getAttribute("data-control"));
+    else if (b.$control) { if (!b.$control.matches?.(":disabled")) b.$control.click(); }
   });
   nav.addEventListener("scrollend", ev => { const s = ev.target; if (s.hasAttribute?.("data-exact-inset")) s.$y = s.scrollTop; }, { capture: true, passive: true });
   // The page's offset, as a press or the browser's Back may take its route
@@ -437,7 +506,7 @@ function listen(nav, st) {
     const bar = ev.target.closest?.("[data-exact-navbar][data-drag]"), r = bar?.parentNode;
     if (!bar || ev.target.closest("button") || !nav.contains(bar)) return;
     const heights = detents(r), H = tall(nav);
-    drag = { r, bar, y: ev.clientY, top: H - heights[r.$detent ?? heights.length - 1], tops: heights.map(h => H - h), last: ev.clientY, lt: performance.now(), v: 0 };
+    drag = { r, bar, y: ev.clientY, top: H - heights[r.$detent ?? 0], tops: heights.map(h => H - h), last: ev.clientY, lt: performance.now(), v: 0 };
     ev.preventDefault(); bar.setPointerCapture(ev.pointerId);
     r.style.transition = "none";
   });
@@ -477,27 +546,31 @@ function backdrop(nav, st, sheet) {
   if (b.parentNode !== nav || b.nextSibling) nav.append(b);
 }
 
-/** The tab bar: one item per tab, in its rows' order, from its first
- * row's `navigationTab…`; a tap presses that tab's control. */
-function tabBar(nav, routes, selected) {
-  const tabs = [];
-  for (const r of routes) { const t = data(r, "tab"); if (t && !tabs.some(x => x.tab === t)) tabs.push({ tab: t, r }); }
+/** The tab bar: one item per tab of the root's tablist, a symbol over its
+ * label (its `-fill` symbol when selected, as iOS draws it); a tap clicks
+ * the authored tab, whose action selects it. The tablist it stands in for
+ * is not painted (iOS's tab bar adopts it). */
+function tabBar(nav, tabs, selected) {
   let bar = kids(nav).find(k => k.hasAttribute("data-exact-tabbar"));
-  if (!tabs.length) { bar?.remove(); return; }
+  const list = tablistOf(nav);
+  if (!tabs.length) { bar?.remove(); if (list) setAttr(list, "data-exact-lifted", null); return; }
+  setAttr(list, "data-exact-lifted", "");
   bar ??= el("div", "", { "data-exact-tabbar": "", role: "tablist" });
-  const want = tabs.map(({ tab, r }) => [tab, data(r, "tabtitle"), data(r, "tabsymbol"), data(r, "tabselectedsymbol"), data(r, "tabcontrol"), tab === selected].join("|")).join("\n");
+  const face = t => [t.name, attr(t.tab, "aria-label") || t.tab.textContent.trim(), symbolIn(t.tab), t.name === selected];
+  const want = tabs.map(t => face(t).join("|")).join("\n");
   if (attr(bar, "data-want") !== want) {
     bar.setAttribute("data-want", want); bar.textContent = "";
-    for (const { tab, r } of tabs) {
-      const on = tab === selected, title = data(r, "tabtitle") || tab;
-      const b = el("button", "", { type: "button", role: "tab", "aria-selected": String(on), "data-control": data(r, "tabcontrol") });
-      const g = glyph(on ? data(r, "tabselectedsymbol") || data(r, "tabsymbol") : data(r, "tabsymbol"), 22);
+    for (const t of tabs) {
+      const [, title, symbol, on] = face(t);
+      const b = el("button", "", { type: "button", role: "tab", "aria-selected": String(on) });
+      const g = (on && glyph(symbol + ".fill", 22)) || glyph(symbol, 22);
       if (g) b.append(el("span", "icon", {}, g));
       b.append(el("span", "", {}, title));
       bar.append(b);
     }
     bar.style.setProperty("--tabs", String(tabs.length));
   }
+  kids(bar).forEach((b, i) => { b.$control = tabs[i]?.tab; });
   if (bar.parentNode !== nav) nav.append(bar);
   // Under a sheet the bar stays below it (the backdrop is appended after).
   const b = kids(nav).find(k => k.hasAttribute("data-exact-backdrop"));

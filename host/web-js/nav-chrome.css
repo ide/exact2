@@ -138,8 +138,8 @@ html[data-exact-docnav] {
      scroller padded as much, so its content goes on showing under the toolbar as the page's
      does. Only a sheet, which runs under the toolbar as UIKit's runs under the home indicator,
      is fixed. */
-  & [data-exact-page] > :is([data-exact-chromed], [data-exact-ghost]):not([data-exact-sheet], [data-exact-doc]) { position: absolute !important; inset: var(--exact-page-y, 0px) 0 auto !important; --exact-page-under: var(--exact-page-below, 0px); height: calc(var(--exact-page-h, 100vh) + var(--exact-page-under)) !important; }
-  & [data-exact-page] > [data-exact-sheet] { position: fixed !important; }
+  & [data-exact-page] :is([data-exact-chromed], [data-exact-ghost]):not([data-exact-sheet], [data-exact-doc]) { position: absolute !important; inset: var(--exact-page-y, 0px) 0 auto !important; --exact-page-under: var(--exact-page-below, 0px); height: calc(var(--exact-page-h, 100vh) + var(--exact-page-under)) !important; }
+  & [data-exact-page] [data-exact-sheet] { position: fixed !important; }
   /* Safari colours its status bar from the topmost fixed box at the top edge that it can read,
      which the bar's material, under the bar's row, is not: a strip in the canvas over the routes
      (under the tab bar, a sheet and the dimming), shown while the page's route has a bar, whose
@@ -147,12 +147,15 @@ html[data-exact-docnav] {
      leaves, with no strip over the routes as they slide). nav-chrome.js makes it anew as the
      scheme changes. */
   & [data-exact-page] > [data-exact-edge] { display: none; position: fixed; top: 0; left: 0; right: 0; height: 10px; z-index: 1; pointer-events: none; background: var(--exact-canvas, Canvas); }
-  & [data-exact-page]:has(> [data-exact-doc][data-exact-bar]) > [data-exact-edge] { display: block; }
-  & [data-exact-page] > [data-exact-off] { display: none !important; }
+  & [data-exact-page]:has([data-exact-doc][data-exact-bar]) > [data-exact-edge] { display: block; }
+  & [data-exact-page] [data-exact-off] { display: none !important; }
   /* The strip nav-chrome.js `floor` shows for a moment as the page begins scrolling the document. */
   & body > [data-exact-floor] { position: fixed; left: 0; right: 0; bottom: 0; height: 12px; z-index: 1; pointer-events: none; background: var(--exact-canvas, Canvas); }
-  & [data-exact-page] > [data-exact-doc] [data-exact-overlay] { position: fixed !important; }
-  & [data-exact-page] > [data-exact-doc] { position: relative !important; inset: auto !important; height: auto !important; min-height: 100vh; }
+  & [data-exact-page] [data-exact-doc] [data-exact-overlay] { position: fixed !important; }
+  /* Between the root and the page's route (a tab's panel, the box holding the panels): in
+     flow, as tall as the route, so the document is the route's scroller (nav-chrome.js). */
+  & [data-exact-docpath] { position: relative !important; inset: auto !important; height: auto !important; min-height: 100vh; display: block !important; }
+  & [data-exact-page] [data-exact-doc] { position: relative !important; inset: auto !important; height: auto !important; min-height: 100vh; }
   & [data-exact-doc] [data-exact-inset]:not([data-exact-inset="route"]) { overflow-x: clip !important; overflow-y: visible !important; height: auto !important; max-height: none !important; scroll-timeline: none; }
   & [data-exact-doc] > [data-exact-navbar] { display: contents; }
   & [data-exact-doc] > [data-exact-navbar] > :is(.bg, .bar, .grab) { position: fixed; z-index: 2147483000; }
@@ -175,3 +178,7 @@ html[data-exact-docnav] {
    those), and its scroller never hands its overscroll to the page. */
 html[data-exact-docnav][data-exact-locked] { overflow: hidden; }
 html[data-exact-docnav] [data-exact-sheet] [data-exact-inset] { overscroll-behavior: contain; }
+/* What the chrome stands in for — a header-shaped route's header, the root's tablist — is
+   not painted while it does, as iOS lifts the header into its bar and its tab bar adopts
+   the tablist (nav-chrome.js). */
+[data-exact-lifted] { display: none !important; }
