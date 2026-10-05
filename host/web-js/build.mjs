@@ -229,7 +229,7 @@ if (rust) {
   cpSync(resolve(gen, 'app.bind.plan'), resolve(out, 'app.bind.plan'));
 }
 writeFileSync(resolve(gen, 'admission-data.js'), `import {createGrantSet} from './admission.js';export const tsGrantSet=createGrantSet(${JSON.stringify(tsGrantSet)}),rustGrantSet=createGrantSet(${JSON.stringify(rustGrantSet)});\n`);
-// The app's launch modules that have a web service (Exact Observe design §4.6).
+// The app's launch modules that have a web service, the app's own before exact2's.
 const launchWeb = (manifest.launch ?? []).map(name => {
   const own = resolve(appDir, 'modules', name, 'web/service.js'), shared = resolve(root, 'modules', name, 'web/service.js');
   return { name, file: existsSync(own) ? own : existsSync(shared) ? shared : null };
@@ -258,7 +258,7 @@ writeFileSync(resolve(gen, 'main.js'), [
     "Clocked.push(() => { const o = reportTime(clock.now)[1]; if (o === told) return; told = o; commit(() => { for (const r of Resources) if (r.source === 'exactTime') R(r); }, 'time'); });",
   ] : []),
   ...(ts ? ["import { install as ts } from './ts-data.js';", `ts(data, ${mixed}${pageModules ? ", () => import('./native.js')" : ''});`] : []),
-  // Exact Observe design §4.6: launch modules' marks, before the app boots; their services after startup.
+  // Launch marks install before the app boots; marks.js loads the services after startup.
   ...(launchWeb.length ? ["import { install as launchMarks } from './marks.js';", `const marks = launchMarks(${JSON.stringify(launchWeb.map(m => ({ name: m.name, url: `./launch/${m.name}/service.js`, config: { ...(manifest.moduleConfig?.[m.name] ?? {}), 'app.CFBundleIdentifier': manifest.app?.id, 'app.CFBundleName': manifest.app?.name, 'fact.development': !production } })))});`] : []),
   "const start = () => {",
   "  const state = app();",
@@ -505,7 +505,7 @@ if (existsSync(gpuLib)) {
   await copyLazyModules(['gpu-glue.js']);
 }
 if (pageModules) cpSync(moduleDirectory(appDir, 'web'), resolve(out, 'modules'), { recursive: true });
-// Launch modules' web services, loaded by marks.js after startup (Exact Observe design §4.6).
+// Launch modules' web services, which marks.js imports after startup.
 for (const m of launchWeb) cpSync(m.file, resolve(out, 'launch', m.name, 'service.js'));
 if (existsSync(resolve(appDir, 'assets'))) cpSync(resolve(appDir, 'assets'), resolve(out, 'assets'), { recursive: true });
 if (existsSync(resolve(appDir, 'deck'))) cpSync(resolve(appDir, 'deck'), resolve(out, 'deck'), { recursive: true });

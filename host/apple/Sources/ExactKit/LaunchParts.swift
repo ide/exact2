@@ -1,34 +1,27 @@
-// Module launch parts (Exact Observe design §4.3, §4.6): the small, static part
-// of a module that runs during initialization, and the lifecycle journal it
-// reads. A launch part is linked into the app's executable (no dlopen on the
-// boot path), runs once at the app delegate's init, and from then on hears
-// every journal event — the history first, then live ones — at the end of a
-// main-thread turn, never inside a draw, a commit or an apply. Its heavier
-// half (storage, network) is a separate artifact, `lib<module>_service.dylib`,
-// loaded later, on the policy the launch part asks for.
-//
-// Budgets are validation gates: all launch parts together 500 µs at launch,
-// each delivery turn 1 ms across every subscriber. An overrun is journaled
-// (`launchBudget`) and printed in development; it never aborts.
+// Module launch parts and the journal of lifecycle events they subscribe to.
+// A launch part is linked into the executable, so nothing is dlopened during
+// launch. It runs once at the app delegate's init and receives journal events
+// in their own main-thread turn, never inside a draw, commit or apply. Its
+// heavier service, `lib<module>_service.dylib`, loads later when it asks.
 import Foundation
 import QuartzCore
 
-/// A module's launch part. `launch` runs on the main thread, inside
-/// `UIApplicationMain`, before `didFinishLaunching`: no I/O, no UI, no runner.
+/// `launch` runs on the main thread inside `UIApplicationMain`, before
+/// `didFinishLaunching`. It must do no I/O and no UI, and has no runner.
+/// All launch parts together have a 500 µs budget, which is logged when exceeded.
 public protocol ExactLaunchPart {
     static var module: String { get }
     static func launch(_ context: ExactLaunchContext)
 }
 
-/// One journal event: what happened, when (monotonic seconds, the
-/// `CACurrentMediaTime` clock, and wall seconds since 1970), and its fields.
+/// `at` is seconds on `CACurrentMediaTime`; `wall` is seconds since 1970.
 public struct ExactJournalEvent {
     public let kind: String
     public let at: Double
     public let wall: Double
     public let fields: [String: Any]
 
-    /// The event as one JSON object (what a service receives).
+    /// The JSON object a service receives.
     public var json: String {
         var o = fields
         o["kind"] = kind
@@ -39,8 +32,8 @@ public struct ExactJournalEvent {
     }
 }
 
-/// The process's journal: append-only, bounded. The startup events are few
-/// and always kept; the rest is a ring that drops its oldest and counts it.
+/// The process's append-only event journal. Past `capacity` it drops and
+/// counts its oldest events.
 public final class ExactJournal {
     public static let shared = ExactJournal()
     public static let capacity = 4096
@@ -50,14 +43,14 @@ public final class ExactJournal {
     private var delivering = false
     private var services: [(name: String, handle: ExactService)] = []
 
-    /// Every subscriber's events this turn, together, may take this long.
+    /// Seconds all subscribers may spend in one turn; the rest is delivered next turn.
     static let turnBudget = 0.001
 
     func record(_ kind: String, _ fields: [String: Any] = [:], at: Double = CACurrentMediaTime()) {
         let wall = Date().timeIntervalSince1970 - (CACurrentMediaTime() - at)
         events.append(ExactJournalEvent(kind: kind, at: at, wall: wall, fields: fields))
         if events.count > Self.capacity {
-            // Startup marks are re-derivable from ExactLaunch; keep the ring bounded.
+            // Dropping startup marks is safe: ExactLaunch keeps them.
             events.removeFirst()
             dropped += 1
             for i in subscribers.indices { subscribers[i].next = max(0, subscribers[i].next - 1) }
@@ -84,7 +77,6 @@ public final class ExactJournal {
         DispatchQueue.main.async { [weak self] in self?.deliver() }
     }
 
-    /// One turn's delivery, within the budget; the rest waits for the next turn.
     private func deliver() {
         delivering = false
         let start = CACurrentMediaTime()
@@ -112,16 +104,14 @@ public enum ExactServiceLoad: String {
 /// What a launch part sees.
 public final class ExactLaunchContext {
     public let module: String
-    /// Provisional facts at launch: `prewarmed` and `debugger` are final;
-    /// eligibility and cold/warm come with the `didFinishLaunching` event.
+    /// `prewarmed`, `debugger`, `development` and `agent`. Cold or warm and
+    /// whether metrics are suppressed arrive later, in the `launch` journal event.
     public let facts: [String: Any]
-    /// A directory that exists at launch, for a crash record written from a
-    /// signal handler (no directory is created on the boot path).
+    /// An existing directory a signal handler can write a crash record to.
     public let crashDirectory: String
     /// This module's settings from `app.json` `moduleConfig.<module>`.
     public let config: [String: Any]
-    /// The app's baked metadata (its Info.plist, or a bare build's sidecar):
-    /// identity, version and build, for a module to describe the app with.
+    /// The app's Info.plist, or a bare build's sidecar: identity, version and build.
     public let app: [String: Any]
 
     init(module: String, facts: [String: Any]) {
@@ -132,20 +122,20 @@ public final class ExactLaunchContext {
         crashDirectory = NSSearchPathForDirectoriesInDomains(.cachesDirectory, .userDomainMask, true).first ?? NSTemporaryDirectory()
     }
 
-    /// The journal: every event so far, then each new one, at the end of a turn.
+    /// Delivers every event so far, then each new one, in later main-thread turns.
     public func subscribe(_ fn: @escaping (ExactJournalEvent) -> Void) {
         ExactJournal.shared.subscribe(module, fn)
     }
 
-    /// Load `lib<module>_service.dylib` at `when`, starting it with `config`
-    /// and `handoff` (the launch part's bytes, e.g. its ring).
+    /// Loads `lib<module>_service.dylib` at `when` and starts it with `config` and
+    /// `handoff`, the bytes the launch part kept (for example its ring).
     public func requestService(_ when: ExactServiceLoad, config: [String: Any], handoff: @escaping () -> Data) {
         ExactLaunch.shared.requestService(module: module, when: when, config: config, handoff: handoff)
     }
 }
 
-/// A fixed RAM ring of length-prefixed records: what a launch part keeps
-/// before its service exists. Drops its oldest when full, and counts them.
+/// An in-memory ring of records a launch part keeps until its service loads.
+/// `capacity` is in bytes. When full it drops and counts the oldest records.
 public final class ExactRing {
     public let capacity: Int
     private var records: [Data] = []
@@ -175,7 +165,7 @@ public final class ExactRing {
     }
 }
 
-/// A loaded service artifact: the C entry points of `lib<module>_service.dylib`.
+/// The C entry points of a loaded `lib<module>_service.dylib`.
 final class ExactService {
     typealias Start = @convention(c) (UnsafePointer<UInt8>?, UInt32, UnsafePointer<UInt8>?, UInt32) -> UnsafeMutableRawPointer?
     typealias Event = @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<UInt8>?, UInt32) -> Void
@@ -184,7 +174,7 @@ final class ExactService {
     private let eventFn: Event
     private let backgroundFn: Background
 
-    /// The artifact beside the executable (macOS) or in Frameworks (iOS).
+    /// Loads from beside the executable on macOS, or from Frameworks on iOS.
     static func load(module: String, config: Data, handoff: Data) -> ExactService? {
         let name = "lib\(module)_service.dylib"
         #if os(macOS)
@@ -224,7 +214,7 @@ final class ExactService {
 }
 
 extension ExactLaunch {
-    /// Run the app's launch parts, in `app.json` order, timing each (§4.6).
+    /// Runs the launch parts in `app.json` order and journals each one's time.
     public func runLaunchParts(_ parts: [ExactLaunchPart.Type]) {
         let facts: [String: Any] = ["prewarmed": facts.prewarm != 0, "debugger": facts.traced != 0, "development": !ExactEnv.productionBake, "agent": ExactEnv.agentMode]
         var total = 0.0
@@ -243,18 +233,15 @@ extension ExactLaunch {
 
     static let launchBudget = 0.0005
 
-    /// The window dispatched an input (touch ended, press, mouse up, key):
-    /// its platform timestamp, a navigation's cause (§3.6).
+    /// An input's event timestamp, from which the next navigation is timed.
     public func input(at timestamp: TimeInterval) { NavigationMarks.shared.input(at: timestamp) }
 }
 
-/// What an app (its native modules, its host adapter) reports for a module
-/// such as Observe to send: custom events, errors and the attributes merged
-/// into everything. Journal events; the module's service decides what they mean.
+/// App-reported events, errors and attributes, journaled for a module such as
+/// Observe. The module's service decides what to send.
 public enum ExactEvents {
-    /// Contract's `observe`, `observeAttributes` and `observeError` (Exact
-    /// Observe design §5.2), journal events stamped now. The compiler sends
-    /// a record's fields as name, value pairs.
+    /// Handles the contract's `observe`, `observeAttributes` and `observeError`
+    /// host commands. The compiler sends a record's fields as name, value pairs.
     static func hostCommand(_ name: String, _ args: [Any]) {
         let pairs = { (from: Int) -> [String: Any] in
             var out: [String: Any] = [:]
@@ -284,7 +271,7 @@ public enum ExactEvents {
         ExactJournal.shared.record("app.attributes", ["attributes": attributes])
     }
 
-    /// A framework event for modules (an update's download, …).
+    /// A framework event for modules, such as an update's download.
     public static func journal(_ kind: String, _ fields: [String: Any]) {
         ExactJournal.shared.record(kind, fields)
     }

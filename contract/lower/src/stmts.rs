@@ -95,11 +95,9 @@ impl Lowerer<'_> {
             // A tail call's type check (LLP 1017 §11): nothing to run.
             Stmt::Command { name, .. }
                 if name.starts_with(contract_syntax::inline::tail::CHECK) => {}
-            // Exact Observe design §5.2: a record's fields go to the host by
-            // name — `observe(name, Shape(a=x), sev)` is the command `observe`
-            // with `name, sev, "a", x`; `observeAttributes(Shape(a=x))` is
-            // `"a", x`. Hosts receive records positionally, so the names are
-            // made explicit here.
+            // Hosts receive records positionally, so the field names are sent
+            // as arguments: `observe(name, Shape(a=x), sev)` becomes
+            // `name, sev, "a", x`, and `observeAttributes(Shape(a=x))` becomes `"a", x`.
             Stmt::Command { name, args, .. }
                 if name == "observe" || name == "observeAttributes" =>
             {

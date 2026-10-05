@@ -1,19 +1,9 @@
-//! The Linux launch marks (Exact Observe design §3.1–3.5), for the display
-//! path (a headless run renders no frame and reports none).
+//! Startup timestamps for the display path (a headless run reports none).
 //!
-//! Every startup mark is on `CLOCK_BOOTTIME`: the process start the kernel
-//! keeps in `/proc/self/stat` counts ticks of it (1/`CLK_TCK`, usually 10 ms,
-//! carried as the resolution), and a suspend in the middle is then inside the
-//! numbers rather than silently subtracted. A flip's timestamp comes from the
-//! kernel on `CLOCK_MONOTONIC` and is moved onto BOOTTIME with the offset
-//! sampled when it is read.
-//!
-//! - launch end: `boot_presenter` begins — the display open, Exact about to
-//!   produce its first tree.
-//! - first pixel: the first frame's `set_crtc` returned (a synchronous modeset).
-//! - TTI: the runner's settle ledger clear and the data module active, at the
-//!   end of a loop turn; the next flip's own timestamp if the screen changed
-//!   since its last frame, else now.
+//! All marks are seconds on `CLOCK_BOOTTIME`, the clock `/proc/self/stat`
+//! counts the process start in (ticks of 1/`CLK_TCK`, usually 10 ms).
+//! A suspend during startup therefore counts toward the numbers.
+//! DRM flip timestamps are `CLOCK_MONOTONIC` and are converted on read.
 
 use std::time::Duration;
 
@@ -42,15 +32,15 @@ pub fn boottime() -> f64 {
     }
 }
 
-/// A `CLOCK_MONOTONIC` instant (a DRM event's) on BOOTTIME.
+/// Converts a `CLOCK_MONOTONIC` instant, such as a DRM flip's, to BOOTTIME seconds.
 pub fn monotonic_to_boottime(t: Duration) -> f64 {
     t.as_secs_f64() + (boottime() - clock(libc::CLOCK_MONOTONIC))
 }
 
-/// The process's start, seconds since boot, and the clock's resolution.
+/// The process start in seconds since boot, and the tick length in ms.
 fn process_start() -> Option<(f64, f64)> {
     let stat = std::fs::read_to_string("/proc/self/stat").ok()?;
-    // Field 22, counted after the command's closing parenthesis.
+    // Field 22 (starttime). Count from the last ')' since the command name may contain spaces.
     let after = &stat[stat.rfind(')')? + 2..];
     let ticks: f64 = after.split(' ').nth(19)?.parse().ok()?;
     // SAFETY: sysconf reads a constant.
@@ -59,7 +49,7 @@ fn process_start() -> Option<(f64, f64)> {
     (hz > 0.0).then(|| (ticks / hz, 1000.0 / hz))
 }
 
-/// The runner's ledger as named items (the same names the Apple host uses).
+/// The runner's outstanding work as `kind:name` items, named as on the Apple host.
 pub fn items(o: &exact_runner::runner::outstanding::Outstanding) -> Vec<String> {
     let mut out = Vec::new();
     for (key, list) in [
@@ -79,7 +69,7 @@ pub fn items(o: &exact_runner::runner::outstanding::Outstanding) -> Vec<String> 
     out
 }
 
-/// One launch's marks, from process start to time-to-interactive.
+/// One launch's marks, from process start to time to interactive (TTI).
 #[derive(Default)]
 pub struct LaunchMarks {
     process: Option<f64>,
@@ -97,7 +87,7 @@ pub struct LaunchMarks {
 }
 
 impl LaunchMarks {
-    /// The process start read from the kernel, nothing marked yet.
+    /// Reads the process start from the kernel.
     pub fn new() -> Self {
         let (process, resolution_ms) = process_start().map_or((None, 0.0), |(p, r)| (Some(p), r));
         LaunchMarks {
@@ -107,13 +97,13 @@ impl LaunchMarks {
         }
     }
 
-    /// `boot_presenter` begins: the end of the platform's launch.
+    /// Marks launch end: the display is open and Exact is about to build its first tree.
     pub fn launch_end(&mut self) {
         self.launch_end.get_or_insert_with(boottime);
     }
 
-    /// A frame went to the display; the first one is on screen when its
-    /// synchronous modeset returns.
+    /// A frame went to the display. The first frame uses a synchronous
+    /// modeset, so it is on screen when submit returns.
     pub fn submitted(&mut self, first: bool) {
         let now = boottime();
         if first && self.present.is_none() {
@@ -124,7 +114,8 @@ impl LaunchMarks {
         }
     }
 
-    /// A flip completed at `at` (the kernel's MONOTONIC timestamp).
+    /// A flip completed at `at` (`CLOCK_MONOTONIC`). If nothing is outstanding
+    /// and the data module is active, TTI is this flip's time.
     pub fn flipped(&mut self, at: Duration, ready: Option<&[String]>) {
         self.changed = false;
         if self.outcome.is_none() && ready.is_some_and(|r| r.is_empty()) && self.activated.is_some()
@@ -134,12 +125,13 @@ impl LaunchMarks {
         }
     }
 
-    /// The data module answers.
+    /// The data module is active.
     pub fn activated(&mut self) {
         self.activated.get_or_insert_with(boottime);
     }
 
-    /// The end of a loop turn: the ledger as named items.
+    /// The end of a loop turn, with the outstanding work. TTI settles here when
+    /// nothing is outstanding and no submitted frame awaits its flip.
     pub fn turn(&mut self, outstanding: &[String]) {
         if self.outcome.is_some() || self.present.is_none() {
             return;
@@ -161,7 +153,7 @@ impl LaunchMarks {
         }
     }
 
-    /// TTI is decided.
+    /// Whether TTI is decided.
     pub fn done(&self) -> bool {
         self.outcome.is_some()
     }
@@ -173,10 +165,9 @@ impl LaunchMarks {
         fresh
     }
 
-    /// The startup report the journal carries (ExactKit's `report()`):
-    /// Observe's metrics in seconds — a Linux launch is always cold, measured
-    /// from the process start to launch end; TTR and TTI from launch end —
-    /// the marks in ms from process start, the TTI outcome and the ledger.
+    /// The journal's `startup` fields, shaped like ExactKit's `report()`.
+    /// Metrics are in seconds: cold launch from process start, TTR and TTI from
+    /// launch end. A Linux launch is always cold. Marks are ms from process start.
     pub fn report(&self) -> serde_json::Map<String, serde_json::Value> {
         use serde_json::{json, Map, Value};
         let mut metrics = Map::new();
@@ -194,7 +185,7 @@ impl LaunchMarks {
         if let Some(p) = self.process {
             for (name, at) in [
                 ("process", self.process),
-                // Launch end stands where Apple's didFinishLaunching and boot do.
+                // Linux has one launch-end mark. It fills both Apple mark names.
                 ("didFinishLaunching", self.launch_end),
                 ("boot", self.launch_end),
                 ("commit", self.commit),
@@ -218,7 +209,7 @@ impl LaunchMarks {
         out
     }
 
-    /// One line: Observe's metrics (ms) and the marks from process start.
+    /// A one-line summary for stderr, in ms.
     pub fn line(&self) -> String {
         let ms = |a: Option<f64>, b: Option<f64>| {
             a.zip(b)
