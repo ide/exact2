@@ -616,19 +616,22 @@ test('page facts: the platform off the agent, the drive\'s values under it (LLP 
   const listened = [];
   const platform = { document: { visibilityState: 'hidden', addEventListener: name => listened.push(name) }, navigator: { onLine: false, share() {} }, addEventListener: name => listened.push(name) };
   const real = pageReporter(false, platform);
-  expect(real.bits()).toBe(1 | 2 | 4);
+  // No navigation entry is a page the browser navigated to (bits 4–5: 1).
+  expect(real.bits()).toBe(1 | 2 | 4 | 16);
   platform.document.visibilityState = 'visible'; platform.navigator = { onLine: true };
-  expect(real.bits()).toBe(0);
+  expect(real.bits()).toBe(16);
+  const reloaded = pageReporter(false, { ...platform, performance: { getEntriesByType: t => t === 'navigation' ? [{ type: 'reload' }] : [] } });
+  expect(reloaded.bits()).toBe(2 << 4);
   // The document pickers (studio diary R31): bit 3 where the browser has them.
   platform.showOpenFilePicker = () => {};
-  expect(real.bits()).toBe(8);
+  expect(real.bits()).toBe(16 | 8);
   delete platform.showOpenFilePicker;
   real.onChange(() => {});
   expect(listened).toEqual(['visibilitychange', 'online', 'offline']);
   const agent = pageReporter(true, new Proxy({}, {get() { throw new Error('agent read the platform'); }}));
   expect(agent.bits()).toBe(4 | 8);
   agent.prefer({ 'visibility-state': 'hidden', online: false, 'can-open-files': false });
-  expect(agent.bits()).toBe(1 | 2 | 4);
+  expect(agent.bits()).toBe(1 | 2 | 4 | 8);
   expect(() => agent.prefer({ online: 'maybe', 'can-share': false })).toThrow('prefer: online');
   expect(agent.read()['can-share']).toBe(true);
   agent.onChange(() => { throw new Error('agent listened to the platform'); });

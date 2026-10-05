@@ -46,8 +46,8 @@ export function page(readers) {
   const facts = typeof document === "object" && document.createElement ? pageReporter(agent) : null;
   (data.reserved ??= {}).exactPage = (_, a, name) => {
     // A render has no page: the bake's answer (runner/src/page.rs `Page::default`).
-    const f = facts ? facts.read() : { "visibility-state": "visible", online: true, "can-share": false, "can-open-files": false };
-    return byName(readers, name, { visibilityState: f["visibility-state"], onLine: f.online, canShare: f["can-share"], canOpenFiles: f["can-open-files"] });
+    const f = facts ? facts.read() : { "visibility-state": "visible", online: true, "can-share": false, "can-open-files": false, "navigation-type": "" };
+    return byName(readers, name, { visibilityState: f["visibility-state"], onLine: f.online, canShare: f["can-share"], canOpenFiles: f["can-open-files"], navigationType: f["navigation-type"] });
   };
   if (!facts) return;
   const changed = again("exactPage", "page");
