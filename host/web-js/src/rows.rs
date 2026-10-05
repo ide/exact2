@@ -128,6 +128,16 @@ impl Em<'_> {
         if id == StyleId::AnimationTimeline && style::can_be(plan, plan.code(b.expr), &clock) {
             self.clocks();
         }
+        // Apple's button style: the attribute the stylesheet's approximation
+        // reads (element.rs `props_of` writes a static one).
+        if id == StyleId::ExactAppleButtonStyle {
+            let p = self.uses.rt("P");
+            let _ = write!(
+                self.out,
+                "{p}({e},\"data-exact-apple-button-style\",()=>{{const v=({f})();return v==null||v===\"none\"?null:v}});"
+            );
+            return Ok(());
+        }
         let refuse = |why: &str| Err(format!("node {i}: {why} is not in the JS target"));
         // (name, unit, map): a map is JavaScript of the value (`null` writes none).
         let one = |name: &str, map: Option<String>| vec![(name.to_string(), String::new(), map)];
