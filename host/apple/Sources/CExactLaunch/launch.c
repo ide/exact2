@@ -1,4 +1,3 @@
-// @ref design: Exact Observe §3.2 — L and the process age, before `main`.
 #include "CExactLaunch.h"
 #include <mach/mach_time.h>
 #include <stdlib.h>
@@ -9,7 +8,7 @@
 
 static exact_launch_facts facts;
 
-// Priority near Observe's (62137): late among constructors, so close to `main`.
+// Observe's priority (62137): late among constructors, so close to `main`.
 __attribute__((constructor(62137))) static void exact_launch_constructor(void) {
     mach_timebase_info_data_t base;
     mach_timebase_info(&base);

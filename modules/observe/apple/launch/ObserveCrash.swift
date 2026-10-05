@@ -1,9 +1,7 @@
-// Crash capture from launch (Exact Observe design §6): a fatal signal — a Swift
-// trap, a Rust panic's abort, a bad access — writes one pending record before
-// the process dies. Everything the handler needs is formatted at launch into
-// static memory, so it only calls `open`, `write` and `close`, which are
-// async-signal-safe, then re-raises with the default action. The service
-// ingests the record at the next launch, against the session it describes.
+// Crash capture: on a fatal signal, write one pending record, then re-raise with the
+// default action. The record's text is formatted at launch into static memory, so the
+// handler only calls the async-signal-safe `open`, `write` and `close`.
+// The service reads the record at the next launch and attributes it to the crashed session.
 import Foundation
 
 enum ObserveCrash {
@@ -13,7 +11,7 @@ enum ObserveCrash {
     static let signals: [Int32] = [SIGABRT, SIGSEGV, SIGBUS, SIGILL, SIGFPE, SIGTRAP]
 
     static func install(directory: String, session: String) {
-        // The directory exists at launch (Caches); the file is made only on a crash.
+        // The directory (Caches) already exists. The file is created only on a crash.
         path = strdup("\(directory)/exact-observe-pending-\(session).json")
         let wall = Date().timeIntervalSince1970
         let text = "{\"session\":\"\(session)\",\"sessionStart\":\(wall),\"signal\":"
@@ -29,7 +27,7 @@ enum ObserveCrash {
             let fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0o644)
             if fd >= 0 {
                 _ = write(fd, head, ObserveCrash.headLength)
-                // The signal number, in decimal, without formatting functions.
+                // Write the signal number in decimal by hand: formatting functions aren't async-signal-safe.
                 var digits: [UInt8] = [0, 0, 0, 0]
                 var n = Int(sig), i = 3
                 repeat { digits[i] = UInt8(48 + n % 10); n /= 10; i -= 1 } while n > 0 && i >= 0
