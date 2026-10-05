@@ -810,7 +810,7 @@ async function main(args) {
   // SwiftPM compiles Package.swift itself for macOS before applying the iOS
   // product triple; an iPhone SDKROOT in its environment breaks that host
   // manifest compile. The target SDK stays in the explicit Swift arguments.
-  const launchModules = app.launch, launchPartsDir = writeLaunchParts(pkg, app); // Exact Observe design §4.6 (launch-parts.mjs)
+  const launchModules = app.launch, launchPartsDir = writeLaunchParts(pkg, app);
   const swiftEnv = (libDir, composition, link = 'all') => ({
     ...process.env, ...(launchPartsDir ? { EXACT_LAUNCH_PARTS: launchPartsDir.slice(pkg.length + 1) } : {}),
     EXACT_APPLE_LINK: link, // LLP 1047.001 D4 (link.mjs)
@@ -1189,7 +1189,7 @@ async function main(args) {
       const platform = ios ? 'ios' : 'macos';
       assertLinkedSdk(executable, designCompatible(app, platform) ? COMPATIBLE_SDK[platform] : read('xcrun', ['--sdk', sdkName, '--show-sdk-version']).stdout.trim());
       if (ipa) stripped = stripForDistribution(executable, `${ipa.replace(/\.ipa$/, '')}.dSYM`);
-    } if (launchPartsDir) auditLaunchParts(resolve(swiftBinDir, 'ExactLaunchParts.o'), launchModules, read); // Exact Observe §4.6
+    } if (launchPartsDir) auditLaunchParts(resolve(swiftBinDir, 'ExactLaunchParts.o'), launchModules, read);
   } finally { releaseSwift(); }
   const tSwift = Date.now();
   for (const placed of arms) await placed();

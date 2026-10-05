@@ -136,7 +136,7 @@ final class ExactWindow: NSWindow {
     override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect {
         agentMode ? frameRect : super.constrainFrameRect(frameRect, to: screen)
     }
-    /// A navigation's cause (Exact Observe design §3.6): when the click or key happened.
+    /// A navigation is timed from its input: a mouse-up or key press.
     override func sendEvent(_ event: NSEvent) {
         super.sendEvent(event)
         if [.leftMouseUp, .keyDown].contains(event.type) { ExactLaunch.shared.input(at: event.timestamp) }
@@ -468,8 +468,8 @@ final class Delegate: NSObject, NSApplicationDelegate {
     }
     func applicationDidFinishLaunching(_ notification: Notification) {
         ExactEnv.stamp("didFinishLaunching")
-        // The session is already made; AppKit boots it inside this callback,
-        // so launch ends at its entry (Exact Observe design §3.2, macOS).
+        // The session already exists and AppKit boots it inside this
+        // callback, so launch is measured to this point.
         ExactLaunch.shared.didFinishLaunching(hidden: NSApp.isHidden)
         finishLaunching()
     }

@@ -1,11 +1,7 @@
-// Observe's wire (Exact Observe design §4.5, §7): the OTLP/JSON that
-// expo-observe sends (`OpenTelemetry.swift`, `DispatchLoop.swift`,
-// `DispatchUtils.swift` on expo main) — the same metric names, attributes,
-// scope, schema URL and envelope — and its dispatch rules, copied: chunks of
-// 200, a 413 halves the chunk and drops a single row that still fails,
-// 429/502/503/504 and transport errors wait min(60·2^(n−1), 900)·random()
-// seconds (or the server's Retry-After, clamped to 60…900), anything else
-// drops the chunk. No auth: the project id is in the path.
+// The OTLP/JSON body and retry rules expo-observe uses, copied from its
+// `OpenTelemetry.swift`, `DispatchLoop.swift` and `DispatchUtils.swift`.
+// A 413 halves the chunk, and a single row that still fails is dropped. 429, 502-504 and
+// transport errors back off. Other errors drop the chunk. There is no auth: the project id is in the URL.
 import Foundation
 
 enum ObserveWire {
@@ -13,7 +9,7 @@ enum ObserveWire {
     static let chunk = 200
     static let backoffBase = 60.0, backoffCap = 900.0
 
-    /// Observe's `metricNameMap`: the only names Exact emits.
+    /// Observe's `metricNameMap`. Exact emits only these names.
     static let names = [
         "appStartup/timeToInteractive": "expo.app_startup.tti",
         "appStartup/timeToFirstRender": "expo.app_startup.ttr",
@@ -55,7 +51,7 @@ enum ObserveWire {
         return nil
     }
 
-    /// Observe's resource attributes, from the session's snapshot.
+    /// Observe's resource attributes, from the session's stored metadata.
     static func resource(_ meta: [String: Any], clientId: String) -> [String: Any] {
         var a: [[String: Any]] = []
         let s = { (k: String, m: String) in if let v = meta[m] as? String { a.append(["key": k, "value": ["stringValue": v]]) } }
@@ -102,7 +98,7 @@ enum ObserveWire {
         }]
     }
 
-    /// `{"resourceLogs":[…]}`.
+    /// `{"resourceLogs":[…]}`, one resource per session in the chunk.
     static func logsBody(_ rows: [[Any?]], sessions: [String: [String: Any]], clientId: String) -> [String: Any] {
         var bySession: [String: [[String: Any]]] = [:]
         for r in rows {
@@ -153,7 +149,7 @@ enum ObserveWire {
         return min(backoffBase * pow(2, Double(attempt - 1)), backoffCap) * Double.random(in: 0..<1)
     }
 
-    /// EASClientID.deterministicUniformValue: splitmix64 over both UUID halves → [0, 1).
+    /// Same as expo's `EASClientID.deterministicUniformValue`: a stable value in [0, 1) per install.
     static func uniform(_ uuid: UUID) -> Double {
         let (high, low) = withUnsafeBytes(of: uuid.uuid) {
             ($0.load(fromByteOffset: 0, as: UInt64.self).bigEndian, $0.load(fromByteOffset: 8, as: UInt64.self).bigEndian)

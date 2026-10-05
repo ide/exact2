@@ -345,7 +345,7 @@ pub fn run<D: DataSource + Default>(config: &mut Config, started: Instant) -> i3
     let (pw, ph) = display.size();
     let viewport = (pw as f32 / config.scale, ph as f32 / config.scale);
     let wall = || started.elapsed().as_secs_f64() * 1000.0;
-    // Exact Observe design §3.2–3.5: the launch marks, on BOOTTIME.
+    // Startup timestamps for Observe's launch metrics.
     let mut marks = crate::launch_marks::LaunchMarks::new();
     let observe_log = std::env::var("EXACT_OBSERVE_LOG").as_deref() == Ok("1");
     marks.launch_end();

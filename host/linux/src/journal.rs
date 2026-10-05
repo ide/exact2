@@ -1,18 +1,10 @@
-//! The launch journal and launch parts (Exact Observe design §4.6), Linux's
-//! twin of ExactKit's `LaunchParts.swift`.
+//! The launch journal and launch parts, the Linux counterpart of ExactKit's `LaunchParts.swift`.
 //!
-//! A module the app's `app.json` names under `launch` ships one Rust file,
-//! `modules/<name>/linux/launch.rs`, that the app's build compiles into the
-//! executable (`contract::linux_launch_parts`); its `launch` runs first thing
-//! in `main`, before the host opens the display, and must be small: subscribe
-//! to this journal, perhaps install a panic hook. Anything that stores or
-//! sends waits for [`after_startup`], which runs it on a thread of its own
-//! once the startup report is in, so it never delays a mark.
-//!
-//! The journal keeps the last [`CAPACITY`] events and replays them to a new
-//! subscriber, so a module that starts late misses nothing. Subscribers are
-//! called on the thread that records — the display loop — and must only hand
-//! the event off (a channel send).
+//! Each module listed under `launch` in `app.json` provides `modules/<name>/linux/launch.rs`,
+//! compiled into the app and run at the start of `main`, before the display opens.
+//! A launch part only subscribes and installs hooks. File and network work goes
+//! through [`after_startup`] so it cannot delay the startup marks.
+//! Subscribers run on the display loop's thread and must only hand events off.
 
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
@@ -23,23 +15,22 @@ use serde_json::{Map, Value};
 /// Events kept for a subscriber that arrives later.
 pub const CAPACITY: usize = 4096;
 
-/// One journal event: its kind, when (seconds on `CLOCK_BOOTTIME`, the
-/// marks' clock, and Unix seconds), and its fields.
+/// One journal event.
 #[derive(Debug, Clone)]
 pub struct Event {
     /// `startup`, `app.event`, `app.attributes`, `app.error`, …
     pub kind: String,
-    /// Seconds on `CLOCK_BOOTTIME`.
+    /// Seconds on `CLOCK_BOOTTIME`, the launch marks' clock.
     pub at: f64,
     /// Seconds since the Unix epoch.
     pub wall: f64,
-    /// The kind's fields.
+    /// Kind-specific fields.
     pub fields: Map<String, Value>,
 }
 
 impl Event {
-    /// The event as one JSON object: its fields beside `kind`, `at`, `wall`
-    /// (the shape the Apple and web journals hand a service).
+    /// The fields plus `kind`, `at` and `wall` in one object, the shape the
+    /// Apple and web journals produce.
     pub fn json(&self) -> Value {
         let mut o = self.fields.clone();
         o.insert("kind".into(), self.kind.clone().into());
@@ -74,7 +65,7 @@ pub fn wall() -> f64 {
         .map_or(0.0, |d| d.as_secs_f64())
 }
 
-/// Record an event; the first `startup` releases [`after_startup`]'s work.
+/// Records an event. The first `startup` event starts the [`after_startup`] work.
 pub fn record(kind: &str, fields: Map<String, Value>) {
     let e = Arc::new(Event {
         kind: kind.into(),
@@ -102,7 +93,7 @@ pub fn record(kind: &str, fields: Map<String, Value>) {
     }
 }
 
-/// Every event from now on, after the ones already recorded.
+/// Calls `f` with the retained events, then with each new one.
 pub fn subscribe(f: impl Fn(&Event) + Send + 'static) {
     with(|j| {
         for e in &j.events {
@@ -112,8 +103,7 @@ pub fn subscribe(f: impl Fn(&Event) + Send + 'static) {
     });
 }
 
-/// Run `f` on a thread of its own once startup is reported (at once if it
-/// already was): where a module stores and sends.
+/// Runs `f` on its own thread once startup is recorded, or at once if it already was.
 pub fn after_startup(f: impl FnOnce() + Send + 'static) {
     let f: Deferred = Box::new(f);
     let ready = with(|j| {
@@ -129,12 +119,12 @@ pub fn after_startup(f: impl FnOnce() + Send + 'static) {
     }
 }
 
-/// What every launch part may take together, as on Apple
-/// (`runLaunchParts`): more is said on stderr, never refused.
+/// The time all launch parts together should take, as on Apple. Overruns are
+/// logged to stderr, not enforced.
 pub const LAUNCH_BUDGET: std::time::Duration = std::time::Duration::from_micros(500);
 
-/// The generated `launch_parts()` ran in `took`: journaled, and said when
-/// it was over budget or `EXACT_OBSERVE_LOG=1` asks.
+/// Records how long the generated `launch_parts()` took. Logs it when over
+/// budget or when `EXACT_OBSERVE_LOG=1`.
 pub fn launch_parts_ran(took: std::time::Duration) {
     let micros = took.as_secs_f64() * 1e6;
     if took > LAUNCH_BUDGET || std::env::var("EXACT_OBSERVE_LOG").as_deref() == Ok("1") {
@@ -148,21 +138,21 @@ pub fn launch_parts_ran(took: std::time::Duration) {
     record("launch.parts", f);
 }
 
-/// What a launch part is told (ExactKit's `ExactLaunchContext`).
+/// What a launch part receives, like ExactKit's `ExactLaunchContext`.
 pub struct LaunchContext {
-    /// The module's name in `app.json`'s `launch`.
+    /// The module's name in `app.json`'s `launch` list.
     pub module: &'static str,
     /// `app.json`'s `moduleConfig[module]`, JSON (`{}` when none).
     pub config: &'static str,
     /// The app's identity: `{"id","name","version"}` from `app.json`.
     pub app: &'static str,
-    /// A development build (not production trust) — Observe sends nothing
-    /// from one unless asked.
+    /// Whether this is a development build. Observe sends nothing from one
+    /// unless configured to.
     pub development: bool,
 }
 
 impl LaunchContext {
-    /// The context for `module`, from the baked compatibility id.
+    /// The context for `module`. `compat` is the baked compatibility id.
     pub fn new(
         module: &'static str,
         config: &'static str,
@@ -177,8 +167,8 @@ impl LaunchContext {
         }
     }
 
-    /// Where the module keeps its files: `$XDG_STATE_HOME/exact/<app id>/<module>`
-    /// (`~/.local/state` when unset). Not created here: launch does no I/O.
+    /// `$XDG_STATE_HOME/exact/<app id>/<module>`, defaulting to `~/.local/state`.
+    /// Not created here, because launch does no I/O.
     pub fn state_dir(&self) -> std::path::PathBuf {
         let app: Value = serde_json::from_str(self.app).unwrap_or_default();
         let id = app["id"].as_str().unwrap_or("app");
@@ -192,7 +182,7 @@ impl LaunchContext {
     }
 }
 
-/// A Contract value as JSON, for `observe` commands' arguments.
+/// A Contract value as JSON, for the `observe` commands' arguments.
 pub fn value_json(v: &exact_plan::Value) -> Value {
     if let Some(s) = v.as_str() {
         return s.into();
@@ -207,8 +197,8 @@ pub fn value_json(v: &exact_plan::Value) -> Value {
     }
 }
 
-/// Contract's `observe`, `observeAttributes` and `observeError` (design
-/// §5.2): names, then a record's fields as key/value pairs.
+/// Records Contract's `observe`, `observeAttributes` and `observeError`.
+/// Leading positional arguments are followed by alternating keys and values.
 pub fn host_command(name: &str, args: &[exact_plan::Value]) {
     let pairs = |from: usize| {
         let mut o = Map::new();
@@ -248,8 +238,8 @@ pub fn host_command(name: &str, args: &[exact_plan::Value]) {
     }
 }
 
-/// POST `body` to `url`: the status and the `Retry-After` header, through
-/// the transport the host already links (rustls off Apple).
+/// POSTs `body` to `url` with the host's existing transport. Returns the
+/// status and the `Retry-After` header.
 pub fn post(
     url: &str,
     headers: &[(&str, &str)],
