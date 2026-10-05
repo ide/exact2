@@ -23,7 +23,7 @@ extension NodeView {
     func pressBoundary(_ touch: UITouch, presses: Bool = true) -> Bool {
         var view = touch.view
         while let current = view, current !== self {
-            if let node = current as? NodeView, (presses && node.handlers.contains("press")) || node.field != nil || node.textArea != nil { return true }
+            if let node = current as? NodeView, (presses && node.activatable) || node.field != nil || node.textArea != nil { return true }
             view = current.superview
         }
         return false

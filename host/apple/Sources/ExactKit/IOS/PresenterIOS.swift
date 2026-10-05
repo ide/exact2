@@ -556,7 +556,7 @@ package final class Presenter {
         if v.formDisabled || v.cssVisibilityHidden || v.bounds.width == 0 || v.bounds.height == 0 { return false }
         if let index = v.explicitTabIndex, index < 0 { return false }
         // A radio group is one stop (x2apps survey #2).
-        return v.field != nil || v.textArea != nil || v.handlers.contains("press") || v.canBecomeFirstResponder && (!v.isRadio || v.radioTabStop)
+        return v.field != nil || v.textArea != nil || v.activatable || v.canBecomeFirstResponder && (!v.isRadio || v.radioTabStop)
     }
 
     /// `showModal(id)`, `close(id)` from an action (LLP 1115 D6): a
@@ -684,12 +684,44 @@ package final class Presenter {
 
     /// The modifiers held for the press being sent (its `MouseEvent`'s; gallery F20).
     private(set) var pressHeld = ""
-    package func press(_ id: UInt32, held: String = "") {
+    /// HTML activation (LLP 1035.001.001 D1), the one way any input — a
+    /// touch, a key, VoiceOver, a native or bar button, a menu row, the
+    /// agent — activates a node, as `PresenterMac.press` is on macOS: an
+    /// eligible node's action, then, if it is still eligible, its default
+    /// behaviour read after the action ran (an invoker's command,
+    /// `MenuHost.activated`). An id that is not a view (an SVG element, an
+    /// inline run) has its action only. True when it ran to the default.
+    @discardableResult
+    package func press(_ id: UInt32, held: String = "") -> Bool {
         pressHeld = held; defer { pressHeld = "" }
-        if let node = views[id], let url = node.defaultLink, node.activateLink(url) { return }
-        let original = views[id]
-        onPress?(id)
-        if let original, views[id] === original { menus.invoke(original) }
+        guard let node = views[id] else { onPress?(id); return true }
+        if let refusal = activationRefusal(node) { session?.log("activation of #\(id) refused: \(refusal)"); return false }
+        // A button with an `href` and no action follows its link (HTML's
+        // activation behaviour for a link).
+        if let url = node.defaultLink, node.activateLink(url) { return true }
+        if node.handlers.contains("press") { onPress?(id) }
+        // HTML runs a button's command only if its action left it enabled:
+        // disabled, removed, or out of the selected route ends it here.
+        guard views[id] === node, activationRefusal(node) == nil else { return false }
+        menus.activated(node)
+        return true
+    }
+    /// Why `node` cannot be activated now: disabled (itself or a container)
+    /// or inert (except above a modal dialog, which escapes the inertness
+    /// around it, as HTML's `showModal` does). Activation never reaches a
+    /// node under an inactive route (UIKit holds it off screen).
+    func activationRefusal(_ node: NodeView) -> String? {
+        var ancestor: UIView? = node
+        var checksInert = true
+        while let view = ancestor {
+            if let n = view as? NodeView {
+                if n.disabled { return "disabled" }
+                if checksInert && n.props["inert"] == "true" { return "inert" }
+                if n.props["semanticTag"] == "dialog" { checksInert = false }
+            }
+            ancestor = view.superview
+        }
+        return nil
     }
     func change(_ id: UInt32, _ value: String) { onChange?(id, value) }
     /// A text field typed into since it took the focus: its `change` fires
