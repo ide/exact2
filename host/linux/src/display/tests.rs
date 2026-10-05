@@ -32,19 +32,14 @@ fn read_timed(
     })
 }
 
-/// The flip's kernel timestamp is returned, not the time the loop read the
+/// The kernel's flip timestamp is returned, not the time the loop read the
 /// event: TTI uses it as the moment the frame was shown.
 #[test]
-fn a_flip_carries_the_kernels_timestamp() {
+fn matching_crtc_read_accepts_the_frame_sequence() {
     assert_eq!(
         read_timed(None, Ok(vec![flip(7, 30)])).unwrap(),
         Some((30, Duration::from_millis(16)))
     );
-}
-
-#[test]
-fn matching_crtc_read_accepts_the_frame_sequence() {
-    assert_eq!(read_once(None, Ok(vec![flip(7, 30)])).unwrap(), Some(30));
 }
 
 #[test]

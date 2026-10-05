@@ -49,18 +49,8 @@ fn log_enabled() -> bool {
     std::env::var("EXACT_OBSERVE_LOG").as_deref() == Ok("1")
 }
 
-/// A random v4 UUID, lowercase.
-fn uuid() -> String {
-    let mut b = [0u8; 16];
-    use std::io::Read;
-    if std::fs::File::open("/dev/urandom")
-        .and_then(|mut f| f.read_exact(&mut b))
-        .is_err()
-    {
-        let t = journal::wall().to_bits() ^ u64::from(std::process::id()).rotate_left(32);
-        b[..8].copy_from_slice(&t.to_le_bytes());
-        b[8..].copy_from_slice(&t.rotate_left(17).to_le_bytes());
-    }
+/// Formats 16 bytes as a lowercase v4 UUID.
+fn uuid_v4(mut b: [u8; 16]) -> String {
     b[6] = (b[6] & 0x0f) | 0x40;
     b[8] = (b[8] & 0x3f) | 0x80;
     let h: String = b.iter().map(|x| format!("{x:02x}")).collect();
@@ -72,6 +62,21 @@ fn uuid() -> String {
         &h[16..20],
         &h[20..]
     )
+}
+
+/// A random v4 UUID.
+fn uuid() -> String {
+    let mut b = [0u8; 16];
+    use std::io::Read;
+    if std::fs::File::open("/dev/urandom")
+        .and_then(|mut f| f.read_exact(&mut b))
+        .is_err()
+    {
+        let t = journal::wall().to_bits() ^ u64::from(std::process::id()).rotate_left(32);
+        b[..8].copy_from_slice(&t.to_le_bytes());
+        b[8..].copy_from_slice(&t.rotate_left(17).to_le_bytes());
+    }
+    uuid_v4(b)
 }
 
 /// A v4-format session id hashed from the clocks and the pid.
@@ -86,20 +91,7 @@ fn session_id() -> String {
     let seed = exact_linux::launch_marks::boottime().to_bits()
         ^ u64::from(std::process::id()).rotate_left(40);
     let (a, b) = (mix(seed), mix(seed ^ journal::wall().to_bits()));
-    let mut bytes = [0u8; 16];
-    bytes[..8].copy_from_slice(&a.to_be_bytes());
-    bytes[8..].copy_from_slice(&b.to_be_bytes());
-    bytes[6] = (bytes[6] & 0x0f) | 0x40;
-    bytes[8] = (bytes[8] & 0x3f) | 0x80;
-    let h: String = bytes.iter().map(|x| format!("{x:02x}")).collect();
-    format!(
-        "{}-{}-{}-{}-{}",
-        &h[..8],
-        &h[8..12],
-        &h[12..16],
-        &h[16..20],
-        &h[20..]
-    )
+    uuid_v4((u128::from(a) << 64 | u128::from(b)).to_be_bytes())
 }
 
 /// The launch part: no I/O, no parsing, no thread until startup is reported.
@@ -209,9 +201,6 @@ fn uniform(id: &str) -> f64 {
 
 /// Observe's jittered exponential backoff, in seconds.
 fn backoff(attempt: u32) -> f64 {
-    if attempt == 0 {
-        return 0.0;
-    }
     let random = u64::from_str_radix(&uuid().replace('-', "")[..13], 16).unwrap_or(0) as f64
         / (1u64 << 52) as f64;
     (60.0 * 2f64.powi(attempt as i32 - 1)).min(900.0) * random
@@ -221,6 +210,11 @@ fn backoff(attempt: u32) -> f64 {
 fn retry_after(h: Option<&str>) -> Option<f64> {
     let s: f64 = h?.trim().parse().ok()?;
     s.is_finite().then(|| s.clamp(60.0, 900.0))
+}
+
+/// An OTLP attribute with a string value.
+fn string_attr(key: &str, value: &str) -> Value {
+    json!({ "key": key, "value": { "stringValue": value } })
 }
 
 fn nanos(seconds: f64) -> String {
@@ -249,6 +243,13 @@ fn any_value(v: &Value) -> Option<Value> {
         }
         Value::Null => return None,
     })
+}
+
+fn read_json(path: &std::path::Path) -> Value {
+    std::fs::read(path)
+        .ok()
+        .and_then(|b| serde_json::from_slice(&b).ok())
+        .unwrap_or_default()
 }
 
 fn read(path: &str) -> Option<String> {
@@ -320,8 +321,25 @@ fn device() -> Map<String, Value> {
 
 type Row = Map<String, Value>;
 
+/// Appends a row, dropping the oldest past `MAX_ROWS`.
+fn push_capped(queue: &mut Vec<Row>, row: Row) {
+    queue.push(row);
+    if queue.len() > MAX_ROWS {
+        queue.remove(0);
+    }
+}
+
+/// The JSON object `v` builds, as a map.
+fn object(v: Value) -> Map<String, Value> {
+    match v {
+        Value::Object(m) => m,
+        _ => Map::new(),
+    }
+}
+
 struct Service {
-    config: Map<String, Value>,
+    /// `moduleConfig.observe`. Indexing a missing key gives `null`.
+    config: Value,
     development: bool,
     dir: PathBuf,
     session: String,
@@ -352,10 +370,7 @@ impl Service {
             let _ = std::fs::write(&id_file, &id);
             id
         });
-        let queue: Value = std::fs::read(dir.join("queue.json"))
-            .ok()
-            .and_then(|b| serde_json::from_slice(&b).ok())
-            .unwrap_or_default();
+        let queue = read_json(&dir.join("queue.json"));
         let rows = |k: &str| -> Vec<Row> {
             queue[k]
                 .as_array()
@@ -375,21 +390,13 @@ impl Service {
             due: Some(Instant::now() + DEBOUNCE),
             gate: (None, 0),
             session,
-            config,
+            config: Value::Object(config),
         };
-        let environment = s
-            .config
-            .get("environment")
-            .and_then(Value::as_str)
-            .map(str::to_string)
-            .unwrap_or_else(|| {
-                if development {
-                    "development"
-                } else {
-                    "production"
-                }
-                .into()
-            });
+        let environment = s.config["environment"].as_str().unwrap_or(if development {
+            "development"
+        } else {
+            "production"
+        });
         let meta = json!({
             "osName": "Linux",
             "osVersion": read("/proc/sys/kernel/osrelease"),
@@ -449,22 +456,16 @@ impl Service {
         route: Option<&Value>,
         params: Map<String, Value>,
     ) {
-        let mut r = Row::new();
-        r.insert("session".into(), self.session.clone().into());
-        r.insert("time".into(), wall.into());
-        r.insert("category".into(), category.into());
-        r.insert("name".into(), name.into());
-        r.insert("value".into(), value.into());
+        let mut r = object(json!({
+            "session": self.session, "time": wall, "category": category, "name": name, "value": value,
+        }));
         if let Some(route) = route.filter(|r| r.is_string()) {
             r.insert("route".into(), route.clone());
         }
         if !params.is_empty() {
             r.insert("params".into(), Value::Object(params).to_string().into());
         }
-        self.metrics.push(r);
-        if self.metrics.len() > MAX_ROWS {
-            self.metrics.remove(0);
-        }
+        push_capped(&mut self.metrics, r);
     }
 
     fn log(
@@ -476,20 +477,14 @@ impl Service {
         body: Option<String>,
         (attributes, dropped): (Map<String, Value>, u64),
     ) {
-        let mut r = Row::new();
-        r.insert("session".into(), session.into());
-        r.insert("time".into(), wall.into());
-        r.insert("severity".into(), severity.into());
-        r.insert("name".into(), name.into());
+        let mut r = object(json!({
+            "session": session, "time": wall, "severity": severity, "name": name,
+            "attributes": attributes, "dropped": dropped,
+        }));
         if let Some(b) = body {
             r.insert("body".into(), b.into());
         }
-        r.insert("attributes".into(), Value::Object(attributes));
-        r.insert("dropped".into(), dropped.into());
-        self.logs.push(r);
-        if self.logs.len() > MAX_ROWS {
-            self.logs.remove(0);
-        }
+        push_capped(&mut self.logs, r);
     }
 
     fn event(&mut self, e: &Value) {
@@ -538,20 +533,12 @@ impl Service {
                 );
             }
             "app.error" => {
-                let mut attrs = Map::new();
-                attrs.insert(
-                    "expo.error.source".into(),
-                    e["source"].as_str().unwrap_or("reportedByUser").into(),
-                );
-                attrs.insert("expo.error.is_fatal".into(), false.into());
-                attrs.insert(
-                    "exception.type".into(),
-                    e["type"].as_str().unwrap_or("Error").into(),
-                );
-                attrs.insert(
-                    "exception.message".into(),
-                    e["message"].as_str().unwrap_or("").into(),
-                );
+                let mut attrs = object(json!({
+                    "expo.error.source": e["source"].as_str().unwrap_or("reportedByUser"),
+                    "expo.error.is_fatal": false,
+                    "exception.type": e["type"].as_str().unwrap_or("Error"),
+                    "exception.message": e["message"].as_str().unwrap_or(""),
+                }));
                 if let Some(stack) = e["stack"].as_str() {
                     attrs.insert("exception.stacktrace".into(), stack.into());
                 }
@@ -621,17 +608,7 @@ impl Service {
         // The launch route's `cold_ttr` and `tti`, measured from boot. Observe measures
         // from its integration start, which has no Exact equivalent.
         if let (Some(route), Some(boot)) = (self.launch_route.clone(), marks["boot"].as_f64()) {
-            let mut params = self.globals.clone();
-            params.insert("isAppLaunch".into(), true.into());
-            params.insert(
-                "routeParams".into(),
-                if route["routeParams"].is_null() {
-                    json!({})
-                } else {
-                    route["routeParams"].clone()
-                },
-            );
-            params.insert("url".into(), route["url"].clone());
+            let mut params = self.nav_params(&route, true);
             params.insert("exact.nav.anchor".into(), "boot".into());
             if let Some(present) = marks["present"].as_f64() {
                 self.metric(
@@ -674,10 +651,7 @@ impl Service {
             format!("{}:{}", m.len(), mtime.map_or(0, |d| d.as_nanos()))
         });
         let path = self.dir.join("launch.json");
-        let previous: Value = std::fs::read(&path)
-            .ok()
-            .and_then(|b| serde_json::from_slice(&b).ok())
-            .unwrap_or_default();
+        let previous = read_json(&path);
         let _ = std::fs::write(&path, json!({ "boot": boot, "build": build }).to_string());
         let same = boot.is_some()
             && previous["boot"] == json!(boot)
@@ -690,22 +664,25 @@ impl Service {
         }
     }
 
+    /// Observe's navigation params, on top of the global attributes.
+    fn nav_params(&self, e: &Value, launch: bool) -> Map<String, Value> {
+        let mut params = self.globals.clone();
+        let route_params = match &e["routeParams"] {
+            Value::Null => json!({}),
+            p => p.clone(),
+        };
+        params.extend(object(
+            json!({ "isAppLaunch": launch, "routeParams": route_params, "url": e["url"] }),
+        ));
+        params
+    }
+
     fn navigation(&mut self, e: &Value, wall: f64) {
         let (Some(name), Some(value)) = (e["name"].as_str(), e["value"].as_f64()) else {
             return;
         };
         self.navigated = true;
-        let mut params = self.globals.clone();
-        params.insert("isAppLaunch".into(), false.into());
-        params.insert(
-            "routeParams".into(),
-            if e["routeParams"].is_null() {
-                json!({})
-            } else {
-                e["routeParams"].clone()
-            },
-        );
-        params.insert("url".into(), e["url"].clone());
+        let mut params = self.nav_params(e, false);
         for (k, v) in e
             .as_object()
             .into_iter()
@@ -725,10 +702,7 @@ impl Service {
                 continue;
             }
             let path = entry.path();
-            let o: Value = std::fs::read(&path)
-                .ok()
-                .and_then(|b| serde_json::from_slice(&b).ok())
-                .unwrap_or_default();
+            let o = read_json(&path);
             let _ = std::fs::remove_file(&path);
             let Some(crashed) = o["session"].as_str() else {
                 continue;
@@ -740,20 +714,15 @@ impl Service {
                     json!({ "start": o["sessionStart"], "meta": meta }),
                 );
             }
-            let mut attrs = Map::new();
-            attrs.insert(
-                "exception.type".into(),
-                o["type"].as_str().unwrap_or("panic").into(),
-            );
-            attrs.insert(
-                "exception.message".into(),
-                o["message"].as_str().unwrap_or("").into(),
-            );
+            let mut attrs = object(json!({
+                "exception.type": o["type"].as_str().unwrap_or("panic"),
+                "exception.message": o["message"].as_str().unwrap_or(""),
+                "expo.error.source": "nativeCrash",
+                "expo.error.is_fatal": true,
+            }));
             if let Some(at) = o["location"].as_str() {
                 attrs.insert("exception.stacktrace".into(), format!("at {at}").into());
             }
-            attrs.insert("expo.error.source".into(), "nativeCrash".into());
-            attrs.insert("expo.error.is_fatal".into(), true.into());
             let time = o["time"].as_f64().unwrap_or_else(journal::wall);
             self.log(
                 crashed.into(),
@@ -767,12 +736,8 @@ impl Service {
     }
 
     fn resource(&self, meta: &Value) -> Value {
-        let mut a = vec![json!({ "key": "os.type", "value": { "stringValue": "linux" } })];
-        let mut s = |k: &str, v: &Value| {
-            if let Some(v) = v.as_str() {
-                a.push(json!({ "key": k, "value": { "stringValue": v } }));
-            }
-        };
+        let mut a = vec![string_attr("os.type", "linux")];
+        let mut s = |k: &str, v: &Value| a.extend(v.as_str().map(|v| string_attr(k, v)));
         s("os.name", &meta["osName"]);
         s("os.version", &meta["osVersion"]);
         s("device.model.name", &meta["deviceName"]);
@@ -795,19 +760,11 @@ impl Service {
         for r in rows {
             let session = r["session"].as_str().unwrap_or("").to_string();
             let time = r["time"].as_f64().unwrap_or(0.0);
-            let mut attrs =
-                vec![json!({ "key": "session.id", "value": { "stringValue": session } })];
+            let mut attrs = vec![string_attr("session.id", &session)];
             let item = if signal == "metrics" {
-                if let Some(route) = r.get("route").and_then(Value::as_str) {
-                    attrs.push(
-                        json!({ "key": "expo.route_name", "value": { "stringValue": route } }),
-                    );
-                }
-                if let Some(params) = r.get("params").and_then(Value::as_str) {
-                    attrs.push(
-                        json!({ "key": "expo.custom_params", "value": { "stringValue": params } }),
-                    );
-                }
+                let text = |k: &str| r.get(k).and_then(Value::as_str);
+                attrs.extend(text("route").map(|v| string_attr("expo.route_name", v)));
+                attrs.extend(text("params").map(|v| string_attr("expo.custom_params", v)));
                 let name = metric_name(
                     r["category"].as_str().unwrap_or(""),
                     r["name"].as_str().unwrap_or(""),
@@ -815,7 +772,7 @@ impl Service {
                 json!({ "unit": "s", "name": name, "gauge": { "dataPoints": [{ "timeUnixNano": nanos(time), "asDouble": r["value"], "attributes": attrs }] } })
             } else {
                 let name = r["name"].as_str().unwrap_or("");
-                attrs.push(json!({ "key": "event.name", "value": { "stringValue": name } }));
+                attrs.push(string_attr("event.name", name));
                 let mut dropped = r.get("dropped").and_then(Value::as_u64).unwrap_or(0);
                 let mut keys: Vec<(&String, &Value)> = r
                     .get("attributes")
@@ -865,19 +822,11 @@ impl Service {
     /// Observe's gate: dispatching enabled, this install in the sample, and not a development
     /// build unless `dispatchInDebug`. When it fails, rows are dropped, not kept for later.
     fn should_dispatch(&self) -> bool {
-        let enabled = self
-            .config
-            .get("dispatchingEnabled")
-            .and_then(Value::as_bool)
-            .unwrap_or(true);
-        let rate = self
-            .config
-            .get("sampleRate")
-            .and_then(Value::as_f64)
-            .unwrap_or(1.0)
-            .clamp(0.0, 1.0);
-        let debug = self.config.get("dispatchInDebug").and_then(Value::as_bool) == Some(true);
-        enabled && uniform(&self.client_id) < rate && (!self.development || debug)
+        let c = &self.config;
+        let rate = c["sampleRate"].as_f64().unwrap_or(1.0).clamp(0.0, 1.0);
+        c["dispatchingEnabled"].as_bool().unwrap_or(true)
+            && uniform(&self.client_id) < rate
+            && (!self.development || c["dispatchInDebug"] == true)
     }
 
     fn dispatch(&mut self) {
@@ -885,22 +834,17 @@ impl Service {
             self.due = self.gate.0;
             return;
         }
-        let project = self
-            .config
-            .get("projectId")
-            .and_then(Value::as_str)
-            .map(str::to_string);
+        let project = self.config["projectId"].as_str().map(str::to_string);
         let Some(project) = project.filter(|_| self.should_dispatch()) else {
             self.metrics.clear();
             self.logs.clear();
             return self.save();
         };
-        let endpoint = self
-            .config
-            .get("endpoint")
-            .and_then(Value::as_str)
-            .unwrap_or("https://o.expo.dev");
-        let base = endpoint.trim_end_matches('/').to_string();
+        let base = self.config["endpoint"]
+            .as_str()
+            .unwrap_or("https://o.expo.dev")
+            .trim_end_matches('/')
+            .to_string();
         if self.send("metrics", &format!("{base}/{project}/v1/metrics")) {
             self.send("logs", &format!("{base}/{project}/v1/logs"));
         }
@@ -922,11 +866,7 @@ impl Service {
     fn send(&mut self, signal: &str, url: &str) -> bool {
         let mut limit = CHUNK;
         loop {
-            let queue = if signal == "metrics" {
-                &self.metrics
-            } else {
-                &self.logs
-            };
+            let queue = self.queue(signal);
             if queue.is_empty() {
                 return true;
             }
@@ -943,41 +883,34 @@ impl Service {
                     .map_or_else(|e| format!("transport error ({e})"), |(s, _)| s.to_string());
                 eprintln!("observe: {signal} {} rows → {status}", rows.len());
             }
-            let queue = if signal == "metrics" {
-                &mut self.metrics
-            } else {
-                &mut self.logs
-            };
             match result {
                 Ok((413, _)) if rows.len() > 1 => {
                     self.gate.1 = 0;
-                    limit = (rows.len() / 2).max(1);
+                    limit = rows.len() / 2;
                 }
-                Ok((413, _)) => {
+                // Success, a lone 413 row, or a status Observe does not retry: drop the chunk.
+                Ok((status, _)) if !matches!(status, 429 | 502 | 503 | 504) => {
                     self.gate.1 = 0;
-                    queue.remove(0);
+                    self.queue(signal).drain(..rows.len());
                     limit = CHUNK;
                 }
-                Ok((429 | 502 | 503 | 504, after)) => {
+                retryable => {
                     self.gate.1 += 1;
+                    let after = retryable.ok().and_then(|(_, after)| after);
                     let wait =
                         retry_after(after.as_deref()).unwrap_or_else(|| backoff(self.gate.1));
                     self.gate.0 = Some(Instant::now() + Duration::from_secs_f64(wait));
                     return false;
                 }
-                // Success, or a status Observe does not retry: drop the chunk.
-                Ok(_) => {
-                    self.gate.1 = 0;
-                    queue.drain(..rows.len());
-                    limit = CHUNK;
-                }
-                Err(_) => {
-                    self.gate.1 += 1;
-                    self.gate.0 =
-                        Some(Instant::now() + Duration::from_secs_f64(backoff(self.gate.1)));
-                    return false;
-                }
             }
+        }
+    }
+
+    fn queue(&mut self, signal: &str) -> &mut Vec<Row> {
+        if signal == "metrics" {
+            &mut self.metrics
+        } else {
+            &mut self.logs
         }
     }
 }
