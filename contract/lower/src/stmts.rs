@@ -98,11 +98,9 @@ impl Lowerer<'_> {
             // `let`s first, as a block of their own, whose locals drop before
             // the next statement. No call opcode: the plan never sees one.
             Stmt::Call { body, .. } => self.block(asm, body, scope, locals)?,
-            // Exact Observe design §5.2: a record's fields go to the host by
-            // name — `observe(name, Shape(a=x), sev)` is the command `observe`
-            // with `name, sev, "a", x`; `observeAttributes(Shape(a=x))` is
-            // `"a", x`. Hosts receive records positionally, so the names are
-            // made explicit here.
+            // Hosts receive records positionally, so the field names are sent
+            // as arguments: `observe(name, Shape(a=x), sev)` becomes
+            // `name, sev, "a", x`, and `observeAttributes(Shape(a=x))` becomes `"a", x`.
             Stmt::Command { name, args, .. }
                 if name == "observe" || name == "observeAttributes" =>
             {

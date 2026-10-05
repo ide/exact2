@@ -1,20 +1,11 @@
-// The web's launch and navigation marks (Exact Observe design §3.3–3.6),
-// host code imported only when app.json names launch modules. Times are
-// performance.now(), the clock Event.timeStamp and Performance entries share;
-// a prerendered page measures from its activation (A).
-//
-// - TTR: the first paint of the boot tree — Element Timing on the first text
-//   leaves this file marks at mount, else a first-contentful-paint at or after
-//   mount, else the rendering opportunity after it (rAF then a task), labelled.
-// - TTI: the settle ledger clear at a commit barrier (rt.js `After`): no
-//   fetch, lazy row or data load in flight (`inflight`), no armed mutation
-//   `then`, no one-shot task due within 1 s, no mounted `aria-busy` element;
-//   then the next rendering opportunity if the screen changed, else now.
-// - Navigation: a changed location after a commit; its cause the last input's
-//   own timestamp within a second before, else the commit.
-// - Hidden before a mark: that mark and the later ones are not reported.
-// Events go to each launch module's service (`modules/<name>/web/service.js`),
-// loaded once startup is over, history first.
+// Web launch and navigation timing, imported only when app.json names launch
+// modules. Times are performance.now(), the clock Event.timeStamp and
+// Performance entries share. A prerendered page measures from its activation.
+// Time-to-first-render (TTR) is the boot tree's first paint. Time-to-interactive
+// (TTI) is the first commit after which nothing is outstanding. A navigation
+// starts at an input within 1 s before it, else at the commit. A page hidden
+// during startup reports no further startup marks.
+// Events go to each launch module's web service, which receives earlier events first.
 import { inflight, Mutations, clock, After, Hosts, Routes, routeAt } from './rt.js';
 
 const STARTUP_TIMER_WINDOW_MS = 1000, TTI_TIMEOUT_MS = 30000;
@@ -29,7 +20,7 @@ const record = (kind, fields = {}) => {
   for (const s of services) s.event(e);
 };
 
-/** What is still outstanding, by name: the ledger (§3.5). */
+/** What is still outstanding, by name. A one-shot timer counts only when due within 1 s. */
 export function outstanding() {
   const out = [];
   if (inflight.n > 0) out.push(`inflight:${inflight.n}`);
@@ -52,7 +43,7 @@ function finish(o) {
   loadServices();
 }
 
-/** At a barrier: the ledger, and TTI once it is clear after the first paint. */
+/** Runs after each commit. Records TTI once nothing is outstanding after the first paint; if the screen changed, at the next rendering opportunity. */
 async function evaluate() {
   if (hidden) return;
   const out = outstanding(), line = out.join(', ');
@@ -66,7 +57,6 @@ async function evaluate() {
     dirty = false;
     finish(declared ? 'declared' : 'settled');
   }
-  // A navigation: a new location after this commit.
   const here = location.pathname + location.search;
   if (location0 !== null && here !== location0 && outcome) startNavigation(here);
   location0 = here;
@@ -103,10 +93,10 @@ function startNavigation(url) {
 }
 
 function presentFrom(c0, served) {
-  // Element Timing on the boot tree's first text leaves (an eligible
-  // witness), else FCP at or after the commit, else the next opportunity.
-  // A served page painted its document before this script ran: its first
-  // paint is the served FCP (§3.4), and adopting it repaints nothing.
+  // The first of: Element Timing on the boot tree's first text leaves, the
+  // first-contentful-paint at or after the commit, or the next rendering
+  // opportunity. A server-rendered page painted before this script ran, so
+  // its first-contentful-paint counts even though it precedes the commit.
   let done = false;
   const take = (t, method) => { if (done || hidden) return; done = true; marks.present = method === 'served_fcp' ? t : Math.max(t, c0); marks.presentMethod = method; record('mark', { mark: 'present', method }); evaluate(); };
   try {
@@ -129,8 +119,8 @@ export function install(modules) {
   addEventListener('pagehide', () => { record('background'); for (const s of services) s.background(); });
   for (const t of ['pointerup', 'keydown']) addEventListener(t, e => { lastInput = e.timeStamp; }, { capture: true, passive: true });
   setTimeout(() => finish('timeout'), TTI_TIMEOUT_MS);
-  // Errors before and after the service loads (§6), and Contract's observe
-  // commands: names then a record's key/value pairs (§5.2).
+  // Errors and Contract's observe commands. The commands' arguments end in a
+  // record's key/value pairs.
   addEventListener('error', e => record('app.error', { source: 'global', type: e.error?.name ?? 'Error', message: e.message, stack: e.error?.stack }));
   addEventListener('unhandledrejection', e => record('app.error', { source: 'global', type: e.reason?.name ?? 'UnhandledRejection', message: String(e.reason?.message ?? e.reason), stack: e.reason?.stack }));
   const pairs = a => { const o = {}; for (let i = 0; i + 1 < a.length; i += 2) o[a[i]] = a[i + 1]; return o; };
@@ -138,7 +128,7 @@ export function install(modules) {
   Hosts.observeAttributes = (...rest) => record('app.attributes', { attributes: pairs(rest) });
   Hosts.observeError = (message, type) => record('app.error', { source: 'reportedByUser', message, type: type ?? 'ContractError' });
   globalThis.exact = Object.assign(globalThis.exact ?? {}, { observe: () => ({ marks: { ...marks }, outcome, trace, events: events.length }) });
-  // A document the server rendered (capture.js holds its checkpoint).
+  // A server-rendered document carries capture.js's checkpoint script.
   const served = !!document.querySelector('script[type="application/vnd.exact.checkpoint"]');
   return {
     mounted() {

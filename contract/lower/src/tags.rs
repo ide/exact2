@@ -639,7 +639,7 @@ pub fn attr(name: &str) -> Option<AttrTarget> {
         "aria-controls" => AttrTarget::Prop(p("accessibilityControls")), // LLP 1075.003 §3.7: a tab names its tabpanel.
         "aria-selected" => AttrTarget::Prop(p("accessibilitySelected")),
         "aria-expanded" => AttrTarget::Prop(p("accessibilityExpanded")),
-        // A region still loading (Exact Observe design §3.5): the settle ledger waits for it.
+        // A region still loading: time-to-interactive waits until it is not busy.
         "aria-busy" => AttrTarget::Prop(p("accessibilityBusy")),
         "aria-pressed" => AttrTarget::Prop(p("accessibilityPressed")),
         "aria-modal" => AttrTarget::Prop(p("accessibilityModal")),

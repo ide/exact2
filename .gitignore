@@ -6,7 +6,7 @@ node_modules/
 host/web/dist/
 # The Apple package's SwiftPM build products.
 host/apple/.build/
-# Generated module launch-part targets (Exact Observe design §4.6).
+# Generated module launch-part targets.
 host/apple/.launch-parts/
 # The harness's subagent worktrees: never committed.
 .claude/worktrees/
