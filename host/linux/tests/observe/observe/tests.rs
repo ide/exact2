@@ -75,12 +75,12 @@ fn startup(s: &mut Service, n: usize) {
 fn startup_becomes_observes_metrics_on_its_wire() {
     let (url, seen) = sink(|_| (200, ""));
     let mut s = service(&url, "wire");
-    startup(&mut s, 1);
+    startup(&mut s, 2);
     s.dispatch();
     assert!(s.metrics.is_empty(), "acknowledged rows leave the queue");
     let seen = seen.lock().unwrap();
     let (path, rows, body) = &seen[0];
-    assert_eq!((path.as_str(), *rows), ("/p1/v1/metrics", 3));
+    assert_eq!((path.as_str(), *rows), ("/p1/v1/metrics", 6));
     let resource = &body["resourceMetrics"][0];
     assert_eq!(resource["schemaUrl"], SCHEMA_URL);
     assert_eq!(resource["scopeMetrics"][0]["scope"]["name"], "expo-observe");
@@ -99,12 +99,22 @@ fn startup_becomes_observes_metrics_on_its_wire() {
         .iter()
         .map(|m| m["name"].as_str().unwrap())
         .collect();
+    // A second launch of the same build in the same boot is warm. Warm
+    // launches are detected through /proc's boot_id, so without it every launch is cold.
+    let second = if std::path::Path::new("/proc/sys/kernel/random/boot_id").exists()
+        && !std::io::IsTerminal::is_terminal(&std::io::stdin())
+    {
+        "expo.app_startup.warm_launch_time"
+    } else {
+        "expo.app_startup.cold_launch_time"
+    };
     assert_eq!(
-        names,
+        names[..4],
         [
             "expo.app_startup.cold_launch_time",
             "expo.app_startup.ttr",
-            "expo.app_startup.tti"
+            "expo.app_startup.tti",
+            second
         ]
     );
     assert!(metrics.iter().all(|m| m["unit"] == "s"));
@@ -242,33 +252,6 @@ fn custom_events_follow_observes_rules() {
         .map(|a| a["key"].as_str().unwrap())
         .collect();
     assert!(error.contains(&"exception.type") && records[1]["severityText"] == "ERROR");
-}
-
-#[test]
-fn a_second_launch_of_the_same_build_in_the_same_boot_is_warm() {
-    let (url, seen) = sink(|_| (200, ""));
-    let mut s = service(&url, "warm");
-    startup(&mut s, 2);
-    s.dispatch();
-    let names: Vec<String> = seen.lock().unwrap()[0].2["resourceMetrics"][0]["scopeMetrics"][0]
-        ["metrics"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|m| m["name"].as_str().unwrap().to_string())
-        .collect();
-    // Warm launches are detected through /proc's boot_id, so without it every launch is cold.
-    let second = if std::path::Path::new("/proc/sys/kernel/random/boot_id").exists()
-        && !std::io::IsTerminal::is_terminal(&std::io::stdin())
-    {
-        "expo.app_startup.warm_launch_time"
-    } else {
-        "expo.app_startup.cold_launch_time"
-    };
-    assert_eq!(
-        (names[0].as_str(), names[3].as_str()),
-        ("expo.app_startup.cold_launch_time", second)
-    );
 }
 
 #[test]

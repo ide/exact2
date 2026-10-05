@@ -26,7 +26,7 @@ export function outstanding() {
   if (inflight.n > 0) out.push(`inflight:${inflight.n}`);
   for (const m of Mutations) if (Number.isFinite(m.due)) out.push(`thens:${m.name}`);
   for (const t of clock.timers) if (t.once && t.ms <= STARTUP_TIMER_WINDOW_MS) out.push(`oneShots:${t.ms}`);
-  for (const el of document.querySelectorAll('[aria-busy="true"]')) out.push(`busy:${el.getAttribute('data-testid') ?? el.id ?? el.tagName}`);
+  for (const el of document.querySelectorAll('[aria-busy="true"]')) out.push(`busy:${el.getAttribute('data-testid') ?? el.id}`);
   return out;
 }
 
@@ -114,9 +114,9 @@ export function install(modules) {
   const nav0 = performance.getEntriesByType?.('navigation')?.[0];
   marks.activation = nav0?.activationStart > 0 ? nav0.activationStart : 0;
   marks.process = 0;
-  const onHide = () => { if (document.visibilityState === 'hidden') { record('background'); for (const s of services) s.background(); if (!outcome && !document.prerendering) { hidden = true; finish('interrupted'); } } };
-  document.addEventListener('visibilitychange', onHide);
-  addEventListener('pagehide', () => { record('background'); for (const s of services) s.background(); });
+  const background = () => { record('background'); for (const s of services) s.background(); };
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') { background(); if (!outcome && !document.prerendering) { hidden = true; finish('interrupted'); } } });
+  addEventListener('pagehide', background);
   for (const t of ['pointerup', 'keydown']) addEventListener(t, e => { lastInput = e.timeStamp; }, { capture: true, passive: true });
   setTimeout(() => finish('timeout'), TTI_TIMEOUT_MS);
   // Errors and Contract's observe commands. The commands' arguments end in a
