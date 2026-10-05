@@ -21,7 +21,9 @@
         "iphone"
       ]
     },
-    "web": {}
+    "web": {
+      "navigationChrome": "ios"
+    }
   },
   "deploy": {
     "store": {
