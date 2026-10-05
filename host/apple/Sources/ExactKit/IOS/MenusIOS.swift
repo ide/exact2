@@ -835,20 +835,19 @@ final class MenuHost {
     private func anchor(_ presentation: UIPopoverPresentationController, at source: NodeView, area: String) {
         let anchor: UIView = source.isNativeButton ? presenter?.controls.controls[source.id] ?? source : source
         presentation.sourceView = anchor
-        // A labelled row anchors at its text; an icon control uses its box.
-        let labels = source.container.subviews.compactMap { $0 as? NodeView }.filter { $0.kind == "text" }
-        let labelBox = labels.reduce(CGRect.null) { $0.union($1.convert($1.bounds, to: source)) }
-        presentation.sourceRect = source.isNativeButton ? anchor.bounds : (labelBox.isNull ? source.bounds : CGRect(x: labelBox.minX, y: 0, width: labelBox.width, height: source.bounds.height))
-        presentation.permittedArrowDirections = []
-        presentation.canOverlapSourceViewRect = true
+        // From the invoker's box, with UIKit's arrow on whichever side UIKit
+        // picks and never over the invoker: UIKit's own default for a sheet
+        // anchored to a control, until the platform default (`position-area:
+        // auto`, QUEUE) lands. An authored area overrides.
+        presentation.sourceRect = anchor.bounds
         Self.place(presentation, area, source: anchor)
     }
     #endif
 
     #if !os(tvOS)
     /// LLP 1021 §5: the sheet's side of its invoker, from its popover's
-    /// `position-area`. `none` keeps the arrowless placement above (D2's
-    /// below-left, native Messages' prompts). UIKit places a popover by the
+    /// `position-area`. `none` keeps UIKit's anchored default above (the
+    /// invoker's box, an arrow on the side UIKit picks). UIKit places a popover by the
     /// arrow directions it permits — `.down` puts it above its source,
     /// `.up` below, `.left` to its right (`right span-bottom`) — centred on
     /// the source rect where it fits, so a centred
