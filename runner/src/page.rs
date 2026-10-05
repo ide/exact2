@@ -1,7 +1,8 @@
 //! The page's facts that are not media features: whether any of it can be
 //! seen (the Page Visibility API), whether the device believes it is online
-//! (`navigator.onLine`), and whether a share sheet exists
-//! (`navigator.share`). The host observes them; the app reads them by
+//! (`navigator.onLine`), whether a share sheet exists (`navigator.share`),
+//! and whether the app is a web document at all (a page a browser loaded,
+//! in a tab or added to the Home Screen) rather than a native app. The host observes them; the app reads them by
 //! field name from one reserved source.
 //! @ref LLP 1069.000 D2; LLP 1069.003 D5
 
@@ -10,7 +11,7 @@ use exact_plan::Value;
 /// Reserved resource source, answered before the app data seam.
 pub const SOURCE: &str = "exactPage";
 /// Fields an app may declare, filled by name.
-pub const FIELDS: &[&str] = &["visibilityState", "onLine", "canShare"];
+pub const FIELDS: &[&str] = &["visibilityState", "onLine", "canShare", "document"];
 
 /// What the host last said. The default is the bake's answer: a visible,
 /// online page with no share sheet.
@@ -24,6 +25,10 @@ pub struct Page {
     pub on_line: bool,
     /// `typeof navigator.share === "function"` (LLP 1069.003 D5).
     pub can_share: bool,
+    /// The app is a web document: every launch is a load the person asked
+    /// the browser for (a visit, a reload), so it fetches as a page does. A
+    /// native host's launch and return to the foreground are the app's own.
+    pub document: bool,
 }
 
 impl Default for Page {
@@ -32,24 +37,30 @@ impl Default for Page {
             hidden: false,
             on_line: true,
             can_share: false,
+            document: false,
         }
     }
 }
 
 impl Page {
-    /// The hosts' wire form: bit 0 hidden, bit 1 offline, bit 2 can share;
-    /// other bits are ignored. Zero is visible, online, no share sheet.
+    /// The hosts' wire form: bit 0 hidden, bit 1 offline, bit 2 can share,
+    /// bit 3 a web document; other bits are ignored. Zero is visible,
+    /// online, no share sheet, native.
     pub fn from_bits(bits: u32) -> Self {
         Self {
             hidden: bits & 1 != 0,
             on_line: bits & 2 == 0,
             can_share: bits & 4 != 0,
+            document: bits & 8 != 0,
         }
     }
 
     /// The inverse of [`Page::from_bits`].
     pub fn bits(self) -> u32 {
-        u32::from(self.hidden) | (u32::from(!self.on_line) << 1) | (u32::from(self.can_share) << 2)
+        u32::from(self.hidden)
+            | (u32::from(!self.on_line) << 1)
+            | (u32::from(self.can_share) << 2)
+            | (u32::from(self.document) << 3)
     }
 
     /// `"visible"` or `"hidden"`, the web's words.
@@ -67,6 +78,7 @@ impl Page {
             "visibilityState" => Some(Value::str(self.visibility_state())),
             "onLine" => Some(Value::Bool(self.on_line)),
             "canShare" => Some(Value::Bool(self.can_share)),
+            "document" => Some(Value::Bool(self.document)),
             _ => None,
         }
     }

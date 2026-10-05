@@ -378,6 +378,13 @@ macro_rules! host {
             $crate::abi::with_runtime(&EXACT_RUNTIMES, rt, false, |b, _| b.frame(now_ms), |n| n)
         }
 
+        /// Back from the background at `now_ms`: an interval timer that
+        /// missed several beats fires once, as UIKit's do.
+        #[no_mangle]
+        pub extern "C" fn exact_coalesce_missed(rt: u32, now_ms: f64) -> u32 {
+            $crate::abi::with_runtime(&EXACT_RUNTIMES, rt, false, |b, _| { b.coalesce_missed(now_ms); 0 }, |n| n)
+        }
+
         /// Nonzero: the display drives frame tasks (`exact_frame` turns it
         /// on); zero when the agent's clock takes over (LLP 1073 D4).
         #[no_mangle]

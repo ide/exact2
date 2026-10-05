@@ -397,6 +397,8 @@ uint32_t exact_frame(ExactRuntime rt, double now_ms);
 /* Whether the display drives frame tasks: exact_frame turns it on; 0 when the
  * agent's clock takes over, whose advances then fire virtual frames. */
 uint32_t exact_present_frames(ExactRuntime rt, uint32_t on);
+/// Back from the background at `now_ms`: an interval timer that missed several beats fires once.
+uint32_t exact_coalesce_missed(ExactRuntime rt, double now_ms);
 /* Input: name alone clears; name NUL JSON publishes a current record. */
 uint32_t exact_surface_record(ExactRuntime rt, size_t len);
 /* @ref LLP 1027.000.000: the date — Unix ms at clock zero, minutes east of UTC. */
