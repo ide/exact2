@@ -1090,13 +1090,6 @@ impl<D: DataSource> Bridge<D> {
         }
     }
 
-    /// Back from the background: timers that missed beats fire once.
-    pub fn coalesce_missed(&mut self, now_ms: f64) {
-        if let Some(h) = self.host.as_mut() {
-            h.coalesce_missed(now_ms);
-        }
-    }
-
     /// A presented display frame (LLP 1073 D5).
     pub fn frame(&mut self, now_ms: f64) -> u32 {
         let out = self
@@ -1480,6 +1473,7 @@ mod exports;
 mod colors;
 #[path = "abi/commands.rs"]
 mod commands;
+mod clock;
 
 #[cfg(test)]
 #[path = "abi_tests.rs"]
