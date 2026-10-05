@@ -11,7 +11,7 @@ final class ObserveStore {
     init?(directory: URL) {
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         guard sqlite3_open(directory.appendingPathComponent("observe.db").path, &db) == SQLITE_OK else { return nil }
-        exec("""
+        sqlite3_exec(db, """
             PRAGMA journal_mode=WAL;
             CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, start REAL NOT NULL, metadata TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS metrics (id INTEGER PRIMARY KEY AUTOINCREMENT, session TEXT NOT NULL, time REAL NOT NULL,
@@ -19,7 +19,7 @@ final class ObserveStore {
             CREATE TABLE IF NOT EXISTS logs (id INTEGER PRIMARY KEY AUTOINCREMENT, session TEXT NOT NULL, time REAL NOT NULL,
                 severity TEXT NOT NULL, name TEXT NOT NULL, body TEXT, attributes TEXT, dropped INTEGER NOT NULL DEFAULT 0);
             CREATE TABLE IF NOT EXISTS cursors (signal TEXT PRIMARY KEY, id INTEGER NOT NULL);
-            """)
+            """, nil, nil, nil)
         let cutoff = Date().timeIntervalSince1970 - Self.retention
         run("DELETE FROM metrics WHERE time < ?", [cutoff])
         run("DELETE FROM logs WHERE time < ?", [cutoff])
@@ -27,8 +27,6 @@ final class ObserveStore {
     }
 
     deinit { sqlite3_close(db) }
-
-    func exec(_ sql: String) { sqlite3_exec(db, sql, nil, nil, nil) }
 
     @discardableResult
     func run(_ sql: String, _ args: [Any?]) -> Bool {
@@ -99,10 +97,9 @@ final class ObserveStore {
         rows("SELECT MAX(id) FROM \(table)", []).first?.first as? Int64 ?? -1
     }
 
-    func session(_ id: String) -> (start: Double, metadata: [String: Any])? {
-        guard let row = rows("SELECT start, metadata FROM sessions WHERE id = ?", [id]).first,
-              let start = row[0] as? Double, let text = row[1] as? String,
-              let meta = (try? JSONSerialization.jsonObject(with: Data(text.utf8))) as? [String: Any] else { return nil }
-        return (start, meta)
+    /// The metadata `saveSession` stored for a session.
+    func metadata(_ id: String) -> [String: Any]? {
+        guard let text = rows("SELECT metadata FROM sessions WHERE id = ?", [id]).first?.first as? String else { return nil }
+        return (try? JSONSerialization.jsonObject(with: Data(text.utf8))) as? [String: Any]
     }
 }
