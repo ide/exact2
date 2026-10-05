@@ -10,7 +10,7 @@
   "properties": {
     "launch": {
       "type": "array",
-      "description": "Module launch parts (Exact Observe design §4.6), in the order they run at launch: each names modules/<name>/ in the app, else in exact2. Its apple/launch/*.swift is linked into the executable; its apple/service/*.swift becomes lib<name>_service.dylib, loaded later.",
+      "description": "Modules whose launch parts run at launch, in this order. Each names modules/<name>/ in the app, else in exact2. Its apple/launch/*.swift is linked into the executable. Its apple/service/*.swift becomes lib<name>_service.dylib, loaded after startup.",
       "items": {
         "type": "string",
         "pattern": "^[a-z][a-z0-9]*$"

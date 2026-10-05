@@ -129,8 +129,8 @@ public final class ExactUpdates: ExactAppLifecycle {
         }
     }
 
-    /// A staged update's download (Exact Observe design §3.8): `staged seq N;
-    /// downloaded F files in T ms; entry E` becomes a journal event.
+    /// Journals `staged seq N; downloaded F files in T ms; entry E` (from
+    /// store.rs) as an `update.download` event.
     static func journalDownload(_ line: String) {
         let parts = line.components(separatedBy: "; ")
         guard parts.first?.hasPrefix("staged seq ") == true,
