@@ -40,8 +40,6 @@ enum Materials {
     /// `-exact-apple-glass-container`'s material: an effect view whose content
     /// view holds the children, so their glass blends (UIGlassContainerEffect).
     static let containerKind = "exact-glass-container"
-    /// The row's `auto` (the kernel's GLASS_CONTAINER_AUTO): the box's gap.
-    static let containerAuto: CGFloat = -2
 
     /// The schema's name on this platform for `name`, and whether that is a
     /// stand-in for a material this platform lacks; nil for no such name.
@@ -133,8 +131,7 @@ extension NodeView {
     /// backdrop blur, else none.
     var materialRequest: String? {
         #if os(iOS)
-        let group = number("exact_apple_glass_container", -1)
-        if group >= 0 || group == Materials.containerAuto { return Materials.containerKind }
+        if number("exact_apple_glass_container", -1) >= 0 { return Materials.containerKind }
         #endif
         // An empty value (a bound one turned off) asks for none.
         if let material = props["backgroundMaterial"], !material.isEmpty { return material }
@@ -159,7 +156,7 @@ extension NodeView {
     func materialEffect(_ kind: String, interactive: Bool) -> UIVisualEffect {
         if kind == Materials.containerKind, #available(iOS 26.0, *) {
             let group = UIGlassContainerEffect()
-            group.spacing = glassGroupSpacing
+            group.spacing = number("exact_apple_glass_container", 0)
             return group
         }
         let apple = Materials.resolve(kind) { [weak self] in self?.presenter?.session?.log($0) }
@@ -181,23 +178,6 @@ extension NodeView {
         #else
         return UIBlurEffect(style: Materials.blurStyle(apple) ?? .systemUltraThinMaterial)
         #endif
-    }
-
-    /// A glass group's merge distance: the authored one, or for `auto` the
-    /// smallest space between neighbouring children as laid out (the
-    /// box's gap), 0 until there are two.
-    var glassGroupSpacing: CGFloat {
-        let authored = number("exact_apple_glass_container", -1)
-        if authored >= 0 { return authored }
-        let frames = container.subviews.compactMap { ($0 as? NodeView)?.frame }.filter { !$0.isEmpty }
-        var gap = CGFloat.infinity
-        for a in frames {
-            for b in frames where b != a {
-                if b.minX >= a.maxX, b.maxY > a.minY, b.minY < a.maxY { gap = min(gap, b.minX - a.maxX) }
-                if b.minY >= a.maxY, b.maxX > a.minX, b.minX < a.maxX { gap = min(gap, b.minY - a.maxY) }
-            }
-        }
-        return gap.isFinite ? gap : 0
     }
 
     /// The backdrop blur's effect, nil when this is not a backdrop.

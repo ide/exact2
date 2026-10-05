@@ -1281,17 +1281,6 @@ final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, UIScrollV
         video?.layout()
         if kind == "native" { presenter?.session?.natives.laidOut(self) }
         for case let button as NativeButton in subviews where button.frame != bounds { button.frame = bounds }
-        // `-exact-apple-glass-container: auto` follows the laid-out gap.
-        if materialKind == Materials.containerKind, number("exact_apple_glass_container", -1) == Materials.containerAuto,
-           let effect = materialView, #available(iOS 26.0, *) {
-            let spacing = glassGroupSpacing, mark = Int((spacing * 100).rounded()) + 1
-            if effect.tag != mark {
-                effect.tag = mark
-                let group = UIGlassContainerEffect()
-                group.spacing = spacing
-                effect.effect = group
-            }
-        }
         layoutTextArea()
         layoutSymbol()
     }
