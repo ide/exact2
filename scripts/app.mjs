@@ -565,9 +565,9 @@ export function resolveApp(nameOrCrate) {
     get modules() {
       return { ...this.modulesFor('apple'), web: this.modulesFor('web').web };
     },
-    /** Module launch parts (Exact Observe design §4.6), in `launch` order: the
-     * app's `modules/<name>/`, else exact2's; its `apple/launch/*.swift` (linked
-     * into the executable) and `apple/service/*.swift` (its service dylib). */
+    /** Module launch parts in `launch` order, from the app's `modules/<name>/`
+     * else exact2's. `apple/launch/*.swift` links into the executable and
+     * `apple/service/*.swift` builds the module's service dylib. */
     get launch() {
       return (manifest.launch ?? []).map((name) => {
         const own = resolve(dir, 'modules', name), shared = resolve(ROOT, 'modules', name);

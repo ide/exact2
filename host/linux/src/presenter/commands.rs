@@ -29,7 +29,7 @@ impl<D: DataSource> Presenter<D> {
                 "haptic" => {}
                 // Outside a `key` event (`key_event` takes a key's), nothing to prevent or stop.
                 "preventDefault" | "stopPropagation" => {}
-                // Exact Observe design §5.2: journal events for a launch module.
+                // Recorded in the journal for launch parts such as Observe.
                 n @ ("observe" | "observeAttributes" | "observeError") => {
                     crate::journal::host_command(n, &c.args)
                 }

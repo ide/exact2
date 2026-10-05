@@ -1,13 +1,8 @@
-// Observe's web service (Exact Observe design §4.5): loaded by the host's
-// marks.js once startup is over. It turns journal events into Observe's
-// metric and log rows, queues them in localStorage (bounded, kept until
-// acknowledged), and sends the OTLP/JSON expo-observe sends — the same names,
-// attributes, scope and schema URL — with its rules: chunks of 200, a 413
-// halves the chunk and drops a lone row, 429/502/503/504 back off
-// min(60·2^(n−1), 900)·random() s or Retry-After clamped 60–900, sampling per
-// install, development builds only with dispatchInDebug. On hide it flushes
-// with fetch(keepalive), whose 64 KiB budget is shared by every request in
-// flight, so it sends at most 60 KiB at once and keeps the rest for later.
+// Observe's web service, loaded by the host's marks.js after startup. It queues journal
+// events as Observe rows in localStorage until the server accepts them, and sends them
+// in expo-observe's OTLP/JSON with its retry rules.
+// On page hide it flushes with fetch(keepalive). Browsers cap all in-flight keepalive
+// bodies at 64 KiB together, so one flush sends at most 60 KiB and leaves the rest queued.
 
 const SCHEMA_URL = 'https://opentelemetry.io/schemas/1.27.0';
 const NAMES = {
@@ -21,7 +16,7 @@ const KEEPALIVE_BUDGET = 60 * 1024, CHUNK = 200, MAX_ROWS = 2000;
 
 const uuid = () => crypto.randomUUID();
 
-/** EASClientID.deterministicUniformValue: splitmix64 over both UUID halves → [0, 1). */
+/** Same as expo's `EASClientID.deterministicUniformValue`: a stable value in [0, 1) per install. */
 export function uniform(id) {
   const hex = id.replace(/-/g, '');
   let z = BigInt('0x' + hex.slice(0, 16)) ^ BigInt('0x' + hex.slice(16, 32));
@@ -45,7 +40,7 @@ function anyValue(v) {
   return null;
 }
 
-/** Observe's event rules (expo-app-metrics LogEvents validation). */
+/** Observe's custom-event validation, copied from expo-app-metrics (`LogEvents`). */
 function rulesName(raw) { const n = String(raw ?? '').trim(); return n && !n.startsWith('expo.') && n.length <= 256 ? n : null; }
 const truncate = (s, max) => (s.length <= max ? s : s.slice(0, max - 1) + '…');
 function rulesAttributes(raw) {
@@ -134,7 +129,8 @@ export function start(config, { boot = 0 } = {}) {
   const backoff = n => Math.min(60 * 2 ** (n - 1), 900) * Math.random();
   const retryAfter = h => { if (!h) return null; const s = Number(h); const clamp = x => Math.min(Math.max(x, 60), 900); if (Number.isFinite(s)) return clamp(s); const d = Date.parse(h); return Number.isNaN(d) ? null : clamp((d - Date.now()) / 1000); };
 
-  /** One signal, chunk by chunk (Observe's DispatchLoop); `keepalive` bounds it by bytes. */
+  /** Sends one signal's rows chunk by chunk, as expo-observe's `DispatchLoop.swift` does.
+   * With `keepalive`, it also stops at the byte budget. */
   async function send(signal, url, keepalive) {
     let limit = CHUNK, budget = KEEPALIVE_BUDGET;
     while (q[signal].length) {
@@ -142,7 +138,7 @@ export function start(config, { boot = 0 } = {}) {
       const body = JSON.stringify(signal === 'metrics' ? metricsBody(rows) : logsBody(rows));
       if (keepalive && body.length > budget) {
         if (rows.length > 1) { limit = Math.max(1, rows.length >> 1); continue; }
-        return; // a single row too big for keepalive: sent by an ordinary fetch next time
+        return; // One row is over the keepalive budget. A normal fetch sends it next time.
       }
       let status = null, retry = null;
       try {

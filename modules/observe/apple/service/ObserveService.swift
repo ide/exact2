@@ -1,8 +1,6 @@
-// Observe's service (Exact Observe design §4.5): the heavy half, a dylib of its
-// own that ExactKit loads after startup. It turns journal events into
-// Observe's metric and log rows (SQLite), ingests crashes a previous launch
-// recorded, and sends them as expo-observe does. Everything runs on one serial
-// queue, off the main thread.
+// Observe's service: a separate dylib ExactKit loads after startup. It stores journal
+// events as Observe's metric and log rows, records crashes from earlier launches, and
+// sends the rows the way expo-observe does. All work runs on one serial background queue.
 import Foundation
 #if os(iOS)
 import UIKit
@@ -16,8 +14,7 @@ final class ObserveService {
     let clientId: UUID
     let metadata: [String: Any]
     var device: [String: Any] = [:]
-    /// The launch route (its first router change) and whether the user had
-    /// navigated away before startup ended (then it gets no `tti`).
+    /// The route shown at launch. If the user navigates before startup ends, it gets no `tti`.
     var launchRoute: [String: Any]?
     var navigatedBeforeStartup = false
     var globals: [String: Any] = [:]
@@ -25,8 +22,7 @@ final class ObserveService {
     var sending = false
     var scheduled = false
 
-    /// New rows go out within `delay` (one timer at a time), besides the
-    /// background and terminal-outcome sends.
+    /// Sends new rows within `delay` seconds. Only one timer is pending at a time.
     func scheduleDispatch(_ delay: Double = 5) {
         guard !scheduled else { return }
         scheduled = true
@@ -78,7 +74,7 @@ final class ObserveService {
         }
     }
 
-    /// The launch's metrics, Observe's names, from ExactLaunch's report.
+    /// Stores the launch metrics from ExactLaunch's startup report under Observe's names.
     func startup(_ e: [String: Any], wall: Double) {
         launchNavigation(e, wall: wall)
         guard let store, let metrics = e["metrics"] as? [String: Double], !metrics.isEmpty else { return }
@@ -110,8 +106,7 @@ final class ObserveService {
         }
     }
 
-    /// Observe's navigation metrics (`expo.navigation.*`): routeName is the
-    /// route pattern; params are routeParams, url and isAppLaunch.
+    /// Observe's `expo.navigation.*` metrics. The route is the pattern, not the concrete path.
     func navigation(_ e: [String: Any], wall: Double) {
         guard let store, let name = e["name"] as? String, let value = e["value"] as? Double else { return }
         navigatedBeforeStartup = true
@@ -123,9 +118,8 @@ final class ObserveService {
         store.addMetric(session: session, time: wall, category: "navigation", name: name, value: value, route: e["route"] as? String, params: params)
     }
 
-    /// The launch route's own pair, from startup's marks: from boot (Exact's
-    /// nearest to Observe's integration start; a declared deviation) to the
-    /// first frame, and to TTI unless the user had navigated away by then.
+    /// The launch route's `cold_ttr` and `tti`, measured from boot. Observe measures from
+    /// its integration start, which Exact has no equivalent of; boot is the closest mark.
     func launchNavigation(_ e: [String: Any], wall: Double) {
         guard let store, let route = launchRoute, let marks = e["marks"] as? [String: Double], let boot = marks["boot"] else { return }
         var params = globals
@@ -141,8 +135,8 @@ final class ObserveService {
         }
     }
 
-    /// Observe's `updates/updateDownloadTime`: a staged update's blobs, from
-    /// the first request to staged. The id is Exact's envelope digest.
+    /// Observe's `updates/updateDownloadTime`: from the first request to the update being staged.
+    /// The update id is Exact's envelope digest, not an EAS update id.
     func updateDownload(_ e: [String: Any], wall: Double) {
         guard let store, let seconds = e["seconds"] as? Double else { return }
         store.run("INSERT INTO metrics (session, time, category, name, value, updateId, params) VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -169,8 +163,7 @@ final class ObserveService {
                      attributes: attrs, dropped: user.dropped)
     }
 
-    /// Pending records ObserveCrash wrote as earlier processes died: one
-    /// `native.exception` each, against the session that crashed.
+    /// Turns each pending ObserveCrash record into a `native.exception` log for the crashed session.
     func ingestCrashes() {
         guard let store, let dir = NSSearchPathForDirectoriesInDomains(.cachesDirectory, .userDomainMask, true).first,
               let files = try? FileManager.default.contentsOfDirectory(atPath: dir) else { return }
@@ -194,8 +187,8 @@ final class ObserveService {
 
     var development: Bool { config["fact.development"] as? Bool == true || config["fact.agent"] as? Bool == true }
 
-    /// Observe's gate: enabled, in sample (per install), and not a development
-    /// build unless `dispatchInDebug`. Out of the gate, rows are dropped.
+    /// Observe's gate: dispatching enabled, this install in the sample, and not a development
+    /// build unless `dispatchInDebug`. When it fails, rows are dropped, not kept for later.
     var shouldDispatch: Bool {
         let enabled = config["dispatchingEnabled"] as? Bool ?? true
         let rate = min(max(config["sampleRate"] as? Double ?? 1, 0), 1)
@@ -217,7 +210,8 @@ final class ObserveService {
         }
     }
 
-    /// One signal, chunk by chunk, until drained or stopped (Observe's DispatchLoop).
+    /// Sends one signal's rows chunk by chunk until none are left or a send must wait.
+    /// Follows expo-observe's `DispatchLoop.swift`.
     func send(_ signal: String, url: String, limit: Int, done: @escaping () -> Void) {
         guard let store else { return done() }
         let cursor = store.cursor(signal)
@@ -261,7 +255,7 @@ final class ObserveService {
         }.resume()
     }
 
-    /// Milliseconds as seconds, to 0.1 ms, printed without binary noise.
+    /// Milliseconds to seconds, rounded to 0.1 ms, as a decimal so JSON prints it exactly.
     static func seconds(_ ms: Double) -> NSDecimalNumber {
         NSDecimalNumber(string: String(format: "%.4f", ms / 1000))
     }
@@ -276,7 +270,7 @@ final class ObserveService {
         let v = ProcessInfo.processInfo.operatingSystemVersion
         var m: [String: Any] = [
             "osVersion": "\(v.majorVersion).\(v.minorVersion).\(v.patchVersion)",
-            // The simulator's own model, not the Mac's architecture.
+            // On a simulator, `uname` reports the Mac's architecture, so use the simulated model.
             "deviceModel": ProcessInfo.processInfo.environment["SIMULATOR_MODEL_IDENTIFIER"] ?? machine,
             "language": Locale.preferredLanguages.first ?? "en",
             "clientVersion": "0.1.0",
@@ -312,7 +306,7 @@ final class ObserveService {
     }
 }
 
-// MARK: The C entry points ExactKit's service loader binds.
+// MARK: C entry points bound by ExactKit's service loader
 
 @_cdecl("exact_service_start")
 public func exactServiceStart(_ config: UnsafePointer<UInt8>?, _ configLength: UInt32, _ handoff: UnsafePointer<UInt8>?, _ handoffLength: UInt32) -> UnsafeMutableRawPointer? {

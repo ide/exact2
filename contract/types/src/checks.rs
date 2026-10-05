@@ -1171,9 +1171,8 @@ pub(super) fn check_command(
     Ok(())
 }
 
-/// `observe(name)`, `observe(name, Shape(key=value))`, with a severity third;
-/// `observeAttributes(Shape(key=value))` (a declared shape's record); `observeError(message)` or
-/// `observeError(message, "TypeName")` (Exact Observe design §5.2).
+/// Checks `observe(name[, Shape(key=value)[, severity]])`,
+/// `observeAttributes(Shape(key=value))` and `observeError(message[, "TypeName"])`.
 fn observe_args(
     name: &str,
     args: &[Expr],
@@ -1197,8 +1196,8 @@ fn observe_args(
     for (i, arg) in args.iter().enumerate() {
         let ty = infer(arg, scope, shapes)?;
         let record = name == "observeAttributes" || (name == "observe" && i == 1);
-        // The attributes are written as a construction, so their names reach
-        // the host (a record value alone carries none).
+        // The attributes must be constructed here: a record value carries no
+        // field names for the host.
         let constructed = matches!(arg, Expr::Call(_, fields, _)
             if fields.iter().all(|f| matches!(f, Expr::NamedArg(..))));
         if record && !constructed {
