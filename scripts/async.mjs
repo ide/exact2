@@ -99,7 +99,7 @@ export function glueWorkers(cores = availableParallelism(), load = loadavg()[0])
   return Math.max(1, Math.floor((cores - load) / 2));
 }
 export function glueTests(root) {
-  const files = [...new Bun.Glob('host/web/**/*.test.mjs').scanSync({ cwd: root, onlyFiles: true })].sort().map(file => `./${file}`);
+  const files = ['host/web/**/*.test.mjs', 'modules/*/tests/*.test.mjs'].flatMap(g => [...new Bun.Glob(g).scanSync({ cwd: root, onlyFiles: true })]).sort().map(file => `./${file}`);
   return [...files, ...['app-workspace', 'app-bake', 'app-apple', 'app-manifest', 'agent', 'agent-launch', 'tamber-server'].map(name => `./scripts/${name}.test.mjs`), './scripts/deploy-paths.test.mjs', './scripts/async-inputs.test.mjs', './scripts/coverage.test.mjs'];
 }
 export function checks(sha, since, selection = {}) {
@@ -122,6 +122,7 @@ export function checks(sha, since, selection = {}) {
     ['boot', 'bun', ['scripts/boot.mjs']],
     // Every web host unit test (LLP 1012.001.000 D9; Charlie, 2026-09-30)
     // and the source capture fixtures, in the existing async glue step.
+    // Modules' JS tests (`modules/*/tests`) run here too.
     // Run the files in as many worker processes as the machine's idle cores allow when the step starts (`glueWorkers`)
     // A file that edits an app's sources runs after them, alone, since a page another file opens meanwhile would refuse
     // that app's build as stale
