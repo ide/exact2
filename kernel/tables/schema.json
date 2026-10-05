@@ -586,6 +586,12 @@
       "kind": "str"
     },
     {
+      "id": 234,
+      "name": "navigationSubtitle",
+      "kind": "str",
+      "_comment": "A route's navigation bar subtitle, under its title (large or inline): a status line, as iOS 26's UINavigationItem `subtitle`. Empty or blank shows none."
+    },
+    {
       "id": 221,
       "name": "navigationTrailing",
       "kind": "str"

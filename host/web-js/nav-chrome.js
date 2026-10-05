@@ -1,8 +1,9 @@
 // The navigation chrome the native hosts project from a navigation root's
 // `navigation*` props (LLP 1038; NavigationIOS.swift, ModalIOS.swift), drawn
 // by the page: a tab bar over the tabs' rows (`navigationTab…`), a bar per
-// route that declares a `navigationTitle` (large or inline, a back button,
-// a `navigationTrailing` bar button), push and pop as slides, and a
+// route that declares a `navigationTitle` (large or inline, with its
+// `navigationSubtitle` under it, a back button, a `navigationTrailing` bar
+// button), push and pop as slides, and a
 // `navigationPresentation="modal"` route as a sheet at its
 // `navigationDetent` heights. An app's module imports this when its plan
 // names a title or a tab (emit.rs); it draws in each projection
@@ -311,6 +312,8 @@ function overlays(r) {
 function route(nav, r, previous, sheet, tabbed) {
   const title = r.getAttribute("data-navigationtitle") ?? "";
   const large = title !== "" && data(r, "largetitle") !== "false";
+  // A blank subtitle is none, as UIKit's nil.
+  const subtitle = title !== "" ? data(r, "subtitle").trim() : "";
   setAttr(r, "data-exact-chromed", "");
   setAttr(r, "data-exact-bar", title !== "" ? "" : null);
   setAttr(r, "data-exact-large", large ? "" : null);
@@ -321,7 +324,7 @@ function route(nav, r, previous, sheet, tabbed) {
   if (title === "") bar?.remove();
   else {
     if (!bar) { bar = makeBar(); r.append(bar); }
-    fillBar(nav, r, bar, title, large, previous, !!sheet && presentation(sheet) === "modal" && r === sheet && attr(sheet, "data-navigationdetent").trim().split(/\s+/).length > 1);
+    fillBar(nav, r, bar, title, subtitle, large, previous, !!sheet && presentation(sheet) === "modal" && r === sheet && attr(sheet, "data-navigationdetent").trim().split(/\s+/).length > 1);
   }
   scroller(r, bar);
 }
@@ -329,15 +332,18 @@ function route(nav, r, previous, sheet, tabbed) {
 function makeBar() {
   return el("div", "", { "data-exact-navbar": "" },
     el("div", "bg"),
-    el("div", "bar", {}, el("div", "lead"), el("div", "title", { role: "heading", "aria-level": "1" }), el("div", "trail")),
-    el("div", "large", { "aria-hidden": "true" }, el("h1")));
+    el("div", "bar", {}, el("div", "lead"), el("div", "title", {}, el("div", "heading", { role: "heading", "aria-level": "1" }), el("div", "sub")), el("div", "trail")),
+    el("div", "large", { "aria-hidden": "true" }, el("h1"), el("div", "sub")));
 }
 
-function fillBar(nav, r, bar, title, large, previous, grabber) {
+function fillBar(nav, r, bar, title, subtitle, large, previous, grabber) {
   setAttr(bar, "data-large", large ? "" : null);
-  const row = part(bar, "bar"), t = title.trim();
-  setText(part(row, "title"), t);
-  setText(kids(part(bar, "large"))[0], t);
+  setAttr(bar, "data-subtitle", subtitle ? "" : null);
+  const row = part(bar, "bar"), t = title.trim(), inline = part(row, "title"), big = part(bar, "large");
+  setText(part(inline, "heading"), t);
+  setText(part(inline, "sub"), subtitle);
+  setText(kids(big)[0], t);
+  setText(part(big, "sub"), subtitle);
   // Back: over a route below it in its stack (and with an enabled back
   // control to press), the chevron with the previous title, or alone when
   // `navigationBackButton` is "minimal".

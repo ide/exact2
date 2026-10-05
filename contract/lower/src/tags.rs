@@ -615,10 +615,11 @@ pub fn attr(name: &str) -> Option<AttrTarget> {
         "navigationPresentation" => AttrTarget::Prop(p("navigationPresentation")),
         "navigationDetent" => AttrTarget::Prop(p("navigationDetent")),
         // @ref LLP 1038 — a route's native navigation bar (iOS): its title,
-        // large or inline, a trailing bar button pressing an authored control,
+        // large or inline, and a subtitle under it, a trailing bar button pressing an authored control,
         // and the back button's display mode.
         "navigationTitle" => AttrTarget::Prop(p("navigationTitle")),
         "navigationLargeTitle" => AttrTarget::Prop(p("navigationLargeTitle")),
+        "navigationSubtitle" => AttrTarget::Prop(p("navigationSubtitle")),
         "navigationTrailing" => AttrTarget::Prop(p("navigationTrailing")),
         "navigationTrailingSymbol" => AttrTarget::Prop(p("navigationTrailingSymbol")),
         "navigationBackButton" => AttrTarget::Prop(p("navigationBackButton")),

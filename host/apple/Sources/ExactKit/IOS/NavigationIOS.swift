@@ -30,7 +30,9 @@ private final class RouteController: UIViewController {
     }
     /// The route's native navigation bar (LLP 1038): a `navigationTitle`
     /// shows UIKit's bar with that title, large unless `navigationLargeTitle`
-    /// is "false"; `navigationBackButton` "minimal" shows the chevron alone;
+    /// is "false", and `navigationSubtitle` under it (iOS 26's subtitle,
+    /// which the large title shows too); `navigationBackButton` "minimal"
+    /// shows the chevron alone;
     /// `navigationTrailing` names (by HTML id) an authored control a trailing
     /// bar button presses, drawn as the `navigationTrailingSymbol` SF Symbol.
     /// A route with no title keeps the bar hidden, as before; a blank one
@@ -45,6 +47,11 @@ private final class RouteController: UIViewController {
         let raw = node.props["navigationTitle"] ?? ""
         let title: String? = raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : raw
         if item.title != title { item.title = title }
+        if #available(iOS 26.0, *) {
+            let raw = node.props["navigationSubtitle"] ?? ""
+            let subtitle: String? = raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : raw
+            if item.subtitle != subtitle { item.subtitle = subtitle }
+        }
         item.largeTitleDisplayMode = node.props["navigationLargeTitle"] == "false" ? .never : .always
         item.backButtonDisplayMode = node.props["navigationBackButton"] == "minimal" ? .minimal : .default
         if let target = node.props["navigationTrailing"], !target.isEmpty {

@@ -12,6 +12,7 @@
   --exact-nav-font: system-ui, -apple-system, sans-serif;
   --exact-nav-bar-height: 44px;
   --exact-nav-large-height: 52px;
+  --exact-nav-subtitle: var(--exact-secondary-label, light-dark(#3c3c4399, #ebebf599));
   --exact-nav-safe-top: env(safe-area-inset-top, 0px);
   --exact-tabbar-background: var(--exact-secondary-grouped-background, light-dark(#fff, #1c1c1e));
   --exact-tabbar-text: var(--exact-secondary-label, light-dark(#3c3c4399, #ebebf599));
@@ -47,7 +48,17 @@
 /* Its edge: a hairline, one device pixel (a thin border, which WebKit snaps). */
 [data-exact-navbar] > .bg::after { content: ""; position: absolute; left: 0; right: 0; top: 100%; height: 0; border-top: .5px solid var(--exact-nav-separator); }
 [data-exact-navbar] > .bar { position: absolute; left: 0; right: 0; top: var(--exact-nav-safe-top); height: var(--exact-nav-bar-height); display: flex; align-items: center; padding: 0 4px; box-sizing: border-box; }
-[data-exact-navbar] .title { position: absolute; left: 30%; right: 30%; text-align: center; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+[data-exact-navbar] .title { position: absolute; left: 30%; right: 30%; display: flex; flex-direction: column; text-align: center; }
+[data-exact-navbar] .title > *, [data-exact-navbar] .large > .sub { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+[data-exact-navbar] .title > .heading { font-weight: 600; }
+/* A subtitle (UIKit's): small, in the secondary colour, under the inline title, which shrinks
+   to make room, and under the large title, which rises in its band to make room (the band
+   keeps its height, as UIKit's). None when blank. */
+[data-exact-navbar]:not([data-subtitle]) .sub { display: none; }
+[data-exact-navbar][data-subtitle] .title > .heading { font-size: 15px; line-height: 19px; }
+[data-exact-navbar] .title > .sub { font-size: 12px; line-height: 15px; color: var(--exact-nav-subtitle); }
+[data-exact-navbar][data-subtitle] .large > h1 { line-height: calc(var(--exact-nav-large-height) - 19px); }
+[data-exact-navbar] .large > .sub { padding: 0 16px; font: 11.5px/18px var(--exact-nav-font); color: var(--exact-nav-subtitle); }
 [data-exact-navbar] .lead, [data-exact-navbar] .trail { display: flex; align-items: center; min-width: 0; max-width: 30%; }
 [data-exact-navbar] .lead { max-width: calc(30% - 4px); }
 [data-exact-navbar] .trail { margin-left: auto; }
@@ -73,14 +84,14 @@
 @supports (animation-timeline: scroll()) and (timeline-scope: --exact-nav) {
   [data-exact-chromed][data-exact-large] { --exact-nav-large: var(--exact-nav-large-height); }
   [data-exact-navbar][data-large] .large { display: block; }
-  [data-exact-navbar][data-large] .large > h1 { animation: exact-nav-lift linear both; animation-timeline: --exact-nav; animation-range: 0 var(--exact-nav-large-height); }
+  [data-exact-navbar][data-large] .large > :is(h1, .sub) { animation: exact-nav-lift linear both; animation-timeline: --exact-nav; animation-range: 0 var(--exact-nav-large-height); }
   [data-exact-navbar][data-large] > .bg, [data-exact-navbar][data-large] .title { opacity: 0; animation: exact-nav-in linear both; animation-timeline: --exact-nav; animation-range: calc(var(--exact-nav-large-height) - 26px) calc(var(--exact-nav-large-height) - 10px); }
   /* On the page (below), the large title is the document's and the bar
      follows the root's scroll: the title rides up under the bar, clipped at
      its edge, the material and the inline title arriving as it goes. */
   html[data-exact-docnav] [data-exact-doc] > [data-exact-navbar][data-large] {
     & .large { animation: exact-nav-clip linear both; animation-timeline: scroll(root block); animation-range: 0 var(--exact-nav-large-height); }
-    & .large > h1 { animation: none; }
+    & .large > :is(h1, .sub) { animation: none; }
     & .title { animation-timeline: scroll(root block); }
     /* Its material is always there, unseen over the canvas at rest, so it frosts what
        slides under it from the first point (the large title, then the content), and the
@@ -92,7 +103,7 @@
   }
   /* A route shown beside the page for a slide: its bar as at the offset it left at. */
   [data-exact-frozen] > [data-exact-navbar][data-large] {
-    & .large > h1 { animation: none; transform: translateY(var(--exact-frozen-lift, 0px)); }
+    & .large > :is(h1, .sub) { animation: none; transform: translateY(var(--exact-frozen-lift, 0px)); }
     & > .bg, & .title { animation: none; opacity: var(--exact-frozen-in, 0); }
   }
 }
