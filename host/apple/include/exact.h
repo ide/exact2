@@ -553,7 +553,8 @@ uint32_t exact_auth(ExactRuntime rt, size_t len);
 /* Optional delivery composition (LLP 1030 D4). L=0 returns NULL: no store,
  * keys, selection, check or networking implementation is linked. The higher
  * update adapter supplies these calls only when the app chooses L=A. */
-typedef void (*ExactUpdateDoneFn)(void *ctx, const uint8_t *line, size_t len);
+/* A check's result as JSON: {"line": text, "download": {seq, files, ms, entry}?}. */
+typedef void (*ExactUpdateDoneFn)(void *ctx, const uint8_t *json, size_t len);
 typedef struct {
     uint8_t *(*input)(size_t len);
     const uint8_t *(*output)(void);
