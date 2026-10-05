@@ -1,4 +1,4 @@
-import { moduleDirectory } from '../../scripts/app.mjs';
+import { launchModules, moduleDirectory } from '../../scripts/app.mjs';
 // The web build's JS target: `bun host/web-js/build.mjs <app> [--plan <baked app.plan>] [--out <dir>]`.
 //
 // 1. `exact-web-js js` compiles the plan (the app's Contract, or a baked
@@ -229,11 +229,8 @@ if (rust) {
   cpSync(resolve(gen, 'app.bind.plan'), resolve(out, 'app.bind.plan'));
 }
 writeFileSync(resolve(gen, 'admission-data.js'), `import {createGrantSet} from './admission.js';export const tsGrantSet=createGrantSet(${JSON.stringify(tsGrantSet)}),rustGrantSet=createGrantSet(${JSON.stringify(rustGrantSet)});\n`);
-// The app's launch modules that have a web service, the app's own before exact2's.
-const launchWeb = (manifest.launch ?? []).map(name => {
-  const own = resolve(appDir, 'modules', name, 'web/service.js'), shared = resolve(root, 'modules', name, 'web/service.js');
-  return { name, file: existsSync(own) ? own : existsSync(shared) ? shared : null };
-}).filter(m => m.file);
+// The app's launch modules that have a web service.
+const launchWeb = launchModules(appDir, manifest).filter(m => m.web);
 if (launchWeb.length) cpSync(resolve(here, 'marks.js'), resolve(gen, 'marks.js'));
 writeFileSync(resolve(gen, 'main.js'), [
   "import app, { sources, wait } from './app.js';",
@@ -506,7 +503,7 @@ if (existsSync(gpuLib)) {
 }
 if (pageModules) cpSync(moduleDirectory(appDir, 'web'), resolve(out, 'modules'), { recursive: true });
 // Launch modules' web services, which marks.js imports after startup.
-for (const m of launchWeb) cpSync(m.file, resolve(out, 'launch', m.name, 'service.js'));
+for (const m of launchWeb) cpSync(m.web, resolve(out, 'launch', m.name, 'service.js'));
 if (existsSync(resolve(appDir, 'assets'))) cpSync(resolve(appDir, 'assets'), resolve(out, 'assets'), { recursive: true });
 if (existsSync(resolve(appDir, 'deck'))) cpSync(resolve(appDir, 'deck'), resolve(out, 'deck'), { recursive: true });
 if (devReload) writeFileSync(resolve(out, '.exact-dev-logic.json'), JSON.stringify({ version: 1, modules: devLogic.sort(([a], [b]) => a.localeCompare(b)) }) + '\n');

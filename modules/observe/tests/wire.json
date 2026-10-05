@@ -1,0 +1,346 @@
+{
+  "about": [
+    "Journal events, and the OTLP bodies Observe's web, Apple and Linux services must send for them.",
+    "wire.test.mjs runs the web and Apple services, host/linux/tests/observe the Linux one.",
+    "Walls are in seconds. The web journal uses milliseconds, so its runner multiplies them by 1000.",
+    "Bodies are compared as parsed JSON: object key order is ignored, expo.custom_params is parsed, and metrics are sorted by name, then time.",
+    "Only these resource attributes are compared: the ones below and platforms.<name>.resource. The rest (os.version, device.*, browser.language) describe the machine.",
+    "platforms.<name>.startupParams join every expo.app_startup.* metric's params, and launchNavigationParams the launch route's. They are each host's own launch phases and anchor.",
+    "Crash records and update downloads are not here: each platform records different ones.",
+    "Truncation lengths are counted per platform: graphemes on Apple, as Observe does, UTF-16 units on the web and chars on Linux. The strings here are ASCII, so the counts agree.",
+    "Pinned rules: the launch route gets a navigation tti exactly when the startup event has a timeToInteractive metric and nothing navigated first; navigation params copy every exact.* field of the event; a missing url is omitted; app.error uses the event's source (default reportedByUser); exact.boot.path appears only when the startup event has a bootPath."
+  ],
+  "session": "6f1e4d2c-8b3a-4c5d-9e7f-0a1b2c3d4e5f",
+  "sessionStart": 1700000000,
+  "clientId": "0d9c8b7a-6e5f-4a3b-8c2d-1e0f9a8b7c6d",
+  "app": {"id":"com.example.wire","name":"Wire"},
+  "environment": "production",
+  "device": {"expo.network.connected":true,"expo.network.type":"wifi"},
+  "events": [
+    {"kind":"app.attributes","wall":1700000000.1,"attributes":{"tier":"gold","count":2,"expo.plan":"dropped"}},
+    {"kind":"navigation.launch","wall":1700000000.2,"route":"/stations/[id]","routeParams":{"id":"sf"},"url":"/stations/sf"},
+    {
+      "kind": "startup",
+      "wall": 1700000001,
+      "tti": "failed",
+      "presentMethod": "raf",
+      "metrics": {"coldLaunchTime":0.25,"timeToFirstRender":0.1,"timeToInteractive":0.2},
+      "marks": {"process":0,"didFinishLaunching":2,"scene":3,"activation":4,"boot":4,"commit":50,"activated":60,"present":104,"interactive":204}
+    },
+    {
+      "kind": "navigation",
+      "wall": 1700000002,
+      "name": "warm_ttr",
+      "value": 0.05,
+      "route": "/stations",
+      "routeParams": {},
+      "url": "/stations",
+      "exact.nav.cause": "tap"
+    },
+    {"kind":"navigation","wall":1700000002.5,"name":"tti","value":0.08,"route":"/stations","exact.nav.cause":"tap","exact.tti.failed":1},
+    {
+      "kind": "app.event",
+      "wall": 1700000003,
+      "name": "  station.opened  ",
+      "severity": "warn",
+      "body": "opened",
+      "displayName": "  Station opened  ",
+      "attributes": {
+        "station": "sf",
+        " padded ": true,
+        "ratio": 2.5,
+        "whole": 1,
+        "tags": ["a","b"],
+        "nested": {"b":1,"a":"x"},
+        "holes": [1,null],
+        "nothing": null,
+        "expo.custom": "reserved",
+        "expo.": "kept",
+        "session.id": "reserved",
+        "event.name": "reserved",
+        "   ": "blank"
+      }
+    },
+    {"kind":"app.event","wall":1700000003.5,"name":"expo.internal","severity":"info"},
+    {"kind":"app.event","wall":1700000004,"name":"plain","severity":"loud"},
+    {"kind":"app.error","wall":1700000005,"source":"contract","type":"TypeError","message":"boom","stack":"at f (app.js:1:1)"}
+  ],
+  "expected": {
+    "metrics": {
+      "resourceMetrics": [
+        {
+          "resource": {
+            "attributes": [
+              {"key":"telemetry.sdk.name","value":{"stringValue":"exact-observe"}},
+              {"key":"telemetry.sdk.version","value":{"stringValue":"0.1.0"}},
+              {"key":"expo.eas_client.id","value":{"stringValue":"0d9c8b7a-6e5f-4a3b-8c2d-1e0f9a8b7c6d"}},
+              {"key":"service.name","value":{"stringValue":"com.example.wire"}},
+              {"key":"expo.app.name","value":{"stringValue":"Wire"}},
+              {"key":"expo.environment","value":{"stringValue":"production"}}
+            ]
+          },
+          "scopeMetrics": [
+            {
+              "scope": {"name":"expo-observe","version":"0.1.0"},
+              "metrics": [
+                {
+                  "unit": "s",
+                  "name": "expo.app_startup.cold_launch_time",
+                  "gauge": {
+                    "dataPoints": [
+                      {
+                        "timeUnixNano": 1700000001000000000,
+                        "asDouble": 0.25,
+                        "attributes": [
+                          {"key":"session.id","value":{"stringValue":"6f1e4d2c-8b3a-4c5d-9e7f-0a1b2c3d4e5f"}},
+                          {"key":"expo.custom_params","value":{"stringValue":"{\"count\":2,\"tier\":\"gold\"}"}}
+                        ]
+                      }
+                    ]
+                  }
+                },
+                {
+                  "unit": "s",
+                  "name": "expo.app_startup.tti",
+                  "gauge": {
+                    "dataPoints": [
+                      {
+                        "timeUnixNano": 1700000001000000000,
+                        "asDouble": 0.2,
+                        "attributes": [
+                          {"key":"session.id","value":{"stringValue":"6f1e4d2c-8b3a-4c5d-9e7f-0a1b2c3d4e5f"}},
+                          {
+                            "key": "expo.custom_params",
+                            "value": {
+                              "stringValue": "{\"count\":2,\"exact.tti.reason\":\"failed\",\"expo.network.connected\":true,\"expo.network.type\":\"wifi\",\"tier\":\"gold\"}"
+                            }
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                },
+                {
+                  "unit": "s",
+                  "name": "expo.app_startup.ttr",
+                  "gauge": {
+                    "dataPoints": [
+                      {
+                        "timeUnixNano": 1700000001000000000,
+                        "asDouble": 0.1,
+                        "attributes": [
+                          {"key":"session.id","value":{"stringValue":"6f1e4d2c-8b3a-4c5d-9e7f-0a1b2c3d4e5f"}},
+                          {"key":"expo.custom_params","value":{"stringValue":"{\"count\":2,\"tier\":\"gold\"}"}}
+                        ]
+                      }
+                    ]
+                  }
+                },
+                {
+                  "unit": "s",
+                  "name": "expo.navigation.cold_ttr",
+                  "gauge": {
+                    "dataPoints": [
+                      {
+                        "timeUnixNano": 1700000001000000000,
+                        "asDouble": 0.1,
+                        "attributes": [
+                          {"key":"session.id","value":{"stringValue":"6f1e4d2c-8b3a-4c5d-9e7f-0a1b2c3d4e5f"}},
+                          {"key":"expo.route_name","value":{"stringValue":"/stations/[id]"}},
+                          {
+                            "key": "expo.custom_params",
+                            "value": {
+                              "stringValue": "{\"count\":2,\"isAppLaunch\":true,\"routeParams\":{\"id\":\"sf\"},\"tier\":\"gold\",\"url\":\"/stations/sf\"}"
+                            }
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                },
+                {
+                  "unit": "s",
+                  "name": "expo.navigation.tti",
+                  "gauge": {
+                    "dataPoints": [
+                      {
+                        "timeUnixNano": 1700000001000000000,
+                        "asDouble": 0.2,
+                        "attributes": [
+                          {"key":"session.id","value":{"stringValue":"6f1e4d2c-8b3a-4c5d-9e7f-0a1b2c3d4e5f"}},
+                          {"key":"expo.route_name","value":{"stringValue":"/stations/[id]"}},
+                          {
+                            "key": "expo.custom_params",
+                            "value": {
+                              "stringValue": "{\"count\":2,\"isAppLaunch\":true,\"routeParams\":{\"id\":\"sf\"},\"tier\":\"gold\",\"url\":\"/stations/sf\"}"
+                            }
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                },
+                {
+                  "unit": "s",
+                  "name": "expo.navigation.warm_ttr",
+                  "gauge": {
+                    "dataPoints": [
+                      {
+                        "timeUnixNano": 1700000002000000000,
+                        "asDouble": 0.05,
+                        "attributes": [
+                          {"key":"session.id","value":{"stringValue":"6f1e4d2c-8b3a-4c5d-9e7f-0a1b2c3d4e5f"}},
+                          {"key":"expo.route_name","value":{"stringValue":"/stations"}},
+                          {
+                            "key": "expo.custom_params",
+                            "value": {
+                              "stringValue": "{\"count\":2,\"exact.nav.cause\":\"tap\",\"isAppLaunch\":false,\"routeParams\":{},\"tier\":\"gold\",\"url\":\"/stations\"}"
+                            }
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                },
+                {
+                  "unit": "s",
+                  "name": "expo.navigation.tti",
+                  "gauge": {
+                    "dataPoints": [
+                      {
+                        "timeUnixNano": 1700000002500000000,
+                        "asDouble": 0.08,
+                        "attributes": [
+                          {"key":"session.id","value":{"stringValue":"6f1e4d2c-8b3a-4c5d-9e7f-0a1b2c3d4e5f"}},
+                          {"key":"expo.route_name","value":{"stringValue":"/stations"}},
+                          {
+                            "key": "expo.custom_params",
+                            "value": {
+                              "stringValue": "{\"count\":2,\"exact.nav.cause\":\"tap\",\"exact.tti.failed\":1,\"isAppLaunch\":false,\"routeParams\":{},\"tier\":\"gold\"}"
+                            }
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          ],
+          "schemaUrl": "https://opentelemetry.io/schemas/1.27.0"
+        }
+      ]
+    },
+    "logs": {
+      "resourceLogs": [
+        {
+          "resource": {
+            "attributes": [
+              {"key":"telemetry.sdk.name","value":{"stringValue":"exact-observe"}},
+              {"key":"telemetry.sdk.version","value":{"stringValue":"0.1.0"}},
+              {"key":"expo.eas_client.id","value":{"stringValue":"0d9c8b7a-6e5f-4a3b-8c2d-1e0f9a8b7c6d"}},
+              {"key":"service.name","value":{"stringValue":"com.example.wire"}},
+              {"key":"expo.app.name","value":{"stringValue":"Wire"}},
+              {"key":"expo.environment","value":{"stringValue":"production"}}
+            ]
+          },
+          "scopeLogs": [
+            {
+              "scope": {"name":"expo-observe","version":"0.1.0"},
+              "logRecords": [
+                {
+                  "timeUnixNano": 1700000003000000000,
+                  "observedTimeUnixNano": 1700000003000000000,
+                  "severityNumber": 13,
+                  "severityText": "WARN",
+                  "body": {"stringValue":"opened"},
+                  "attributes": [
+                    {"key":"session.id","value":{"stringValue":"6f1e4d2c-8b3a-4c5d-9e7f-0a1b2c3d4e5f"}},
+                    {"key":"event.name","value":{"stringValue":"station.opened"}},
+                    {"key":"count","value":{"intValue":2}},
+                    {"key":"expo.","value":{"stringValue":"kept"}},
+                    {"key":"expo.log.display_name","value":{"stringValue":"Station opened"}},
+                    {
+                      "key": "nested",
+                      "value": {"kvlistValue":{"values":[{"key":"a","value":{"stringValue":"x"}},{"key":"b","value":{"intValue":1}}]}}
+                    },
+                    {"key":"padded","value":{"boolValue":true}},
+                    {"key":"ratio","value":{"doubleValue":2.5}},
+                    {"key":"station","value":{"stringValue":"sf"}},
+                    {"key":"tags","value":{"arrayValue":{"values":[{"stringValue":"a"},{"stringValue":"b"}]}}},
+                    {"key":"tier","value":{"stringValue":"gold"}},
+                    {"key":"whole","value":{"intValue":1}}
+                  ],
+                  "droppedAttributesCount": 6
+                },
+                {
+                  "timeUnixNano": 1700000004000000000,
+                  "observedTimeUnixNano": 1700000004000000000,
+                  "severityNumber": 9,
+                  "severityText": "INFO",
+                  "body": {"stringValue":""},
+                  "attributes": [
+                    {"key":"session.id","value":{"stringValue":"6f1e4d2c-8b3a-4c5d-9e7f-0a1b2c3d4e5f"}},
+                    {"key":"event.name","value":{"stringValue":"plain"}},
+                    {"key":"count","value":{"intValue":2}},
+                    {"key":"tier","value":{"stringValue":"gold"}}
+                  ]
+                },
+                {
+                  "timeUnixNano": 1700000005000000000,
+                  "observedTimeUnixNano": 1700000005000000000,
+                  "severityNumber": 17,
+                  "severityText": "ERROR",
+                  "body": {"stringValue":""},
+                  "attributes": [
+                    {"key":"session.id","value":{"stringValue":"6f1e4d2c-8b3a-4c5d-9e7f-0a1b2c3d4e5f"}},
+                    {"key":"event.name","value":{"stringValue":"js.exception"}},
+                    {"key":"exception.message","value":{"stringValue":"boom"}},
+                    {"key":"exception.stacktrace","value":{"stringValue":"at f (app.js:1:1)"}},
+                    {"key":"exception.type","value":{"stringValue":"TypeError"}},
+                    {"key":"expo.error.is_fatal","value":{"boolValue":false}},
+                    {"key":"expo.error.source","value":{"stringValue":"contract"}}
+                  ]
+                }
+              ]
+            }
+          ],
+          "schemaUrl": "https://opentelemetry.io/schemas/1.27.0"
+        }
+      ]
+    }
+  },
+  "platforms": {
+    "web": {
+      "resource": {"os.type":"browser","os.name":"MacIntel","telemetry.sdk.language":"javascript"},
+      "startupParams": {"exact.present.method":"raf","exact.since_process_start.ttr":0.1},
+      "launchNavigationParams": {"exact.nav.anchor":"activation"}
+    },
+    "apple": {
+      "resource": {"os.type":"darwin","os.name":"macOS","telemetry.sdk.language":"swift"},
+      "startupParams": {
+        "exact.phase.activate": 0.01,
+        "exact.phase.boot": 0.046,
+        "exact.phase.boot_wait": 0.001,
+        "exact.phase.present": 0.054,
+        "exact.phase.scene": 0.001,
+        "exact.present.method": "next_vsync",
+        "exact.since_process_start.tti": 0.204,
+        "exact.since_process_start.ttr": 0.104
+      },
+      "launchNavigationParams": {"exact.nav.anchor":"boot"}
+    },
+    "linux": {
+      "resource": {"os.type":"linux","os.name":"Linux","telemetry.sdk.language":"rust"},
+      "startupParams": {
+        "exact.phase.activate": 0.01,
+        "exact.phase.boot": 0.046,
+        "exact.phase.present": 0.054,
+        "exact.present.method": "modeset",
+        "exact.since_process_start.tti": 0.204,
+        "exact.since_process_start.ttr": 0.104
+      },
+      "launchNavigationParams": {"exact.nav.anchor":"boot"}
+    }
+  }
+}
