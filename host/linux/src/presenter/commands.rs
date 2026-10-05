@@ -66,7 +66,7 @@ impl<D: DataSource> Presenter<D> {
                 // Outside a bubbling event (a key's, focus's, the pointer's
                 // or a wheel's, which take theirs), nothing to prevent or stop.
                 "preventDefault" | "stopPropagation" => {}
-                // Exact Observe design §5.2: journal events for a launch module.
+                // Recorded in the journal for launch parts such as Observe.
                 n @ ("observe" | "observeAttributes" | "observeError") => {
                     crate::journal::host_command(n, &c.args)
                 }

@@ -1,7 +1,6 @@
-// Observe's queue on disk (Exact Observe design §4.5): SQLite, Observe's own
-// model — sessions, metrics, logs, and a dispatch cursor per signal — kept 7
-// days. Owned by this service, beside the app's other host state, never in
-// the app's own `app:/` storage.
+// Observe's on-disk queue in SQLite: sessions, metrics, logs, and a per-signal cursor
+// marking the last row sent. Rows are kept 7 days. The database lives with the host's
+// state, outside the app's `app:/` storage.
 import Foundation
 import SQLite3
 

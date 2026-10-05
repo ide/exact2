@@ -1,12 +1,10 @@
-// Module launch parts and their services for an Apple build (Exact Observe
-// design §4.6), split from build.mjs.
+// Builds module launch parts and their services for an Apple build.
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, resolve } from 'node:path';
 
-/** The app's launch parts, linked into the executable as one generated
- * SwiftPM target inside the package (as SwiftPM requires; built, never
- * committed): each module's `apple/launch/*.swift` and a registry of their
- * `ExactLaunchPart` types, in `launch` order. Returns its directory, or null. */
+/** Writes a generated SwiftPM target with each module's `apple/launch/*.swift`
+ * and a registry of their `ExactLaunchPart` types, in `launch` order. SwiftPM
+ * needs it inside the package. Returns its directory, or null if there are none. */
 export function writeLaunchParts(pkg, app) {
   const modules = app.launch;
   if (!modules.some(m => m.launch.length)) return null;
@@ -25,18 +23,17 @@ export function writeLaunchParts(pkg, app) {
   return dir;
 }
 
-/** Each launch module's service: its `apple/service/*.swift`, a dylib of its
- * own beside the module artifact, loaded by ExactKit when the launch part's
- * policy says (never at launch). */
+/** Each launch module's `apple/service/*.swift`, built as its own dylib.
+ * ExactKit loads it when the launch part's policy says, never during launch. */
 export const launchServices = (modules, buildDir) => modules.filter(m => m.service.length)
   .map(m => ({ name: m.name, load: `lib${m.name}_service.dylib`, built: resolve(buildDir, `lib${m.name}_service.dylib`), sources: m.service }));
 
 /** swiftc's arguments for a service dylib, before its target. */
 export const serviceArgs = svc => ['-parse-as-library', '-emit-library', '-O', '-swift-version', '5', '-module-name', `ExactService_${svc.name}`, ...svc.sources, '-lsqlite3', '-o', svc.built];
 
-/** The launch parts' budgets, checked on what was linked: text and data at
- * most 32 KiB, and nothing that runs before `launch()` is called (a static
- * initializer, an ObjC +load). Throws on a breach. */
+/** Throws unless the linked launch parts have at most 32 KiB of text and data
+ * and no static initializer or ObjC +load, which would run outside the timed
+ * `launch()` call. */
 export function auditLaunchParts(object, modules, read) {
   if (!existsSync(object)) return;
   const [, row] = (read('xcrun', ['size', object]).stdout ?? '').trim().split('\n');

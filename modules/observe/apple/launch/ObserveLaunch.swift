@@ -1,8 +1,6 @@
-// Observe's launch part (Exact Observe design §4.6): linked into the app's
-// executable, run at the app delegate's init. It does no I/O: it starts the
-// device and network caches, installs crash capture, keeps a small ring of
-// what it latched, and asks for its service — the part that stores and sends —
-// once startup is over.
+// Observe's launch part, run at the app delegate's init. It does no I/O. It installs
+// crash capture, starts tracking device and network state, records that state at
+// startup, and requests the service (which stores and sends) once startup is over.
 import ExactKit
 import Foundation
 import Network
@@ -29,13 +27,13 @@ public enum ObserveLaunch: ExactLaunchPart {
         ObserveCrash.install(directory: context.crashDirectory, session: session)
         startDeviceCaches()
         context.subscribe { event in
-            // The device and network state as of I, from the caches' history (§3.10).
+            // Record the device and network state as of the startup event's time.
             if event.kind == "startup" { ring.append(Data(deviceRecord(at: event.at).utf8)) }
         }
         context.requestService(.afterStartup, config: config, handoff: { ring.encoded() })
     }
 
-    /// Each change with its monotonic time; the record takes the last at or before `at`.
+    /// Device and network changes, timed by `CACurrentMediaTime` (seconds), oldest first.
     nonisolated(unsafe) static var history: [(at: Double, key: String, value: Any)] = []
 
     static func note(_ key: String, _ value: Any) {
@@ -55,7 +53,7 @@ public enum ObserveLaunch: ExactLaunchPart {
             note("expo.device.thermalState", thermal(ProcessInfo.processInfo.thermalState))
         }
         #if os(iOS)
-        // Monitoring on at launch, so the first reading is published before I.
+        // Enable monitoring at launch so the first battery reading arrives before startup ends.
         UIDevice.current.isBatteryMonitoringEnabled = true
         center.addObserver(forName: UIDevice.batteryLevelDidChangeNotification, object: nil, queue: .main) { _ in noteBattery() }
         center.addObserver(forName: UIDevice.batteryStateDidChangeNotification, object: nil, queue: .main) { _ in noteBattery() }
@@ -99,9 +97,9 @@ public enum ObserveLaunch: ExactLaunchPart {
         }
     }
 
-    /// `{"kind":"device","params":{…}}`: Observe's keys, each its last value at
-    /// or before `at`; a key never observed by then is absent. Plus whether any
-    /// changed between DFL-era and I (`exact.device.changed`).
+    /// `{"kind":"device","params":{…}}` with each key's last value at or before `at`.
+    /// Keys never observed by then are absent. `exact.device.changed` is set when the
+    /// thermal state or low power mode changed during launch.
     static func deviceRecord(at: Double) -> String {
         var params: [String: Any] = [:]
         var seen: [String: Int] = [:]

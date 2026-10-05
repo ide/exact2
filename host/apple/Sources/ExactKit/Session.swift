@@ -430,8 +430,8 @@ public final class ExactSession {
     // main instead, and runs after the slice lands, in order.
     private(set) var fillInFlight = false
     private var afterFill: [(generation: Int, work: () -> Void, cancelled: (() -> Void)?)] = []
-    /// The host's half of the settle ledger (Exact Observe design §3.5): work
-    /// the owner or the presenter still owes this session's screen.
+    /// Work the owner or presenter still owes this session's screen. The
+    /// screen has not settled while this is non-empty.
     var hostOutstanding: [String] {
         var out: [String] = []
         if fillInFlight || !afterFill.isEmpty { out.append("fill") }
@@ -1153,7 +1153,7 @@ public final class ExactSession {
                 }
                 if name == "relaunch" { app.deliver { [weak self] in self?.relaunch() }; continue }
                 if name.hasPrefix("observe") {
-                    ExactEvents.hostCommand(name, args) // Exact Observe design §5.2
+                    ExactEvents.hostCommand(name, args)
                     continue
                 }
                 if name == "haptic" {

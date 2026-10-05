@@ -36,7 +36,7 @@ public final class ExactWindow: UIWindow {
         }
         super.sendEvent(event)
         if ExactEnv.agentMode, event.type == .touches { TouchLog.record(event, in: self, gone: gone) }
-        // A navigation's cause (Exact Observe design §3.6): when the finger lifted, or a press.
+        // A navigation is timed from its input: a finger lifting or a press.
         if event.type == .presses || (event.allTouches ?? []).contains(where: { $0.phase == .ended }) {
             ExactLaunch.shared.input(at: event.timestamp)
         }

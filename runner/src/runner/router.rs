@@ -26,8 +26,8 @@ pub struct RouterChange {
     pub removed: Vec<u64>,
     /// Every retained visit's canonical location, in tab/stack order.
     pub visits: Vec<(u64, String)>,
-    /// The top's route pattern (`/post/:id`), the name a metric groups by
-    /// (Exact Observe design §3.6); empty when the table has no such route.
+    /// The top's route pattern (`/post/:id`), which navigation metrics group
+    /// by. Empty when the table has no such route.
     pub pattern: String,
     /// The top's bound parameters, in the table's order.
     pub params: Vec<(String, String)>,

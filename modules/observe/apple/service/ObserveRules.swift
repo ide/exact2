@@ -1,9 +1,7 @@
-// Observe's event rules (expo-app-metrics `LogEvents/*Validation.swift`,
-// `AttributeValidation.swift` on main), copied so a custom event means the
-// same thing from Exact: a name of 1–256 characters, trimmed, never `expo.`;
-// a body truncated to 4096 characters with "…"; a display name truncated to
-// 128; at most 128 attributes (alphabetical, the rest dropped and counted);
-// reserved keys (`expo.*`, `session.id`, `event.name`) and blank keys dropped.
+// Observe's custom-event validation, copied from expo-app-metrics
+// (`LogEvents/*Validation.swift`, `AttributeValidation.swift`) so events match upstream.
+// Attributes are kept in key order up to the limit. The rest, plus blank and
+// reserved keys, are dropped and counted.
 import Foundation
 
 enum ObserveRules {

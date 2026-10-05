@@ -1,23 +1,16 @@
-//! What the app is still doing (Exact Observe design §3.5): the runner's half
-//! of the settle ledger that time-to-interactive reads. Clockless and pure:
-//! the host stamps when it changes.
-//!
-//! Counted: requests in flight (minus device holds, which wait on a person),
-//! streams before their first message, resources showing a placeholder until
-//! their source can answer, compiled answers still to be asked again, armed
-//! `after` tasks due within [`STARTUP_TIMER_WINDOW_MS`] (load on appear),
-//! armed mutation `then`s, and mounted elements marked `aria-busy`. A resource whose current arguments failed is
-//! terminal, not outstanding, until something asks again.
+//! The runner's outstanding work: time-to-interactive (TTI) is reached when it
+//! is clear. It has no clock; the host timestamps the moment it clears.
+//! Device holds don't count because they wait on a person. A resource whose
+//! current arguments failed counts as done, not outstanding.
 
 use super::{Runner, Target};
 
 use crate::DataSource;
 
-/// An `after` task armed with at most this delay is startup work; a longer
-/// one (a promotion in a minute) is not.
+/// An `after` task armed with at most this delay counts as startup work.
 pub const STARTUP_TIMER_WINDOW_MS: f64 = 1000.0;
 
-/// The runner's outstanding work, by kind, named for the agent and the log.
+/// The runner's outstanding work, by kind.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Outstanding {
     /// Requests in flight, by resource or mutation name.
@@ -34,8 +27,7 @@ pub struct Outstanding {
     pub thens: Vec<String>,
     /// Resources whose current arguments failed: settled, but in error.
     pub failed: Vec<String>,
-    /// Mounted elements marked `aria-busy` (by test id, else view id): the
-    /// app's own word that a region is still loading.
+    /// Mounted elements marked `aria-busy`, by test id, else view id.
     pub busy: Vec<String>,
     /// The data source can answer.
     pub data_ready: bool,
@@ -44,8 +36,7 @@ pub struct Outstanding {
 }
 
 impl Outstanding {
-    /// `{"clear":…,"requests":[…],…}`: the agent's `outstanding` reply, and
-    /// what a host's TTI reads.
+    /// `{"clear":…,"requests":[…],…}`: the agent's `outstanding` reply.
     pub fn json(&self) -> String {
         let list = |name: &str, items: &[String], out: &mut String| {
             out.push_str(&format!(",\"{name}\":["));
@@ -131,7 +122,6 @@ impl<D: DataSource> Runner<D> {
                     .push(self.plan.str(self.plan.action(row.action).name).to_string());
             }
         }
-        // `aria-busy` on a mounted element: what the app says is not final.
         let mut stack: Vec<u32> = self.kernel.roots().into_iter().rev().collect();
         while let Some(id) = stack.pop() {
             let Some(node) = self.kernel.node(id) else {
