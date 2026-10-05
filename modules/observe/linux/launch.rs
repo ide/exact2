@@ -1,4 +1,5 @@
-// Observe on Linux, compiled into the app's executable (`contract::linux_launch_parts`).
+// Observe on Linux, compiled into the app's executable. The entry that
+// `contract::linux_entry` generates calls `launch_parts`, which runs `launch`.
 // `launch` does no I/O. It names the session, forwards journal events to a channel and
 // installs a panic hook. After the startup report, a background thread keeps the queue
 // (one bounded JSON file), records earlier crashes and sends rows in expo-observe's
@@ -217,8 +218,9 @@ fn string_attr(key: &str, value: &str) -> Value {
     json!({ "key": key, "value": { "stringValue": value } })
 }
 
-fn nanos(seconds: f64) -> String {
-    format!("{}000000", (seconds * 1000.0).round() as u64)
+/// A JSON number, as expo-observe sends it.
+fn nanos(seconds: f64) -> u64 {
+    (seconds * 1000.0).round() as u64 * 1_000_000
 }
 
 /// Observe's `otAnyValue`: a value it can't represent is dropped and counted.
@@ -350,6 +352,8 @@ struct Service {
     globals: Map<String, Value>,
     launch_route: Option<Value>,
     navigated: bool,
+    /// Reads the device state at TTI. Tests replace it.
+    device: fn() -> Map<String, Value>,
     due: Option<Instant>,
     gate: (Option<Instant>, u32),
 }
@@ -387,6 +391,7 @@ impl Service {
             globals: Map::new(),
             launch_route: None,
             navigated: false,
+            device,
             due: Some(Instant::now() + DEBOUNCE),
             gate: (None, 0),
             session,
@@ -582,11 +587,13 @@ impl Service {
         }
         // The first frame counts as shown when its synchronous modeset returns.
         phases.insert("exact.present.method".into(), "modeset".into());
-        phases.insert("exact.boot.path".into(), e["bootPath"].clone());
+        if let Some(path) = e["bootPath"].as_str() {
+            phases.insert("exact.boot.path".into(), path.into());
+        }
         if let Some(r) = e["processResolutionMs"].as_f64() {
             phases.insert("exact.launch.resolution_ms".into(), json!(r));
         }
-        let device = device();
+        let device = (self.device)();
         let launch = self.launch_type();
         for (name, value) in e["metrics"].as_object().into_iter().flatten() {
             let Some(value) = value.as_f64() else {
@@ -620,10 +627,10 @@ impl Service {
                     params.clone(),
                 );
             }
-            if let (Some(i), false, Some("settled")) = (
+            if let (Some(i), false, true) = (
                 marks["interactive"].as_f64(),
                 self.navigated,
-                e["tti"].as_str(),
+                e["metrics"]["timeToInteractive"].is_number(),
             ) {
                 self.metric(
                     "navigation",
@@ -672,8 +679,11 @@ impl Service {
             p => p.clone(),
         };
         params.extend(object(
-            json!({ "isAppLaunch": launch, "routeParams": route_params, "url": e["url"] }),
+            json!({ "isAppLaunch": launch, "routeParams": route_params }),
         ));
+        if !e["url"].is_null() {
+            params.insert("url".into(), e["url"].clone());
+        }
         params
     }
 

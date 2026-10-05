@@ -6,7 +6,7 @@
 // starts at an input within 1 s before it, else at the commit. A page hidden
 // during startup reports no further startup marks.
 // Events go to each launch module's web service, which receives earlier events first.
-import { inflight, Mutations, clock, After, Hosts, Routes, routeAt } from './rt.js';
+import { inflight, Mutations, clock, After, Hosts, Routes, routeAt, busy } from './rt.js';
 
 const STARTUP_TIMER_WINDOW_MS = 1000, TTI_TIMEOUT_MS = 30000;
 const events = [], services = [];
@@ -26,7 +26,7 @@ export function outstanding() {
   if (inflight.n > 0) out.push(`inflight:${inflight.n}`);
   for (const m of Mutations) if (Number.isFinite(m.due)) out.push(`thens:${m.name}`);
   for (const t of clock.timers) if (t.once && t.ms <= STARTUP_TIMER_WINDOW_MS) out.push(`oneShots:${t.ms}`);
-  for (const el of document.querySelectorAll('[aria-busy="true"]')) out.push(`busy:${el.getAttribute('data-testid') ?? el.id}`);
+  for (const id of busy()) out.push(`busy:${id}`);
   return out;
 }
 

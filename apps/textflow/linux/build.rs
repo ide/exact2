@@ -38,16 +38,15 @@ fn main() {
         .unwrap_or_else(|e| panic!("hatches: {e}"));
     std::fs::write(
         out_dir.join("entry.rs"),
-        format!(
-            "{}\n{}\n{hatches}fn main() {{ launch_parts(); std::process::exit({host}::{run}); }}\n",
-            contract::rust_entry(
-                "textflow_data::Textflow",
-                "textflow_data::Textflow::default()",
-                compat.inputs["rustMode"].as_str().unwrap()
-            )
-            .unwrap(),
-            contract::linux_launch_parts().unwrap_or_else(|e| panic!("launch parts: {e}"))
-        ),
+        contract::linux_entry(
+            "textflow_data::Textflow",
+            "textflow_data::Textflow::default()",
+            compat.inputs["rustMode"].as_str().unwrap(),
+            host,
+            &hatches,
+            run,
+        )
+        .unwrap_or_else(|e| panic!("entry: {e}")),
     )
     .unwrap();
 }

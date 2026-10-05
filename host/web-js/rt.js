@@ -397,6 +397,8 @@ let Ticket = 0;
 const sameReq = (a, b) => a && b && a.storage === b.storage && a.method === b.method && a.url === b.url && a.body === b.body && JSON.stringify(a.headers) === JSON.stringify(b.headers) && a.http === b.http;
 /** Requests in flight, for the agent's `clock settle`. */
 export const inflight = { n: 0 };
+/** Elements the app marks `aria-busy="true"` (still loading), by test id else id. */
+export const busy = () => [...document.querySelectorAll('[aria-busy="true"]')].map(el => el.getAttribute('data-testid') ?? el.id);
 function send(t, land) {
   Out.push(() => {
     inflight.n++; t.waiting = true;

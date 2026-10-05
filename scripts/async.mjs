@@ -108,8 +108,8 @@ export function glueWorkers(cores = availableParallelism(), load = loadavg()[0])
 // before the glue; `document-agent` fails here (QUEUE.md, "The page's frames drop to one a second")
 const LEFT_OUT = /^host\/web-js\/(bundle-size|document-agent)\.test\.mjs$/;
 export function glueTests(root) {
-  const files = ['host/web', 'host/web-js'].flatMap(dir => [...new Bun.Glob(`${dir}/**/*.test.{mjs,js}`).scanSync({ cwd: root, onlyFiles: true })])
-    .filter(file => !LEFT_OUT.test(file)).sort().map(file => `./${file}`);
+  const files = [...['host/web', 'host/web-js'].flatMap(dir => [...new Bun.Glob(`${dir}/**/*.test.{mjs,js}`).scanSync({ cwd: root, onlyFiles: true })]),
+    ...new Bun.Glob('modules/*/tests/*.test.mjs').scanSync({ cwd: root, onlyFiles: true })].filter(file => !LEFT_OUT.test(file)).sort().map(file => `./${file}`);
   // The glue lane is macOS: link.test reads Mach-O load commands with Apple tools.
   return [...files, './host/apple/link.test.mjs', ...['app-workspace', 'app-bake', 'app-apple', 'app-keychain', 'app-manifest', 'exact', 'push', 'agent', 'agent-launch', 'tamber-server', 'test-children', 'scale-check', 'tool-drive', 'help-parity', 'tamber-builds', 'tamber-scrub', 'tamber-dtcg', 'design-tool'].map(name => `./scripts/${name}.test.mjs`), './scripts/deploy-paths.test.mjs', './scripts/async-inputs.test.mjs', './scripts/coverage.test.mjs'];
 }
@@ -140,6 +140,7 @@ export function checks(sha, since, selection = {}) {
     ['boot', 'bun', ['scripts/boot.mjs']],
     // Every web host unit test (LLP 1012.001.000 D9; Charlie, 2026-09-30)
     // and the source capture fixtures, in the existing async glue step.
+    // Modules' JS tests (`modules/*/tests`) run here too.
     // Run the files in as many worker processes as the machine's idle cores allow when the step starts (`glueWorkers`)
     // A file that edits an app's sources runs after them, alone, since a page another file opens meanwhile would refuse
     // that app's build as stale

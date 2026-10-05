@@ -32,9 +32,9 @@ export const serviceArgs = svc => ['-parse-as-library', '-emit-library', '-O', '
 
 /** Throws unless the linked launch parts have at most 32 KiB of text and data
  * and no static initializer or ObjC +load, which would run outside the timed
- * `launch()` call. */
+ * `launch()` call, or if their object is missing and cannot be audited. */
 export function auditLaunchParts(object, modules, read) {
-  if (!existsSync(object)) return;
+  if (!existsSync(object)) throw new Error(`host/apple: module launch parts (app.json launch) cannot be audited: ${object} is missing`);
   const [, row] = (read('xcrun', ['size', object]).stdout ?? '').trim().split('\n');
   const [text, data] = (row ?? '').trim().split(/\s+/).map(Number);
   const sections = read('otool', ['-l', object]).stdout ?? '';

@@ -34,15 +34,24 @@ final class ObserveService {
         }
     }
 
-    init(config: [String: Any], handoff: Data) {
+    /// Crash records are read from here: the user's Caches directory, where ObserveCrash writes them.
+    let crashDirectory: String?
+
+    /// `root` and `clientId` are for tests: `root` holds the store and the crash records.
+    init(config: [String: Any], handoff: Data, root: URL? = nil, clientId fixedId: UUID? = nil) {
         self.config = config
         session = config["session"] as? String ?? UUID().uuidString
-        let defaults = UserDefaults.standard
-        let id = defaults.string(forKey: "expo.eas-client-id") ?? UUID().uuidString
-        defaults.set(id, forKey: "expo.eas-client-id")
-        clientId = UUID(uuidString: id) ?? UUID()
+        if let fixedId {
+            clientId = fixedId
+        } else {
+            let defaults = UserDefaults.standard
+            let id = defaults.string(forKey: "expo.eas-client-id") ?? UUID().uuidString
+            defaults.set(id, forKey: "expo.eas-client-id")
+            clientId = UUID(uuidString: id) ?? UUID()
+        }
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        store = ObserveStore(directory: base.appendingPathComponent("exact/\(config["app.CFBundleIdentifier"] as? String ?? Bundle.main.bundleIdentifier ?? "app")/observe", isDirectory: true))
+        store = ObserveStore(directory: root ?? base.appendingPathComponent("exact/\(config["app.CFBundleIdentifier"] as? String ?? Bundle.main.bundleIdentifier ?? "app")/observe", isDirectory: true))
+        crashDirectory = root?.path ?? NSSearchPathForDirectoriesInDomains(.cachesDirectory, .userDomainMask, true).first
         metadata = Self.metadata(config)
         for record in Self.records(handoff) {
             if record["kind"] as? String == "device" { device = record["params"] as? [String: Any] ?? [:] }
@@ -126,14 +135,16 @@ final class ObserveService {
         if let present = marks["present"] {
             store.addMetric(session: session, time: wall, category: "navigation", name: "cold_ttr", value: (present - boot) / 1000, route: route["route"] as? String, params: params)
         }
-        if let interactive = marks["interactive"], !navigatedBeforeStartup, ["settled", "failed", "declared"].contains(e["tti"] as? String ?? "") {
+        if let interactive = marks["interactive"], !navigatedBeforeStartup, (e["metrics"] as? [String: Any])?["timeToInteractive"] != nil {
             store.addMetric(session: session, time: wall, category: "navigation", name: "tti", value: (interactive - boot) / 1000, route: route["route"] as? String, params: params)
         }
     }
 
     /// Observe's navigation params, on top of the global attributes.
     func navigationParams(_ e: [String: Any], launch: Bool) -> [String: Any] {
-        globals.merging(["isAppLaunch": launch, "routeParams": e["routeParams"] ?? [:], "url": e["url"] ?? ""]) { $1 }
+        var params = globals.merging(["isAppLaunch": launch, "routeParams": e["routeParams"] ?? [:]]) { $1 }
+        if let url = e["url"] { params["url"] = url }
+        return params
     }
 
     /// Observe's `updates/updateDownloadTime`: from the first request to the update being staged.
@@ -148,7 +159,7 @@ final class ObserveService {
     func log(_ e: [String: Any], wall: Double, error: Bool) {
         guard let store else { return }
         if error {
-            var attrs: [String: Any] = ["expo.error.source": "reportedByUser", "expo.error.is_fatal": false,
+            var attrs: [String: Any] = ["expo.error.source": e["source"] as? String ?? "reportedByUser", "expo.error.is_fatal": false,
                                         "exception.type": e["type"] as? String ?? "Error", "exception.message": e["message"] as? String ?? ""]
             if let stack = e["stack"] as? String { attrs["exception.stacktrace"] = stack }
             store.addLog(session: session, time: wall, severity: "error", name: "js.exception", body: nil, attributes: attrs, dropped: 0)
@@ -166,7 +177,7 @@ final class ObserveService {
 
     /// Turns each pending ObserveCrash record into a `native.exception` log for the crashed session.
     func ingestCrashes() {
-        guard let store, let dir = NSSearchPathForDirectoriesInDomains(.cachesDirectory, .userDomainMask, true).first,
+        guard let store, let dir = crashDirectory,
               let files = try? FileManager.default.contentsOfDirectory(atPath: dir) else { return }
         for f in files where f.hasPrefix("exact-observe-pending-") && !f.contains(session) {
             let path = "\(dir)/\(f)"
@@ -213,19 +224,9 @@ final class ObserveService {
     /// Sends one signal's rows chunk by chunk until none are left or a send must wait.
     /// Follows expo-observe's `DispatchLoop.swift`.
     func send(_ signal: String, url: String, limit: Int, done: @escaping () -> Void) {
-        guard let store else { return done() }
-        let cursor = store.cursor(signal)
-        let rows = signal == "metrics"
-            ? store.rows("SELECT id, session, time, category, name, value, route, updateId, params FROM metrics WHERE id > ? ORDER BY id LIMIT ?", [cursor, limit])
-            : store.rows("SELECT id, session, time, severity, name, body, attributes, dropped FROM logs WHERE id > ? ORDER BY id LIMIT ?", [cursor, limit])
-        guard !rows.isEmpty, let highest = rows.last?.first as? Int64 else { return done() }
-        var sessions: [String: [String: Any]] = [:]
-        for r in rows { if let s = r[1] as? String, sessions[s] == nil { sessions[s] = store.metadata(s) } }
-        let id = clientId.uuidString.lowercased()
-        let body = signal == "metrics"
-            ? ObserveWire.metricsBody(rows, sessions: sessions, clientId: id)
-            : ObserveWire.logsBody(rows, sessions: sessions, clientId: id)
-        guard let data = try? JSONSerialization.data(withJSONObject: body), let endpoint = URL(string: url) else { return done() }
+        guard let store, let next = chunk(signal, limit: limit), let highest = next.rows.last?.first as? Int64,
+              let data = try? JSONSerialization.data(withJSONObject: next.body), let endpoint = URL(string: url) else { return done() }
+        let rows = next.rows
         var request = URLRequest(url: endpoint)
         request.httpMethod = "POST"
         request.httpBody = data
@@ -254,6 +255,22 @@ final class ObserveService {
                 }
             }
         }.resume()
+    }
+
+    /// The next unsent rows of a signal, up to `limit`, and their OTLP body.
+    func chunk(_ signal: String, limit: Int) -> (rows: [[Any?]], body: [String: Any])? {
+        guard let store else { return nil }
+        let cursor = store.cursor(signal)
+        let rows = signal == "metrics"
+            ? store.rows("SELECT id, session, time, category, name, value, route, updateId, params FROM metrics WHERE id > ? ORDER BY id LIMIT ?", [cursor, limit])
+            : store.rows("SELECT id, session, time, severity, name, body, attributes, dropped FROM logs WHERE id > ? ORDER BY id LIMIT ?", [cursor, limit])
+        guard !rows.isEmpty else { return nil }
+        var sessions: [String: [String: Any]] = [:]
+        for r in rows { if let s = r[1] as? String, sessions[s] == nil { sessions[s] = store.metadata(s) } }
+        let id = clientId.uuidString.lowercased()
+        return (rows, signal == "metrics"
+            ? ObserveWire.metricsBody(rows, sessions: sessions, clientId: id)
+            : ObserveWire.logsBody(rows, sessions: sessions, clientId: id))
     }
 
     /// Milliseconds to seconds, rounded to 0.1 ms, as a decimal so JSON prints it exactly.

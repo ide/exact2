@@ -119,7 +119,7 @@ fn startup_becomes_observes_metrics_on_its_wire() {
     );
     assert!(metrics.iter().all(|m| m["unit"] == "s"));
     let tti = &metrics[2]["gauge"]["dataPoints"][0];
-    assert_eq!(tti["timeUnixNano"], "1700000001000000000");
+    assert_eq!(tti["timeUnixNano"], 1_700_000_001_000_000_000u64);
     let params = tti["attributes"]
         .as_array()
         .unwrap()
