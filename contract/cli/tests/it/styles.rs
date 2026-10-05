@@ -1378,7 +1378,7 @@ component App
 fn css_native_interaction_gaps_are_named_precisely() {
     for (name, value, reason) in [
         ("resize", "vertical", "user-controlled box geometry"),
-        ("user-select", "all", "selection ownership"),
+        ("user-select", "contain", "selection ownership"),
         ("border", "1px dashed red", "native painters"),
         ("text-decoration", "underline wavy", "native text painters"),
     ] {
@@ -1388,6 +1388,8 @@ fn css_native_interaction_gaps_are_named_precisely() {
         assert!(!error.contains("unknown attribute"), "{error}");
     }
     contract::compile("component App\n  view\n    textarea rows=3 maxlength=5 resize=\"none\" user-select=\"none\"\n").unwrap();
+    // On iOS `text` and `all` offer the system Copy for the box's text.
+    contract::compile("component App\n  view\n    text \"x\" user-select=\"text\"\n").unwrap();
 }
 
 #[test]
