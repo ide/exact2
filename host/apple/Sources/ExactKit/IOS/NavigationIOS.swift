@@ -39,7 +39,7 @@ private final class RouteController: UIViewController {
     /// (" ", a title still loading) shows the bar with no words in it —
     /// UIKit draws a whitespace title as a pair of quotes.
     var hasBar: Bool { !(node.props["navigationTitle"] ?? "").isEmpty }
-    func configure(backHidden: Bool, press: @escaping (String) -> Void) {
+    func configure(backHidden: Bool, press: @escaping (String, UIBarButtonItem) -> Void) {
         let item = navigationItem
         // D6: the back button and its menu show only where leaving is the
         // app's to permit; a route that refuses it has none to tap.
@@ -57,7 +57,8 @@ private final class RouteController: UIViewController {
         if let target = node.props["navigationTrailing"], !target.isEmpty {
             let symbol = node.props["navigationTrailingSymbol"] ?? ""
             if item.rightBarButtonItem?.accessibilityIdentifier != "\(target)|\(symbol)" {
-                let button = UIBarButtonItem(image: UIImage(systemName: symbol), primaryAction: UIAction { _ in press(target) })
+                let button = UIBarButtonItem(image: UIImage(systemName: symbol))
+                button.primaryAction = UIAction(image: button.image) { [weak button] _ in if let button { press(target, button) } }
                 button.accessibilityIdentifier = "\(target)|\(symbol)"
                 item.rightBarButtonItem = button
             }
@@ -218,7 +219,7 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
         let c = controllers[node.id] ?? RouteController(node)
         controllers[node.id] = c
         c.mount()
-        c.configure(backHidden: !backPermitted(in: node)) { [weak self] target in self?.pressControl(named: target, in: node) }
+        c.configure(backHidden: !backPermitted(in: node)) { [weak self] target, item in self?.pressControl(named: target, in: node, from: item) }
         return c
     }
 
@@ -552,16 +553,19 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
     }
 
     /// A bar button presses the authored control the route names by HTML id
-    /// (anywhere, for a tab's control).
-    private func pressControl(named target: String, in route: NodeView?) {
+    /// (anywhere, for a tab's control). A popover it opens points at `item`,
+    /// the bar button, as UIKit's own bar button popovers do.
+    private func pressControl(named target: String, in route: NodeView?, from item: UIBarButtonItem? = nil) {
         guard let control = presenter.carrying("id").first(where: { node in
             node.props["id"] == target && (route.map { node === $0 || node.isDescendant(of: $0) } ?? true)
-                && node.handlers.contains("press") && !node.disabled
+                && (node.handlers.contains("press") || node.invokesConfirmation) && !node.disabled
         }) else {
             presenter.session?.log("navigationTrailing \"\(target)\" names no enabled control in its route")
             return
         }
-        presenter.press(control.id)
+        // As a tap on the control would: one that opens a confirmation or a
+        // popover (`popovertarget`, `commandfor`) opens it; else its press.
+        if presenter.menus.invokeConfirmation(control, anchor: item) != true { presenter.press(control.id) }
     }
 
     func willMount() { mounting = true }

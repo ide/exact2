@@ -270,13 +270,15 @@ final class MenuHost {
 
     /// A touch's press on a confirmation's (or a content popover's) invoker:
     /// open it. True when `node` invokes one, whether or not it could open now.
-    func invokeConfirmation(_ node: NodeView) -> Bool {
+    /// `anchor` is what a popover points at when not the invoker's own box
+    /// (a bar button that stands for it).
+    func invokeConfirmation(_ node: NodeView, anchor: UIBarButtonItem? = nil) -> Bool {
         if let pop = confirmation(invokedBy: node) {
-            _ = openConfirmation(from: node, popover: pop)
+            _ = openConfirmation(from: node, popover: pop, anchor: anchor)
             return true
         }
         if let pop = contentPopover(invokedBy: node) {
-            openContent(from: node, popover: pop)
+            openContent(from: node, popover: pop, anchor: anchor)
             return true
         }
         return false
@@ -302,7 +304,7 @@ final class MenuHost {
 
     private var shownContent: ContentPopover?
 
-    private func openContent(from source: NodeView, popover pop: NodeView) {
+    private func openContent(from source: NodeView, popover pop: NodeView, anchor: UIBarButtonItem? = nil) {
         if source.handlers.contains("press") { presenter?.press(source.id) }
         guard shownContent == nil, live(pop), source.window != nil else { return }
         var responder: UIResponder? = source
@@ -312,8 +314,7 @@ final class MenuHost {
         // Gone, it no longer holds the owner a waiting sheet needs (LLP 1035.001.000 D5).
         let shown = ContentPopover(pop: pop) { [weak self] in self?.shownContent = nil; self?.presenter?.navigation.settle() }
         guard let presentation = shown.popoverPresentationController else { return }
-        presentation.sourceView = source
-        presentation.sourceRect = source.bounds
+        anchorPopover(presentation, to: source, or: anchor)
         presentation.delegate = shown
         shownContent = shown
         controller.present(shown, animated: !ExactEnv.agentFreezes)
@@ -329,7 +330,7 @@ final class MenuHost {
         }
     }
 
-    private func openConfirmation(from source: NodeView, popover pop: NodeView) -> Bool {
+    private func openConfirmation(from source: NodeView, popover pop: NodeView, anchor: UIBarButtonItem? = nil) -> Bool {
         guard confirmation == nil, eligible(source), live(pop), source.window != nil else { return false }
         if isDialog(pop) && pop.props["closedby"] != "any" {
             presenter?.session?.log("dialog refused: native confirmation currently requires closedby=any")
@@ -340,13 +341,13 @@ final class MenuHost {
         // survived that action (no elapsed-time guess or successor id).
         if source.handlers.contains("press") { presenter?.press(source.id) }
         guard confirmation == nil, eligible(source), live(pop), source.window != nil,
-              let owner = build(source: source, pop: pop, modal: isDialog(pop)) else { return false }
+              let owner = build(source: source, pop: pop, modal: isDialog(pop), anchor: anchor) else { return false }
         return present(owner, from: source)
     }
 
     /// The alert for a dialog or confirmation popover's rows, or nil (and a
     /// log line) when they are not texts, actions and at most one cancel.
-    private func build(source: NodeView, pop: NodeView, modal: Bool) -> Confirmation? {
+    private func build(source: NodeView, pop: NodeView, modal: Bool, anchor: UIBarButtonItem? = nil) -> Confirmation? {
         let children = pop.container.subviews.compactMap { $0 as? NodeView }
         let actions = children.filter { $0.isButton && $0.handlers.contains("press") }
         let cancels = children.filter { $0.isButton && !$0.handlers.contains("press") && closes($0, pop) }
@@ -382,13 +383,21 @@ final class MenuHost {
         }
         if !modal {
             guard let presentation = owner.alert.popoverPresentationController else { return nil }
-            presentation.sourceView = source
             // From the invoker's box, with UIKit's arrow, as a sheet anchored
             // to a control is.
-            presentation.sourceRect = source.bounds
+            anchorPopover(presentation, to: source, or: anchor)
             presentation.delegate = owner
         }
         return owner
+    }
+
+    private func anchorPopover(_ presentation: UIPopoverPresentationController, to source: NodeView, or anchor: UIBarButtonItem?) {
+        if let anchor {
+            presentation.sourceItem = anchor
+        } else {
+            presentation.sourceView = source
+            presentation.sourceRect = source.bounds
+        }
     }
 
     @discardableResult
