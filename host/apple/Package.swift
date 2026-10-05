@@ -13,8 +13,8 @@ import Foundation
 let libDir = ProcessInfo.processInfo.environment["EXACT_LIB_DIR"] ?? (Context.packageDirectory + "/../../target/host-dev")
 let libName = ProcessInfo.processInfo.environment["EXACT_LIB"] ?? "caltrain_apple"
 
-// The app's module launch parts (Exact Observe design §4.6): `build.mjs`
-// generates their target when the manifest names any in `launch`.
+// The app's module launch parts. `build.mjs` generates this target when the
+// manifest's `launch` names any; otherwise the empty default is used.
 let launchParts = ProcessInfo.processInfo.environment["EXACT_LAUNCH_PARTS"] ?? "Sources/ExactLaunchParts"
 
 let composition = ProcessInfo.processInfo.environment["EXACT_APP_COMPOSITION"] ?? "embedded"
@@ -45,7 +45,7 @@ let testing = ProcessInfo.processInfo.environment["EXACT_TESTS"] == "1"
 
 let core: [Target] = [
     .systemLibrary(name: "CExact", path: "Sources/CExact"),
-    // The launch constructor (L, the process age, prewarm): C, so it runs before `main`.
+    // C, so its constructor runs before `main` and can read the process start and prewarm flag.
     .target(name: "CExactLaunch", path: "Sources/CExactLaunch"),
     .target(
         name: "ExactKit",

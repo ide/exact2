@@ -292,8 +292,7 @@ fn a_response_that_is_not_an_event_stream_ends_it() {
     assert_eq!(value(&r, "progress"), Value::Number(-2.));
 }
 
-/// The settle ledger (Exact Observe design §3.5) counts a stream once, as a
-/// stream, until its first message; then nothing is outstanding.
+/// A stream is outstanding once, as a stream, until its first message.
 #[test]
 fn outstanding_counts_a_stream_until_its_first_message() {
     let mut r = boot();
@@ -326,8 +325,7 @@ fn outstanding_counts_a_failed_resource_as_settled() {
     assert!(out.is_clear(), "{out:?}");
 }
 
-/// Load on appear: a short `after` task is startup work until it fires; a
-/// long one (a promotion in a minute) never gates.
+/// A short `after` task is outstanding until it fires; a long one never is.
 #[test]
 fn outstanding_counts_only_short_one_shot_tasks() {
     let mut b = PlanBuilder::new(exact_kernel::SCHEMA_DIGEST, 1);
