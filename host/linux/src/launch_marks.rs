@@ -33,7 +33,7 @@ pub fn boottime() -> f64 {
 }
 
 /// Converts a `CLOCK_MONOTONIC` instant, such as a DRM flip's, to BOOTTIME seconds.
-pub fn monotonic_to_boottime(t: Duration) -> f64 {
+fn monotonic_to_boottime(t: Duration) -> f64 {
     t.as_secs_f64() + (boottime() - clock(libc::CLOCK_MONOTONIC))
 }
 
@@ -116,10 +116,9 @@ impl LaunchMarks {
 
     /// A flip completed at `at` (`CLOCK_MONOTONIC`). If nothing is outstanding
     /// and the data module is active, TTI is this flip's time.
-    pub fn flipped(&mut self, at: Duration, ready: Option<&[String]>) {
+    pub fn flipped(&mut self, at: Duration, outstanding: &[String]) {
         self.changed = false;
-        if self.outcome.is_none() && ready.is_some_and(|r| r.is_empty()) && self.activated.is_some()
-        {
+        if self.outcome.is_none() && outstanding.is_empty() && self.activated.is_some() {
             self.interactive = Some(monotonic_to_boottime(at));
             self.outcome = Some("settled");
         }
@@ -133,22 +132,21 @@ impl LaunchMarks {
     /// The end of a loop turn, with the outstanding work. TTI settles here when
     /// nothing is outstanding and no submitted frame awaits its flip.
     pub fn turn(&mut self, outstanding: &[String]) {
-        if self.outcome.is_some() || self.present.is_none() {
+        let (None, Some(present)) = (self.outcome, self.present) else {
             return;
-        }
+        };
         let line = outstanding.join(", ");
-        if self
-            .trace
-            .last()
-            .map(|l| !l.ends_with(&format!("[{line}]")))
-            .unwrap_or(true)
-            && self.trace.len() < 32
+        if self.trace.len() < 32
+            && self
+                .trace
+                .last()
+                .is_none_or(|l| !l.ends_with(&format!("[{line}]")))
         {
             let at = self.process.map_or(0.0, |p| (boottime() - p) * 1000.0);
             self.trace.push(format!("{at:.1} [{line}]"));
         }
         if outstanding.is_empty() && self.activated.is_some() && !self.changed {
-            self.interactive = Some(boottime().max(self.present.unwrap_or(0.0)));
+            self.interactive = Some(boottime().max(present));
             self.outcome = Some("settled");
         }
     }
@@ -178,9 +176,7 @@ impl LaunchMarks {
         };
         metric("coldLaunchTime", self.launch_end, self.process);
         metric("timeToFirstRender", self.present, self.launch_end);
-        if self.outcome == Some("settled") {
-            metric("timeToInteractive", self.interactive, self.launch_end);
-        }
+        metric("timeToInteractive", self.interactive, self.launch_end);
         let mut marks = Map::new();
         if let Some(p) = self.process {
             for (name, at) in [
