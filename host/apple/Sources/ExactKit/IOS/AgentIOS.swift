@@ -950,7 +950,7 @@ extension Agent {
                 else if let f = v.field { if !f.isFirstResponder { _ = f.becomeFirstResponder() } }
                 else if v.canBecomeFirstResponder, !v.isFirstResponder { _ = v.becomeFirstResponder() }
             }
-            let focus = v.field != nil || v.textArea != nil || v.isFirstResponder || v.handlers.contains("press") ? v : nil
+            let focus = v.field != nil || v.textArea != nil || v.isFirstResponder || v.activatable ? v : nil
             // The release's `keyup` handlers at the focus (#140): after the
             // down, or when a held key comes up. A modifier's own keydown
             // holds it and its keyup no longer does, as DOM's.
@@ -1002,7 +1002,7 @@ extension Agent {
                     else if Agent.caretKey(name, in: f) {} else if types { f.insertText(name) }
                     f.heard = nil
                 } else if presenter.controls.radioKey(focus, name, held: held) { // x2apps survey #2
-                } else if focus.handlers.contains("press") || focus.defaultLink != nil, name == "Enter" || (name == " " && focus.props["href"] == nil) { presenter.press(focus.id) }
+                } else if focus.activatable, name == "Enter" || (name == " " && focus.props["href"] == nil) { presenter.press(focus.id) }
             }
             return ["typed": Int(v.id), "key": key, "value": Agent.shownValue(v.textArea?.text ?? v.field?.text ?? "", of: v), "delivery": "recognized"]
         }
