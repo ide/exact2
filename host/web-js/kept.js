@@ -72,10 +72,15 @@ export const Kept = {
   on: undefined,
   /** What storage holds, by resource name (read once, at boot). */
   held: new Map(),
+  /** The page was reloaded (the browser's reload, Safari's pull to
+   * reload): a reload asks for the page anew, so it paints what arrives,
+   * never what was kept. Fresh answers are still kept for the next load. */
+  reloaded: false,
   /** This commit's writes: [name, text] or [name, null], and `null` to forget every one. */
   writes: [],
   load(on) {
     this.on = on;
+    try { this.reloaded = performance.getEntriesByType("navigation")[0]?.type === "reload"; } catch {}
     if (on) try { for (let k = 0; k < localStorage.length; k++) { const n = localStorage.key(k); if (n.startsWith(PREFIX)) this.held.set(n.slice(PREFIX.length), localStorage.getItem(n)); } } catch {}
   },
   /** The answer kept for `name` from `source`: [args, value], the value
@@ -83,7 +88,7 @@ export const Kept = {
    * codes, concatenated), else nothing. */
   seed(name, source, type, params, driven) {
     if (this.on === undefined) this.load(!driven());
-    const e = this.on && this.held.get(name);
+    const e = this.on && !this.reloaded && this.held.get(name);
     if (!e || !e.startsWith(source + "|")) return;
     try {
       const [a, v] = e.slice(source.length + 1).split("|"), args = value(a), val = value(v);
