@@ -565,7 +565,7 @@ func finishLaunching() {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
             print("painted \(session.firstDrawMs.map { String(format: "%.1f", $0) } ?? "?") ms")
             print("stamps: " + ExactEnv.stamps.map { "\($0.0) \(String(format: "%.1f", $0.1))" }.joined(separator: " · ") + " · first layout \(session.firstLayoutMs.map { String(format: "%.1f", $0) } ?? "?") · first draw \(session.firstDrawMs.map { String(format: "%.1f", $0) } ?? "?")")
-            print("observe: \(ExactLaunch.shared.smokeLine(for: session))")
+            print("observe: \(ExactLaunch.shared.smokeLine())")
             print("gpu: \(session.gpuStatus)")
             print("web: \(session.webStatus)")
             print("smoke ok")

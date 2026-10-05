@@ -31,39 +31,33 @@ impl DataSource for NoData {
     }
 }
 
-#[test]
-fn custom_events_are_commands_in_order() {
-    let mut r = Runner::boot(
-        contract::compile(APP).unwrap(),
+fn boot(source: &str) -> Runner<NoData> {
+    Runner::boot(
+        contract::compile(source).unwrap(),
         NoData,
         exact_kernel::Kernel::with_monospace(),
         Default::default(),
         "/",
     )
-    .unwrap();
+    .unwrap()
+}
+
+#[test]
+fn custom_events_are_commands_in_order() {
+    let mut r = boot(APP);
     r.take_commands();
     r.act("checkout", vec![Value::Number(2.)]).unwrap();
-    let names: Vec<_> = r
-        .take_commands()
-        .into_iter()
-        .map(|c| (c.name, c.args.len()))
+    let commands = r.take_commands();
+    let names: Vec<_> = commands
+        .iter()
+        .map(|c| (c.name.as_str(), c.args.len()))
         .collect();
     assert_eq!(
         names,
-        [
-            ("observeAttributes".to_string(), 2),
-            ("observe".to_string(), 6),
-            ("observe".to_string(), 2)
-        ]
+        [("observeAttributes", 2), ("observe", 6), ("observe", 2)]
     );
-    r.act("checkout", vec![Value::Number(2.)]).unwrap();
-    let observed = r
-        .take_commands()
-        .into_iter()
-        .find(|c| c.name == "observe")
-        .unwrap();
     assert_eq!(
-        observed.args,
+        commands[1].args,
         vec![
             Value::str("checkout.completed"),
             Value::str("info"),
@@ -115,14 +109,7 @@ const SCREEN: &str = r#"component App
 /// longer busy.
 #[test]
 fn aria_busy_holds_the_ledger_until_cleared() {
-    let mut r = Runner::boot(
-        contract::compile(SCREEN).unwrap(),
-        NoData,
-        exact_kernel::Kernel::with_monospace(),
-        Default::default(),
-        "/",
-    )
-    .unwrap();
+    let mut r = boot(SCREEN);
     assert_eq!(
         r.outstanding().busy,
         vec!["forecast".to_string()],
