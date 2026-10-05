@@ -419,8 +419,8 @@ public final class ExactSession {
     // main instead, and runs after the slice lands, in order.
     private(set) var fillInFlight = false
     private var afterFill: [() -> Void] = []
-    /// The host's half of the settle ledger (Exact Observe design §3.5): work
-    /// the owner or the presenter still owes this session's screen.
+    /// Work the owner or presenter still owes this session's screen. The
+    /// screen has not settled while this is non-empty.
     var hostOutstanding: [String] {
         var out: [String] = []
         if fillInFlight || !afterFill.isEmpty { out.append("fill") }
@@ -1122,7 +1122,7 @@ public final class ExactSession {
                 }
                 if name == "relaunch" { app.deliver { [weak self] in self?.relaunch() }; continue }
                 if name.hasPrefix("observe") {
-                    ExactEvents.hostCommand(name, args) // Exact Observe design §5.2
+                    ExactEvents.hostCommand(name, args)
                     continue
                 }
                 if name == "haptic" {
@@ -1280,10 +1280,7 @@ public final class ExactSession {
 
     /// Drawn once per launch; the same across a dev reload's new runner.
     let launchPlace = LaunchPlace()
-    /// The machine zone's offset now, told when it is not the one last told:
-    /// at boot and before each advance, so a DST change or a new zone reaches
-    /// the timer that fires after it (habits F6). Under the agent, the
-    /// drive's zone moves it instead (`tellAgentOffset`).
+    /// The zone offset last sent to the runtime by `followOffset`, in minutes.
     var toldOffset: Double?
     /// @ref LLP 1061 D5 — told after every boot, as the date is, and on each
     /// change: in the same main-thread turn as the boot batch, so the first
