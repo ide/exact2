@@ -469,6 +469,21 @@ export function platformCrateKind(dir, kind) {
     ? (existsSync(resolve(dir, kind, 'Cargo.toml')) ? kind : 'apple') : kind;
 }
 
+/** The modules app.json `launch` names, in order, each from the app's
+ * `modules/<name>/` else exact2's: `apple/launch/*.swift` links into the
+ * executable, `apple/service/*.swift` builds its service dylib, and `web` is
+ * its `web/service.js` or null. */
+export function launchModules(dir, manifest) {
+  return (manifest.launch ?? []).map((name) => {
+    const own = resolve(dir, 'modules', name), shared = resolve(ROOT, 'modules', name);
+    const base = existsSync(own) ? own : shared;
+    if (!existsSync(base)) throw new Error(`app.json launch: no module ${name} (neither ${own} nor ${shared})`);
+    const swift = (sub) => { const d = resolve(base, sub); return existsSync(d) ? readdirSync(d).filter(f => f.endsWith('.swift')).sort().map(f => resolve(d, f)) : []; };
+    const web = resolve(base, 'web/service.js');
+    return { name, launch: swift('apple/launch'), service: swift('apple/service'), web: existsSync(web) ? web : null };
+  });
+}
+
 /** Platform-specific source folder; shared Apple modules remain valid for existing apps. */
 export function moduleDirectory(dir, platform) {
   const own = resolve(dir, platform, 'modules');
@@ -568,18 +583,8 @@ export function resolveApp(nameOrCrate) {
     get modules() {
       return { ...this.modulesFor('apple'), web: this.modulesFor('web').web };
     },
-    /** Module launch parts in `launch` order, from the app's `modules/<name>/`
-     * else exact2's. `apple/launch/*.swift` links into the executable and
-     * `apple/service/*.swift` builds the module's service dylib. */
-    get launch() {
-      return (manifest.launch ?? []).map((name) => {
-        const own = resolve(dir, 'modules', name), shared = resolve(ROOT, 'modules', name);
-        const base = existsSync(own) ? own : shared;
-        if (!existsSync(base)) throw new Error(`app.json launch: no module ${name} (neither ${own} nor ${shared})`);
-        const swift = (sub) => { const d = resolve(base, sub); return existsSync(d) ? readdirSync(d).filter(f => f.endsWith('.swift')).sort().map(f => resolve(d, f)) : []; };
-        return { name, launch: swift('apple/launch'), service: swift('apple/service') };
-      });
-    },
+    /** Module launch parts in `launch` order (launchModules). */
+    get launch() { return launchModules(dir, manifest); },
     /** The manifest, validated; the derived defaults when the app has none. */
     manifest,
     /** The app identity, reverse-DNS: the bundle id on every platform (`build.mjs:48–49` derived it from the crate name before the manifest). */

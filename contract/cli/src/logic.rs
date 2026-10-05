@@ -36,11 +36,26 @@ pub fn rust_entry(data: &str, constructor: &str, mode: &str) -> Result<String, S
     }
 }
 
-/// Generates a Linux entry's `launch_parts()`, which `main` calls before the
-/// host starts. Each `app.json` `launch` module with a `linux/launch.rs` (the
-/// app's `modules/` first, then exact2's) becomes a module of the executable,
-/// called with its `moduleConfig`. Run from the app's Linux build script.
-pub fn linux_launch_parts() -> Result<String, String> {
+/// A Linux app's whole `entry.rs`: [`rust_entry`], its `launch_parts()`, and
+/// a `main` that runs them before `host` (`exact_linux` or
+/// `exact_linux_update`). Run from the app's Linux build script.
+pub fn linux_entry(
+    data: &str,
+    constructor: &str,
+    mode: &str,
+    host: &str,
+) -> Result<String, String> {
+    Ok(format!(
+        "{}\n{}\nfn main() {{ launch_parts(); std::process::exit({host}::run::<AppData>(PLAN, COMPAT)); }}\n",
+        rust_entry(data, constructor, mode)?,
+        launch_parts()?
+    ))
+}
+
+/// Each `app.json` `launch` module with a `linux/launch.rs` (the app's
+/// `modules/` first, then exact2's) becomes a module of the executable,
+/// called with its `moduleConfig` before the host starts.
+fn launch_parts() -> Result<String, String> {
     let crate_dir = std::env::var_os("CARGO_MANIFEST_DIR").ok_or("not run by cargo")?;
     let app_dir = std::path::Path::new(&crate_dir).join("..");
     let manifest = crate::Manifest::read(&app_dir)?;
@@ -56,10 +71,11 @@ pub fn linux_launch_parts() -> Result<String, String> {
         let name = name
             .as_str()
             .ok_or("app.json launch: a module name is a string")?;
-        if name.is_empty()
+        // As `scripts/app.schema.json`: `^[a-z][a-z0-9]*$`.
+        if !name.starts_with(|c: char| c.is_ascii_lowercase())
             || !name
                 .chars()
-                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
         {
             return Err(format!("app.json launch: invalid module name {name:?}"));
         }
@@ -76,7 +92,7 @@ pub fn linux_launch_parts() -> Result<String, String> {
             .cloned()
             .unwrap_or_else(|| serde_json::json!({}))
             .to_string();
-        let ident = format!("launch_{}", name.replace('-', "_"));
+        let ident = format!("launch_{name}");
         mods.push_str(&format!(
             "#[allow(missing_docs, dead_code)]\nmod {ident} {{ include!({:?}); }}\n",
             file.canonicalize().map_err(|e| e.to_string())?

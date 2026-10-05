@@ -35,16 +35,13 @@ fn main() {
     };
     std::fs::write(
         out_dir.join("entry.rs"),
-        format!(
-            "{}\n{}\nfn main() {{ launch_parts(); std::process::exit({host}::run::<AppData>(PLAN, COMPAT)); }}\n",
-            contract::rust_entry(
-                "shared_elements_data::Shared",
-                "shared_elements_data::Shared",
-                compat.inputs["rustMode"].as_str().unwrap()
-            )
-            .unwrap(),
-            contract::linux_launch_parts().unwrap_or_else(|e| panic!("launch parts: {e}"))
-        ),
+        contract::linux_entry(
+            "shared_elements_data::Shared",
+            "shared_elements_data::Shared",
+            compat.inputs["rustMode"].as_str().unwrap(),
+            host,
+        )
+        .unwrap_or_else(|e| panic!("entry: {e}")),
     )
     .unwrap();
 }

@@ -392,6 +392,8 @@ const sameReq = (a, b) => a && b && a.storage === b.storage && a.method === b.me
 /** Run a request after the commit publishes; `land(outcome)` on reply. */
 /** Requests in flight, for the agent's `clock settle`. */
 export const inflight = { n: 0 };
+/** Elements the app marks `aria-busy="true"` (still loading), by test id else id. */
+export const busy = () => [...document.querySelectorAll('[aria-busy="true"]')].map(el => el.getAttribute('data-testid') ?? el.id);
 function send(t, land) {
   Out.push(() => {
     inflight.n++; t.waiting = true;
