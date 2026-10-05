@@ -36,8 +36,8 @@ use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
 
 /// The host's callback for a finished check: called on the check's thread
-/// with `ctx` and one UTF-8 line — `current` · `staged seq N` · `refused: …`
-/// — that lives only for the call.
+/// with `ctx` and UTF-8 JSON alive only for the call, `{"line":…}` plus,
+/// when a check fetched and staged files, `"download":{"seq","files","ms","entry"}`.
 pub type DoneFn = extern "C" fn(ctx: *mut c_void, line: *const u8, len: usize);
 
 /// The head is a pointer card (LLP 1026 D11); a file is a plan or an asset.
@@ -407,10 +407,21 @@ pub fn check(done: Option<DoneFn>, ctx: *mut c_void) -> u32 {
     let spawned = std::thread::Builder::new()
         .name("exact-update".into())
         .spawn(move || {
-            let line = run_check();
+            let (line, download) = run_check();
             lock(&SNAPSHOT).checking = false;
+            let mut json = format!("{{\"line\":{}", quote(&line));
+            if let Some(d) = download {
+                json.push_str(&format!(
+                    ",\"download\":{{\"seq\":{},\"files\":{},\"ms\":{:.1},\"entry\":{}}}",
+                    d.seq,
+                    d.files,
+                    d.ms,
+                    quote(&d.entry)
+                ));
+            }
+            json.push('}');
             if let Some(f) = done {
-                f(ctx as *mut c_void, line.as_ptr(), line.len());
+                f(ctx as *mut c_void, json.as_ptr(), json.len());
             }
         });
     if spawned.is_err() {
@@ -420,14 +431,24 @@ pub fn check(done: Option<DoneFn>, ctx: *mut c_void) -> u32 {
     0
 }
 
+/// A staged check's download: timed from the first blob request (any URL
+/// but the head) to staging.
+#[derive(Debug, PartialEq)]
+struct Download {
+    seq: u64,
+    files: usize,
+    ms: f64,
+    entry: String,
+}
+
 /// One check, on the calling thread, over ibex2's transport: the outcome's
-/// line. Every URL the store asks for is bounded — the head at its
-/// envelope ceiling, a file at the plan's — while the bytes arrive.
-fn run_check() -> String {
+/// line and download. Every URL the store asks for is bounded — the head at
+/// its envelope ceiling, a file at the plan's — while the bytes arrive.
+fn run_check() -> (String, Option<Download>) {
     run_check_with(ibex2::transport::default_transport().as_ref())
 }
 
-fn run_check_with(transport: &dyn ibex2::stdlib::fetch::Transport) -> String {
+fn run_check_with(transport: &dyn ibex2::stdlib::fetch::Transport) -> (String, Option<Download>) {
     let request = {
         let guard = lock(&CLIENT);
         guard
@@ -435,8 +456,6 @@ fn run_check_with(transport: &dyn ibex2::stdlib::fetch::Transport) -> String {
             .ok_or_else(|| "no store is open".to_string())
             .and_then(Client::begin_check)
     };
-    // The download is timed from the first blob request (any URL but the head)
-    // to staging. A check that fetched no blob reports no download.
     let mut first_blob: Option<std::time::Instant> = None;
     let mut blobs = 0usize;
     let downloaded = request.map(|request| {
@@ -455,17 +474,23 @@ fn run_check_with(transport: &dyn ibex2::stdlib::fetch::Transport) -> String {
         (_, Err(why)) => exact_update::Outcome::Refused(why),
         (None, _) => exact_update::Outcome::Refused("no store is open".into()),
     };
+    let download = match (&outcome, first_blob) {
+        (exact_update::Outcome::Staged { entry, seq }, Some(started)) => Some(Download {
+            seq: *seq,
+            files: blobs,
+            ms: started.elapsed().as_secs_f64() * 1000.0,
+            entry: entry.clone(),
+        }),
+        _ => None,
+    };
     let mut line = outcome.to_string();
-    if let (exact_update::Outcome::Staged { entry, .. }, Some(started)) = (&outcome, first_blob) {
-        line.push_str(&format!(
-            "; downloaded {blobs} files in {:.1} ms; entry {entry}",
-            started.elapsed().as_secs_f64() * 1000.0
-        ));
+    if let Some(d) = &download {
+        line.push_str(&format!("; downloaded {} files in {:.1} ms", d.files, d.ms));
     }
     let mut snap = lock(&SNAPSHOT);
     snap.status = guard.as_ref().map(Client::status);
     snap.line = Some(format!("exact update: {line}"));
-    line
+    (line, download)
 }
 
 /// Fetch one update object. Update cards are same-origin, immutable objects;
@@ -738,12 +763,14 @@ mod tests {
             let response = responsive_rx.recv_timeout(std::time::Duration::from_secs(2));
             release_tx.send(()).unwrap();
             foreground.join().unwrap();
-            let line = checking.join().unwrap();
+            let (line, download) = checking.join().unwrap();
             assert!(
                 line.starts_with("staged seq 2; downloaded 1 files in "),
                 "{line}"
             );
-            assert!(line.contains(" ms; entry "), "{line}");
+            let download = download.unwrap();
+            assert_eq!((download.seq, download.files), (2, 1));
+            assert!(download.ms >= 0.0 && !download.entry.is_empty());
             assert_eq!(response.unwrap(), (1, false));
             let mut delivery = Delivery::default();
             status_into(&mut delivery);
