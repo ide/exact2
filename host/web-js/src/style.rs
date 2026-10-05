@@ -553,10 +553,8 @@ pub fn style_writes(id: u16, timeline: bool) -> Result<Vec<Write>, String> {
         | StyleId::ScrollEdgeEffect
         | StyleId::HoverEffect
         | StyleId::SmartInvert
-        // Apple's button style is an attribute (rows.rs `style_row`), and a
-        // glass container groups only native glass.
-        | StyleId::ExactAppleButtonStyle
-        | StyleId::ExactAppleGlassContainer => vec![],
+        // Apple's button style is an attribute (rows.rs `style_row`).
+        | StyleId::ExactAppleButtonStyle => vec![],
         // @ref LLP 1055 D13 — the browser starts an animation at insertion;
         // this target does not hold one for its row (a declared deviation).
         StyleId::AnimationTrigger => vec![],
