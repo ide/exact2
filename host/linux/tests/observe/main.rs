@@ -7,4 +7,6 @@ mod observe {
 
     #[cfg(test)]
     mod tests;
+    #[cfg(test)]
+    mod wire;
 }

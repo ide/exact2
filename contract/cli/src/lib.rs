@@ -32,7 +32,7 @@ pub use contract_types::strings::Strings;
 /// The data seam, re-exported for an app's build script: the bake asks the
 /// crate its grants for the compatibility id (`Caltrain.grants()`).
 pub use exact_runner::DataSource;
-pub use logic::{linux_launch_parts, rust_entry, web_linked, web_rust_mode};
+pub use logic::{linux_entry, rust_entry, web_linked, web_rust_mode};
 pub use manifest::Manifest;
 pub use map::{plan_digest, SourceMap};
 pub use resolve::Origin;

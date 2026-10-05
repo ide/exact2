@@ -44,7 +44,7 @@ enum ObserveWire {
         }
         if let d = value as? [String: Any] {
             var pairs: [[String: Any]] = []
-            for (k, v) in d { guard let m = anyValue(v) else { return nil }; pairs.append(["key": k, "value": m]) }
+            for (k, v) in d.sorted(by: { $0.key < $1.key }) { guard let m = anyValue(v) else { return nil }; pairs.append(["key": k, "value": m]) }
             return ["kvlistValue": ["values": pairs]]
         }
         return nil

@@ -68,7 +68,7 @@ function checks(sha) {
   if (TIER === 2) return TIER_2;
   const lane = laneTests();
   const apple = git(['diff', '--name-only', `${sha}^`, sha, '--', 'host/apple'], WT) !== '';
-  const glue = [...new Bun.Glob('host/web/**/*.test.mjs').scanSync({ cwd: WT, onlyFiles: true })].sort().map(file => `./${file}`);
+  const glue = ['host/web/**/*.test.mjs', 'modules/*/tests/*.test.mjs'].flatMap(g => [...new Bun.Glob(g).scanSync({ cwd: WT, onlyFiles: true })]).sort().map(file => `./${file}`);
   return [
     ['build', 'cargo', ['build', ...workspace, '--all-targets', '--keep-going']],
     ['test', 'cargo', ['test', ...workspace, '--lib', '--bins', '--tests', '--no-fail-fast']],
@@ -79,6 +79,7 @@ function checks(sha) {
     ['boot', 'bun', ['scripts/boot.mjs']],
     // Every web host unit test (LLP 1012.001.000 D9; Charlie, 2026-09-30),
     // discovered by one glob so a new test cannot sit outside the lane.
+    // Modules' JS tests (`modules/*/tests`) run here too.
     ['glue', 'env', ['EXACT_GLUE_FAST=1', 'bun', 'test', ...glue]],
     // This document proof builds Weatherlight's wasm target. Keep it out of
     // glue's seconds loop while retaining it in the asynchronous lane.
