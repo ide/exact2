@@ -941,6 +941,12 @@ impl<D: DataSource> Host<D> {
         self.runner.present_frames(on);
     }
 
+    /// Back from the background at `now_ms`: timers that missed beats fire
+    /// once ([`exact_runner::Runner::coalesce_missed`]).
+    pub fn coalesce_missed(&mut self, now_ms: f64) {
+        self.runner.coalesce_missed(now_ms);
+    }
+
     /// A presented frame (LLP 1073 D2): the timers due by `now_ms`, then
     /// every frame task once at it, in one batch as [`Host::advance`]'s.
     pub fn frame(&mut self, now_ms: f64) -> String {
