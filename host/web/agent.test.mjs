@@ -600,15 +600,18 @@ test('page facts: the platform off the agent, the drive\'s values under it (LLP 
   const listened = [];
   const platform = { document: { visibilityState: 'hidden', addEventListener: name => listened.push(name) }, navigator: { onLine: false, share() {} }, addEventListener: name => listened.push(name) };
   const real = pageReporter(false, platform);
-  expect(real.bits()).toBe(1 | 2 | 4);
+  // No navigation entry is a page the browser navigated to (bits 3–4: 1).
+  expect(real.bits()).toBe(1 | 2 | 4 | 8);
   platform.document.visibilityState = 'visible'; platform.navigator = { onLine: true };
-  expect(real.bits()).toBe(0);
+  expect(real.bits()).toBe(8);
+  const reloaded = pageReporter(false, { ...platform, performance: { getEntriesByType: t => t === 'navigation' ? [{ type: 'reload' }] : [] } });
+  expect(reloaded.bits()).toBe(2 << 3);
   real.onChange(() => {});
   expect(listened).toEqual(['visibilitychange', 'online', 'offline']);
   const agent = pageReporter(true, new Proxy({}, {get() { throw new Error('agent read the platform'); }}));
-  expect(agent.bits()).toBe(4);
+  expect(agent.bits()).toBe(4 | 8);
   agent.prefer({ 'visibility-state': 'hidden', online: false });
-  expect(agent.bits()).toBe(1 | 2 | 4);
+  expect(agent.bits()).toBe(1 | 2 | 4 | 8);
   expect(() => agent.prefer({ online: 'maybe', 'can-share': false })).toThrow('prefer: online');
   expect(agent.read()['can-share']).toBe(true);
   agent.onChange(() => { throw new Error('agent listened to the platform'); });
