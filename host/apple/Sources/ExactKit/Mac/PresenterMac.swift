@@ -746,11 +746,14 @@ final class Presenter {
         pressHeld = held; defer { pressHeld = "" }
         guard let node = textHost(id), !node.inert, !node.disabled,
               fromNativeMenu || (segments.shown(node) ?? !node.isHiddenOrHasHiddenAncestor) || toolbar.contains(node) else { return }
-        let command = dialogs.command(node, fromNativeMenu: fromNativeMenu)
-        let popover = menus.command(node, fromNativeMenu: fromNativeMenu)
-        if (command == nil && popover == nil) || node.handlers.contains("press") { onPress?(id) }
-        command?()
-        popover?()
+        // HTML activation (LLP 1035.001.001 D1), as on iOS: the action, then
+        // — if the invoker is still live and enabled — its command, read from
+        // its attributes as the action left them.
+        let invoker = !(node.props["commandfor"] ?? "").isEmpty || !(node.props["popovertarget"] ?? "").isEmpty
+        if !invoker || node.handlers.contains("press") { onPress?(id) }
+        guard textHost(id) === node, !node.inert, !node.disabled else { return }
+        dialogs.command(node, fromNativeMenu: fromNativeMenu)?()
+        menus.command(node, fromNativeMenu: fromNativeMenu)?()
     }
     func change(_ id: UInt32, _ value: String) { onChange?(id, value) }
     /// A text field typed into since it took the focus: its `change` fires
