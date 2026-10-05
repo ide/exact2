@@ -101,7 +101,7 @@ impl Lowerer<'_> {
             Stmt::Command { name, args, .. }
                 if name == "observe" || name == "observeAttributes" =>
             {
-                let (head, record) = if name == "observe" {
+                let (mut flat, record) = if name == "observe" {
                     let severity = args
                         .get(2)
                         .cloned()
@@ -110,7 +110,6 @@ impl Lowerer<'_> {
                 } else {
                     (Vec::new(), args.first())
                 };
-                let mut flat = head;
                 if let Some(Expr::Call(_, fields, _)) = record {
                     for field in fields {
                         if let Expr::NamedArg(key, value, span) = field {

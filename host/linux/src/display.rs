@@ -415,11 +415,8 @@ pub fn run<D: DataSource + Default>(config: &mut Config, started: Instant) -> i3
             if measured {
                 frames.submitted(wall(), p.host().runner().seq(), p.hosts);
             }
-            let first = first_pixel.is_none();
             let submitted = display.submit(frame);
-            if submitted.is_ok() {
-                marks.submitted(first);
-            }
+            marks.submitted(first_pixel.is_none());
             match submitted {
                 Ok(Some(frame)) => presented(
                     &mut p,
@@ -491,8 +488,10 @@ pub fn run<D: DataSource + Default>(config: &mut Config, started: Instant) -> i3
             Ok(true) => match display.ready() {
                 Ok(Some(frame)) => {
                     if let Some(at) = display.last_flip() {
-                        let ledger = crate::launch_marks::items(&p.host().runner().outstanding());
-                        marks.flipped(at, Some(&ledger));
+                        marks.flipped(
+                            at,
+                            &crate::launch_marks::items(&p.host().runner().outstanding()),
+                        );
                     }
                     presented(
                         &mut p,

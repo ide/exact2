@@ -308,7 +308,7 @@ export function install(exact) {
           const waiting = holds();
           if (waiting.length) return { clock: exact.clock.now, settled: false, reason: 'device', tickets: waiting.map(h => h.ticket) };
           // An element the app marks aria-busy is still loading.
-          const busy = [...document.querySelectorAll('[aria-busy="true"]')].map(el => el.getAttribute('data-testid') ?? el.id ?? el.tagName);
+          const busy = [...document.querySelectorAll('[aria-busy="true"]')].map(el => el.getAttribute('data-testid') ?? el.id);
           if (busy.length && !exact.inflight.n) return { clock: exact.clock.now, settled: false, reason: 'busy', busy };
           return { clock: exact.clock.now, settled: !exact.inflight.n };
         }

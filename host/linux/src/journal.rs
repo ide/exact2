@@ -13,7 +13,7 @@ pub use serde_json;
 use serde_json::{Map, Value};
 
 /// Events kept for a subscriber that arrives later.
-pub const CAPACITY: usize = 4096;
+const CAPACITY: usize = 4096;
 
 /// One journal event.
 #[derive(Debug, Clone)]
@@ -121,7 +121,7 @@ pub fn after_startup(f: impl FnOnce() + Send + 'static) {
 
 /// The time all launch parts together should take, as on Apple. Overruns are
 /// logged to stderr, not enforced.
-pub const LAUNCH_BUDGET: std::time::Duration = std::time::Duration::from_micros(500);
+const LAUNCH_BUDGET: std::time::Duration = std::time::Duration::from_micros(500);
 
 /// Records how long the generated `launch_parts()` took. Logs it when over
 /// budget or when `EXACT_OBSERVE_LOG=1`.
@@ -183,7 +183,7 @@ impl LaunchContext {
 }
 
 /// A Contract value as JSON, for the `observe` commands' arguments.
-pub fn value_json(v: &exact_plan::Value) -> Value {
+fn value_json(v: &exact_plan::Value) -> Value {
     if let Some(s) = v.as_str() {
         return s.into();
     }
@@ -201,15 +201,9 @@ pub fn value_json(v: &exact_plan::Value) -> Value {
 /// Leading positional arguments are followed by alternating keys and values.
 pub fn host_command(name: &str, args: &[exact_plan::Value]) {
     let pairs = |from: usize| {
-        let mut o = Map::new();
-        let mut i = from;
-        while i + 1 < args.len() {
-            if let Some(k) = args[i].as_str() {
-                o.insert(k.into(), value_json(&args[i + 1]));
-            }
-            i += 2;
-        }
-        Value::Object(o)
+        let pairs = args.get(from..).unwrap_or_default().chunks_exact(2);
+        let o = pairs.filter_map(|kv| Some((kv[0].as_str()?.into(), value_json(&kv[1]))));
+        Value::Object(o.collect())
     };
     let text = |i: usize, or: &str| {
         args.get(i)
