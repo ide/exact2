@@ -442,7 +442,10 @@ extension NavigationHost {
             c.lifted = nil
         }
         guard shows else { return }
-        item.title = shape?.title
+        // A blank heading (" ", a title not known yet) shows the bar with
+        // no words in it: UIKit draws a whitespace title as a pair of quotes.
+        let title = shape?.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? shape?.title : nil
+        if item.title != title { item.title = title }
         // tvOS has no large titles or back button.
         #if !os(tvOS)
         item.largeTitleDisplayMode = shape?.level == 1 ? .always : .never
