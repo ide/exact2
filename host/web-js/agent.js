@@ -3,7 +3,7 @@
 // `scripts/agent.mjs web` asks. Input and screenshots stay the carrier's own
 // (CDP). Loaded only under `?agent`; never part of an app's boot bytes.
 import names, { types } from './names.js';
-import { pieces, pageHistory, Head, navigateRoot, Tasks, journal } from './rt.js';
+import { pieces, pageHistory, Head, navigateRoot, Tasks, journal, busy as busyIds } from './rt.js';
 import * as perf from './perf.js';
 import { faultOp, faultsJson, setFaultLog } from '../web/faults.js';
 import { environment, navigation, unselected, guestOutline, guestTap, guestType, viewBox, foldEnv, preferFold, typedControl, typeControl, reveal, animationClocks, pageReporter } from './navigation.js';
@@ -368,8 +368,7 @@ export function install(exact) {
           if (gpuPending.length) return gpuPendingReply(req, gpuPending);
           const waiting = holds();
           if (waiting.length) return { clock: exact.clock.now, settled: false, reason: 'device', tickets: waiting.map(h => h.ticket) };
-          // An element the app marks aria-busy is still loading.
-          const busy = [...document.querySelectorAll('[aria-busy="true"]')].map(el => el.getAttribute('data-testid') ?? el.id);
+          const busy = busyIds();
           if (busy.length && !exact.inflight.n) return { clock: exact.clock.now, settled: false, reason: 'busy', busy };
           return { clock: exact.clock.now, settled: !exact.inflight.n };
         }
