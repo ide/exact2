@@ -15,6 +15,7 @@ const SEVERITY = { trace: 1, debug: 5, info: 9, warn: 13, error: 17, fatal: 21 }
 const KEEPALIVE_BUDGET = 60 * 1024, CHUNK = 200, MAX_ROWS = 2000;
 
 const uuid = () => crypto.randomUUID();
+const stringAttr = (key, v) => ({ key, value: { stringValue: v } });
 
 /** Same as expo's `EASClientID.deterministicUniformValue`: a stable value in [0, 1) per install. */
 export function uniform(id) {
@@ -58,9 +59,8 @@ export function start(config, { boot = 0 } = {}) {
   const clientId = localStorage.getItem('expo.eas-client-id') ?? uuid();
   localStorage.setItem('expo.eas-client-id', clientId);
   const session = uuid();
-  const load = () => { try { return JSON.parse(localStorage.getItem(key)) ?? { sessions: {}, metrics: [], logs: [] }; } catch { return { sessions: {}, metrics: [], logs: [] }; } };
   const save = q => { q.metrics = q.metrics.slice(-MAX_ROWS); q.logs = q.logs.slice(-MAX_ROWS); try { localStorage.setItem(key, JSON.stringify(q)); } catch {} };
-  const q = load();
+  const q = (() => { try { return JSON.parse(localStorage.getItem(key)); } catch {} })() ?? { sessions: {}, metrics: [], logs: [] };
   q.sessions[session] = {
     osName: navigator.userAgentData?.platform ?? navigator.platform, language: navigator.language, clientVersion: '0.1.0',
     appIdentifier: config['app.CFBundleIdentifier'], appName: config['app.CFBundleName'],
@@ -97,31 +97,33 @@ export function start(config, { boot = 0 } = {}) {
     const a = [['os.type', 'browser'], ['os.name', meta.osName], ['browser.language', meta.language], ['telemetry.sdk.name', 'exact-observe'],
       ['telemetry.sdk.version', meta.clientVersion], ['telemetry.sdk.language', 'javascript'], ['expo.eas_client.id', clientId],
       ['service.name', meta.appIdentifier], ['expo.app.name', meta.appName], ['expo.environment', meta.environment]];
-    return { attributes: a.filter(([, v]) => v != null).map(([k, v]) => ({ key: k, value: { stringValue: String(v) } })) };
+    return { attributes: a.filter(([, v]) => v != null).map(([k, v]) => stringAttr(k, String(v))) };
   };
-  const scope = meta => ({ name: 'expo-observe', version: meta.clientVersion ?? '0' });
+  /** `{outer: [{resource, inner: [{scope, list: items}], schemaUrl}]}`, one resource per session. */
+  const envelope = (by, outer, inner, list) => ({ [outer]: Object.keys(by).filter(s => q.sessions[s]).map(s => ({
+    resource: resource(q.sessions[s]), [inner]: [{ scope: { name: 'expo-observe', version: q.sessions[s].clientVersion ?? '0' }, [list]: by[s] }], schemaUrl: SCHEMA_URL })) });
   const nanos = s => String(Math.round(s * 1000)) + '000000';
   function metricsBody(rows) {
     const by = {};
     for (const r of rows) {
-      const attrs = [{ key: 'session.id', value: { stringValue: r.session } }];
-      if (r.route) attrs.push({ key: 'expo.route_name', value: { stringValue: r.route } });
-      if (r.params && r.params !== '{}') attrs.push({ key: 'expo.custom_params', value: { stringValue: r.params } });
+      const attrs = [stringAttr('session.id', r.session)];
+      if (r.route) attrs.push(stringAttr('expo.route_name', r.route));
+      if (r.params && r.params !== '{}') attrs.push(stringAttr('expo.custom_params', r.params));
       (by[r.session] ??= []).push({ unit: 's', name: NAMES[`${r.category}/${r.name}`] ?? `expo.unknown.${r.name}`, gauge: { dataPoints: [{ timeUnixNano: nanos(r.time), asDouble: r.value, attributes: attrs }] } });
     }
-    return { resourceMetrics: Object.keys(by).filter(s => q.sessions[s]).map(s => ({ resource: resource(q.sessions[s]), scopeMetrics: [{ scope: scope(q.sessions[s]), metrics: by[s] }], schemaUrl: SCHEMA_URL })) };
+    return envelope(by, 'resourceMetrics', 'scopeMetrics', 'metrics');
   }
   function logsBody(rows) {
     const by = {};
     for (const r of rows) {
-      const attrs = [{ key: 'session.id', value: { stringValue: r.session } }, { key: 'event.name', value: { stringValue: r.name } }];
+      const attrs = [stringAttr('session.id', r.session), stringAttr('event.name', r.name)];
       let dropped = r.dropped ?? 0;
       for (const k of Object.keys(r.attributes ?? {}).sort()) { const v = anyValue(r.attributes[k]); if (v) attrs.push({ key: k, value: v }); else dropped++; }
       const rec = { timeUnixNano: nanos(r.time), observedTimeUnixNano: nanos(r.time), severityNumber: SEVERITY[r.severity] ?? 9, severityText: r.severity.toUpperCase(), body: { stringValue: r.body ?? '' }, attributes: attrs };
       if (dropped) rec.droppedAttributesCount = dropped;
       (by[r.session] ??= []).push(rec);
     }
-    return { resourceLogs: Object.keys(by).filter(s => q.sessions[s]).map(s => ({ resource: resource(q.sessions[s]), scopeLogs: [{ scope: scope(q.sessions[s]), logRecords: by[s] }], schemaUrl: SCHEMA_URL })) };
+    return envelope(by, 'resourceLogs', 'scopeLogs', 'logRecords');
   }
 
   const inSample = () => uniform(clientId) < Math.min(Math.max(config.sampleRate ?? 1, 0), 1);
@@ -137,7 +139,7 @@ export function start(config, { boot = 0 } = {}) {
       const rows = q[signal].slice(0, limit);
       const body = JSON.stringify(signal === 'metrics' ? metricsBody(rows) : logsBody(rows));
       if (keepalive && body.length > budget) {
-        if (rows.length > 1) { limit = Math.max(1, rows.length >> 1); continue; }
+        if (rows.length > 1) { limit = rows.length >> 1; continue; }
         return; // One row is over the keepalive budget. A normal fetch sends it next time.
       }
       let status = null, retry = null;
@@ -147,8 +149,8 @@ export function start(config, { boot = 0 } = {}) {
       } catch {}
       if (keepalive) budget -= body.length;
       if (globalThis.EXACT_OBSERVE_LOG) console.log(`observe: ${signal} ${rows.length} rows → ${status ?? 'transport error'}`);
-      if (status !== null && ((status >= 200 && status < 300) || ![413, 429, 502, 503, 504].includes(status))) { gate.failures = 0; q[signal].splice(0, rows.length); save(q); limit = CHUNK; continue; }
-      if (status === 413) { gate.failures = 0; if (rows.length > 1) { limit = Math.max(1, rows.length >> 1); continue; } q[signal].splice(0, 1); save(q); continue; }
+      if (status !== null && ![413, 429, 502, 503, 504].includes(status)) { gate.failures = 0; q[signal].splice(0, rows.length); save(q); limit = CHUNK; continue; }
+      if (status === 413) { gate.failures = 0; if (rows.length > 1) { limit = rows.length >> 1; continue; } q[signal].splice(0, 1); save(q); limit = CHUNK; continue; }
       gate.failures++; gate.after = Date.now() + 1000 * (retryAfter(retry) ?? backoff(gate.failures));
       return;
     }

@@ -13,7 +13,6 @@ public enum ObserveLaunch: ExactLaunchPart {
     public static let module = "observe"
     nonisolated(unsafe) static var ring = ExactRing(capacity: 128 * 1024)
     nonisolated(unsafe) static var path: NWPathMonitor?
-    nonisolated(unsafe) static var lastPath: (at: Double, json: [String: Any])?
 
     public static func launch(_ context: ExactLaunchContext) {
         var config = context.config

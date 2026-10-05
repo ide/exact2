@@ -8,6 +8,8 @@ enum ObserveCrash {
     nonisolated(unsafe) static var path: UnsafeMutablePointer<CChar>?
     nonisolated(unsafe) static var head: UnsafeMutablePointer<UInt8>?
     nonisolated(unsafe) static var headLength = 0
+    /// Scratch for the signal number and "}\n", allocated at install: the handler must not allocate.
+    nonisolated(unsafe) static var tail: UnsafeMutablePointer<UInt8>?
     static let signals: [Int32] = [SIGABRT, SIGSEGV, SIGBUS, SIGILL, SIGFPE, SIGTRAP]
 
     static func install(directory: String, session: String) {
@@ -19,21 +21,21 @@ enum ObserveCrash {
         head = UnsafeMutablePointer<UInt8>.allocate(capacity: bytes.count)
         head!.initialize(from: bytes, count: bytes.count)
         headLength = bytes.count
+        tail = UnsafeMutablePointer<UInt8>.allocate(capacity: 8)
         for s in signals { signal(s, handler) }
     }
 
     static let handler: @convention(c) (Int32) -> Void = { sig in
-        if let path = ObserveCrash.path, let head = ObserveCrash.head {
+        if let path = ObserveCrash.path, let head = ObserveCrash.head, let tail = ObserveCrash.tail {
             let fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0o644)
             if fd >= 0 {
                 _ = write(fd, head, ObserveCrash.headLength)
-                // Write the signal number in decimal by hand: formatting functions aren't async-signal-safe.
-                var digits: [UInt8] = [0, 0, 0, 0]
-                var n = Int(sig), i = 3
-                repeat { digits[i] = UInt8(48 + n % 10); n /= 10; i -= 1 } while n > 0 && i >= 0
-                digits.withUnsafeBufferPointer { _ = write(fd, $0.baseAddress! + i + 1, 3 - i) }
-                var tail: [UInt8] = [125, 10] // "}\n"
-                tail.withUnsafeMutableBufferPointer { _ = write(fd, $0.baseAddress!, 2) }
+                // The signal number in decimal, then "}\n": formatting functions aren't async-signal-safe.
+                var n = Int(sig), start = 6
+                tail[6] = 125
+                tail[7] = 10
+                repeat { start -= 1; tail[start] = UInt8(48 + n % 10); n /= 10 } while n > 0 && start > 0
+                _ = write(fd, tail + start, 8 - start)
                 close(fd)
             }
         }

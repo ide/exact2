@@ -26,9 +26,8 @@ enum ObserveWire {
 
     static func nanos(_ seconds: Double) -> UInt64 { UInt64((seconds * 1000).rounded()) * 1_000_000 }
 
-    static func attr(_ key: String, _ value: Any) -> [String: Any]? {
-        guard let v = anyValue(value) else { return nil }
-        return ["key": key, "value": v]
+    static func stringAttr(_ key: String, _ value: String) -> [String: Any] {
+        ["key": key, "value": ["stringValue": value]]
     }
 
     /// Observe's `otAnyValue`: a value it can't represent is dropped and counted.
@@ -53,16 +52,15 @@ enum ObserveWire {
 
     /// Observe's resource attributes, from the session's stored metadata.
     static func resource(_ meta: [String: Any], clientId: String) -> [String: Any] {
-        var a: [[String: Any]] = []
-        let s = { (k: String, m: String) in if let v = meta[m] as? String { a.append(["key": k, "value": ["stringValue": v]]) } }
-        a.append(["key": "os.type", "value": ["stringValue": "darwin"]])
+        var a = [stringAttr("os.type", "darwin")]
+        let s = { (k: String, m: String) in if let v = meta[m] as? String { a.append(stringAttr(k, v)) } }
         s("os.name", "osName"); s("os.version", "osVersion")
         s("device.model.name", "deviceName"); s("device.model.identifier", "deviceModel")
         s("browser.language", "language")
-        a.append(["key": "telemetry.sdk.name", "value": ["stringValue": "exact-observe"]])
+        a.append(stringAttr("telemetry.sdk.name", "exact-observe"))
         s("telemetry.sdk.version", "clientVersion")
-        a.append(["key": "telemetry.sdk.language", "value": ["stringValue": "swift"]])
-        a.append(["key": "expo.eas_client.id", "value": ["stringValue": clientId]])
+        a.append(stringAttr("telemetry.sdk.language", "swift"))
+        a.append(stringAttr("expo.eas_client.id", clientId))
         s("service.name", "appIdentifier"); s("service.version", "appVersion")
         s("expo.app.name", "appName"); s("expo.app.build_number", "appBuildNumber")
         s("expo.app.update_id", "updateId"); s("expo.app.updates.id", "updateId")
@@ -72,8 +70,14 @@ enum ObserveWire {
         return ["attributes": a]
     }
 
-    static func scope(_ meta: [String: Any]) -> [String: Any] {
-        ["name": "expo-observe", "version": meta["clientVersion"] as? String ?? "0"]
+    /// `{outer: [{resource, inner: [{scope, list: items}], schemaUrl}]}`, one resource per session.
+    static func envelope(_ bySession: [String: [[String: Any]]], _ outer: String, _ inner: String, _ list: String,
+                         sessions: [String: [String: Any]], clientId: String) -> [String: Any] {
+        [outer: bySession.keys.sorted().compactMap { s -> [String: Any]? in
+            guard let meta = sessions[s] else { return nil }
+            let scope = ["name": "expo-observe", "version": meta["clientVersion"] as? String ?? "0"]
+            return ["resource": resource(meta, clientId: clientId), inner: [["scope": scope, list: bySession[s]!]], "schemaUrl": schemaUrl]
+        }]
     }
 
     /// `{"resourceMetrics":[…]}`, one resource per session in the chunk.
@@ -82,20 +86,17 @@ enum ObserveWire {
         for r in rows {
             guard let session = r[1] as? String, let time = r[2] as? Double, let category = r[3] as? String,
                   let name = r[4] as? String, let value = r[5] as? Double else { continue }
-            var attrs: [[String: Any]] = [["key": "session.id", "value": ["stringValue": session]]]
-            if let route = r[6] as? String { attrs.append(["key": "expo.route_name", "value": ["stringValue": route]]) }
-            if let update = r[7] as? String { attrs.append(["key": "expo.update_id", "value": ["stringValue": update]]) }
-            if let params = r[8] as? String { attrs.append(["key": "expo.custom_params", "value": ["stringValue": params]]) }
+            var attrs = [stringAttr("session.id", session)]
+            for (i, key) in [(6, "expo.route_name"), (7, "expo.update_id"), (8, "expo.custom_params")] {
+                if let v = r[i] as? String { attrs.append(stringAttr(key, v)) }
+            }
             bySession[session, default: []].append([
                 "unit": "s",
                 "name": names["\(category)/\(name)"] ?? "expo.unknown.\(name)",
                 "gauge": ["dataPoints": [["timeUnixNano": nanos(time), "asDouble": value, "attributes": attrs]]],
             ])
         }
-        return ["resourceMetrics": bySession.keys.sorted().compactMap { s -> [String: Any]? in
-            guard let meta = sessions[s] else { return nil }
-            return ["resource": resource(meta, clientId: clientId), "scopeMetrics": [["scope": scope(meta), "metrics": bySession[s]!]], "schemaUrl": schemaUrl]
-        }]
+        return envelope(bySession, "resourceMetrics", "scopeMetrics", "metrics", sessions: sessions, clientId: clientId)
     }
 
     /// `{"resourceLogs":[…]}`, one resource per session in the chunk.
@@ -103,10 +104,12 @@ enum ObserveWire {
         var bySession: [String: [[String: Any]]] = [:]
         for r in rows {
             guard let session = r[1] as? String, let time = r[2] as? Double, let severity = r[3] as? String, let name = r[4] as? String else { continue }
-            var attrs: [[String: Any]] = [["key": "session.id", "value": ["stringValue": session]], ["key": "event.name", "value": ["stringValue": name]]]
+            var attrs = [stringAttr("session.id", session), stringAttr("event.name", name)]
             var dropped = (r[7] as? Int64).map(Int.init) ?? 0
             if let text = r[6] as? String, let user = (try? JSONSerialization.jsonObject(with: Data(text.utf8))) as? [String: Any] {
-                for (k, v) in user.sorted(by: { $0.key < $1.key }) { if let a = attr(k, v) { attrs.append(a) } else { dropped += 1 } }
+                for (k, v) in user.sorted(by: { $0.key < $1.key }) {
+                    if let m = anyValue(v) { attrs.append(["key": k, "value": m]) } else { dropped += 1 }
+                }
             }
             var record: [String: Any] = [
                 "timeUnixNano": nanos(time), "observedTimeUnixNano": nanos(time),
@@ -116,21 +119,18 @@ enum ObserveWire {
             if dropped > 0 { record["droppedAttributesCount"] = dropped }
             bySession[session, default: []].append(record)
         }
-        return ["resourceLogs": bySession.keys.sorted().compactMap { s -> [String: Any]? in
-            guard let meta = sessions[s] else { return nil }
-            return ["resource": resource(meta, clientId: clientId), "scopeLogs": [["scope": scope(meta), "logRecords": bySession[s]!]], "schemaUrl": schemaUrl]
-        }]
+        return envelope(bySession, "resourceLogs", "scopeLogs", "logRecords", sessions: sessions, clientId: clientId)
     }
 
     enum Result {
-        case success, payloadTooLarge, nonRetryable(String), retryable(TimeInterval?)
+        case success, payloadTooLarge, nonRetryable, retryable(TimeInterval?)
     }
 
     static func classify(status: Int, retryAfter: String?) -> Result {
         if (200...299).contains(status) { return .success }
         if status == 413 { return .payloadTooLarge }
         if [429, 502, 503, 504].contains(status) { return .retryable(parseRetryAfter(retryAfter)) }
-        return .nonRetryable("HTTP \(status)")
+        return .nonRetryable
     }
 
     static func parseRetryAfter(_ header: String?) -> TimeInterval? {
@@ -145,8 +145,7 @@ enum ObserveWire {
     }
 
     static func backoff(attempt: Int) -> TimeInterval {
-        guard attempt >= 1 else { return 0 }
-        return min(backoffBase * pow(2, Double(attempt - 1)), backoffCap) * Double.random(in: 0..<1)
+        min(backoffBase * pow(2, Double(attempt - 1)), backoffCap) * Double.random(in: 0..<1)
     }
 
     /// Same as expo's `EASClientID.deterministicUniformValue`: a stable value in [0, 1) per install.

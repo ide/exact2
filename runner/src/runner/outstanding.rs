@@ -38,30 +38,31 @@ pub struct Outstanding {
 impl Outstanding {
     /// `{"clear":…,"requests":[…],…}`: the agent's `outstanding` reply.
     pub fn json(&self) -> String {
-        let list = |name: &str, items: &[String], out: &mut String| {
-            out.push_str(&format!(",\"{name}\":["));
-            for (i, item) in items.iter().enumerate() {
-                if i > 0 {
-                    out.push(',');
-                }
-                crate::agent::quote(item, out);
-            }
-            out.push(']');
-        };
         let mut out = format!(
             "{{\"clear\":{},\"dataReady\":{},\"poisoned\":{}",
             self.is_clear(),
             self.data_ready,
             self.poisoned
         );
-        list("requests", &self.requests, &mut out);
-        list("streams", &self.streams, &mut out);
-        list("awaiting", &self.awaiting, &mut out);
-        list("deferred", &self.deferred, &mut out);
-        list("oneShots", &self.one_shots, &mut out);
-        list("thens", &self.thens, &mut out);
-        list("failed", &self.failed, &mut out);
-        list("busy", &self.busy, &mut out);
+        for (name, items) in [
+            ("requests", &self.requests),
+            ("streams", &self.streams),
+            ("awaiting", &self.awaiting),
+            ("deferred", &self.deferred),
+            ("oneShots", &self.one_shots),
+            ("thens", &self.thens),
+            ("failed", &self.failed),
+            ("busy", &self.busy),
+        ] {
+            out.push_str(&format!(",\"{name}\":["));
+            for (i, item) in items.iter().enumerate() {
+                if i > 0 {
+                    out.push(',');
+                }
+                crate::agent::quote(item, &mut out);
+            }
+            out.push(']');
+        }
         out.push('}');
         out
     }
@@ -100,11 +101,8 @@ impl<D: DataSource> Runner<D> {
         let asked = |i: usize| self.pending.iter().any(|p| p.target == Target::Resource(i));
         for i in 0..self.plan.resources.len() {
             let name = || self.plan.str(self.plan.resources[i].name).to_string();
-            let failed = match (&self.failed_args[i], &self.resources[i]) {
-                (Some(failed), Some(state)) => failed == &state.args,
-                _ => false,
-            };
-            if failed {
+            if matches!((&self.failed_args[i], &self.resources[i]), (Some(f), Some(s)) if f == &s.args)
+            {
                 out.failed.push(name());
             } else if self.awaiting[i] {
                 out.awaiting.push(name());
@@ -112,8 +110,7 @@ impl<D: DataSource> Runner<D> {
                 out.deferred.push(name());
             }
         }
-        for (i, t) in self.timers.iter().enumerate() {
-            let row = &self.plan.timers[i];
+        for (t, row) in self.timers.iter().zip(&self.plan.timers) {
             if row.once
                 && t.next_ms.is_finite()
                 && row.interval_ms as f64 <= STARTUP_TIMER_WINDOW_MS
