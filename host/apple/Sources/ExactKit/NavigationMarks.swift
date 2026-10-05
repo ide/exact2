@@ -5,11 +5,6 @@
 // TTI is when outstanding work clears, never before render. A newer change cancels it.
 import Foundation
 import QuartzCore
-#if os(macOS)
-import AppKit
-#else
-import UIKit
-#endif
 
 final class NavigationMarks: NSObject {
     static let shared = NavigationMarks()
@@ -19,7 +14,6 @@ final class NavigationMarks: NSObject {
     private var launched: Set<ObjectIdentifier> = []
     private var pending: Pending?
     private var link: CADisplayLink?
-    private var vsync: (at: Double, interval: Double)?
     private var deadline: DispatchWorkItem?
     /// Recent measurements for `state.observe`, newest last.
     private(set) var recent: [String] = []
@@ -54,17 +48,14 @@ final class NavigationMarks: NSObject {
         let now = CACurrentMediaTime()
         var fields: [String: Any] = ["route": payload["pattern"] as? String ?? "", "url": payload["url"] as? String ?? "",
                                      "routeParams": payload["params"] as? [String: Any] ?? [:]]
+        let cold = seen[key, default: []].insert(top).inserted
         // The first route is the launch route, which startup metrics cover.
-        guard launched.contains(key) else {
-            launched.insert(key)
-            seen[key, default: []].insert(top)
+        if launched.insert(key).inserted {
             fields["entry"] = Int(top)
             ExactJournal.shared.record("navigation.launch", fields)
             note("launch \(fields["route"] ?? "")")
             return
         }
-        let cold = !(seen[key]?.contains(top) ?? false)
-        seen[key, default: []].insert(top)
         for removed in payload["removed"] as? [NSNumber] ?? [] { seen[key]?.remove(removed.uint64Value) }
         let start: Double
         if let input = lastInput, input <= now, now - input <= 1.0 {
@@ -83,7 +74,7 @@ final class NavigationMarks: NSObject {
         DispatchQueue.main.async { [weak self, weak p] in
             guard let self, let p, pending === p else { return }
             p.turnEnded = CACurrentMediaTime()
-            watch()
+            if link == nil { link = mainDisplayLink(self, #selector(tick(_:))) }
         }
         deadline?.cancel()
         let item = DispatchWorkItem { [weak self, weak p] in
@@ -101,28 +92,13 @@ final class NavigationMarks: NSObject {
         DispatchQueue.main.async { [weak self] in self?.evaluate() }
     }
 
-    private func watch() {
-        guard link == nil else { return }
-        #if os(macOS)
-        let l: CADisplayLink? = NSScreen.main?.displayLink(target: self, selector: #selector(tick(_:)))
-        #else
-        let l: CADisplayLink? = CADisplayLink(target: self, selector: #selector(tick(_:)))
-        #endif
-        l?.add(to: .main, forMode: .common)
-        link = l
-    }
-
     private func stop() {
         link?.invalidate()
         link = nil
     }
 
     @objc private func tick(_ link: CADisplayLink) {
-        let interval = link.targetTimestamp - link.timestamp
-        vsync = (link.timestamp, interval > 0 ? interval : link.duration)
-        guard let p = pending, let ended = p.turnEnded, p.presented == nil, let v = vsync else { return }
-        var g = v.at + ((ended - v.at) / v.interval).rounded(.up) * v.interval
-        if g <= ended { g += v.interval }
+        guard let p = pending, let ended = p.turnEnded, p.presented == nil, let g = Vsync(link).next(after: ended) else { return }
         p.presented = g
         var f = p.fields
         f["name"] = p.cold ? "cold_ttr" : "warm_ttr"

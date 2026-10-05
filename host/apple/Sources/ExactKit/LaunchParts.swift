@@ -39,9 +39,9 @@ public final class ExactJournal {
     public static let capacity = 4096
     private(set) var events: [ExactJournalEvent] = []
     private(set) var dropped = 0
-    private var subscribers: [(name: String, fn: (ExactJournalEvent) -> Void, next: Int)] = []
+    private var subscribers: [(fn: (ExactJournalEvent) -> Void, next: Int)] = []
     private var delivering = false
-    private var services: [(name: String, handle: ExactService)] = []
+    private var services: [ExactService] = []
 
     /// Seconds all subscribers may spend in one turn; the rest is delivered next turn.
     static let turnBudget = 0.001
@@ -55,21 +55,21 @@ public final class ExactJournal {
             dropped += 1
             for i in subscribers.indices { subscribers[i].next = max(0, subscribers[i].next - 1) }
         }
-        for s in services { s.handle.event(events[events.count - 1]) }
+        for s in services { s.event(events[events.count - 1]) }
         scheduleDelivery()
     }
 
-    func subscribe(_ name: String, _ fn: @escaping (ExactJournalEvent) -> Void) {
-        subscribers.append((name, fn, 0))
+    func subscribe(_ fn: @escaping (ExactJournalEvent) -> Void) {
+        subscribers.append((fn, 0))
         scheduleDelivery()
     }
 
-    func attach(_ name: String, _ service: ExactService) {
-        services.append((name, service))
+    func attach(_ service: ExactService) {
+        services.append(service)
         for e in events { service.event(e) }
     }
 
-    func background() { for s in services { s.handle.background() } }
+    func background() { for s in services { s.background() } }
 
     private func scheduleDelivery() {
         guard !delivering, !subscribers.isEmpty else { return }
@@ -124,7 +124,7 @@ public final class ExactLaunchContext {
 
     /// Delivers every event so far, then each new one, in later main-thread turns.
     public func subscribe(_ fn: @escaping (ExactJournalEvent) -> Void) {
-        ExactJournal.shared.subscribe(module, fn)
+        ExactJournal.shared.subscribe(fn)
     }
 
     /// Loads `lib<module>_service.dylib` at `when` and starts it with `config` and
