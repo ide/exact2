@@ -64,7 +64,7 @@ final class NativeButton: UIButton {
             // A press blurs the field being edited, as a click on a button
             // blurs a page's input (NodeView's own tap did the same).
             if presenter.contextRetainsFocus(owner) != true { presenter.viewport.endEditing(true) }
-            if !presenter.menus.invokeConfirmation(owner) { presenter.press(owner.id) }
+            presenter.press(owner.id)
         }, for: .primaryActionTriggered)
     }
     required init?(coder: NSCoder) { nil }
