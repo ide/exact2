@@ -225,7 +225,7 @@ impl Batch {
             }
             let _ = write!(s, "{id}");
         }
-        // The route pattern and parameters, for navigation metrics (Exact Observe design §3.6).
+        // The route pattern and params name the screen in navigation metrics.
         s.push_str("],\"pattern\":");
         quote(&change.pattern, &mut s);
         s.push_str(",\"params\":{");

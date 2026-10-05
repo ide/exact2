@@ -36,13 +36,10 @@ pub fn rust_entry(data: &str, constructor: &str, mode: &str) -> Result<String, S
     }
 }
 
-/// A Linux entry's `launch_parts()` (Exact Observe design §4.6): for each
-/// module `app.json` names under `launch` that ships
-/// `modules/<name>/linux/launch.rs` (the app's own `modules/`, else exact2's,
-/// as `scripts/app.mjs` resolves them), that file as a module of the
-/// executable and a call to its `launch` with the module's `moduleConfig`.
-/// `main` calls it before the host starts; with no launch modules it is empty.
-/// Run from the app's Linux build script (`CARGO_MANIFEST_DIR` is its crate).
+/// Generates a Linux entry's `launch_parts()`, which `main` calls before the
+/// host starts. Each `app.json` `launch` module with a `linux/launch.rs` (the
+/// app's `modules/` first, then exact2's) becomes a module of the executable,
+/// called with its `moduleConfig`. Run from the app's Linux build script.
 pub fn linux_launch_parts() -> Result<String, String> {
     let crate_dir = std::env::var_os("CARGO_MANIFEST_DIR").ok_or("not run by cargo")?;
     let app_dir = std::path::Path::new(&crate_dir).join("..");
