@@ -4,7 +4,7 @@ import XCTest
 @testable import ExactKit
 
 /// Every button is a UIButton (NativeButtonIOS); `-exact-apple-button-style`
-/// draws it in a system style from its text and symbol; and
+/// draws it in a system style from its text and symbol.
 ///   bun host/apple/build.mjs --test --ios
 final class NativeButtonIOSTests: XCTestCase {
     private var window: UIWindow!
