@@ -65,6 +65,24 @@
      size is the UA's; `appearance: none` on the node hands it to the author. */
   input[type="checkbox"], input[type="radio"], input[type="file"], input[type="range"], input[type="date"], input[type="time"], input[type="datetime-local"] { appearance: auto; cursor: default; -webkit-user-select: none; user-select: none; }
   input[type="checkbox"], input[type="radio"] { box-sizing: border-box; }
+  /* `-exact-apple-button-style` (Apple's vendor row; element.rs writes its attribute): the
+     web's approximation of UIButton.Configuration's styles from `accent-color`, under the
+     author's box (its size, radius and content stay the author's, as UIKit draws them).
+     filled: the accent; tinted: the accent at 15 %; gray: the secondary fill (the accent
+     when one is set); glass: the materials table's `glass` row; plain: nothing. Disabled,
+     a filled look is the tertiary fill and its content the tertiary label, as UIKit's.
+     These rules, the alert's and the action sheet's are as specific as the app's class rules
+     (`#exact-root#exact-root`, emit.rs), so the look is the platform's, as natively, and an
+     author's live (inline) rows still win. */
+  #exact-root#exact-root button[data-exact-apple-button-style] { -webkit-user-select: none; user-select: none; }
+  #exact-root#exact-root button[data-exact-apple-button-style="filled"] { background-color: var(--exact-accent, light-dark(#007aff, #0a84ff)); }
+  #exact-root#exact-root button[data-exact-apple-button-style="tinted"] { background-color: color-mix(in srgb, var(--exact-accent, light-dark(#007aff, #0a84ff)) 15%, transparent); }
+  #exact-root#exact-root button[data-exact-apple-button-style="gray"] { background-color: var(--exact-accent, light-dark(#78788029, #78788052)); }
+  #exact-root#exact-root button[data-exact-apple-button-style="glass"] { backdrop-filter: blur(20px) saturate(150%); -webkit-backdrop-filter: blur(20px) saturate(150%); background-color: light-dark(#ffffffb3, #262629b3); box-shadow: 0 8px 24px #0000001a, inset 0 0 0 .5px light-dark(#0000000f, #ffffff26), inset 0 1px 1px light-dark(#ffffffcc, #ffffff33); }
+  #exact-root#exact-root button[data-exact-apple-button-style="prominent-glass"] { backdrop-filter: blur(20px) saturate(150%); -webkit-backdrop-filter: blur(20px) saturate(150%); background-color: color-mix(in srgb, var(--exact-accent, light-dark(#007aff, #0a84ff)) 85%, transparent); box-shadow: 0 8px 24px #0000001a, inset 0 1px 1px #ffffff40; }
+  #exact-root#exact-root button[data-exact-apple-button-style]:not([data-exact-apple-button-style="plain"], [data-exact-apple-button-style="glass"]):disabled { background-color: light-dark(#7676801f, #7676803d); }
+  #exact-root#exact-root button[data-exact-apple-button-style]:disabled, #exact-root#exact-root button[data-exact-apple-button-style]:disabled *:is([data-exact-text], [data-exact-text] *) { color: light-dark(#3c3c434d, #ebebf54d); }
+  #exact-root#exact-root button[data-exact-apple-button-style]:disabled img { --exact-tint: light-dark(#3c3c434d, #ebebf54d); }
   /* LLP 1104 D4: native buttons inherit the page's typography. Face fields
      use grid areas so a subtitle remains under its title beside a symbol.
      The empty gap is a real space glyph, D3's declared web approximation. */

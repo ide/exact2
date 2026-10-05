@@ -772,6 +772,14 @@ pub fn props_of(node: &NodeFacts<'_>) -> SortedMap<String, String> {
     if node.style.wrap_flow == exact_kernel::WrapFlow::Both {
         out.insert("data-wrap-flow".into(), "both".into());
     }
+    // Apple's system button style (a vendor row only the Apple hosts draw):
+    // the stylesheet's web approximation of it reads this attribute.
+    if node.style.exact_apple_button_style != exact_kernel::ExactAppleButtonStyle::None {
+        out.insert(
+            "data-exact-apple-button-style".into(),
+            node.style.exact_apple_button_style.name().into(),
+        );
+    }
     if node.node_type == NodeType::Text
         && !node.is_inline_run()
         && !exact_kernel::control::is_option_node(node.node_type, node.props)
