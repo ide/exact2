@@ -233,21 +233,21 @@ impl Lexer {
                     && trimmed[pos..].starts_with("-exact-")
                     && (pos == 0 || bytes[pos - 1] == b' '))
                     || ["-webkit-", "-apple-"].iter().any(|p| {
-                    trimmed[pos..].starts_with(p)
-                        && bytes
-                            .get(pos + p.len())
-                            .is_some_and(|n| (*n as char).is_ascii_alphabetic())
-                        && {
-                            let rest = &trimmed[pos + 1..];
-                            let end = rest
-                                .find(|c: char| {
-                                    !(c.is_ascii_alphanumeric() || c == '-' || c == '_')
-                                })
-                                .unwrap_or(rest.len());
-                            let after = rest[end..].trim_start_matches([' ', '\t']);
-                            after.starts_with('=') && !after.starts_with("==")
-                        }
-                });
+                        trimmed[pos..].starts_with(p)
+                            && bytes
+                                .get(pos + p.len())
+                                .is_some_and(|n| (*n as char).is_ascii_alphabetic())
+                            && {
+                                let rest = &trimmed[pos + 1..];
+                                let end = rest
+                                    .find(|c: char| {
+                                        !(c.is_ascii_alphanumeric() || c == '-' || c == '_')
+                                    })
+                                    .unwrap_or(rest.len());
+                                let after = rest[end..].trim_start_matches([' ', '\t']);
+                                after.starts_with('=') && !after.starts_with("==")
+                            }
+                    });
                 if c.is_ascii_alphabetic() || c == '_' || vendor {
                     // An identifier may contain hyphens — `font-size`,
                     // `aria-label` — as CSS's do; so, as in CSS `calc()`,
