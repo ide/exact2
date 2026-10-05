@@ -577,8 +577,7 @@ export function resolveApp(nameOrCrate) {
         const base = existsSync(own) ? own : shared;
         if (!existsSync(base)) throw new Error(`app.json launch: no module ${name} (neither ${own} nor ${shared})`);
         const swift = (sub) => { const d = resolve(base, sub); return existsSync(d) ? readdirSync(d).filter(f => f.endsWith('.swift')).sort().map(f => resolve(d, f)) : []; };
-        const web = resolve(base, 'web/service.js');
-        return { name, dir: base, launch: swift('apple/launch'), service: swift('apple/service'), web: existsSync(web) ? web : null };
+        return { name, launch: swift('apple/launch'), service: swift('apple/service') };
       });
     },
     /** The manifest, validated; the derived defaults when the app has none. */

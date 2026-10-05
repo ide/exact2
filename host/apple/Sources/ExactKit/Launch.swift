@@ -38,8 +38,7 @@ public final class ExactLaunch: NSObject {
     private weak var launchSession: ExactSession?
     private var commitPending = false
     private var link: CADisplayLink?
-    /// The last display-link sample: its vsync time and its observed interval.
-    private var vsync: (at: Double, interval: Double)?
+    private var vsync: Vsync?
     /// How time to interactive ended: settled, declared, failed, timeout, or a failure.
     private(set) var ttiOutcome: String?
     private(set) var lastOutstanding: [String] = []
@@ -86,7 +85,7 @@ public final class ExactLaunch: NSObject {
         ExactJournal.shared.record("launch", ["type": launchType ?? "", "suppressed": suppressed ?? ""])
         watchInterruption()
         guard suppressed == nil, !ExactEnv.agentMode else { loadServices(.afterStartup); return }
-        watchVsync()
+        link = mainDisplayLink(self, #selector(tick(_:)))
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.ttiTimeout) { [weak self] in
             guard let self, ttiOutcome == nil, suppressed == nil else { return }
             if let o = outstandingNow() { lastOutstanding = o }
@@ -152,20 +151,8 @@ public final class ExactLaunch: NSObject {
         resolvePresent()
     }
 
-    private func watchVsync() {
-        #if os(macOS)
-        let l: CADisplayLink? = NSScreen.main?.displayLink(target: self, selector: #selector(tick(_:)))
-        #else
-        let l: CADisplayLink? = CADisplayLink(target: self, selector: #selector(tick(_:)))
-        #endif
-        l?.add(to: .main, forMode: .common)
-        link = l
-    }
-
     @objc private func tick(_ link: CADisplayLink) {
-        // On ProMotion, `duration` can stay nominal while the real cadence changes.
-        let interval = link.targetTimestamp - link.timestamp
-        vsync = (link.timestamp, interval > 0 ? interval : link.duration)
+        vsync = Vsync(link)
         resolvePresent()
         confirmCandidate()
     }
@@ -174,20 +161,10 @@ public final class ExactLaunch: NSObject {
     /// grid. A late display-link callback still carries its own vsync time, so
     /// a busy main thread does not move the mark.
     private func resolvePresent() {
-        guard let c0 = marks[.commit], marks[.present] == nil, let v = vsync, v.interval > 0 else { return }
-        var g = v.at + ((c0 - v.at) / v.interval).rounded(.up) * v.interval
-        if g <= c0 { g += v.interval }
-        marks[.present] = g
+        guard let commit = marks[.commit], marks[.present] == nil, let present = vsync?.next(after: commit) else { return }
+        marks[.present] = present
         loadServices(.afterFirstPixel)
         scheduleEvaluate()
-    }
-
-    /// The first vsync strictly after `t`, on the last sample's grid.
-    private func nextVsync(after t: Double) -> Double? {
-        guard let v = vsync, v.interval > 0 else { return nil }
-        var g = v.at + ((t - v.at) / v.interval).rounded(.up) * v.interval
-        if g <= t { g += v.interval }
-        return g
     }
 
     // MARK: Time to interactive
@@ -233,14 +210,13 @@ public final class ExactLaunch: NSObject {
             trace.append("\(String(format: "%.1f", (CACurrentMediaTime() - p) * 1000)) [\(outstanding.joined(separator: ", "))]")
         }
         lastOutstanding = outstanding
-        guard outstanding.isEmpty, let f0 = marks[.present] else { candidate = nil; return }
+        guard outstanding.isEmpty, marks[.present] != nil else { candidate = nil; return }
         let now = CACurrentMediaTime()
         if contentDirty {
-            candidate = nextVsync(after: now)
-            return
+            candidate = vsync?.next(after: now)
+        } else {
+            interactive(at: now)
         }
-        marks[.interactive] = max(now, f0)
-        finish(!failedResources.isEmpty ? "failed" : declaredLast ? "declared" : "settled")
     }
 
     /// Confirms the candidate vsync if no work became outstanding before it.
@@ -249,7 +225,11 @@ public final class ExactLaunch: NSObject {
         candidate = nil
         guard let outstanding = outstandingNow(), outstanding.isEmpty else { scheduleEvaluate(); return }
         contentDirty = false
-        marks[.interactive] = max(target, marks[.present] ?? target)
+        interactive(at: target)
+    }
+
+    private func interactive(at t: Double) {
+        marks[.interactive] = max(t, marks[.present] ?? t)
         finish(!failedResources.isEmpty ? "failed" : declaredLast ? "declared" : "settled")
     }
 
@@ -258,7 +238,7 @@ public final class ExactLaunch: NSObject {
         ttiOutcome = outcome
         stopWatching()
         ExactJournal.shared.record("startup", report())
-        if ExactEnv.environment["EXACT_OBSERVE_LOG"] == "1", let session = launchSession { fputs("observe: startup \(smokeLine(for: session))\n", stderr) }
+        if ExactEnv.environment["EXACT_OBSERVE_LOG"] == "1", launchSession != nil { fputs("observe: startup \(smokeLine())\n", stderr) }
         loadServices(.afterStartup)
     }
 
@@ -276,7 +256,7 @@ public final class ExactLaunch: NSObject {
             DispatchQueue.main.async {
                 let config = (try? JSONSerialization.data(withJSONObject: s.config)) ?? Data("{}".utf8)
                 guard let service = ExactService.load(module: s.module, config: config, handoff: s.handoff()) else { return }
-                ExactJournal.shared.attach(s.module, service)
+                ExactJournal.shared.attach(service)
             }
         }
     }
@@ -308,9 +288,8 @@ public final class ExactLaunch: NSObject {
     private func classify() -> String {
         let boot = Self.bootTime()
         let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? ""
-        let os = ProcessInfo.processInfo.operatingSystemVersionString
         let previous = Self.defaults?.dictionary(forKey: "launch")
-        Self.defaults?.set(["boot": boot, "build": build, "os": os], forKey: "launch")
+        Self.defaults?.set(["boot": boot, "build": build], forKey: "launch")
         guard let previous, previous["build"] as? String == build else { return "cold" }
         if facts.tty != 0 { return "cold" }
         guard let was = previous["boot"] as? Double, abs(was - boot) < 1 else { return "cold" }
@@ -354,21 +333,50 @@ public final class ExactLaunch: NSObject {
             m["\(type)LaunchTime"] = (l - p) + (dfl - md)
         }
         if let f0 = marks[.present] { m["timeToFirstRender"] = f0 - dfl }
-        if let i = marks[.interactive], ["settled", "failed", "declared"].contains(ttiOutcome ?? "") { m["timeToInteractive"] = i - dfl }
+        if let i = marks[.interactive] { m["timeToInteractive"] = i - dfl }
         return m
     }
 }
 
 extension ExactLaunch {
     /// One line for `EXACT_SMOKE`: the metrics in ms and the marks from process start.
-    public func smokeLine(for session: ExactSession) -> String {
-        let r = report(for: session)
-        let metrics = (r["metrics"] as? [String: Double] ?? [:]).sorted { $0.key < $1.key }
+    public func smokeLine() -> String {
+        let metrics = metrics().sorted { $0.key < $1.key }
             .map { "\($0.key) \(String(format: "%.1f", $0.value * 1000)) ms" }.joined(separator: "; ")
-        let order = Mark.allCases.map(\.rawValue)
-        let marks = (r["marks"] as? [String: Double] ?? [:]).sorted { order.firstIndex(of: $0.key)! < order.firstIndex(of: $1.key)! }
-            .map { "\($0.key) \(String(format: "%.1f", $0.value))" }.joined(separator: " · ")
-        let trace = (r["trace"] as? [String] ?? []).joined(separator: " → ")
-        return "\(r["launchType"] ?? "?") \(r["bootPath"] ?? "?") tti \(r["tti"] ?? "pending")\((r["outstanding"] as? [String]).map { " outstanding \($0)" } ?? "") \(r["suppressed"].map { "suppressed: \($0) " } ?? "")activation \(r["activation"] ?? "?"); \(metrics.isEmpty ? "no metrics" : metrics); marks \(marks); ledger \(trace)"
+        let marks = self.marks[.process].map { p in
+            Mark.allCases.compactMap { m in self.marks[m].map { "\(m.rawValue) \(String(format: "%.1f", ($0 - p) * 1000))" } }.joined(separator: " · ")
+        } ?? ""
+        return "\(launchType ?? "?") \(bootPath ?? "?") tti \(ttiOutcome ?? "pending")\(lastOutstanding.isEmpty ? "" : " outstanding \(lastOutstanding)") \(suppressed.map { "suppressed: \($0) " } ?? "")activation \(activation); \(metrics.isEmpty ? "no metrics" : metrics); marks \(marks); ledger \(trace.joined(separator: " → "))"
+    }
+}
+
+/// A display link on the main run loop's common modes, so it fires during tracking.
+func mainDisplayLink(_ target: Any, _ selector: Selector) -> CADisplayLink? {
+    #if os(macOS)
+    let link = NSScreen.main?.displayLink(target: target, selector: selector)
+    #else
+    let link: CADisplayLink? = CADisplayLink(target: target, selector: selector)
+    #endif
+    link?.add(to: .main, forMode: .common)
+    return link
+}
+
+/// A display-link sample: its vsync time and observed interval, in seconds.
+struct Vsync {
+    let at: Double
+    let interval: Double
+
+    init(_ link: CADisplayLink) {
+        // On ProMotion, `duration` can stay nominal while the real cadence changes.
+        let interval = link.targetTimestamp - link.timestamp
+        at = link.timestamp
+        self.interval = interval > 0 ? interval : link.duration
+    }
+
+    /// The first vsync strictly after `t`, on this sample's grid.
+    func next(after t: Double) -> Double? {
+        guard interval > 0 else { return nil }
+        let g = at + ((t - at) / interval).rounded(.up) * interval
+        return g <= t ? g + interval : g
     }
 }

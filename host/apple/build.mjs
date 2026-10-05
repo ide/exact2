@@ -812,7 +812,7 @@ async function main(args) {
   // SwiftPM compiles Package.swift itself for macOS before applying the iOS
   // product triple; an iPhone SDKROOT in its environment breaks that host
   // manifest compile. The target SDK stays in the explicit Swift arguments.
-  const launchModules = app.launch, launchPartsDir = writeLaunchParts(pkg, app);
+  const launchPartsDir = writeLaunchParts(pkg, app);
   const swiftEnv = (libDir, composition) => ({
     ...process.env, ...(launchPartsDir ? { EXACT_LAUNCH_PARTS: launchPartsDir.slice(pkg.length + 1) } : {}),
     ...(tv ? { TVOS_DEPLOYMENT_TARGET: targets.ios } : ios ? { IPHONEOS_DEPLOYMENT_TARGET: targets.ios } : { MACOSX_DEPLOYMENT_TARGET: targets.macos }),
@@ -1126,7 +1126,7 @@ async function main(args) {
   const moduleArgs = (sdkFor, targetArgs, out, forIos = false, simulator = false, arch = macArch) => ['--sdk', sdkFor, 'swiftc', '-module-cache-path', resolve(swiftBuildRoot, 'modules-module-cache'), '-parse-as-library', '-emit-library', '-O', '-swift-version', '5', '-module-name', 'ExactAppModules', ...moduleSources, ...frameworkArgs(forIos, simulator, arch), ...linkArgs(forIos), '-o', out, ...targetArgs];
   const macTarget = ['-target', `${process.arch === 'arm64' ? 'arm64' : 'x86_64'}-apple-macos14.0`];
   if (modulesBuilt) arms.push(arm(moduleArgs(sdkName, ios ? ['-target', tv ? iosTripleFor(app, device, true) : device ? 'arm64-apple-ios17.0' : iosTriple, '-sdk', sdk] : macTarget, modulesBuilt, ios, ios && !device, ios ? iosArch : macArch), moduleSources, modulesBuilt, frameworkStamp(ios, ios && !device, ios ? iosArch : macArch), true));
-  const serviceDylibs = launchServices(launchModules, webBuildDir); for (const svc of serviceDylibs) arms.push(arm(['--sdk', sdkName, 'swiftc', '-module-cache-path', resolve(swiftBuildRoot, 'modules-module-cache'), ...serviceArgs(svc), ...(ios ? ['-target', device ? 'arm64-apple-ios17.0' : tv ? iosTripleFor(app, false, true) : iosTriple, '-sdk', sdk] : macTarget)], svc.sources, svc.built, '', true));
+  const serviceDylibs = launchServices(app.launch, webBuildDir); for (const svc of serviceDylibs) arms.push(arm(['--sdk', sdkName, 'swiftc', '-module-cache-path', resolve(swiftBuildRoot, 'modules-module-cache'), ...serviceArgs(svc), ...(ios ? ['-target', device ? 'arm64-apple-ios17.0' : tv ? iosTripleFor(app, false, true) : iosTriple, '-sdk', sdk] : macTarget)], svc.sources, svc.built, '', true));
   // The roster the artifact serves is read from its table: a macOS slice (the
   // one this process can load) of the same sources for an iOS build. That
   // probe is a macOS build of the same Swift, so an iOS build whose
@@ -1186,7 +1186,7 @@ async function main(args) {
       const platform = ios ? 'ios' : 'macos';
       assertLinkedSdk(executable, designCompatible(app, platform) ? COMPATIBLE_SDK[platform] : read('xcrun', ['--sdk', sdkName, '--show-sdk-version']).stdout.trim());
       if (ipa) stripped = stripForDistribution(executable, `${ipa.replace(/\.ipa$/, '')}.dSYM`);
-    } if (launchPartsDir) auditLaunchParts(resolve(swiftBinDir, 'ExactLaunchParts.o'), launchModules, read);
+    } if (launchPartsDir) auditLaunchParts(resolve(swiftBinDir, 'ExactLaunchParts.o'), app.launch, read);
   } finally { releaseSwift(); }
   const tSwift = Date.now();
   for (const placed of arms) await placed();
