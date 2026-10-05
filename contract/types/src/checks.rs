@@ -1163,17 +1163,12 @@ fn observe_args(
     shapes: &Shapes,
     span: Span,
 ) -> Result<(), TypeError> {
-    let usage = match name {
-        "observe" => "`observe(name)`, `observe(name, Shape(key=value))` or `observe(name, Shape(key=value), \"warn\")`",
-        "observeAttributes" => "`observeAttributes(Shape(key=value))`",
-        _ => "`observeError(message)` or `observeError(message, \"TypeName\")`",
+    let (usage, max) = match name {
+        "observe" => ("`observe(name)`, `observe(name, Shape(key=value))` or `observe(name, Shape(key=value), \"warn\")`", 3),
+        "observeAttributes" => ("`observeAttributes(Shape(key=value))`", 1),
+        _ => ("`observeError(message)` or `observeError(message, \"TypeName\")`", 2),
     };
-    let (min, max) = match name {
-        "observe" => (1, 3),
-        "observeAttributes" => (1, 1),
-        _ => (1, 2),
-    };
-    if args.len() < min || args.len() > max {
+    if args.is_empty() || args.len() > max {
         return err("type-observe", usage.to_string(), span);
     }
     for (i, arg) in args.iter().enumerate() {
