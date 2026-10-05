@@ -49,6 +49,22 @@ final class NativeButtonIOSTests: XCTestCase {
         XCTAssertTrue(try XCTUnwrap(p.views[2]).isHidden, "the configuration draws the title")
     }
 
+    func testAStyledButtonKeepsItsContentWhereTheBoxesStand() throws {
+        let p = presenter([
+            ["op": "create", "id": 1, "kind": "button", "handlers": ["press"], "style": ["exact_apple_button_style": "plain"]],
+            ["op": "create", "id": 2, "kind": "text", "props": ["text": "Check"]],
+            ["op": "children", "id": 1, "ids": [2]],
+            ["op": "roots", "ids": [1]],
+            ["op": "frame", "id": 1, "x": 0.0, "y": 0.0, "w": 300.0, "h": 44.0],
+            ["op": "frame", "id": 2, "x": 16.0, "y": 12.0, "w": 60.0, "h": 20.0],
+        ])
+        let b = try XCTUnwrap(button(try XCTUnwrap(p.views[1])))
+        XCTAssertEqual(b.contentHorizontalAlignment, .left)
+        XCTAssertEqual(b.configuration?.contentInsets.leading, 16)
+        XCTAssertEqual(NativeButton.horizontal([CGRect(x: 120, y: 0, width: 60, height: 20)], in: 300).0, .center)
+        XCTAssertEqual(NativeButton.horizontal([CGRect(x: 16, y: 0, width: 60, height: 20)], in: 300, rtl: true).1.trailing, 16)
+    }
+
     func testADisabledButtonIsADisabledUIButton() throws {
         let p = presenter([
             ["op": "create", "id": 1, "kind": "button", "handlers": ["press"], "props": ["disabled": "true"]],
