@@ -15,6 +15,13 @@ final class SpaceHitIOSTests: XCTestCase {
 
     /// A 200×200 parent with `perspective: 200px` holding a 100×100 button
     /// at (50, 50) turned about y by `degrees`.
+    /// The node a hit lands on: a button's hit is its UIButton
+    /// (NativeButtonIOS), which belongs to the button's node.
+    private func node(_ hit: UIView?) -> UIView? {
+        if let button = hit as? NativeButton { return button.owner }
+        return hit
+    }
+
     private func fixture(degrees: Double, axis: [Double] = [0, 1, 0], child: [String: Any] = [:]) throws -> (Presenter, NodeView, NodeView) {
         let p = Presenter()
         window = UIWindow(frame: CGRect(x: 0, y: 0, width: 400, height: 400))
@@ -40,10 +47,10 @@ final class SpaceHitIOSTests: XCTestCase {
     // stands at x ≈ 68 and runs y ≈ 36…164; the far (right) edge at x ≈ 121.
     func testATurnedBoxIsHitWhereItIsDrawn() throws {
         let (_, parent, child) = try fixture(degrees: 60)
-        XCTAssertTrue(parent.hitTest(CGPoint(x: 75, y: 45), with: nil) === child, "inside the drawn quad, outside the flat frame")
-        XCTAssertTrue(parent.hitTest(CGPoint(x: 100, y: 100), with: nil) === child, "the centre")
-        XCTAssertFalse(parent.hitTest(CGPoint(x: 140, y: 100), with: nil) === child, "inside the flat frame, beyond the far edge")
-        XCTAssertFalse(parent.hitTest(CGPoint(x: 55, y: 100), with: nil) === child, "inside the flat frame, before the near edge")
+        XCTAssertTrue(node(parent.hitTest(CGPoint(x: 75, y: 45), with: nil)) === child, "inside the drawn quad, outside the flat frame")
+        XCTAssertTrue(node(parent.hitTest(CGPoint(x: 100, y: 100), with: nil)) === child, "the centre")
+        XCTAssertFalse(node(parent.hitTest(CGPoint(x: 140, y: 100), with: nil)) === child, "inside the flat frame, beyond the far edge")
+        XCTAssertFalse(node(parent.hitTest(CGPoint(x: 55, y: 100), with: nil)) === child, "inside the flat frame, before the near edge")
         // A press inside resolves through the same projection.
         let window = try XCTUnwrap(child.window)
         let inChild = child.local(parent.convert(CGPoint(x: 75, y: 45), to: window))
@@ -77,9 +84,9 @@ final class SpaceHitIOSTests: XCTestCase {
         ]))
         window.layoutIfNeeded()
         let parent = try XCTUnwrap(p.views[1]), child = try XCTUnwrap(p.views[2])
-        XCTAssertTrue(parent.hitTest(CGPoint(x: 200, y: 200), with: nil) === child)
-        XCTAssertTrue(parent.hitTest(CGPoint(x: 235, y: 235), with: nil) === child)
-        XCTAssertFalse(parent.hitTest(CGPoint(x: 110, y: 110), with: nil) === child, "its flat frame, where nothing of it is drawn")
+        XCTAssertTrue(node(parent.hitTest(CGPoint(x: 200, y: 200), with: nil)) === child)
+        XCTAssertTrue(node(parent.hitTest(CGPoint(x: 235, y: 235), with: nil)) === child)
+        XCTAssertFalse(node(parent.hitTest(CGPoint(x: 110, y: 110), with: nil)) === child, "its flat frame, where nothing of it is drawn")
         // The perspective about an origin off the holder's anchor, too.
         let h = try XCTUnwrap(child.plane)
         for q in [CGPoint(x: 0, y: 0), CGPoint(x: 60, y: 60)] {
@@ -119,15 +126,15 @@ final class SpaceHitIOSTests: XCTestCase {
         button.placement = [1, 0, 50, 0, 1, 50, 0, 0, 1, 0]
         button.alpha = 0
         let sup = try XCTUnwrap(box.superview)
-        XCTAssertTrue(box.hitTest(sup.convert(CGPoint(x: 180, y: 80), to: box), with: nil) === button, "where it is drawn")
-        XCTAssertFalse(box.hitTest(sup.convert(CGPoint(x: 80, y: 80), to: box), with: nil) === button, "placed, but not translated")
+        XCTAssertTrue(node(box.hitTest(sup.convert(CGPoint(x: 180, y: 80), to: box), with: nil)) === button, "where it is drawn")
+        XCTAssertFalse(node(box.hitTest(sup.convert(CGPoint(x: 80, y: 80), to: box), with: nil)) === button, "placed, but not translated")
         // A point that misses every placed child is the canvas's, unless the
         // canvas lets the touch through (Grok's batch 2 review).
         let canvas = try XCTUnwrap(p.views[2])
-        XCTAssertTrue(box.hitTest(sup.convert(CGPoint(x: 180, y: 150), to: box), with: nil) === canvas)
+        XCTAssertTrue(node(box.hitTest(sup.convert(CGPoint(x: 180, y: 150), to: box), with: nil)) === canvas)
         canvas.applyStyle(["pointer_events": "none"])
-        XCTAssertFalse(box.hitTest(sup.convert(CGPoint(x: 180, y: 150), to: box), with: nil) === canvas, "pointer-events: none")
-        XCTAssertTrue(box.hitTest(sup.convert(CGPoint(x: 180, y: 80), to: box), with: nil) === button, "its placed child still takes it")
+        XCTAssertFalse(node(box.hitTest(sup.convert(CGPoint(x: 180, y: 150), to: box), with: nil)) === canvas, "pointer-events: none")
+        XCTAssertTrue(node(box.hitTest(sup.convert(CGPoint(x: 180, y: 80), to: box), with: nil)) === button, "its placed child still takes it")
         canvas.applyStyle([:])
         let inButton = button.local(sup.convert(CGPoint(x: 180, y: 80), to: nil))
         XCTAssertEqual(inButton.x, 30, accuracy: 1e-6)
@@ -142,22 +149,22 @@ final class SpaceHitIOSTests: XCTestCase {
 
     func testAHiddenBackFaceTakesNoHit() throws {
         let (_, parent, child) = try fixture(degrees: 150, child: ["backface_visibility": "hidden"])
-        XCTAssertFalse(parent.hitTest(CGPoint(x: 100, y: 100), with: nil) === child)
+        XCTAssertFalse(node(parent.hitTest(CGPoint(x: 100, y: 100), with: nil)) === child)
         let (_, shown, back) = try fixture(degrees: 150)
-        XCTAssertTrue(shown.hitTest(CGPoint(x: 100, y: 100), with: nil) === back, "a visible back face is hit")
+        XCTAssertTrue(node(shown.hitTest(CGPoint(x: 100, y: 100), with: nil)) === back, "a visible back face is hit")
         let (_, front, face) = try fixture(degrees: 30, child: ["backface_visibility": "hidden"])
-        XCTAssertTrue(front.hitTest(CGPoint(x: 100, y: 100), with: nil) === face, "a hidden back face turned toward the viewer is hit")
+        XCTAssertTrue(node(front.hitTest(CGPoint(x: 100, y: 100), with: nil)) === face, "a hidden back face turned toward the viewer is hit")
     }
 
     func testAnUnturnedBoxIsUnchanged() throws {
         let (_, parent, child) = try fixture(degrees: 0)
-        XCTAssertTrue(parent.hitTest(CGPoint(x: 55, y: 55), with: nil) === child)
-        XCTAssertTrue(parent.hitTest(CGPoint(x: 145, y: 145), with: nil) === child)
-        XCTAssertFalse(parent.hitTest(CGPoint(x: 45, y: 100), with: nil) === child)
+        XCTAssertTrue(node(parent.hitTest(CGPoint(x: 55, y: 55), with: nil)) === child)
+        XCTAssertTrue(node(parent.hitTest(CGPoint(x: 145, y: 145), with: nil)) === child)
+        XCTAssertFalse(node(parent.hitTest(CGPoint(x: 45, y: 100), with: nil)) === child)
         // A 2D turn stays UIKit's.
         let (_, flat, turned) = try fixture(degrees: 45, axis: [0, 0, 1])
-        XCTAssertTrue(flat.hitTest(CGPoint(x: 100, y: 35), with: nil) === turned, "a 45° diamond's top corner")
-        XCTAssertFalse(flat.hitTest(CGPoint(x: 55, y: 55), with: nil) === turned, "the flat frame's corner")
+        XCTAssertTrue(node(flat.hitTest(CGPoint(x: 100, y: 35), with: nil)) === turned, "a 45° diamond's top corner")
+        XCTAssertFalse(node(flat.hitTest(CGPoint(x: 55, y: 55), with: nil)) === turned, "the flat frame's corner")
     }
 }
 #endif

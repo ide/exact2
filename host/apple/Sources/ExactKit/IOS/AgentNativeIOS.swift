@@ -112,6 +112,7 @@ extension Presenter {
             if sub === o.scroll { return ("scroll", id) }
             if sub === o.video || sub === o.web { return ("heavy", id) }
             if sub === controls.controls[id] { return ("control", id) }
+            if sub is NativeButton { return ("control", id) }
             if segments.inspectionOwns(sub) { return ("segment", id) }
             if swipeActions.inspectionOwns(sub) { return ("swipe", id) }
             if groupedLists?.inspectionOwns(sub) == true { return ("grouped-list", id) }
