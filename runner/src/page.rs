@@ -1,8 +1,9 @@
 //! The page's facts that are not media features: whether any of it can be
 //! seen (the Page Visibility API), whether the device believes it is online
-//! (`navigator.onLine`), and whether a share sheet exists
-//! (`navigator.share`). The host observes them; the app reads them by
-//! field name from one reserved source.
+//! (`navigator.onLine`), whether a share sheet exists (`navigator.share`),
+//! and how the browser loaded the page (Navigation Timing's `type`). The
+//! host observes them; the app reads them by field name from one reserved
+//! source.
 //! @ref LLP 1069.000 D2; LLP 1069.003 D5
 
 use exact_plan::Value;
@@ -10,7 +11,12 @@ use exact_plan::Value;
 /// Reserved resource source, answered before the app data seam.
 pub const SOURCE: &str = "exactPage";
 /// Fields an app may declare, filled by name.
-pub const FIELDS: &[&str] = &["visibilityState", "onLine", "canShare"];
+pub const FIELDS: &[&str] = &["visibilityState", "onLine", "canShare", "navigationType"];
+
+/// `navigationType`'s words, by their wire code (bits 3–4): the web's
+/// `PerformanceNavigationTiming.type`, or none where the app is no page a
+/// browser loaded (a native app's launch).
+pub const NAVIGATION_TYPES: [&str; 4] = ["", "navigate", "reload", "back_forward"];
 
 /// What the host last said. The default is the bake's answer: a visible,
 /// online page with no share sheet.
@@ -24,6 +30,12 @@ pub struct Page {
     pub on_line: bool,
     /// `typeof navigator.share === "function"` (LLP 1069.003 D5).
     pub can_share: bool,
+    /// How the browser loaded the page, an index into [`NAVIGATION_TYPES`]:
+    /// 0 none (no browser loaded it: a native app), 1 `navigate` (a link,
+    /// the address bar; also a prerender), 2 `reload`, 3 `back_forward`.
+    /// The page's for its whole life, as the web's navigation entry is: an
+    /// app can tell a load the user asked for from a launch it made itself.
+    pub navigation: u8,
 }
 
 impl Default for Page {
@@ -32,24 +44,30 @@ impl Default for Page {
             hidden: false,
             on_line: true,
             can_share: false,
+            navigation: 0,
         }
     }
 }
 
 impl Page {
-    /// The hosts' wire form: bit 0 hidden, bit 1 offline, bit 2 can share;
-    /// other bits are ignored. Zero is visible, online, no share sheet.
+    /// The hosts' wire form: bit 0 hidden, bit 1 offline, bit 2 can share,
+    /// bits 3–4 the navigation type; other bits are ignored. Zero is
+    /// visible, online, no share sheet, no navigation.
     pub fn from_bits(bits: u32) -> Self {
         Self {
             hidden: bits & 1 != 0,
             on_line: bits & 2 == 0,
             can_share: bits & 4 != 0,
+            navigation: ((bits >> 3) & 3) as u8,
         }
     }
 
     /// The inverse of [`Page::from_bits`].
     pub fn bits(self) -> u32 {
-        u32::from(self.hidden) | (u32::from(!self.on_line) << 1) | (u32::from(self.can_share) << 2)
+        u32::from(self.hidden)
+            | (u32::from(!self.on_line) << 1)
+            | (u32::from(self.can_share) << 2)
+            | (u32::from(self.navigation & 3) << 3)
     }
 
     /// `"visible"` or `"hidden"`, the web's words.
@@ -67,6 +85,9 @@ impl Page {
             "visibilityState" => Some(Value::str(self.visibility_state())),
             "onLine" => Some(Value::Bool(self.on_line)),
             "canShare" => Some(Value::Bool(self.can_share)),
+            "navigationType" => Some(Value::str(
+                NAVIGATION_TYPES[usize::from(self.navigation & 3)],
+            )),
             _ => None,
         }
     }
@@ -79,9 +100,17 @@ mod tests {
     #[test]
     fn bits_round_trip_and_zero_is_the_default() {
         assert_eq!(Page::from_bits(0), Page::default());
-        for bits in 0..8 {
+        for bits in 0..32 {
             assert_eq!(Page::from_bits(bits).bits(), bits);
         }
+        assert_eq!(
+            Page::from_bits(2 << 3).field("navigationType"),
+            Some(exact_plan::Value::str("reload"))
+        );
+        assert_eq!(
+            Page::default().field("navigationType"),
+            Some(exact_plan::Value::str(""))
+        );
         let page = Page::from_bits(0b111);
         assert!(page.hidden && !page.on_line && page.can_share);
         assert_eq!(page.visibility_state(), "hidden");
