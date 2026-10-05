@@ -795,7 +795,7 @@ extension Agent {
             if let f = v.textArea { if !f.isFirstResponder { _ = f.becomeFirstResponder() } }
             else if let f = v.field { if !f.isFirstResponder { _ = f.becomeFirstResponder() } }
             else if v.canBecomeFirstResponder, !v.isFirstResponder { _ = v.becomeFirstResponder() }
-            let focus = v.field != nil || v.textArea != nil || v.isFirstResponder || v.handlers.contains("press") ? v : nil
+            let focus = v.field != nil || v.textArea != nil || v.isFirstResponder || v.activatable ? v : nil
             // The page's shortcuts first, as the web's capture listener and
             // macOS's `routeKey` hear them (gallery F18, ShortcutsIOS).
             #if os(iOS)
@@ -814,7 +814,7 @@ extension Agent {
                     if name == "Backspace" { f.deleteBackward() } else if name == "Enter" { _ = focus.textFieldShouldReturn(f) }
                     else if Agent.caretKey(name, in: f) {} else if types { f.insertText(name) }
                     f.heard = nil
-                } else if focus.handlers.contains("press") || focus.defaultLink != nil, name == "Enter" || (name == " " && focus.props["href"] == nil) { presenter.press(focus.id) }
+                } else if focus.activatable, name == "Enter" || (name == " " && focus.props["href"] == nil) { presenter.press(focus.id) }
             }
             return ["typed": Int(v.id), "key": key, "value": v.textArea?.text ?? v.field?.text ?? "", "delivery": "recognized"]
         }

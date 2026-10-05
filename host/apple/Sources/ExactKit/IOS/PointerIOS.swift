@@ -145,6 +145,16 @@ extension NodeView {
     // so a touch on a button's text reaches the button, as a DOM click
     // bubbles. A pan cancels it (the scroll view's `canCancelContentTouches`):
     // scroll always wins.
+    /// Whether activating this node does something (LLP 1035.001.001 D1):
+    /// its own `press`, a link it follows (`defaultLink`), or a command
+    /// toward a confirmation or content popover (MenusIOS) — pressable
+    /// without a press handler of its own, by a touch, a key, VoiceOver or
+    /// the agent alike.
+    var activatable: Bool {
+        if handlers.contains("press") || defaultLink != nil { return true }
+        guard !(props["popovertarget"] ?? "").isEmpty || !(props["commandfor"] ?? "").isEmpty else { return false }
+        return presenter?.menus.invokes(self) == true
+    }
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
         if ((isSurfaceControl || ownsSurfaceControl) ? inputCanvas?.canvasInput : canvasInput)?.touches(touches, phase: "down", source: self, event: event) == true { return }
         guard !disabled else { pressed = false; return }
@@ -156,7 +166,7 @@ extension NodeView {
         }
         // A Markdown run's link has no view of its own (MarkupRuns): its target is the press.
         if let touch = touches.first, let href = inlineLink(at: local(touch.location(in: nil))) { linkPressed = href; return }
-        if handlers.contains("press") || defaultLink != nil { pressed = true } else { super.touchesBegan(touches, with: event) }
+        if activatable { pressed = true } else { super.touchesBegan(touches, with: event) }
     }
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
         inlinePressed = nil; linkPressed = nil
@@ -218,7 +228,7 @@ extension NodeView {
         var v: UIView? = self
         while let cur = v {
             if let n = cur as? NodeView, n.disabled { return nil }
-            if let n = cur as? NodeView, (n.handlers.contains("press") || n.defaultLink != nil || n.isSurfaceControl) {
+            if let n = cur as? NodeView, (n.activatable || n.isSurfaceControl) {
                 guard n.bounds.contains(n.local(windowPoint)) else { return nil }
                 return n
             }
