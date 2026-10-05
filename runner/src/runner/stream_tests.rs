@@ -329,8 +329,6 @@ fn outstanding_counts_a_failed_resource_as_settled() {
 #[test]
 fn outstanding_counts_only_short_one_shot_tasks() {
     let mut b = PlanBuilder::new(exact_kernel::SCHEMA_DIGEST, 1);
-    let number = b.primitive(TypeKind::Number);
-    let _ = number;
     let body = b.code(Asm::new());
     let soon = b.action("soon", &[], &[], body);
     let body = b.code(Asm::new());
