@@ -1,6 +1,6 @@
-// The app's module launch parts (Exact Observe design §4.6). This file is the
-// default, for an app with none; `build.mjs` generates the app's own beside
-// copies of each `modules/<name>/apple/launch/*.swift` it names in `launch`.
+// The default, empty registry for an app with no module launch parts.
+// `build.mjs` generates a replacement next to copies of each module's
+// `apple/launch/*.swift` when app.json's `launch` names any.
 import ExactKit
 
 public enum ExactLaunchParts {

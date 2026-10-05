@@ -435,9 +435,8 @@ fn run_check_with(transport: &dyn ibex2::stdlib::fetch::Transport) -> String {
             .ok_or_else(|| "no store is open".to_string())
             .and_then(Client::begin_check)
     };
-    // Exact Observe design §3.8: the download is the blobs, from the first
-    // request after the head was admitted to the update staged; a check that
-    // fetched no blob (current, or every file already held) downloaded nothing.
+    // The download is timed from the first blob request (any URL but the head)
+    // to staging. A check that fetched no blob reports no download.
     let mut first_blob: Option<std::time::Instant> = None;
     let mut blobs = 0usize;
     let downloaded = request.map(|request| {
@@ -739,7 +738,6 @@ mod tests {
             let response = responsive_rx.recv_timeout(std::time::Duration::from_secs(2));
             release_tx.send(()).unwrap();
             foreground.join().unwrap();
-            // The download is timed and counted (Exact Observe design §3.8).
             let line = checking.join().unwrap();
             assert!(
                 line.starts_with("staged seq 2; downloaded 1 files in "),

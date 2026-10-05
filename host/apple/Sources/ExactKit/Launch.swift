@@ -1,14 +1,8 @@
-// The launch marks (Exact Observe design §3.2–3.4): when the process started,
-// when the platform finished launching it, when the first tree was committed
-// and shown. Marks are host timestamps on one clock (`CACurrentMediaTime`,
-// mach_absolute_time); nothing here does I/O beyond one preferences write.
-//
-// Anchors are Observe's own (expo-app-metrics `AppStartupMarkers`):
-//   launch = (L − P) + (DFL − Md)      Md: the app delegate's init (after any prewarm)
-//   TTR    = F0 − DFL                  DFL: didFinishLaunching *returns*
-// F0 is the first vsync after the commit that carried the first tree: views
-// handed to Core Animation are taken to be displayed by the next frame. The
-// render server can show them a frame or more later; that gap is not measured.
+// Startup metrics with Observe's definitions (expo-app-metrics `AppStartupMarkers`).
+// All marks are seconds on `CACurrentMediaTime` (mach_absolute_time).
+//   launch time = (constructor − process start) + (didFinishLaunching − delegate init)
+//   time to first render = first vsync after the first tree's commit − didFinishLaunching
+// Time to first render assumes the render server shows a commit at the next vsync.
 import CExactLaunch
 import Foundation
 import QuartzCore
@@ -26,7 +20,7 @@ public final class ExactLaunch: NSObject {
     }
 
     let facts = exact_launch_constructor_facts()
-    /// Monotonic seconds per mark, for the launch session only.
+    /// Each mark's time in seconds, for the launch session only.
     private(set) var marks: [Mark: Double] = [:] {
         didSet {
             for (m, t) in marks where oldValue[m] == nil { ExactJournal.shared.record("mark", ["mark": m.rawValue], at: t) }
@@ -35,7 +29,7 @@ public final class ExactLaunch: NSObject {
     /// Services the launch parts asked for, waiting for their moment.
     private var services: [(module: String, when: ExactServiceLoad, config: [String: Any], handoff: () -> Data)] = []
     private var loaded: Set<String> = []
-    /// cold, warm, or nil before DFL.
+    /// "cold", "warm", or nil before didFinishLaunching.
     private(set) var launchType: String?
     /// Why this launch reports no startup metrics, when it doesn't.
     private(set) var suppressed: String?
@@ -46,19 +40,19 @@ public final class ExactLaunch: NSObject {
     private var link: CADisplayLink?
     /// The last display-link sample: its vsync time and its observed interval.
     private var vsync: (at: Double, interval: Double)?
-    /// TTI (§3.5): how startup ended, what was still outstanding, whether the
-    /// screen changed since its last presented frame, and the vsync a ready
-    /// candidate waits for.
+    /// How time to interactive ended: settled, declared, failed, timeout, or a failure.
     private(set) var ttiOutcome: String?
     private(set) var lastOutstanding: [String] = []
-    /// Each distinct outstanding set the ledger passed through, with its time
-    /// from process start: how TTI was reached (`state.observe`, the smoke).
+    /// Each distinct set of outstanding work, with ms from process start, for
+    /// debugging how time to interactive was reached.
     private(set) var trace: [String] = []
     private(set) var failedResources: [String] = []
+    /// The screen changed since its last presented frame.
     private var contentDirty = false
+    /// The vsync at which a settled screen becomes interactive, unless work reappears.
     private var candidate: Double?
     private var evaluateScheduled = false
-    /// The app's own `aria-busy` was the last thing outstanding.
+    /// The app's `aria-busy` elements were the last outstanding work.
     private var declaredLast = false
     static let ttiTimeout = 30.0
 
@@ -73,18 +67,16 @@ public final class ExactLaunch: NSObject {
 
     // MARK: Host hooks (the adapter's app delegate)
 
-    /// The app delegate is being made: inside `UIApplicationMain`, after any
-    /// prewarm pause. Observe's "main".
+    /// Called from the app delegate's init, inside `UIApplicationMain` and after
+    /// any prewarm pause. Observe calls this mark "main".
     public func delegateInit() {
         if marks[.delegateInit] == nil { marks[.delegateInit] = CACurrentMediaTime() }
     }
 
-    /// `didFinishLaunching` is about to return, its own setup (the session)
-    /// done. `hidden`: macOS launched the app hidden (a login item).
-    ///
-    /// A scene-based iOS app is `.background` here even when the user tapped
-    /// its icon (measured on the iOS 27 simulator), so the application state
-    /// can't tell a background launch. The scene does (`sceneConnected`).
+    /// Called as `didFinishLaunching` returns, after the session is made.
+    /// `hidden` means macOS launched the app hidden, as a login item does.
+    /// A scene-based iOS app reports `.background` here even for a tap on its
+    /// icon, so `sceneConnected` detects background launches instead.
     public func didFinishLaunching(hidden: Bool = false) {
         guard marks[.didFinishLaunching] == nil else { return }
         marks[.didFinishLaunching] = CACurrentMediaTime()
@@ -102,12 +94,10 @@ public final class ExactLaunch: NSObject {
         }
     }
 
-    /// The first scene connected. UIKit connects a foreground launch's scene
-    /// straight after `didFinishLaunching` (tens of ms); a process launched
-    /// in the background (a push, a background task) gets its scene only when
-    /// the user later opens it, after its launch work is long done. So a
-    /// scene that connects more than `backgroundGap` after DFL means this
-    /// process was launched in the background: no startup metrics.
+    /// UIKit connects a foreground launch's scene within tens of ms of
+    /// `didFinishLaunching`. A background launch (a push, a background task)
+    /// gets its scene only when the user opens the app later. A gap over
+    /// `backgroundGap` seconds therefore suppresses startup metrics.
     public func sceneConnected() {
         guard marks[.scene] == nil else { return }
         let now = CACurrentMediaTime()
@@ -121,23 +111,21 @@ public final class ExactLaunch: NSObject {
 
     // MARK: Session hooks
 
-    /// A session begins a boot, on any path. The first one after DFL is the
-    /// launch session.
+    /// The first session to boot after `didFinishLaunching` is the launch session.
     func bootEntered(_ session: ExactSession) {
         guard marks[.didFinishLaunching] != nil, launchSession == nil, marks[.boot] == nil else { return }
         launchSession = session
         marks[.boot] = CACurrentMediaTime()
     }
 
-    /// The launch session's first tree is applied; Core Animation draws and
-    /// commits it next (`drawn`).
+    /// The launch session's first tree is applied. Core Animation draws and
+    /// commits it next, which `drawn` records.
     func treeApplied(_ session: ExactSession, path: String) {
         guard session === launchSession, marks[.commit] == nil, bootPath == nil else { return }
         bootPath = path
         commitPending = true
     }
 
-    /// Data activation settled for the launch session's first generation.
     func activated(_ session: ExactSession, ok: Bool) {
         guard session === launchSession, activation == "pending" else { return }
         activation = ok ? "ready" : "failed"
@@ -145,8 +133,7 @@ public final class ExactLaunch: NSObject {
         scheduleEvaluate()
     }
 
-    /// A batch applied to the launch session: re-read the ledger once this
-    /// turn (and the commit that ends it) is done.
+    /// Re-reads outstanding work after this run-loop turn and its commit finish.
     func applied(_ session: ExactSession, changed: Bool) {
         guard session === launchSession, ttiOutcome == nil else { return }
         if changed { contentDirty = true; candidate = nil }
@@ -155,13 +142,9 @@ public final class ExactLaunch: NSObject {
 
     // MARK: Commit and vsync
 
-    /// The launch session's first tree drew. Its layers are drawn inside the
-    /// Core Animation commit that carries it (`CA::Transaction::commit` →
-    /// `display_if_needed`, whether the commit runs at the run loop's
-    /// before-waiting or from AppKit's and UIKit's update cycle), so this is
-    /// the commit, less only what Core Animation does after drawing. A run-loop
-    /// observer can't see every commit: on current macOS the update cycle commits
-    /// from an observer in HIToolbox's own mode.
+    /// The first tree's layers draw inside the Core Animation commit that
+    /// carries them, so this marks the commit. A run-loop observer would miss
+    /// commits that macOS makes from HIToolbox's own run-loop mode.
     func drawn(_ session: ExactSession) {
         guard session === launchSession, commitPending else { return }
         commitPending = false
@@ -180,17 +163,16 @@ public final class ExactLaunch: NSObject {
     }
 
     @objc private func tick(_ link: CADisplayLink) {
-        // The observed interval: on ProMotion `duration` can stay nominal while
-        // the cadence changes (as `Session`'s frame code notes).
+        // On ProMotion, `duration` can stay nominal while the real cadence changes.
         let interval = link.targetTimestamp - link.timestamp
         vsync = (link.timestamp, interval > 0 ? interval : link.duration)
         resolvePresent()
         confirmCandidate()
     }
 
-    /// F0: the first vsync strictly after the commit, on the grid of the
-    /// nearest sample. A sample delivered late still names its own vsync, so a
-    /// busy main turn after the commit does not move F0.
+    /// Marks `present` as the first vsync after the commit, on the last sample's
+    /// grid. A late display-link callback still carries its own vsync time, so
+    /// a busy main thread does not move the mark.
     private func resolvePresent() {
         guard let c0 = marks[.commit], marks[.present] == nil, let v = vsync, v.interval > 0 else { return }
         var g = v.at + ((c0 - v.at) / v.interval).rounded(.up) * v.interval
@@ -208,7 +190,7 @@ public final class ExactLaunch: NSObject {
         return g
     }
 
-    // MARK: TTI (§3.5)
+    // MARK: Time to interactive
 
     private func scheduleEvaluate() {
         guard !evaluateScheduled, ttiOutcome == nil, suppressed == nil, !ExactEnv.agentMode else { return }
@@ -219,8 +201,8 @@ public final class ExactLaunch: NSObject {
         }
     }
 
-    /// What is still outstanding for the launch session: the runner's ledger
-    /// and the host's. Empty when the screen can be used.
+    /// The launch session's outstanding work, from the runner and the host.
+    /// Empty when the screen can be used.
     private func outstandingNow() -> [String]? {
         guard let session = launchSession, let ledger = Self.ledger(session) else { return nil }
         if ledger.poisoned { finish("logic_failed"); return nil }
@@ -228,8 +210,8 @@ public final class ExactLaunch: NSObject {
         return ledger.items + (activation != "ready" ? ["activation"] : [])
     }
 
-    /// A session's settle ledger (§3.5): the runner's outstanding work and the
-    /// host's, as names; what failed; whether the runner is poisoned.
+    /// A session's outstanding work from the runner and the host, as
+    /// `kind:name` items, plus failed resources and whether the runner is poisoned.
     static func ledger(_ session: ExactSession) -> (items: [String], failed: [String], poisoned: Bool)? {
         guard let data = session.agent("{\"op\":\"outstanding\"}").data(using: .utf8),
               let o = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
@@ -241,9 +223,9 @@ public final class ExactLaunch: NSObject {
         return (out, o["failed"] as? [String] ?? [], o["poisoned"] as? Bool == true)
     }
 
-    /// At a completion barrier (the turn after an apply or an activation):
-    /// when nothing is outstanding, I is the screen's next presentation if it
-    /// changed since its last one, else now; never before the first frame.
+    /// Runs the turn after an apply or activation. With nothing outstanding,
+    /// the interactive mark is the next vsync if the screen changed, else now.
+    /// It is never earlier than the first render.
     private func evaluate() {
         guard ttiOutcome == nil, suppressed == nil, let outstanding = outstandingNow() else { return }
         if outstanding.isEmpty, !lastOutstanding.isEmpty, lastOutstanding.allSatisfy({ $0.hasPrefix("busy:") }) { declaredLast = true }
@@ -261,7 +243,7 @@ public final class ExactLaunch: NSObject {
         finish(!failedResources.isEmpty ? "failed" : declaredLast ? "declared" : "settled")
     }
 
-    /// A ready candidate holds if nothing came outstanding before its vsync.
+    /// Confirms the candidate vsync if no work became outstanding before it.
     private func confirmCandidate() {
         guard let target = candidate, let v = vsync, v.at >= target, ttiOutcome == nil else { return }
         candidate = nil
@@ -286,8 +268,7 @@ public final class ExactLaunch: NSObject {
         if when == .afterStartup, ttiOutcome != nil || suppressed != nil { loadServices(.afterStartup) }
     }
 
-    /// Load each service whose moment came, in the turn after this one: never
-    /// inside the work that triggered it.
+    /// Loads due services in a later turn, never inside the work that triggered them.
     private func loadServices(_ moment: ExactServiceLoad) {
         let due = services.filter { ($0.when == moment || moment == .afterStartup) && !loaded.contains($0.module) }
         for s in due {
@@ -321,7 +302,7 @@ public final class ExactLaunch: NSObject {
         }
     }
 
-    // MARK: Classification (Observe's heuristic, `AppStartupMonitoring.getAppLaunchType`)
+    // MARK: Cold or warm, by Observe's heuristic (`AppStartupMonitoring.getAppLaunchType`)
 
     private static let defaults = UserDefaults(suiteName: "dev.exact.observe")
     private func classify() -> String {
@@ -344,9 +325,9 @@ public final class ExactLaunch: NSObject {
         return Double(t.tv_sec) + Double(t.tv_usec) / 1e6
     }
 
-    // MARK: The report (`state.observe`, smoke)
+    // MARK: Report for `state.observe` and the smoke test
 
-    /// Observe's metric names and values (seconds), plus Exact's phases.
+    /// Observe's metric names with values in seconds, plus Exact's marks in ms from process start.
     public func report(for session: ExactSession? = nil) -> [String: Any] {
         var out: [String: Any] = ["activation": activation]
         if let launchType { out["launchType"] = launchType }

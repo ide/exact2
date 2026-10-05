@@ -1,14 +1,8 @@
-// Observe on Linux (Exact Observe design §4.5–4.6): one file the app's
-// build compiles into the executable (`contract::linux_launch_parts`).
-//
-// `launch` runs first in `main` and does no I/O: it names the session,
-// subscribes to the host's journal (a channel send per event) and installs a
-// panic hook that leaves a pending record. Everything else waits for the
-// startup report and runs on a thread of its own: the queue (one JSON file,
-// bounded, kept until acknowledged — the web service's), crash ingestion,
-// the device state at TTI, and dispatch with expo-observe's OTLP/JSON and
-// rules, through the host's transport. The same names, attributes, scope and
-// schema URL as `apple/service/ObserveWire.swift` and `web/service.js`.
+// Observe on Linux, compiled into the app's executable (`contract::linux_launch_parts`).
+// `launch` does no I/O. It names the session, forwards journal events to a channel and
+// installs a panic hook. After the startup report, a background thread keeps the queue
+// (one bounded JSON file), records earlier crashes and sends rows in expo-observe's
+// OTLP/JSON, matching `apple/service/ObserveWire.swift` and `web/service.js`.
 
 use exact_linux::journal::{self, serde_json, LaunchContext};
 use serde_json::{json, Map, Value};
@@ -22,7 +16,7 @@ const CHUNK: usize = 200;
 const MAX_ROWS: usize = 2000;
 const DEBOUNCE: Duration = Duration::from_secs(5);
 
-/// Observe's `metricNameMap`: the only names Exact emits.
+/// Observe's `metricNameMap`. Exact emits only these names.
 fn metric_name(category: &str, name: &str) -> String {
     match (category, name) {
         ("appStartup", "timeToInteractive") => "expo.app_startup.tti",
@@ -80,8 +74,8 @@ fn uuid() -> String {
     )
 }
 
-/// A session id in UUID form with no I/O: splitmix64 over the boot clock,
-/// the wall clock and the pid (a launch part may not wait on a device).
+/// A v4-format session id hashed from the clocks and the pid.
+/// It avoids reading `/dev/urandom`, since a launch part must do no I/O.
 fn session_id() -> String {
     let mix = |mut z: u64| {
         z = z.wrapping_add(0x9e37_79b9_7f4a_7c15);
@@ -112,8 +106,8 @@ fn session_id() -> String {
 pub fn launch(ctx: LaunchContext) {
     let session = session_id();
     let start = journal::wall();
-    // A panic leaves `pending-<session>.json`; the next launch sends it as a
-    // fatal `native.exception` against this session.
+    // A panic writes `pending-<session>.json`. The next launch sends it as a
+    // fatal `native.exception` for this session.
     let (module, config, app, development) = (ctx.module, ctx.config, ctx.app, ctx.development);
     let context = move || LaunchContext {
         module,
@@ -156,7 +150,7 @@ pub fn launch(ctx: LaunchContext) {
     });
 }
 
-/// Observe's event rules (expo-app-metrics `LogEvents` validation).
+/// Observe's custom-event validation, copied from expo-app-metrics (`LogEvents`).
 mod rules {
     use super::*;
 
@@ -177,7 +171,7 @@ mod rules {
         (k.starts_with("expo.") && k.len() > 5) || k == "session.id" || k == "event.name"
     }
 
-    /// At most 128, alphabetical; reserved and blank keys dropped and counted.
+    /// Keeps up to 128 attributes in key order. Returns the kept ones and how many were dropped.
     pub fn attributes(raw: &Value) -> (Map<String, Value>, u64) {
         let mut kept = Map::new();
         let mut dropped = 0;
@@ -198,7 +192,7 @@ mod rules {
     }
 }
 
-/// EASClientID.deterministicUniformValue: splitmix64 over both UUID halves → [0, 1).
+/// Same as expo's `EASClientID.deterministicUniformValue`: a stable value in [0, 1) per install.
 fn uniform(id: &str) -> f64 {
     let hex: String = id.chars().filter(|c| *c != '-').collect();
     let half = |r: std::ops::Range<usize>| {
@@ -213,7 +207,7 @@ fn uniform(id: &str) -> f64 {
     (z >> 11) as f64 / (1u64 << 53) as f64
 }
 
-/// min(60·2^(n−1), 900)·random() seconds.
+/// Observe's jittered exponential backoff, in seconds.
 fn backoff(attempt: u32) -> f64 {
     if attempt == 0 {
         return 0.0;
@@ -223,8 +217,7 @@ fn backoff(attempt: u32) -> f64 {
     (60.0 * 2f64.powi(attempt as i32 - 1)).min(900.0) * random
 }
 
-/// The server's Retry-After in seconds (a number; an HTTP date is ignored
-/// for the backoff), clamped to 60…900.
+/// The server's Retry-After in seconds, clamped to 60-900. An HTTP-date value is ignored.
 fn retry_after(h: Option<&str>) -> Option<f64> {
     let s: f64 = h?.trim().parse().ok()?;
     s.is_finite().then(|| s.clamp(60.0, 900.0))
@@ -265,9 +258,8 @@ fn read(path: &str) -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
-/// The device state Observe attaches to TTI: low-power mode (the ACPI
-/// platform profile), the battery, and the network. Read when the startup
-/// report arrives, a few ms after TTI. Absent hardware is left out.
+/// The device state Observe attaches to TTI, read when the startup report arrives.
+/// Low-power mode comes from the ACPI platform profile. Missing hardware is left out.
 fn device() -> Map<String, Value> {
     let mut d = Map::new();
     if let Some(profile) = read("/sys/firmware/acpi/platform_profile") {
@@ -326,7 +318,6 @@ fn device() -> Map<String, Value> {
     d
 }
 
-/// One queued row.
 type Row = Map<String, Value>;
 
 struct Service {
@@ -403,7 +394,7 @@ impl Service {
             "osName": "Linux",
             "osVersion": read("/proc/sys/kernel/osrelease"),
             "deviceModel": read("/sys/devices/virtual/dmi/id/product_name"),
-            // `LANG`'s language tag (`en_US.UTF-8` → `en-US`); `C`/`POSIX` say none.
+            // `en_US.UTF-8` becomes `en-US`. `C` and `POSIX` mean no language.
             "language": std::env::var("LANG").ok().map(|l| l.split('.').next().unwrap_or("").replace('_', "-"))
                 .filter(|l| !l.is_empty() && l != "C" && l != "POSIX"),
             "clientVersion": CLIENT_VERSION,
@@ -579,7 +570,7 @@ impl Service {
         self.schedule();
     }
 
-    /// The launch's metrics, Observe's names, from the host's startup report.
+    /// Stores the launch metrics from the host's startup report under Observe's names.
     fn startup(&mut self, e: &Value, wall: f64) {
         let marks = &e["marks"];
         let ms = |a: &str, b: &str| {
@@ -602,7 +593,7 @@ impl Service {
                 phases.insert(k.into(), v);
             }
         }
-        // A first frame on screen when its synchronous modeset returned.
+        // The first frame counts as shown when its synchronous modeset returns.
         phases.insert("exact.present.method".into(), "modeset".into());
         phases.insert("exact.boot.path".into(), e["bootPath"].clone());
         if let Some(r) = e["processResolutionMs"].as_f64() {
@@ -627,7 +618,8 @@ impl Service {
             }
             self.metric("appStartup", name, value, wall, None, params);
         }
-        // The launch route's own pair, from boot (a declared deviation).
+        // The launch route's `cold_ttr` and `tti`, measured from boot. Observe measures
+        // from its integration start, which has no Exact equivalent.
         if let (Some(route), Some(boot)) = (self.launch_route.clone(), marks["boot"].as_f64()) {
             let mut params = self.globals.clone();
             params.insert("isAppLaunch".into(), true.into());
@@ -668,11 +660,9 @@ impl Service {
         }
     }
 
-    /// Apple's rule, as Observe's iOS client reads it: warm is a new process
-    /// in the same OS boot as the last launch, of the same build, with no
-    /// terminal attached; anything else is cold. The boot is the kernel's
-    /// `boot_id`, the build this executable's size and mtime. Read and
-    /// written here, after TTI, never on the launch path.
+    /// Warm when the last launch was the same build in the same OS boot and no terminal
+    /// is attached, otherwise cold (Observe's iOS rule). The build is the executable's
+    /// size and mtime. Called after TTI because it does file I/O.
     fn launch_type(&self) -> &'static str {
         use std::io::IsTerminal;
         let boot = read("/proc/sys/kernel/random/boot_id");
@@ -727,7 +717,7 @@ impl Service {
         self.metric("navigation", name, value, wall, Some(&e["route"]), params);
     }
 
-    /// Pending records earlier processes left as they panicked.
+    /// Turns each pending panic record from an earlier process into a `native.exception` log.
     fn ingest_crashes(&mut self) {
         for entry in std::fs::read_dir(&self.dir).into_iter().flatten().flatten() {
             let name = entry.file_name().to_string_lossy().into_owned();
@@ -872,8 +862,8 @@ impl Service {
         json!({ outer: resources })
     }
 
-    /// Observe's gate: enabled, in sample (per install), and not a
-    /// development build unless `dispatchInDebug`. Out of it, rows are dropped.
+    /// Observe's gate: dispatching enabled, this install in the sample, and not a development
+    /// build unless `dispatchInDebug`. When it fails, rows are dropped, not kept for later.
     fn should_dispatch(&self) -> bool {
         let enabled = self
             .config
@@ -914,7 +904,7 @@ impl Service {
         if self.send("metrics", &format!("{base}/{project}/v1/metrics")) {
             self.send("logs", &format!("{base}/{project}/v1/logs"));
         }
-        // Sessions no row refers to any more are forgotten (the current one stays).
+        // Forget sessions no queued row refers to, except the current one.
         let live: std::collections::HashSet<String> = self
             .metrics
             .iter()
@@ -927,7 +917,8 @@ impl Service {
         self.save();
     }
 
-    /// One signal, chunk by chunk (Observe's DispatchLoop); false when it backed off.
+    /// Sends one signal's rows chunk by chunk, as expo-observe's `DispatchLoop.swift` does.
+    /// Returns false when it has to back off.
     fn send(&mut self, signal: &str, url: &str) -> bool {
         let mut limit = CHUNK;
         loop {
@@ -974,7 +965,7 @@ impl Service {
                     self.gate.0 = Some(Instant::now() + Duration::from_secs_f64(wait));
                     return false;
                 }
-                // Success, or a status Observe does not retry: the chunk is done.
+                // Success, or a status Observe does not retry: drop the chunk.
                 Ok(_) => {
                     self.gate.1 = 0;
                     queue.drain(..rows.len());
