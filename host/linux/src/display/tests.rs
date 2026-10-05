@@ -32,8 +32,8 @@ fn read_timed(
     })
 }
 
-/// The kernel's flip timestamp comes back with the sequence (Exact Observe
-/// design §3.4: a frame's presentation, not when the loop read the event).
+/// The flip's kernel timestamp is returned, not the time the loop read the
+/// event: TTI uses it as the moment the frame was shown.
 #[test]
 fn a_flip_carries_the_kernels_timestamp() {
     assert_eq!(

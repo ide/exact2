@@ -1,6 +1,5 @@
-//! `observe(…)`, `observeAttributes(…)`, `observeError(…)` (Exact Observe
-//! design §5.2): custom events from an action reach the host as commands, in
-//! order, with their arguments; anything else is refused at compile time.
+//! `observe(…)`, `observeAttributes(…)` and `observeError(…)` reach the host as
+//! commands, in order, with their arguments. Malformed calls fail to compile.
 use exact_runner::{DataError, DataSource, Runner, Value};
 
 const APP: &str = r#"shape Checkout
@@ -112,8 +111,8 @@ const SCREEN: &str = r#"component App
         text "Load"
 "#;
 
-/// `aria-busy` (Exact Observe design §3.5): a mounted busy element holds the
-/// settle ledger, named by its test id, until it is no longer busy.
+/// A mounted `aria-busy` element is outstanding, by test id, until it is no
+/// longer busy.
 #[test]
 fn aria_busy_holds_the_ledger_until_cleared() {
     let mut r = Runner::boot(

@@ -1,7 +1,6 @@
-//! Observe's Linux module (`modules/observe/linux/launch.rs`, Exact Observe
-//! design §4.5–4.6) against a local sink: its wire, its event rules, its
-//! dispatch rules and its panic record. Its own binary: it installs a panic
-//! hook and points `XDG_STATE_HOME` at a scratch directory.
+//! Tests Observe's Linux launch part (`modules/observe/linux/launch.rs`)
+//! against a local sink. A separate test binary because it installs a panic
+//! hook and sets `XDG_STATE_HOME`.
 
 mod observe {
     include!("../../../../modules/observe/linux/launch.rs");
