@@ -82,7 +82,7 @@ export function tierTwoChecks() {
 export const tvosCompile = ['tvos', 'env', ['EXACT_JS_ENGINE=stub', 'bun', 'host/apple/build.mjs', '--tvos', '--no-install']];
 export const gameCheck = ['game', 'cargo', ['test', '--manifest-path', 'game/Cargo.toml', '--workspace', '--locked', '--lib', '--bins', '--tests', '--no-fail-fast']];
 export function glueTests(root) {
-  const files = [...new Bun.Glob('host/web/**/*.test.mjs').scanSync({ cwd: root, onlyFiles: true })].sort().map(file => `./${file}`);
+  const files = ['host/web/**/*.test.mjs', 'modules/*/tests/*.test.mjs'].flatMap(g => [...new Bun.Glob(g).scanSync({ cwd: root, onlyFiles: true })]).sort().map(file => `./${file}`);
   return [...files, './scripts/app.test.mjs', './scripts/deploy-paths.test.mjs'];
 }
 export function checks(sha, since, selection = {}) {
@@ -102,6 +102,7 @@ export function checks(sha, since, selection = {}) {
     ['boot', 'bun', ['scripts/boot.mjs']],
     // Every web host unit test (LLP 1012.001.000 D9; Charlie, 2026-09-30)
     // and the source capture fixtures, in the existing async glue step.
+    // Modules' JS tests (`modules/*/tests`) run here too.
     ['glue', 'env', ['EXACT_GLUE_FAST=1', 'bun', 'test', ...glue]],
     // This document proof builds Weatherlight's wasm target. Keep it out of
     // glue's seconds loop while retaining it in the asynchronous lane.

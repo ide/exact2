@@ -35,7 +35,7 @@ function anyValue(v) {
   if (Array.isArray(v)) { const a = v.map(anyValue); return a.every(Boolean) ? { arrayValue: { values: a } } : null; }
   if (v && typeof v === 'object') {
     const values = [];
-    for (const [k, x] of Object.entries(v)) { const m = anyValue(x); if (!m) return null; values.push({ key: k, value: m }); }
+    for (const k of Object.keys(v).sort()) { const m = anyValue(v[k]); if (!m) return null; values.push({ key: k, value: m }); }
     return { kvlistValue: { values } };
   }
   return null;
@@ -83,7 +83,7 @@ export function start(config, { boot = 0 } = {}) {
     if (launchRoute && m.present !== undefined) {
       const p = params({ isAppLaunch: true, routeParams: launchRoute.routeParams ?? {}, url: launchRoute.url, 'exact.nav.anchor': 'activation' });
       metric('navigation', 'cold_ttr', (m.present - from) / 1000, e.wall, launchRoute.route, p);
-      if (m.interactive !== undefined && !navigated && ['settled', 'declared'].includes(e.tti)) metric('navigation', 'tti', (m.interactive - from) / 1000, e.wall, launchRoute.route, p);
+      if (m.interactive !== undefined && e.metrics?.timeToInteractive !== undefined && !navigated) metric('navigation', 'tti', (m.interactive - from) / 1000, e.wall, launchRoute.route, p);
     }
   }
   function device() {
@@ -102,7 +102,8 @@ export function start(config, { boot = 0 } = {}) {
   /** `{outer: [{resource, inner: [{scope, list: items}], schemaUrl}]}`, one resource per session. */
   const envelope = (by, outer, inner, list) => ({ [outer]: Object.keys(by).filter(s => q.sessions[s]).map(s => ({
     resource: resource(q.sessions[s]), [inner]: [{ scope: { name: 'expo-observe', version: q.sessions[s].clientVersion ?? '0' }, [list]: by[s] }], schemaUrl: SCHEMA_URL })) });
-  const nanos = s => String(Math.round(s * 1000)) + '000000';
+  // A JSON number, as expo-observe sends it.
+  const nanos = s => Math.round(s * 1000) * 1e6;
   function metricsBody(rows) {
     const by = {};
     for (const r of rows) {
@@ -173,7 +174,7 @@ export function start(config, { boot = 0 } = {}) {
       switch (e.kind) {
         case 'startup': startup(e); break;
         case 'navigation.launch': launchRoute = e; break;
-        case 'navigation': navigated = true; metric('navigation', e.name, e.value, e.wall, e.route, params({ isAppLaunch: false, routeParams: e.routeParams ?? {}, url: e.url, 'exact.nav.cause': e['exact.nav.cause'] })); break;
+        case 'navigation': navigated = true; metric('navigation', e.name, e.value, e.wall, e.route, params({ isAppLaunch: false, routeParams: e.routeParams ?? {}, url: e.url, ...Object.fromEntries(Object.entries(e).filter(([k]) => k.startsWith('exact.'))) })); break;
         case 'app.attributes': globals = rulesAttributes(e.attributes).kept; break;
         case 'app.event': {
           const name = rulesName(e.name); if (!name) break;
