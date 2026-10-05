@@ -348,7 +348,7 @@ final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, UIScrollV
         let name = presses.first?.key.map(NodeView.keyName)
         let held = presses.first?.key.map { KeyCodes.held($0.modifierFlags) } ?? ""
         if !disabled, isFirstResponder, let name, presenter?.keyDown(at: self, name, held: held) == true { return }
-        if !disabled, handlers.contains("press"), let name, ["Enter", " "].contains(name) { presenter?.press(id); return }
+        if !disabled, activatable, let name, ["Enter", " "].contains(name) { presenter?.press(id); return }
         super.pressesBegan(presses, with: event)
     }
     override func pressesEnded(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
@@ -947,7 +947,7 @@ final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, UIScrollV
         defer { syncGlassSlot(); syncGlassGroup(); settleVibrancy() }
         let kind = materialRequest
         let supported = kind != nil
-        let interactive = Materials.glass(kind) && (handlers.contains("press") || invokesConfirmation) && !disabled
+        let interactive = Materials.glass(kind) && activatable && !disabled
         if materialKind != (supported ? kind : nil) {
             let children = container.subviews.compactMap { $0 as? NodeView }
             materialView?.removeFromSuperview()
@@ -1371,12 +1371,14 @@ final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, UIScrollV
     // so a touch on a button's text reaches the button, as a DOM click
     // bubbles. A pan cancels it (the scroll view's `canCancelContentTouches`):
     // scroll always wins.
-    /// Whether this node opens a native confirmation or content popover
-    /// (MenusIOS), which a press presents: it is pressable without a press
-    /// handler of its own.
-    var invokesConfirmation: Bool {
-        guard !(props["popovertarget"] ?? "").isEmpty || !(props["commandfor"] ?? "").isEmpty, let menus = presenter?.menus else { return false }
-        return menus.confirmation(invokedBy: self) != nil || menus.contentPopover(invokedBy: self) != nil
+    /// Whether activating this node does something (LLP 1035.001.001 D1):
+    /// its own `press`, or a command toward a confirmation or content
+    /// popover (MenusIOS) — pressable without a press handler of its own,
+    /// by a touch, a key, VoiceOver or the agent alike.
+    var activatable: Bool {
+        if handlers.contains("press") { return true }
+        guard !(props["popovertarget"] ?? "").isEmpty || !(props["commandfor"] ?? "").isEmpty else { return false }
+        return presenter?.menus.invokes(self) == true
     }
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
         if ((isSurfaceControl || ownsSurfaceControl) ? inputCanvas?.canvasInput : canvasInput)?.touches(touches, phase: "down", source: self, event: event) == true { return }
@@ -1387,7 +1389,7 @@ final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, UIScrollV
         if let touch = touches.first, let run = inlineActivationTarget(at: local(touch.location(in: nil))) {
             inlinePressed = run.id; return
         }
-        if handlers.contains("press") || invokesConfirmation { pressed = true } else { super.touchesBegan(touches, with: event) }
+        if activatable { pressed = true } else { super.touchesBegan(touches, with: event) }
     }
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
         inlinePressed = nil
@@ -1417,7 +1419,7 @@ final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, UIScrollV
         let inside = touches.first.map(pressInside) ?? false
         if !isFirstResponder && presenter?.contextRetainsFocus(self) != true { presenter?.viewport.endEditing(true) }
         if inside, presenter?.views[id] === self {
-            if presenter?.menus.invokeConfirmation(self) != true { presenter?.press(id, held: KeyCodes.held(event?.modifierFlags ?? [])) }
+            presenter?.press(id, held: KeyCodes.held(event?.modifierFlags ?? []))
             finishPointerPress()
         }
     }
@@ -1447,7 +1449,7 @@ final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, UIScrollV
         var v: UIView? = self
         while let cur = v {
             if let n = cur as? NodeView, n.disabled { return nil }
-            if let n = cur as? NodeView, (n.handlers.contains("press") || n.isSurfaceControl) {
+            if let n = cur as? NodeView, (n.activatable || n.isSurfaceControl) {
                 guard n.bounds.contains(n.local(windowPoint)) else { return nil }
                 return n
             }
