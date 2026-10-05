@@ -112,15 +112,35 @@ final class MenuHost {
         if let name = source.props["commandfor"], !name.isEmpty { return name }
         return source.props["popovertarget"].flatMap { $0.isEmpty ? nil : $0 }
     }
-    private func closes(_ source: NodeView, _ target: NodeView) -> Bool {
-        if isDialog(target) {
-            return source.props["commandfor"] == target.props["id"] && source.props["command"] == "close"
+    /// What an invoker does to its target, as HTML's commands say (LLP
+    /// 1035.001.001 D1): `popovertarget` with `popovertargetaction` (toggle
+    /// by default), or `commandfor` with `command`, which wins. A modal
+    /// dialog opens only by `show-modal`; anything else names a popover
+    /// command, and a command its target cannot take does nothing.
+    private enum Command { case open, close, toggle }
+    private func command(_ source: NodeView, _ target: NodeView) -> Command? {
+        guard let id = target.props["id"], self.target(of: source) == id else { return nil }
+        if let name = source.props["commandfor"], !name.isEmpty {
+            switch source.props["command"] {
+            case "show-modal": return isDialog(target) && target.props["popover"] == nil ? .open : nil
+            case "close", "request-close": return isDialog(target) ? .close : nil
+            case "show-popover": return target.props["popover"] != nil ? .open : nil
+            case "hide-popover": return target.props["popover"] != nil ? .close : nil
+            case "toggle-popover": return target.props["popover"] != nil ? .toggle : nil
+            default: return nil
+            }
         }
-        return source.props["popovertarget"] == target.props["id"] && source.props["popovertargetaction"] == "hide"
+        if isDialog(target) && target.props["popover"] == nil { return nil }
+        switch source.props["popovertargetaction"] {
+        case "show": return .open
+        case "hide": return .close
+        default: return .toggle
+        }
     }
+    private func closes(_ source: NodeView, _ target: NodeView) -> Bool { command(source, target) == .close }
     private func opens(_ source: NodeView, _ target: NodeView) -> Bool {
-        self.target(of: source) == target.props["id"] && (isDialog(target)
-            ? source.props["command"] == "show-modal" : source.props["popovertargetaction"] != "hide")
+        guard let command = command(source, target) else { return false }
+        return command != .close
     }
 
     /// After a batch: hide every popover, and lay a transparent button
@@ -169,7 +189,7 @@ final class MenuHost {
             live.insert(v.id)
             // A confirmation's invoker is pressed as itself (its own touch
             // feedback, its glass), and its press opens the confirmation
-            // (`invokeConfirmation`); only a menu needs UIKit's button.
+            // (`Presenter.press`, `activated`); only a menu needs UIKit's button.
             if isConfirmation(pop) || isContent(pop) { live.remove(v.id); continue }
             let button = overlays[v.id] ?? {
                 #if os(iOS)
@@ -208,15 +228,18 @@ final class MenuHost {
                 let invokerId = v.id
                 button.menu = UIMenu(title: heading, children: [
                     UIDeferredMenuElement.uncached { [weak self] completion in
-                        // The popover by name now: the node a batch made
-                        // when the menu was built may since be another.
+                        // The invoker's activation (LLP 1035.001.001 D1a):
+                        // `Presenter.press` runs its action (Session.press
+                        // applies the batch synchronously), then the
+                        // popover by name now — the node a batch made when
+                        // the menu was built may since be another. Refused,
+                        // or disabled by its own action, it opens nothing.
                         let rows = { self?.popover(named: target).map { self?.items(of: $0) ?? [] } ?? [] }
                         guard hasPress else { completion(rows()); return }
-                        self?.presenter?.press(invokerId)
-                        // The runner applies the press on its own thread; the
-                        // items are read after it has (80 ms is invisible under
-                        // the menu's own presentation).
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { completion(rows()) }
+                        self?.providing = true
+                        let ran = self?.presenter?.press(invokerId) == true
+                        self?.providing = false
+                        completion(ran ? rows() : [])
                     }
                 ])
             }
@@ -519,33 +542,51 @@ final class MenuHost {
             }
             return false
         }
-        if let pop = contentPopover(invokedBy: node) {
-            openContent(from: node, popover: pop)
-            return true
-        }
-        guard let pop = confirmation(invokedBy: node) else { return nil }
-        return openConfirmation(from: node, popover: pop)
+        // An invoker is activated as any input activates it:
+        // `Presenter.press` (LLP 1035.001.001 D1).
+        return nil
     }
-    /// The confirmation `node` opens, when it is a confirmation's invoker.
-    func confirmation(invokedBy node: NodeView) -> NodeView? {
-        guard let name = target(of: node), let pop = presenter?.views.values.first(where: {
-            $0.props["id"] == name && isConfirmation($0) && ($0.props["popover"] != nil || isDialog($0))
-        }), opens(node, pop) else { return nil }
-        return pop
+    /// Whether `node` commands a confirmation or content popover — what its
+    /// activation does even without a `press` of its own (D1's target
+    /// resolution: a touch, a key, VoiceOver and the agent all reach it).
+    func invokes(_ node: NodeView) -> Bool {
+        guard let name = target(of: node), let pop = presenter?.views.values.first(where: { $0.props["id"] == name }),
+              command(node, pop) != nil else { return false }
+        return (isConfirmation(pop) && (pop.props["popover"] != nil || isDialog(pop))) || isContent(pop)
     }
-
-    /// A touch's press on a confirmation's (or a content popover's) invoker:
-    /// open it. True when `node` invokes one, whether or not it could open now.
-    func invokeConfirmation(_ node: NodeView) -> Bool {
-        if let pop = confirmation(invokedBy: node) {
-            _ = openConfirmation(from: node, popover: pop)
-            return true
+    /// A menu's provider is activating its invoker (D1a): UIKit opens it.
+    private var providing = false
+    /// An activated node's default behaviour (LLP 1035.001.001 D1, step 3):
+    /// after its action ran, its current command toward its current target —
+    /// open, close or toggle a confirmation or content popover. A menu opens
+    /// only from its UIKit button (`sync`'s overlay, a bar item).
+    func activated(_ node: NodeView) {
+        guard live(node), let name = target(of: node),
+              let pop = presenter?.views.values.first(where: { $0.props["id"] == name }),
+              let command = command(node, pop) else { return }
+        guard (isConfirmation(pop) && (pop.props["popover"] != nil || isDialog(pop))) || isContent(pop) else {
+            if !providing, command != .close { presenter?.session?.log("menu #\(pop.id) opens from its button; activating #\(node.id) ran its action only") }
+            return
         }
-        if let pop = contentPopover(invokedBy: node) {
+        let shown = (confirmation.map { $0.popover === pop && !$0.finishing } ?? false) || shownContent?.pop === pop
+        switch command {
+        case .close: if shown { close(pop) }
+        case .open: if !shown { open(pop, from: node) }
+        case .toggle: if shown { close(pop) } else { open(pop, from: node) }
+        }
+    }
+    private func open(_ pop: NodeView, from node: NodeView) {
+        if isConfirmation(pop) && (pop.props["popover"] != nil || isDialog(pop)) {
+            if !openConfirmation(from: node, popover: pop) { presenter?.session?.log("confirmation #\(pop.id) could not open now") }
+        } else if isContent(pop) {
             openContent(from: node, popover: pop)
-            return true
         }
-        return false
+    }
+    private func close(_ pop: NodeView) {
+        if let owner = confirmation, owner.popover === pop, !owner.held { finish(owner, chosen: nil) }
+        #if os(iOS)
+        if let shown = shownContent, shown.pop === pop { shown.dismiss(animated: !ExactEnv.agentFreezes) }
+        #endif
     }
 
     // MARK: Content popovers
@@ -564,17 +605,10 @@ final class MenuHost {
         #endif
     }
 
-    func contentPopover(invokedBy node: NodeView) -> NodeView? {
-        guard let name = target(of: node), let pop = presenter?.views.values.first(where: {
-            $0.props["id"] == name && isContent($0)
-        }), opens(node, pop) else { return nil }
-        return pop
-    }
-
     private var shownContent: ContentPopover?
 
+    /// After the invoker's action (`Presenter.press`).
     private func openContent(from source: NodeView, popover pop: NodeView) {
-        if source.handlers.contains("press") { presenter?.press(source.id) }
         #if os(iOS)
         guard shownContent == nil, live(pop), source.window != nil else { return }
         var responder: UIResponder? = source
@@ -616,12 +650,9 @@ final class MenuHost {
             presenter?.session?.log("dialog refused: native confirmation currently requires closedby=any")
             return false
         }
-        // Session.press applies its batch synchronously. Both invoker actions
-        // fire, as on the web; read the updated rows only if these identities
-        // survived that action (no elapsed-time guess or successor id).
-        if source.handlers.contains("press") { presenter?.press(source.id) }
-        guard confirmation == nil, eligible(source), live(pop), source.window != nil,
-              let owner = build(source: source, pop: pop, modal: isDialog(pop)) else { return false }
+        // After the invoker's action (`Presenter.press`, which Session
+        // applies synchronously): the rows read here are the updated ones.
+        guard let owner = build(source: source, pop: pop, modal: isDialog(pop)) else { return false }
         return present(owner, from: source)
     }
 

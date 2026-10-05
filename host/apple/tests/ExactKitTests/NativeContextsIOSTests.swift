@@ -168,7 +168,7 @@ final class NativeContextsIOSTests: XCTestCase {
                    ["op": "children", "id": 2, "ids": [3, 4]], ["op": "roots", "ids": [1, 2]]]))
         var pressed: [UInt32] = []
         p.onPress = { pressed.append($0) }
-        XCTAssertEqual(p.menus.activate(try XCTUnwrap(p.views[1])), true, "it opens")
+        XCTAssertTrue(p.press(1), "it opens (LLP 1035.001.001 D1: its activation)")
         let alert = try XCTUnwrap(controller.presentedViewController as? UIAlertController)
         XCTAssertEqual(alert.actions.map(\.title), ["Delete", "Cancel"])
         XCTAssertNil(alert.title, "a confirmation has no title row; its label is not one")
@@ -243,7 +243,7 @@ final class NativeContextsIOSTests: XCTestCase {
     func testAChooserIsASheetWithAnActionPerChoice() throws {
         let (p, controller, _) = chooser({ Self.providers }, disabled: [5])
         defer { p.menus.reset(); window.isHidden = true }
-        XCTAssertEqual(p.menus.activate(try XCTUnwrap(p.views[1])), true, "it opens")
+        XCTAssertTrue(p.press(1), "it opens (LLP 1035.001.001 D1: its activation)")
         let alert = try XCTUnwrap(controller.presentedViewController as? UIAlertController)
         XCTAssertEqual(alert.title, "Open location in", "its aria-label titles it")
         XCTAssertNil(alert.message, "no text rows, no message")
@@ -263,7 +263,7 @@ final class NativeContextsIOSTests: XCTestCase {
             try XCTSkipUnless(scene, "a presentation completes only in a scene's window")
             var pressed: [UInt32] = []
             p.onPress = { pressed.append($0) }
-            XCTAssertEqual(p.menus.activate(try XCTUnwrap(p.views[1])), true)
+            XCTAssertTrue(p.press(1))
             settle(p) { !p.menus.inTransition }
             let alert = try XCTUnwrap(controller.presentedViewController as? UIAlertController)
             try choose(alert.actions[index])
@@ -282,7 +282,7 @@ final class NativeContextsIOSTests: XCTestCase {
         defer { p.menus.reset(); window.isHidden = true }
         var pressed: [UInt32] = []
         p.onPress = { pressed.append($0) }
-        XCTAssertEqual(p.menus.activate(try XCTUnwrap(p.views[1])), true)
+        XCTAssertTrue(p.press(1))
         XCTAssertNotNil(controller.presentedViewController as? UIAlertController)
         names[3] = "Citymapper"
         p.menus.sync()
@@ -300,7 +300,7 @@ final class NativeContextsIOSTests: XCTestCase {
         p.apply(wireBatch([["op": "style", "id": 2, "style": ["position_area": "center"]],
                            ["op": "frame", "id": 1, "x": 100.0, "y": 150.0, "w": 200.0, "h": 40.0]]))
         let source = try XCTUnwrap(p.views[1])
-        XCTAssertEqual(p.menus.activate(source), true)
+        XCTAssertTrue(p.press(source.id))
         let alert = try XCTUnwrap(controller.presentedViewController as? UIAlertController)
         let presentation = try XCTUnwrap(alert.popoverPresentationController)
         XCTAssertEqual(presentation.sourceRect, source.bounds, "the whole invoker, not its label")
@@ -331,7 +331,8 @@ final class NativeContextsIOSTests: XCTestCase {
                 + view(2, ["id": "c", "popover": "auto", "accessibilityRole": "alertdialog"], h: 120)
                 + native(3, closes) + cancel(4) + cancel(5)
                 + [["op": "children", "id": 2, "ids": [3, 4, 5]], ["op": "roots", "ids": [1, 2]]]))
-        XCTAssertEqual(p.menus.activate(try XCTUnwrap(p.views[1])), false)
+        // Activation runs; the confirmation it asks for is refused, and says so.
+        p.press(1)
         XCTAssertNil(controller.presentedViewController)
     }
 
@@ -387,6 +388,48 @@ final class NativeContextsIOSTests: XCTestCase {
             space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
         XCTAssertEqual(MenuHost.rowImage(try XCTUnwrap(context.makeImage())).size, CGSize(width: 24, height: 12),
                        "a bitmap, fit in the row's icon box with its ratio kept")
+    }
+
+    /// LLP 1035.001.001 D1: the command is read after the action, from the
+    /// invoker's attributes as the action left them — an action that
+    /// disables its invoker ends activation; one that retargets it opens the
+    /// new target. And VoiceOver's activation reaches an invoker that has no
+    /// press of its own.
+    func testTheCommandIsReadAfterTheActionAndVoiceOverReachesAnInvoker() throws {
+        let p = Presenter()
+        p.buttonFace = { [unowned self] _ in self.face("Delete") }
+        let scene = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
+        window = scene.map { UIWindow(windowScene: $0) } ?? UIWindow(frame: CGRect(x: 0, y: 0, width: 400, height: 400))
+        window.frame = CGRect(x: 0, y: 0, width: 400, height: 400)
+        defer { p.menus.reset(); window.isHidden = true }
+        let controller = UIViewController()
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+        p.viewport.frame = controller.view.bounds
+        controller.view.addSubview(p.viewport)
+        func confirm(_ id: Int, _ name: String, _ row: Int) -> [[String: Any]] {
+            view(id, ["id": name, "popover": "auto", "accessibilityRole": "alertdialog", "accessibilityLabel": name], h: 120)
+                + native(row, ["popovertarget": name, "popovertargetaction": "hide", "destructive": "true"])
+                + [["op": "children", "id": id, "ids": [row]]]
+        }
+        p.apply(wireBatch(
+            [["op": "create", "id": 1, "kind": "button", "handlers": ["press"], "props": ["popovertarget": "first", "accessibilityLabel": "Remove"], "style": ["text_color": [0, 0, 0, 255]]],
+             ["op": "frame", "id": 1, "x": 0.0, "y": 0.0, "w": 100.0, "h": 40.0],
+             ["op": "create", "id": 7, "kind": "button", "handlers": [], "props": ["popovertarget": "first", "accessibilityLabel": "Remove"], "style": ["text_color": [0, 0, 0, 255]]],
+             ["op": "frame", "id": 7, "x": 0.0, "y": 50.0, "w": 100.0, "h": 40.0]]
+                + confirm(2, "first", 3) + confirm(5, "second", 6) + [["op": "roots", "ids": [1, 7, 2, 5]]]))
+        p.onPress = { _ in p.apply(wireBatch([["op": "props", "id": 1, "set": ["disabled": "true"], "clear": []]])) }
+        XCTAssertFalse(p.press(1))
+        XCTAssertNil(controller.presentedViewController, "an invoker its action disabled opens nothing")
+        p.apply(wireBatch([["op": "props", "id": 1, "set": [:], "clear": ["disabled"]]]))
+        p.onPress = { _ in p.apply(wireBatch([["op": "props", "id": 1, "set": ["popovertarget": "second"], "clear": []]])) }
+        XCTAssertTrue(p.press(1))
+        XCTAssertNotNil(controller.presentedViewController as? UIAlertController)
+        XCTAssertEqual(p.menus.observation()?["popover"] as? Int, 5, "the target the action left")
+        p.menus.reset()
+        let handlerless = try XCTUnwrap(p.views[7])
+        XCTAssertTrue(handlerless.activatable)
+        XCTAssertTrue(handlerless.accessibilityActivate(), "VoiceOver reaches it")
     }
 }
 #endif
