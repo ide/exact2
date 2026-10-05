@@ -165,7 +165,11 @@ final class NativeButton: UIButton {
                    "\(a)", "\(b)", "\(owner.color("accent_color", .clear))", "\(tintColor.resolvedColor(with: traitCollection))"].joined(separator: "|")
         if key != signature {
             signature = key
-            let rest = NativeButton.configuration(style, owner: owner, text: text, symbol: symbol, title: title, radius: radius, symbolBox: a, textBox: b, accent: tintColor)
+            var rest = NativeButton.configuration(style, owner: owner, text: text, symbol: symbol, title: title, radius: radius, symbolBox: a, textBox: b, accent: tintColor)
+            let (align, inset) = NativeButton.horizontal([a, b], in: owner.bounds.width,
+                                                             rtl: effectiveUserInterfaceLayoutDirection == .rightToLeft)
+            if contentHorizontalAlignment != align { contentHorizontalAlignment = align }
+            rest.contentInsets = inset
             // SwiftUI's bordered styles dim the whole button while pressed,
             // its label too; UIKit's configurations darken only the fill.
             let tint: UIColor = symbol.map { $0.followsTint("tint_color") ? tintColor : $0.color("tint_color", .label) } ?? .label
@@ -268,6 +272,22 @@ final class NativeButton: UIButton {
         // no padding of its own that would make a fitted title truncate.
         config.contentInsets = .zero
         return config
+    }
+
+    /// Where the kernel stood the content across the box: centred (UIKit's
+    /// default), or against one side as far in as the boxes are — a row
+    /// starting at its padding, as `justify-content` and the padding put it.
+    /// The boxes are physical; the insets directional, so right to left
+    /// the left gap is the trailing one.
+    static func horizontal(_ boxes: [CGRect], in width: CGFloat, rtl: Bool = false) -> (UIControl.ContentHorizontalAlignment, NSDirectionalEdgeInsets) {
+        let laid = boxes.filter { !$0.isEmpty }
+        guard let first = laid.first else { return (.center, .zero) }
+        let content = laid.dropFirst().reduce(first) { $0.union($1) }
+        let left = content.minX, right = width - content.maxX
+        if abs(left - right) <= 1 { return (.center, .zero) }
+        let (start, end) = rtl ? (max(0, right), max(0, left)) : (max(0, left), max(0, right))
+        return left < right ? (.left, NSDirectionalEdgeInsets(top: 0, leading: rtl ? 0 : start, bottom: 0, trailing: rtl ? end : 0))
+            : (.right, NSDirectionalEdgeInsets(top: 0, leading: rtl ? start : 0, bottom: 0, trailing: rtl ? 0 : end))
     }
 
     static func weight(_ w: CGFloat) -> UIFont.Weight {
