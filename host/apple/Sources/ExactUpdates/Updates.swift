@@ -4,13 +4,14 @@
 // check on the library's own thread, the staged plan's bytes for an
 // activation. No networking here: the library fetches over its own
 // transport (the executor's `NSURLSession`) and reports through `done`;
-// this hops to the main thread and hands `ExactApp` the line.
+// this hops to the main thread and hands `ExactApp` the outcome.
 import ExactKit
 import CExact
 import Foundation
 
 enum Updates {
-    static var completed: ((String) -> Void)?
+    /// A check's line, and its download facts when it staged fetched files.
+    static var completed: ((String, [String: Any]?) -> Void)?
     private static let api = exact_delivery_api()
     static var linked: Bool { api != nil }
     /// What the store selected for this launch: the entry (nil for entry
@@ -84,14 +85,16 @@ enum Updates {
     /// Only the generation which drew can bless the running selection.
     static func bootSucceeded(_ token: UInt64) { api!.pointee.boot_succeeded(token) }
 
-    /// Start the check on the library's thread; `ExactApp.updateChecked`
-    /// gets the line on the main thread. False when a check already runs or
+    /// Start the check on the library's thread; `completed` runs on the
+    /// main thread. False when a check already runs or
     /// no store is open.
     static func check() -> Bool { api!.pointee.check(done, nil) == 0 }
 
-    private static let done: ExactUpdateDoneFn = { _, line, len in
-        let text = line.map { String(decoding: Data(bytes: $0, count: len), as: UTF8.self) } ?? ""
-        DispatchQueue.main.async { Updates.completed?(text) }
+    private static let done: ExactUpdateDoneFn = { _, json, len in
+        let data = json.map { Data(bytes: $0, count: len) } ?? Data()
+        let obj = (try? JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:]
+        let line = obj["line"] as? String ?? "", download = obj["download"] as? [String: Any]
+        DispatchQueue.main.async { Updates.completed?(line, download) }
     }
 
 }
@@ -121,24 +124,16 @@ public final class ExactUpdates: ExactAppLifecycle {
             do { app.installInitial(try generation(selected, app: app)) }
             catch { Updates.refuse(selected.token, reason: error.localizedDescription) }
         }
-        Updates.completed = { [weak self] line in
+        Updates.completed = { [weak self] line, download in
             self?.status = line
-            Self.journalDownload(line)
+            if let d = download {
+                ExactEvents.journal("update.download", ["seq": d["seq"] ?? 0, "files": d["files"] ?? 0,
+                                                        "seconds": ((d["ms"] as? NSNumber)?.doubleValue ?? 0) / 1000,
+                                                        "entry": d["entry"] ?? ""])
+            }
             FileHandle.standardError.write(Data("exact update: \(line)\n".utf8))
             self?.app?.refreshDelivery()
         }
-    }
-
-    /// Journals `staged seq N; downloaded F files in T ms; entry E` (from
-    /// store.rs) as an `update.download` event.
-    static func journalDownload(_ line: String) {
-        let parts = line.components(separatedBy: "; ")
-        guard parts.first?.hasPrefix("staged seq ") == true,
-              let d = parts.first(where: { $0.hasPrefix("downloaded ") })?.components(separatedBy: " "), d.count >= 5,
-              let files = Int(d[1]), let ms = Double(d[4]) else { return }
-        let entry = parts.first(where: { $0.hasPrefix("entry ") }).map { String($0.dropFirst(6)) } ?? ""
-        ExactEvents.journal("update.download", ["seconds": ms / 1000, "files": files, "entry": entry,
-                                                "seq": Int(parts[0].dropFirst(11)) ?? 0])
     }
 
     private func generation(_ selection: Updates.Selection, app: ExactApp) throws -> ExactGeneration {
