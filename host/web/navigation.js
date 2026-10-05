@@ -806,9 +806,12 @@ export const onPreferences = (changed) => queries().forEach(([q]) => q.addEventL
 // bit 2 `typeof navigator.share === "function"` (LLP 1069.003 D5), bit 3
 // `typeof showOpenFilePicker === "function"` (LLP 1069.010 D2; studio diary
 // R31), bit 4 `!document.hasFocus()` (#114), told again at the window's
-// `focus` and `blur`. Under the agent the drive's values stand in (visible,
-// online, a share sheet, the pickers, focus: LLP 1069.000 D6), set by
-// `prefer`'s `page` group; the machine is never read.
+// `focus` and `blur`, bits 5–6 how the browser loaded the page
+// (runner/src/page.rs `NAVIGATION_TYPES`: Navigation Timing's `type`, a
+// prerender's as `navigate`). Under the agent the drive's values stand in
+// (visible, online, a share sheet, the pickers, focus: LLP 1069.000 D6), set
+// by `prefer`'s `page` group; the machine is never read, and the page is one
+// the drive navigated to.
 export function pageReporter(agent, platform = globalThis) {
   const facts = { "visibility-state": "visible", online: true, "can-share": true, "can-open-files": true, "has-focus": true, "root-font-size": 16 };
   // @ref LLP 1069.000 D3 — the root font size: the document element's
@@ -816,8 +819,10 @@ export function pageReporter(agent, platform = globalThis) {
   // the agent the drive sets it on the element (`prefer root-font-size`).
   // The app's own size (`appRootFontSize`) is set over it and read past.
   const rootFontSize = () => agent ? facts["root-font-size"] : beneathApp(platform, () => parseFloat(platform.getComputedStyle(platform.document.documentElement).fontSize) || 16);
-  const read = () => agent ? { ...facts } : { "visibility-state": platform.document.visibilityState === "hidden" ? "hidden" : "visible", online: platform.navigator.onLine !== false, "can-share": typeof platform.navigator.share === "function", "can-open-files": typeof platform.showOpenFilePicker === "function", "has-focus": typeof platform.document.hasFocus !== "function" || platform.document.hasFocus() };
-  const bits = () => { const f = read(); return (f["visibility-state"] === "hidden" ? 1 : 0) | (f.online ? 0 : 2) | (f["can-share"] ? 4 : 0) | (f["can-open-files"] ? 8 : 0) | (f["has-focus"] ? 0 : 16); };
+  const loaded = agent ? "" : platform.performance?.getEntriesByType?.("navigation")?.[0]?.type;
+  const navigationType = ["reload", "back_forward"].includes(loaded) ? loaded : "navigate";
+  const read = () => agent ? { ...facts, "navigation-type": navigationType } : { "visibility-state": platform.document.visibilityState === "hidden" ? "hidden" : "visible", online: platform.navigator.onLine !== false, "can-share": typeof platform.navigator.share === "function", "can-open-files": typeof platform.showOpenFilePicker === "function", "has-focus": typeof platform.document.hasFocus !== "function" || platform.document.hasFocus(), "navigation-type": navigationType };
+  const bits = () => { const f = read(); return (f["visibility-state"] === "hidden" ? 1 : 0) | (f.online ? 0 : 2) | (f["can-share"] ? 4 : 0) | (f["can-open-files"] ? 8 : 0) | (f["has-focus"] ? 0 : 16) | (["navigate", "reload", "back_forward"].indexOf(f["navigation-type"]) + 1) << 5; };
   const prefer = (page) => {
     const next = { ...facts };
     for (const [name, raw] of Object.entries(page ?? {})) {
