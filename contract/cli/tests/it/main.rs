@@ -56,6 +56,7 @@ mod instance_work;
 mod keyframes;
 mod keyup;
 mod link_runs;
+mod lazy_tabs;
 mod lint;
 mod lists;
 mod locals;
