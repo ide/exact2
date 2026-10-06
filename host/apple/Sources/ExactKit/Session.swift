@@ -502,6 +502,7 @@ public final class ExactSession {
         // handles this session decodes.
         runtime.setCanvasText(CanvasText.measureRun)
         runtime.setSymbolMeasure(SymbolMeasure.measure)
+        runtime.setControlMeasure(ControlMeasure.prepared())
         presenter.canvas2d.textEngine = { [weak self] in self?.text }
         presenter.canvas2d.assetBytes = { [weak app] in app?.assetBytes($0) }
         presenter.canvas2d.onImage = { [weak self] src, image in

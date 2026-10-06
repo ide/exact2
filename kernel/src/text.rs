@@ -399,6 +399,16 @@ pub trait TextMeasurer {
     ) -> Option<(f32, f32)> {
         None
     }
+
+    /// The size the platform's own control of `kind` takes (a switch, a
+    /// checkbox), when it is the same for every one: the first layout of a
+    /// control uses it before the host reports that control's size, so a
+    /// first frame does not lay a UISwitch out as a web checkbox and then
+    /// move. `None` when this host cannot say, or the kind's size depends on
+    /// its content; the kind's default stands until the host reports.
+    fn control_size(&mut self, _kind: crate::ControlKind) -> Option<(f32, f32)> {
+        None
+    }
 }
 
 /// Deterministic reference measurer: every glyph advances `advance_em` ems

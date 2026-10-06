@@ -409,6 +409,7 @@ fn text_is_measured_through_the_registered_callback() {
             wake_ctx: std::ptr::null_mut(),
             canvas_text: None,
             symbol: None,
+            control: None,
         },
         390.0,
         844.0,
@@ -495,6 +496,7 @@ fn a_runner_refusal_never_installs_the_candidate_font_catalog() {
             wake_ctx: std::ptr::null_mut(),
             canvas_text: None,
             symbol: None,
+            control: None,
         },
         390.0,
         844.0,
@@ -520,6 +522,7 @@ fn a_runner_refusal_never_installs_the_candidate_font_catalog() {
             wake_ctx: std::ptr::null_mut(),
             canvas_text: None,
             symbol: None,
+            control: None,
         },
         390.0,
         844.0,
@@ -547,6 +550,7 @@ fn an_invalid_viewport_plan_boot_keeps_the_running_host() {
             wake_ctx: std::ptr::null_mut(),
             canvas_text: None,
             symbol: None,
+            control: None,
         },
         390.0,
         844.0,
@@ -569,6 +573,7 @@ fn an_invalid_viewport_plan_boot_keeps_the_running_host() {
             wake_ctx: std::ptr::null_mut(),
             canvas_text: None,
             symbol: None,
+            control: None,
         },
         f32::NAN,
         844.0,
@@ -599,6 +604,7 @@ fn an_invalid_initial_viewport_publishes_no_host() {
             wake_ctx: std::ptr::null_mut(),
             canvas_text: None,
             symbol: None,
+            control: None,
         },
         f32::NAN,
         844.0,
@@ -626,6 +632,7 @@ fn a_refused_fresh_boot_keeps_the_running_host() {
         wake_ctx: std::ptr::null_mut(),
         canvas_text: None,
         symbol: None,
+        control: None,
     };
     let mut bridge: Bridge<NoData> = Bridge::new();
     let len = bridge.boot(&running, NoData, hooks, 390.0, 844.0);
@@ -658,6 +665,7 @@ fn two_prepared_sessions_keep_their_live_hosts_until_both_accept() {
         wake_ctx: std::ptr::null_mut(),
         canvas_text: None,
         symbol: None,
+        control: None,
     };
     let mut a: Bridge<NoData> = Bridge::new();
     let mut b: Bridge<NoData> = Bridge::new();
@@ -713,6 +721,7 @@ fn the_plan_font_catalog_and_family_runs_cross_the_host_seam_before_layout() {
             wake_ctx: std::ptr::null_mut(),
             canvas_text: None,
             symbol: None,
+            control: None,
         },
         390.0,
         844.0,

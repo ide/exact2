@@ -39,6 +39,11 @@ pub enum ControlKind {
 }
 
 impl ControlKind {
+    /// The kind's code on a host's measure hook (`TextMeasurer::control_size`).
+    pub fn code(self) -> u32 {
+        self as u32
+    }
+
     /// The kind of a node, or `None` when it is not a `Control`.
     pub fn of(node_type: NodeType, props: &PropList) -> Option<ControlKind> {
         if node_type != NodeType::Control {

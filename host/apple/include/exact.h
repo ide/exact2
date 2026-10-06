@@ -275,6 +275,13 @@ void exact_set_lines(ExactRuntime rt, ExactLinesFn lines);
  * Called on the runtime's thread with exact_set_measure's context. */
 typedef uint8_t (*ExactSymbolFn)(void *ctx, const uint8_t *name, size_t len, float size, uint16_t weight, float *out);
 void exact_set_symbol_measure(ExactRuntime rt, ExactSymbolFn measure);
+/* A fixed-size platform control's size, so a control's first layout is the
+ * platform's (a UISwitch, not a web checkbox): kind is the kernel's
+ * ControlKind code (0 checkbox, 1 switch, 2 radio, 5 range, …); writes out[0]
+ * width and out[1] height and returns 1, or 0 when its size is not fixed.
+ * Called on the runtime's thread with exact_set_measure's context. */
+typedef uint8_t (*ExactControlFn)(void *ctx, uint32_t kind, float *out);
+void exact_set_control_measure(ExactRuntime rt, ExactControlFn measure);
 void exact_set_wake(ExactRuntime rt, ExactWakeFn wake, void *ctx);
 void exact_set_fonts(ExactRuntime rt, ExactFontsFn fonts, void *ctx);
 
