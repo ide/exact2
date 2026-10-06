@@ -316,6 +316,18 @@ impl Kv {
         self.admit(scope, None)?;
         self.store.keys(scope)
     }
+
+    /// Every key under `scope` with its value as text, in key order; a value
+    /// that isn't UTF-8 or can't be read is left out.
+    pub fn entries_text(&self, scope: &str) -> Result<Vec<(String, String)>, HostError> {
+        self.admit(scope, None)?;
+        Ok(self
+            .store
+            .entries(scope)?
+            .into_iter()
+            .filter_map(|(key, value)| String::from_utf8(value).ok().map(|v| (key, v)))
+            .collect())
+    }
 }
 
 /// `fetch`, carrying its grant. Rust owns redirects, header folding, and the

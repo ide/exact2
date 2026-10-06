@@ -7,7 +7,7 @@
   sibling `../ibex` checkout. The compiler includes `src/bindings/storage.d.ts`
   as text, `exact-js` compiles `src/engine/ibex2_jsi.cc` and the binding
   scripts, and seven manifests depend on the crates.
-- **Patches:** three Exact-only patches below and the Windows connection and native
+- **Patches:** four Exact-only patches below and the Windows connection and native
   filesystem backports described next. Otherwise the copy is the commit's tracked tree, byte for byte,
   plus this file.
 - **Not vendored:** the Hermes engine and `hermesc` builds. They are
@@ -22,8 +22,9 @@
   ```
 
   then restore this file with the new commit and date, and reapply patches
-  3, 4 and 5 (`git show ae0c186a9 a268b5512 001e43d03 -- vendor/ibex2`, and
-  patch 5's commit, `git log -1 --format=%h -S run_document -- vendor/ibex2`).
+  3, 4, 5 and 6 (`git show ae0c186a9 a268b5512 001e43d03 -- vendor/ibex2`, and
+  patches 5 and 6 by `git log -1 --format=%h -S run_document -- vendor/ibex2`
+  and `git log -1 --format=%h -S entries_text -- vendor/ibex2`).
   Keep the Windows connection backport unless the new snapshot contains it.
   Keep the native filesystem backport and its shared-parser adaptation too.
   Patch 4 replaces `src/grant.rs` wholesale, so keep the vendored file
@@ -160,3 +161,17 @@ under the same `fs.read doc:/` / `fs.write doc:/` grants.
   and the `Context`; `src/boundary_abi.rs`'s `run_fs` sends a `doc:` path
   to `run_document`.
 - Not for upstream until Ibex has a picker that mints such paths.
+
+## Patch 6: a scope's kept values in one directory read — Exact only
+
+2026-10-06. `KvStore::entries` returns every key with its value. The
+default is `keys` then `get`. `FileStore` reads the directory once and reads
+each file under the listed name, so it skips `get`'s per-key `canonicalize`.
+That check is a `realpath` of the whole path, about 3 ms of an iOS launch
+with a dozen kept answers. `Kv::entries_text` is its text form, which Exact's
+Apple host reads into the runner's launch snapshot.
+
+- `src/kv.rs`: the trait method and the `FileStore` override, with checks in
+  the listing, symlink and case-variant tests.
+- `src/host.rs`: `Kv::entries_text`.
+- Candidate for upstream.

@@ -29,6 +29,15 @@ pub trait KvStore: Send + Sync {
     fn delete(&self, scope: &str, key: &str) -> Result<(), HostError>;
     /// Every key kept under `scope`, in a stable order.
     fn keys(&self, scope: &str) -> Result<Vec<String>, HostError>;
+    /// Every key under `scope` with its value, in key order. A key whose
+    /// value can't be read is left out.
+    fn entries(&self, scope: &str) -> Result<Vec<(String, Vec<u8>)>, HostError> {
+        Ok(self
+            .keys(scope)?
+            .into_iter()
+            .filter_map(|key| self.get(scope, &key).ok().flatten().map(|v| (key, v)))
+            .collect())
+    }
 }
 
 /// Whether `scope` is a scope name. The grammar is the secret-name grammar
@@ -527,6 +536,38 @@ impl KvStore for FileStore {
         keys.sort();
         Ok(keys)
     }
+
+    /// One directory read. Each file is read under the spelling the listing
+    /// gave, so `get`'s per-key `canonicalize` (a `realpath` of the whole
+    /// path) has nothing to check.
+    fn entries(&self, scope: &str) -> Result<Vec<(String, Vec<u8>)>, HostError> {
+        let dir = self.scope_dir(scope)?;
+        let listing = match std::fs::read_dir(&dir) {
+            Ok(listing) => listing,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(e) => return Err(failed("list", &dir, e)),
+        };
+        let mut entries = Vec::new();
+        for entry in listing {
+            let entry = entry.map_err(|e| failed("list", &dir, e))?;
+            // As `keys`: only a regular file under a canonical spelling.
+            if !entry.file_type().is_ok_and(|t| t.is_file()) {
+                continue;
+            }
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let Some(key) = (!name.starts_with('.'))
+                .then(|| decode_key(&name))
+                .flatten()
+            else {
+                continue;
+            };
+            if let Ok(value) = std::fs::read(entry.path()) {
+                entries.push((key, value));
+            }
+        }
+        entries.sort();
+        Ok(entries)
+    }
 }
 
 /// The store this build uses by default: a file per key under the platform's
@@ -721,6 +762,11 @@ mod tests {
         // A directory under a canonical spelling is not a key either.
         std::fs::create_dir(dir.join("state").join(encode_key("fake-dir"))).unwrap();
         assert_eq!(store.keys("state").unwrap(), vec!["real"]);
+        assert_eq!(
+            store.entries("state").unwrap(),
+            vec![("real".into(), b"v".to_vec())]
+        );
+        assert!(store.entries("absent").unwrap().is_empty());
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -737,6 +783,10 @@ mod tests {
         std::fs::write(&outside, b"the file a kv grant must not reach").unwrap();
         std::os::unix::fs::symlink(&outside, dir.join("state").join(encode_key("stolen"))).unwrap();
         assert_eq!(store.keys("state").unwrap(), vec!["real"]);
+        assert_eq!(
+            store.entries("state").unwrap(),
+            vec![("real".into(), b"v".to_vec())]
+        );
         assert!(matches!(
             store.get("state", "stolen"),
             Err(HostError::Failed(_))
@@ -750,6 +800,7 @@ mod tests {
         assert!(store.get("linked", "k").is_err());
         assert!(store.set("linked", "k", b"v").is_err());
         assert!(store.keys("linked").is_err());
+        assert!(store.entries("linked").is_err());
         let _ = std::fs::remove_dir_all(&dir);
         let _ = std::fs::remove_dir_all(&elsewhere);
     }
@@ -814,6 +865,10 @@ mod tests {
         store.set("state", "anchor", b"x").unwrap(); // creates the scope dir
         std::fs::write(dir.join("state").join("ME"), b"foreign").unwrap();
         assert_eq!(store.keys("state").unwrap(), vec!["anchor"]);
+        assert_eq!(
+            store.entries("state").unwrap(),
+            vec![("anchor".into(), b"x".to_vec())]
+        );
         assert_eq!(store.get("state", "a").unwrap(), None);
         store.delete("state", "a").unwrap();
         store.set("state", "a", b"mine").unwrap();

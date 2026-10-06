@@ -110,13 +110,10 @@ pub fn snapshot_of(bindings: Option<&Bindings>) -> Vec<(String, String)> {
         return Vec::new();
     };
     let kept =
-        b.kv.keys(KEPT)
+        b.kv.entries_text(KEPT)
             .unwrap_or_default()
             .into_iter()
-            .filter_map(|key| {
-                let value = b.kv.get_text(KEPT, &key).ok().flatten()?;
-                Some((format!("{}{key}", Store::KEPT), value))
-            });
+            .map(|(key, value)| (format!("{}{key}", Store::KEPT), value));
     b.secrets
         .names()
         .iter()
