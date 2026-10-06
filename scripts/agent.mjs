@@ -47,7 +47,7 @@ import { fileURLToPath } from 'node:url';
 import { openTouches, realTap } from '../host/apple/touches.mjs';
 import { pageAim, namedRefusal } from './agent-aim.mjs';
 import { dragTap, duringAllowed, duringOp } from './agent-drag.mjs';
-import { driveNotes, runTests, nodeNamed, targetsIn } from './agent-test.mjs';
+import { driveNotes, runTests, nodeNamed, targetsIn, unbuiltTabs } from './agent-test.mjs';
 import { cdpKey, browserKey, nativeKey, typeFor, ticketOf, holdOf, heldTicket, typeArguments, typeCommand, pickedPaths, mouseContact, withHeldModifiers, pasteChord, deliverClipboard, tapWords, pointerGap, chordModifiers, withChordModifiers, heldForClick } from './agent-keys.mjs';
 export { cdpKey, browserKey, nativeKey, typeFor, ticketOf, holdOf, heldTicket, typeArguments, typeCommand, pickedPaths, mouseContact, pasteChord, deliverClipboard, tapWords, pointerGap } from './agent-keys.mjs';
 import { appleRunBinary, appleArtifacts, assertAppleIdentity, bundleId, install } from '../host/apple/build.mjs';
@@ -1008,7 +1008,7 @@ export async function open({onProcess, host = 'web', browser, plan, world, size,
       const nodes = t?.nodes ?? (await s.op({op:'tree'})).nodes;
       const matches = byId ? nodes.filter((n) => n.id === Number(target)) : nodes.filter((n) => n.props.testId === target);
       const node = matches.find((n) => !n.inactive) ?? matches[0] ?? (byId || !named ? undefined : nodeNamed(nodes, String(target)) ?? undefined);
-      if (!node && required) throw new Error(`no view matches ${target} by testId, label or text${targetsIn(nodes)}; tree lists live targets, and a virtualized list's row outside its window comes in by key: \`tap <list> into <key>\` (feed F10)${await s.inFlight()}`);
+      if (!node && required) throw new Error(`no view matches ${target} by testId, label or text${targetsIn(nodes)}; tree lists live targets, and a virtualized list's row outside its window comes in by key: \`tap <list> into <key>\` (feed F10)${unbuiltTabs(nodes)}${await s.inFlight()}`);
       return node;
     },
     /** For a miss: the requests still in flight, whose answers may bring the view (authoring bench: a drive's first op ran before a stored list loaded). */

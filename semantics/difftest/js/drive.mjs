@@ -188,9 +188,9 @@ async function drive(code, c, hostSources) {
   const root = document.root;
   // Elements in preorder; a virtualized list's rows are its window's (left out), as observe.rs leaves
   // out a collection's. Such a list is the one list.js windows: its rows are `listitem` wrappers keyed
-  // by `data-listitemkey`. A grouped list (`list appearance="auto"`) scrolls too but builds every row.
+  // by `data-listitemkey`. A grouped list (`list appearance="auto"`) scrolls too but builds every row. A literal tab panel's contents are left out too.
   const walk = (e, f, windowed) => { for (const k of e.childNodes) if (k.nodeType === 1) { f(k); if (!(windowed && windowedList(k))) walk(k, f, windowed); } };
-  const windowedList = e => e.getAttribute('role') === 'list' && [...e.childNodes].some(k => k.nodeType === 1 && k.getAttribute('role') === 'listitem' && k.getAttribute('data-listitemkey') !== null);
+  const windowedList = e => (e.getAttribute('role') === 'list' && [...e.childNodes].some(k => k.nodeType === 1 && k.getAttribute('role') === 'listitem' && k.getAttribute('data-listitemkey') !== null)) || e.$tabpanel; // a literal role="tabpanel", as observe.rs and Lean read it
   const find = id => { let hit = null; walk(root, e => { if (!hit && e.getAttribute('data-testid') === id) hit = e; }, false); return hit; };
   const observe = () => {
     names.forEach((group, g) => group.forEach((name, i) => {
