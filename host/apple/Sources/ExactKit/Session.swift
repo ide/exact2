@@ -844,7 +844,7 @@ public final class ExactSession {
     /// While a carried restart applies its tree, autofocus waits; the restart
     /// then puts focus back at its place (`Presenter.restoreFocus`).
     var autofocusHeld = false
-    private(set) var firstFrameTurned = false
+    var firstFrameTurned = false
     private var keptFocus: FocusPlace?
 
     func prepare(_ bytes: Data, resolver: AssetResolver, token: UInt64 = 0, module: ExactModule? = nil, size: CGSize? = nil) -> Prepared? {
@@ -1160,9 +1160,9 @@ public final class ExactSession {
             drainSurfaceWork()
             frames.run(frames.motion || canvases.wantsFrames)
             frames.run(frames.motion || frames.timerSoon || canvases.wantsFrames)
+            // The turn after activation, so taking the focus doesn't delay it.
+            if !firstFrameTurned { DispatchQueue.main.async { [weak self] in guard let self, state != .destroyed, !firstFrameTurned else { return }; firstFrameTurned = true; presenter.syncAccessibility() } }
         }
-        // Behind activation, so taking the focus doesn't delay it.
-        if !firstFrameTurned { DispatchQueue.main.async { [weak self] in guard let self, state != .destroyed, !firstFrameTurned else { return }; firstFrameTurned = true; presenter.syncAccessibility() } }
     }
 
     // @ref LLP 1043.000 §3 D8, §6 ruling 5 — one advance per display frame,

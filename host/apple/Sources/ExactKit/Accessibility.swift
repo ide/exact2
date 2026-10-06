@@ -402,7 +402,9 @@ extension Presenter {
         focusedNode.flatMap { FocusTree(json)?.place(of: $0.id) }
     }
     func restoreFocus(_ kept: FocusPlace?, tree json: String) {
-        for node in views.values where node.props["autofocus"] == "true" { autofocusProcessed.insert(ObjectIdentifier(node)) }
+        // A focus found by a restart settles the launch autofocus; an early restart with none leaves it pending.
+        if kept != nil { session?.firstFrameTurned = true }
+        if session?.firstFrameTurned != false { for node in views.values where node.props["autofocus"] == "true" { autofocusProcessed.insert(ObjectIdentifier(node)) } }
         guard let kept, let id = FocusTree(json)?.view(at: kept), let node = views[id], node.accessibilityVisible,
               !node.disabled, node.bounds.width > 0, node.bounds.height > 0 else { return }
         #if os(macOS)
