@@ -267,7 +267,9 @@ extension ControlHost {
         }
         button.written = written
         let (_, drawn, glass) = Self.configuration(face)
-        button.isEnabled = written.enabled
+        if button.isEnabled != written.enabled {
+            EnabledFade.run(button, owner: owner) { button.isEnabled = written.enabled }
+        }
         button.isUserInteractionEnabled = written.interactive
         ButtonConfigurationIOS.apply(face, to: button, traits: button.traitCollection, accent: accent, destructive: destructive,
                                      padding: written.padding)

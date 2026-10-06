@@ -11,6 +11,36 @@
 #if os(iOS) || os(tvOS)
 import UIKit
 
+/// How a native control's look changes when it becomes enabled or
+/// disabled: at once, as UIKit does by default, unless its own `transition`
+/// names `-exact-enabled`. Then it crossfades from the old look to the new
+/// over that timing: `-exact-system` is the platform's default spring, an
+/// easing its curve over its duration. Off screen or under the agent's held
+/// clock it is set at once.
+enum EnabledFade {
+    static func run(_ view: UIView, owner: NodeView, _ change: @escaping () -> Void) {
+        guard view.window != nil, !ExactEnv.agentFreezes, let spec = owner.style["transition"]?.array, !spec.isEmpty,
+              let before = view.snapshotView(afterScreenUpdates: false) else { return change() }
+        let timing: UITimingCurveProvider, duration: TimeInterval, delay: TimeInterval
+        if spec.first?.string == "spring", spec.count == 5, let k = spec[1].number, let d = spec[2].number, let m = spec[3].number {
+            timing = UISpringTimingParameters(mass: m, stiffness: k, damping: d, initialVelocity: .zero)
+            duration = 0.5 // a spring's own settling decides; UIKit asks for one
+            delay = spec[4].number ?? 0
+        } else if let n = owner.style["transition"]?.numbers, n.count == 6, n[0] > 0 {
+            timing = UICubicTimingParameters(controlPoint1: CGPoint(x: n[2], y: n[3]), controlPoint2: CGPoint(x: n[4], y: n[5]))
+            duration = n[0]; delay = n[1]
+        } else { return change() }
+        before.frame = view.bounds
+        before.isUserInteractionEnabled = false
+        view.addSubview(before)
+        change()
+        let fade = UIViewPropertyAnimator(duration: duration, timingParameters: timing)
+        fade.addAnimations { before.alpha = 0 }
+        fade.addCompletion { _ in before.removeFromSuperview() }
+        fade.startAnimation(afterDelay: delay)
+    }
+}
+
 /// The checklist mark: an SF Symbol circle scaled with the body text, filled
 /// and checked when on (tvOS: a 16×16 rounded square). A radio is drawn on
 /// it, with its own symbols (`ExactRadio`, RadioIOS.swift). VoiceOver reads
@@ -280,7 +310,10 @@ final class ControlHost: NSObject {
                 c.ariaUnavailable = owner.ariaUnavailable
             }
             if !(control is NativeButtonIOS) {
-                assign(control, \.isEnabled, !owner.disabled)
+                if control.isEnabled == owner.disabled {
+                    let enabled = !owner.disabled
+                    EnabledFade.run(control, owner: owner) { control.isEnabled = enabled }
+                }
                 assign(control, \.accessibilityLabel, owner.props["accessibilityLabel"])
                 assign(control, \.accessibilityIdentifier, owner.props["testId"])
             }

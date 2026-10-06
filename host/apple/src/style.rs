@@ -27,6 +27,7 @@ use std::fmt::Write as _;
 
 #[cfg(test)]
 mod crossing_tests;
+mod enabled;
 mod kept;
 use kept::kept_geometry;
 
@@ -384,7 +385,8 @@ pub(crate) fn style_json_rows(
                 }
                 true
             }
-            RowValue::Transitions(_) => false, // the engine's, not the presenter's
+            // The engine runs transitions but `-exact-enabled` (enabled.rs).
+            RowValue::Transitions(t) => enabled::push_enabled(&mut out, t),
             // @ref LLP 1057.003 D2 — drag timelines are the engine's too.
             RowValue::DragTimeline(_)
             | RowValue::AnimationTimeline(_)

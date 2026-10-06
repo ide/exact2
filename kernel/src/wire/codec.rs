@@ -22,9 +22,10 @@ pub const MAX_STRING_BYTES: u32 = 1 << 24;
 /// A `transition` row's `border-color` shorthand (LLP 1062): the code after
 /// every property's (grammar: `schema.json` `_transitions`).
 const BORDER_COLOR: u8 = Property::COUNT as u8 + 1;
-
 /// A path's `d` (LLP 1055.000 D15): its property's code, past the wire's.
 const PATH_D: u8 = Property::D as u8 + 1;
+/// `-exact-enabled`'s property code, after `d`'s.
+const ENABLED: u8 = PATH_D + 1;
 
 /// Round `n` up to a multiple of 8.
 pub const fn align8(n: usize) -> usize {
@@ -357,6 +358,7 @@ impl<'a> Reader<'a> {
                 0 => TransitionProperty::All,
                 BORDER_COLOR => TransitionProperty::BorderColor,
                 PATH_D => TransitionProperty::Property(Property::D),
+                ENABLED => TransitionProperty::Enabled,
                 p => TransitionProperty::Property(
                     Property::from_wire(p - 1)
                         .filter(|p| *p != Property::ShadowColor)
@@ -688,6 +690,7 @@ impl Writer {
                 TransitionProperty::All => 0,
                 TransitionProperty::Property(p) => p as u8 + 1,
                 TransitionProperty::BorderColor => BORDER_COLOR,
+                TransitionProperty::Enabled => ENABLED,
             });
             self.f32(transition.duration as f32);
             self.f32(transition.delay as f32);
@@ -729,7 +732,7 @@ mod tests {
         // schema. The literal makes an accidental removal of that coupling a
         // test failure whenever the byte snapshot above is intentionally moved.
         // Recomputed when the schema changes; the digest test prints the value.
-        assert_eq!(SCHEMA_DIGEST, 0xc29b_04b1_d46a_6528);
+        assert_eq!(SCHEMA_DIGEST, 0xba5d_f1ef_ba14_4b1c);
     }
 
     #[test]

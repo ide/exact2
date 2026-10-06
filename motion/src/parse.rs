@@ -122,6 +122,10 @@ pub const EASING_FUNCTIONS: &[(&str, &str)] = &[
 ];
 
 pub(crate) fn easing(s: &str) -> Result<TimingFunction, ParseError> {
+    // `-exact-system`: the platform's own curve and timing (a spring).
+    if s == "-exact-system" {
+        return Ok(TimingFunction::Spring(SpringConfig::SYSTEM));
+    }
     Ok(TimingFunction::Easing(match s {
         "linear" => Easing::Linear,
         "ease" => Easing::Ease,
@@ -315,6 +319,19 @@ mod tests {
     #[test]
     fn spring_shorthand_refuses_non_finite_derived_coefficients() {
         assert!(Transitions::parse("opacity -exact-spring(100, 1e200, 1)").is_err());
+    }
+
+    #[test]
+    fn a_controls_enabled_state_transitions_on_the_platforms_own_timing() {
+        let t = Transitions::parse("-exact-enabled -exact-system, opacity 0.2s").unwrap();
+        let enabled = t.enabled().unwrap();
+        assert_eq!(enabled.property, TransitionProperty::Enabled);
+        assert_eq!(enabled.timing, TimingFunction::Spring(SpringConfig::SYSTEM));
+        // It covers nothing the engine animates, and `all` does not cover it.
+        assert!(t.matching(crate::Property::Opacity).unwrap().duration > 0.0);
+        assert!(Transitions::parse("all 1s").unwrap().enabled().is_none());
+        let timed = Transitions::parse("-exact-enabled 0.3s ease-out").unwrap();
+        assert_eq!(timed.enabled().unwrap().duration, 0.3);
     }
 
     #[test]
