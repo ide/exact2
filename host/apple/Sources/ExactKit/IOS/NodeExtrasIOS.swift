@@ -106,6 +106,10 @@ final class NodeExtras {
     var scrollOrigin: CGFloat = 0
     /// …and the smallest inset it has had: its title collapsed.
     var scrollCollapsed: CGFloat = 0
+    /// The route view whose bars this scroller's view runs under, and the
+    /// box CSS gave it (`placeUnderBars`).
+    weak var underBars: UIView?
+    var layoutFrame: CGRect?
     /// What the style last said of the scroll view's indicators and deceleration.
     var scrollWritten: String?
     /// A hatched node whose hatch undoes its own additions: its row may be
@@ -213,6 +217,27 @@ extension NodeView {
 extension NodeView {
     var scrollOrigin: CGFloat { get { extras?.scrollOrigin ?? 0 } set { if newValue != 0 || extras != nil { more.scrollOrigin = newValue } } }
     var scrollCollapsed: CGFloat { get { extras?.scrollCollapsed ?? 0 } set { if newValue != 0 || extras != nil { more.scrollCollapsed = newValue } } }
+    weak var underBars: UIView? { get { extras?.underBars } set { if newValue != nil || extras != nil { more.underBars = newValue } } }
+    var layoutFrame: CGRect? { get { extras?.layoutFrame } set { if newValue != nil || extras != nil { more.layoutFrame = newValue } } }
+    /// A collapsing title's scroller (LLP 1075.003 §3.7). CSS lays it out
+    /// where its route's covers put it, between the bars, so percentages
+    /// and centring in it are the visible area's, as on the web
+    /// (`layoutFrame`). The platform still scrolls content under
+    /// translucent bars: its view runs out to the route's top and bottom,
+    /// and UIKit's `adjustedContentInset` (the safe area under the bars)
+    /// takes exactly that back, so its content starts where the box does.
+    func placeUnderBars() {
+        guard let route = underBars, let box = layoutFrame, let parent = superview, route.window != nil else {
+            if let box = layoutFrame, frame != box { frame = box }
+            scroll?.frame = bounds
+            return
+        }
+        let r = parent.convert(box, to: route)
+        let top = max(0, r.minY - route.bounds.minY), bottom = max(0, route.bounds.maxY - r.maxY)
+        let out = CGRect(x: box.minX, y: box.minY - top, width: box.width, height: box.height + top + bottom)
+        if frame != out { frame = out }
+        if scroll?.frame != bounds { scroll?.frame = bounds }
+    }
     var scrollWritten: String? { get { extras?.scrollWritten } set { if newValue != nil || extras != nil { more.scrollWritten = newValue } } }
     var hatchReusable: Bool { get { extras?.hatchReusable ?? false } set { if newValue || extras != nil { more.hatchReusable = newValue } } }
     /// Where CSS's `scrollTop` 0 is in UIKit's offsets: past the scroller's
