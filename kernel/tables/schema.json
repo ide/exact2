@@ -602,7 +602,7 @@
       "_comment": "@ref LLP 1075.003.000: the word naming a node the app's native code receives (its view and platform object); a hooked node leaves the host's fast path. data-hook on the web."
     },
     {
-      "id": 252,
+      "id": 254,
       "name": "open",
       "kind": "bool",
       "_comment": "HTML `dialog open`: the dialog shows while true, as the state says, not only when an invoker opens it. The Apple hosts present a dialog of texts and buttons as their alert; a button's press (or the alert's cancel) is the app's to close it with."
@@ -3597,7 +3597,7 @@
       "_comment": "@ref LLP 1055 D13: `animation-trigger`, the name of CSS's scroll-triggered animations with two values of our own, `view | none`: whether the node's animations start when its list row first shows or at insertion."
     },
     {
-      "bit": 182,
+      "bit": 194,
       "field": "exact_apple_button_style",
       "codec": "enum:ExactAppleButtonStyle",
       "_comment": "`-exact-apple-button-style`, a vendor property only the Apple hosts read (each platform has its own; a button may carry several): the system style a `button` (always a UIButton there) is drawn in, in UIKit's own names — UIButton.Configuration glass, prominentGlass, filled, gray, tinted or plain — from its one text and one symbol image. `none`: the author's box. Not inherited."
