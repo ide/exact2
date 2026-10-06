@@ -360,6 +360,24 @@ final class NavigationTabsIOSTests: XCTestCase {
         XCTAssertTrue(route.children.first?.view.isDescendant(of: route.view) == true)
     }
 
+    /// A module that keeps Exact's container (no `tabContainer` of its own,
+    /// as most apps) changes nothing on screen when it connects after first
+    /// paint: the same controller holds the same stacks, its tab selected.
+    func testAModuleThatKeepsExactsTabContainerChangesNothing() throws {
+        defer { NativeViews.uninstallTable() }
+        let session = try fixture("tabs-owned", module: true)
+        let navigation = session.presenter.navigation
+        let log = { session.agent(#"{"op":"logs","since":0}"#) }
+        let container = try XCTUnwrap(navigation.tabController)
+        let stacks = container.viewControllers ?? []
+        XCTAssertNotNil(container.tabBar.selectedItem, "selected at first paint")
+        until("the module answered") { log().contains("hook tabContainer: Exact's") }
+        XCTAssertTrue(navigation.tabController === container)
+        XCTAssertEqual(container.viewControllers?.count, stacks.count)
+        XCTAssertTrue(zip(container.viewControllers ?? [], stacks).allSatisfy { $0 === $1 }, "never emptied and refilled")
+        XCTAssertTrue(container.tabBar.selectedItem === container.selectedViewController?.tabBarItem, "its tab still selected")
+    }
+
     func testTheTabsHookAContainerTheAppOwnsAndANativeScreen() throws {
         setenv("EXACT_FIXTURE_CONTAINER", "app", 1)
         defer { unsetenv("EXACT_FIXTURE_CONTAINER"); NativeViews.uninstallTable() }
