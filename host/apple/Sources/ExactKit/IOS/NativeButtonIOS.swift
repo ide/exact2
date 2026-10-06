@@ -128,7 +128,12 @@ final class NativeButton: UIButton {
         if superview !== owner { owner.addSubview(self) }
         if frame != owner.bounds { frame = owner.bounds }
         if owner.subviews.last !== self { owner.bringSubviewToFront(self) }
-        isEnabled = !owner.disabled
+        // Its configuration follows at once: UIKit would otherwise draw its
+        // own disabled (or enabled) look for a frame before the handler ran.
+        if isEnabled == owner.disabled {
+            isEnabled = !owner.disabled
+            if configured { updateConfiguration() }
+        }
         accessibilityIdentifier = owner.props["testId"] ?? owner.props["id"]
         accessibilityLabel = owner.props["accessibilityLabel"]
 
@@ -181,13 +186,22 @@ final class NativeButton: UIButton {
             // first layout stayed unshown until a trait change ran the new
             // handler). A plain button's press fade is UIKit's own.
             //
-            // Disabled, a button keeps its own colours at half, as one look:
-            // HTML keeps an author's colours on a disabled button, and
-            // UIKit's grey would replace only the label, leaving an authored
-            // fill (a selected toggle's wash) bright behind a grey title.
+            // Disabled, a system style (filled, tinted, gray, glass) is
+            // UIKit's own disabled look, fill and label together. A plain
+            // button whose author paints its fill keeps its own colours, as
+            // HTML keeps an author's on a disabled button: UIKit's grey would
+            // replace only the label, leaving that fill bright behind it.
+            let authoredFill = style == "plain" && owner.color("background_color", .clear) != .clear
             configurationUpdateHandler = { button in
                 var config = rest
-                if !button.isEnabled || (style != "plain" && button.isHighlighted) {
+                if !button.isEnabled && authoredFill {
+                    config.image = rest.image?.withTintColor(tint, renderingMode: .alwaysOriginal)
+                    config.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { incoming in
+                        var out = titleTransformer?(incoming) ?? incoming
+                        out.foregroundColor = rest.baseForegroundColor ?? .label
+                        return out
+                    }
+                } else if style != "plain" && button.isHighlighted {
                     config.image = dimImage ?? config.image
                     config.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { incoming in
                         var out = titleTransformer?(incoming) ?? incoming
