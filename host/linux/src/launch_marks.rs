@@ -56,9 +56,7 @@ pub fn items(o: &exact_runner::runner::outstanding::Outstanding) -> Vec<String> 
         ("requests", &o.requests),
         ("streams", &o.streams),
         ("awaiting", &o.awaiting),
-        ("deferred", &o.deferred),
         ("oneShots", &o.one_shots),
-        ("thens", &o.thens),
         ("busy", &o.busy),
     ] {
         out.extend(list.iter().map(|n| format!("{key}:{n}")));
