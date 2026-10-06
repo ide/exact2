@@ -454,6 +454,7 @@ export function res(name, source, args, initial, initialArgs, type, ph, carried 
   // Nothing kept: the placeholder shows, pending (LLP 1048.003 D6).
   const hold = () => {
     if (r.value !== undefined) return;
+    r.placeholder = true; // until an answer lands: what time-to-interactive waits for (marks.js)
     const v = typeof ph === "function" ? ph() : ph;
     if (v === undefined) throw new Failed(`${name} answers later and has nothing to show; give it an \`else\``);
     r.value = v;
@@ -461,7 +462,7 @@ export function res(name, source, args, initial, initialArgs, type, ph, carried 
   const take = (v, a) => {
     if (type && !conforms(v, type, [0], r.checked)) throw new Failed(`${name}: the answer does not conform to its shape`);
     r.checked = v;
-    r.value = v; r.settled = a; if (keep && (keep[2] || r.store)) Kept.keep(name, source, keep[1], a, v, type);
+    r.value = v; r.settled = a; r.placeholder = false; if (keep && (keep[2] || r.store)) Kept.keep(name, source, keep[1], a, v, type);
   };
   // A reply the source cannot take leaves the value, failed for its arguments (`r.failed`, the runner's `failed_args`).
   // A stream's message (`o.more`) is a settlement that keeps the ticket (LLP 1016.000 D1); a message
@@ -523,8 +524,8 @@ export function res(name, source, args, initial, initialArgs, type, ph, carried 
     return r.value;
   }, type);
   Object.assign(r, {
-    save: () => [r.value, r.settled, r.ticket, r.ticket?.args, r.store, r.failed, r.baked, r.error],
-    restore: x => { [r.value, r.settled, r.ticket] = x; if (r.ticket) r.ticket.args = x[3]; r.store = x[4]; r.failed = x[5]; r.baked = x[6]; r.error = x[7]; },
+    save: () => [r.value, r.settled, r.ticket, r.ticket?.args, r.store, r.failed, r.baked, r.error, r.placeholder],
+    restore: x => { [r.value, r.settled, r.ticket] = x; if (r.ticket) r.ticket.args = x[3]; r.store = x[4]; r.failed = x[5]; r.baked = x[6]; r.error = x[7]; r.placeholder = x[8]; },
     force: undo => { r.forced = true; flag(ver, ver.n.v + 1, undo); },
     reread_: undo => { r.reread = true; flag(ver, ver.n.v + 1, undo); },
     revise: undo => { r.rev = true; flag(ver, ver.n.v + 1, undo); },
