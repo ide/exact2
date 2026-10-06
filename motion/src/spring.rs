@@ -75,6 +75,16 @@ impl SpringSample {
 }
 
 impl SpringConfig {
+    /// `-exact-system`: the platform's own default animation, the spring
+    /// SwiftUI's `Animation.default` and UIKit's `animate(springDuration:
+    /// 0.5, bounce: 0)` use: critically damped with a 0.5 s response
+    /// (stiffness (2π/0.5)², damping 2·√stiffness, unit mass).
+    pub const SYSTEM: SpringConfig = SpringConfig {
+        stiffness: 157.913_670_417_429_7,
+        damping: 25.132_741_228_718_345,
+        mass: 1.0,
+    };
+
     /// Check the parameters. Validated once, at the boundary.
     pub fn validate(&self) -> Result<(), SpringError> {
         if !self.stiffness.is_finite() || !self.damping.is_finite() || !self.mass.is_finite() {

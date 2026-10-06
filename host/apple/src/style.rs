@@ -326,28 +326,45 @@ pub fn style_json_sized(style: &StyleProps, env: &Env, keep_size: bool) -> (Stri
                 }
                 true
             }
-            // The engine runs transitions. The presenter is told only how a
-            // native control changes look when it becomes enabled or
-            // disabled: `[duration, delay]` in seconds of the declaration
-            // covering opacity, color or background-color (UIKit's own
-            // default, no row, is at once).
-            RowValue::Transitions(t) => {
-                match [Property::Opacity, Property::BackgroundColor, Property::Color]
-                    .into_iter()
-                    .find_map(|p| t.matching(p))
-                    .filter(|t| t.duration > 0.0)
-                {
-                    Some(t) => {
-                        out.push('[');
-                        push_num(&mut out, t.duration as f32);
-                        out.push(',');
-                        push_num(&mut out, t.delay as f32);
-                        out.push(']');
-                        true
+            // The engine runs transitions; the presenter runs only
+            // `-exact-enabled` (a native control becoming enabled or
+            // disabled): `["spring", stiffness, damping, mass, delay]`, or
+            // `[duration, delay, x1, y1, x2, y2]` for an easing as its
+            // cubic Bézier (steps and `linear()` as linear).
+            RowValue::Transitions(t) => match t.enabled() {
+                Some(tr) => {
+                    match &tr.timing {
+                        exact_motion::TimingFunction::Spring(c) => {
+                            out.push_str("[\"spring\",");
+                            for v in [c.stiffness, c.damping, c.mass, tr.delay] {
+                                push_num(&mut out, v as f32);
+                                out.push(',');
+                            }
+                            out.pop();
+                        }
+                        exact_motion::TimingFunction::Easing(e) => {
+                            use exact_motion::Easing as E;
+                            let b = match e {
+                                E::Ease => [0.25, 0.1, 0.25, 1.0],
+                                E::EaseIn => [0.42, 0.0, 1.0, 1.0],
+                                E::EaseOut => [0.0, 0.0, 0.58, 1.0],
+                                E::EaseInOut => [0.42, 0.0, 0.58, 1.0],
+                                E::CubicBezier { x1, y1, x2, y2 } => [*x1, *y1, *x2, *y2],
+                                _ => [0.0, 0.0, 1.0, 1.0],
+                            };
+                            out.push('[');
+                            for v in [tr.duration, tr.delay, b[0], b[1], b[2], b[3]] {
+                                push_num(&mut out, v as f32);
+                                out.push(',');
+                            }
+                            out.pop();
+                        }
                     }
-                    None => false,
+                    out.push(']');
+                    true
                 }
-            }
+                None => false,
+            },
             // @ref LLP 1057.003 D2 — drag timelines are the engine's too.
             RowValue::DragTimeline(_)
             | RowValue::AnimationTimeline(_)

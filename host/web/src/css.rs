@@ -755,6 +755,11 @@ pub fn transition_css(t: &Transitions) -> (String, bool) {
         );
     };
     for tr in &t.0 {
+        // A control's enabled state is the host's to transition; the web's
+        // controls are the browser's and keep its default (at once).
+        if tr.property == TransitionProperty::Enabled {
+            continue;
+        }
         match &tr.timing {
             TimingFunction::Spring(config) => {
                 let names: Vec<&str> = match tr.property {
@@ -771,13 +776,14 @@ pub fn transition_css(t: &Transitions) -> (String, bool) {
                         .filter(|n| !n.starts_with("border-") || *n == "border-color")
                         .collect(),
                     TransitionProperty::BorderColor => vec!["border-color"],
+                    TransitionProperty::Enabled => Vec::new(),
                     TransitionProperty::Property(p) if !p.springs() => vec![p.css_name()],
                     TransitionProperty::Property(_) => Vec::new(),
                 };
                 spring |= match tr.property {
                     TransitionProperty::All => true,
                     TransitionProperty::Property(p) => p.springs(),
-                    TransitionProperty::BorderColor => false,
+                    TransitionProperty::BorderColor | TransitionProperty::Enabled => false,
                 };
                 if !names.is_empty() {
                     let (duration, easing) = config.easing();

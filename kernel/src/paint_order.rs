@@ -177,7 +177,7 @@ fn motion_stacks(s: &crate::StyleProps) -> bool {
         match t.property {
             T::All => true,
             T::Property(p) => stacking_property(p),
-            T::BorderColor => false,
+            T::BorderColor | T::Enabled => false,
         }
     });
     let animation = s.animation.0.iter().any(|a| {

@@ -26,6 +26,11 @@ pub enum TransitionProperty {
     Property(Property),
     /// `border-color`, CSS's shorthand for the four sides' colours.
     BorderColor,
+    /// `-exact-enabled`: a native control's enabled state (its platform look
+    /// becoming enabled or disabled), which no CSS property names. Only the
+    /// host that draws the control runs it; it covers no property the
+    /// engine animates, and `all` does not cover it.
+    Enabled,
 }
 
 impl TransitionProperty {
@@ -44,6 +49,7 @@ impl TransitionProperty {
                     | Property::BorderBottomColor
                     | Property::BorderLeftColor
             ),
+            TransitionProperty::Enabled => false,
         }
     }
 
@@ -54,6 +60,7 @@ impl TransitionProperty {
             "border-color" => Some(TransitionProperty::BorderColor),
             // A path's `d` transitions (LLP 1055.000 D15); no keyframe names it.
             "d" => Some(TransitionProperty::Property(Property::D)),
+            "-exact-enabled" => Some(TransitionProperty::Enabled),
             name => Property::from_name(name).map(TransitionProperty::Property),
         }
     }
@@ -64,6 +71,7 @@ impl TransitionProperty {
             TransitionProperty::All => "all",
             TransitionProperty::Property(p) => p.css_name(),
             TransitionProperty::BorderColor => "border-color",
+            TransitionProperty::Enabled => "-exact-enabled",
         }
     }
 }
@@ -197,6 +205,14 @@ impl Transitions {
     /// spring on paint plays as [`Transition::governing`] says.
     pub fn matching(&self, property: Property) -> Option<&Transition> {
         self.0.iter().rev().find(|t| t.property.covers(property))
+    }
+
+    /// The `-exact-enabled` declaration, if any (the last wins).
+    pub fn enabled(&self) -> Option<&Transition> {
+        self.0
+            .iter()
+            .rev()
+            .find(|t| t.property == TransitionProperty::Enabled)
     }
 
     /// Validate every declaration and the count.
