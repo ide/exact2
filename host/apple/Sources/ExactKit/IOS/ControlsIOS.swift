@@ -7,6 +7,21 @@
 #if os(iOS) || os(tvOS)
 import UIKit
 
+/// A native control becoming enabled or disabled changes look as the
+/// platform does, at once, unless its author's CSS `transition` covers
+/// opacity, color or background-color: then it crossfades over that
+/// duration (after its delay). Off screen or under the agent's held clock it
+/// is set at once.
+enum EnabledFade {
+    static func run(_ view: UIView, owner: NodeView, _ change: @escaping () -> Void) {
+        guard view.window != nil, !ExactEnv.agentFreezes, let t = owner.style["transition"]?.numbers,
+              let duration = t.first, duration > 0 else { return change() }
+        let delay = t.count > 1 ? t[1] : 0
+        let fade = { UIView.transition(with: view, duration: duration, options: [.transitionCrossDissolve, .allowUserInteraction, .beginFromCurrentState], animations: change) }
+        if delay > 0 { DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: fade) } else { fade() }
+    }
+}
+
 /// Safari iOS's checkbox: a 16×16 rounded square, filled and checked when
 /// on. A radio is drawn on it (`ExactRadio`, RadioIOS.swift).
 class ExactCheckbox: UIControl {
@@ -193,7 +208,10 @@ final class ControlHost: NSObject {
             }
             #endif
             if !(control is NativeButtonIOS) {
-                assign(control, \.isEnabled, !owner.disabled)
+                if control.isEnabled == owner.disabled {
+                    let enabled = !owner.disabled
+                    EnabledFade.run(control, owner: owner) { control.isEnabled = enabled }
+                }
                 assign(control, \.accessibilityLabel, owner.props["accessibilityLabel"])
                 assign(control, \.accessibilityIdentifier, owner.props["testId"])
             }

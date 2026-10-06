@@ -326,7 +326,28 @@ pub fn style_json_sized(style: &StyleProps, env: &Env, keep_size: bool) -> (Stri
                 }
                 true
             }
-            RowValue::Transitions(_) => false, // the engine's, not the presenter's
+            // The engine runs transitions. The presenter is told only how a
+            // native control changes look when it becomes enabled or
+            // disabled: `[duration, delay]` in seconds of the declaration
+            // covering opacity, color or background-color (UIKit's own
+            // default, no row, is at once).
+            RowValue::Transitions(t) => {
+                match [Property::Opacity, Property::BackgroundColor, Property::Color]
+                    .into_iter()
+                    .find_map(|p| t.matching(p))
+                    .filter(|t| t.duration > 0.0)
+                {
+                    Some(t) => {
+                        out.push('[');
+                        push_num(&mut out, t.duration as f32);
+                        out.push(',');
+                        push_num(&mut out, t.delay as f32);
+                        out.push(']');
+                        true
+                    }
+                    None => false,
+                }
+            }
             // @ref LLP 1057.003 D2 — drag timelines are the engine's too.
             RowValue::DragTimeline(_)
             | RowValue::AnimationTimeline(_)
