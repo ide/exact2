@@ -109,6 +109,26 @@ final class NativeButton: UIButton {
         walk(self)
     }
 
+    /// Disabled, as HTML's: no press, no highlight, `.notEnabled` (the
+    /// node's). Its look is UIKit's disabled one unless the author coloured
+    /// the button (a title's `color`, a symbol's `tint-color`, a fill): then
+    /// it keeps the colours it has enabled, as a browser keeps an author's on
+    /// a disabled `<button>`, and the author's own CSS (an `opacity`) says
+    /// how disabled looks. A tinted defrost that is on must not read as off.
+    private func applyEnabled(ownLook: Bool) {
+        guard let owner else { return }
+        let enabled = !owner.disabled
+        if isUserInteractionEnabled != enabled { isUserInteractionEnabled = enabled }
+        let drawsEnabled = enabled || ownLook
+        guard isEnabled != drawsEnabled else { return }
+        // Its configuration follows at once: UIKit would otherwise draw its
+        // own disabled (or enabled) look for a frame before the handler ran.
+        EnabledFade.run(self, owner: owner) { [self] in
+            isEnabled = drawsEnabled
+            if configured { updateConfiguration() }
+        }
+    }
+
     func detach() {
         drawn.forEach { $0.isHidden = false }
         drawn = []
@@ -128,15 +148,6 @@ final class NativeButton: UIButton {
         if superview !== owner { owner.addSubview(self) }
         if frame != owner.bounds { frame = owner.bounds }
         if owner.subviews.last !== self { owner.bringSubviewToFront(self) }
-        // Its configuration follows at once: UIKit would otherwise draw its
-        // own disabled (or enabled) look for a frame before the handler ran.
-        if isEnabled == owner.disabled {
-            let enabled = !owner.disabled
-            EnabledFade.run(self, owner: owner) { [self] in
-                isEnabled = enabled
-                if configured { updateConfiguration() }
-            }
-        }
         accessibilityIdentifier = owner.props["testId"] ?? owner.props["id"]
         accessibilityLabel = owner.props["accessibilityLabel"]
 
@@ -160,6 +171,7 @@ final class NativeButton: UIButton {
                 configured = false
                 signature = ""
             }
+            applyEnabled(ownLook: false)
             return
         }
         let style = explicit ?? "glass"
@@ -189,22 +201,11 @@ final class NativeButton: UIButton {
             // first layout stayed unshown until a trait change ran the new
             // handler). A plain button's press fade is UIKit's own.
             //
-            // Disabled, a system style (filled, tinted, gray, glass) is
-            // UIKit's own disabled look, fill and label together. A plain
-            // button whose author paints its fill keeps its own colours, as
-            // HTML keeps an author's on a disabled button: UIKit's grey would
-            // replace only the label, leaving that fill bright behind it.
-            let authoredFill = style == "plain" && owner.color("background_color", .clear) != .clear
+            // Disabled with no colours of the author's, it is UIKit's own
+            // disabled look, fill and label together (`applyEnabled`).
             configurationUpdateHandler = { button in
                 var config = rest
-                if !button.isEnabled && authoredFill {
-                    config.image = rest.image?.withTintColor(tint, renderingMode: .alwaysOriginal)
-                    config.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { incoming in
-                        var out = titleTransformer?(incoming) ?? incoming
-                        out.foregroundColor = rest.baseForegroundColor ?? .label
-                        return out
-                    }
-                } else if !button.isEnabled {
+                if !button.isEnabled {
                     // The authored colours go back to UIKit, which draws its
                     // disabled look from its own: a template symbol, no base
                     // colours, the title's font alone.
@@ -234,6 +235,8 @@ final class NativeButton: UIButton {
             if tintAdjustmentMode != adjust { tintAdjustmentMode = adjust }
         }
         configured = true
+        applyEnabled(ownLook: text?.style["text_color"] != nil || symbol?.style["tint_color"] != nil
+                     || owner.color("background_color", .clear) != .clear)
         drawn.filter { !nodes.contains($0) }.forEach { $0.isHidden = false }
         drawn = nodes
         nodes.forEach { if !$0.isHidden { $0.isHidden = true } }
