@@ -807,6 +807,22 @@ package final class Presenter {
     func intrinsic(_ id: UInt32, _ size: CGSize?) { onIntrinsic?([(id, size)]) }
     /// What native containers cover of boxes (LLP 1075.003 §3.5).
     var onCovers: (([(UInt32, HostCover?)]) -> Void)?
+    /// The root's `accent-color`, the app's accent: its window's tint, as an
+    /// app's AccentColor asset is, so every view, sheet and alert inherits
+    /// it, and the accent Exact resolves itself (`SystemColor.appTint`) is
+    /// it. Nil gives the window its own back.
+    var appAccent: UIColor? { didSet { if appAccent != oldValue { applyAppAccent() } } }
+    private var windowTint: (window: UIWindow, tint: UIColor?)?
+    func applyAppAccent() {
+        guard let window = viewport.window else { return }
+        if let accent = appAccent {
+            if windowTint?.window !== window { windowTint = (window, window.tintColor) }
+            if window.tintColor != accent { window.tintColor = accent }
+        } else if let saved = windowTint, saved.window === window {
+            window.tintColor = saved.tint
+            windowTint = nil
+        }
+    }
     /// Work for after the batch being applied, or now: a hatch's act on an
     /// authored element never lands inside a batch (LLP 1075.003 §3.4).
     func afterBatch(_ work: @escaping () -> Void) { if applying { waiting.append((nil, work)) } else { work() } }
@@ -1040,6 +1056,9 @@ package final class Presenter {
             case .roots:
                 root.subviews.forEach { $0.removeFromSuperview() }
                 for r in op.ids.compactMap({ views[UInt32($0)] }) { root.addSubview(r) }
+                // A new root says its own accent, or none.
+                for r in op.ids.compactMap({ views[UInt32($0)] }) { r.accentTint = nil; r.syncAccentTint() }
+                if op.ids.compactMap({ views[UInt32($0)] }).allSatisfy({ $0.accentTint == nil }) { appAccent = nil }
             case .frame, .content:
                 if flats.isFlat(id) {
                     if kind == .frame { flats.frame(id, CGRect(x: op.x, y: op.y, width: op.w, height: op.h)) }

@@ -179,7 +179,7 @@ public final class ExactView: UIView {
 
     public override func didMoveToWindow() {
         super.didMoveToWindow()
-        if window != nil { reportScheme() }
+        if window != nil { session.presenter.applyAppAccent(); reportScheme() }
         session.tellPage() // `hasFocus` is this window's scene's (#114)
         session.natives.scopesChanged()
         session.rasters.setPaused(window == nil)

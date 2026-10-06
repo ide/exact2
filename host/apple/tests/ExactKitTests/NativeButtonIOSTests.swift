@@ -65,7 +65,7 @@ final class NativeButtonIOSTests: XCTestCase {
         XCTAssertEqual(NativeButton.horizontal([CGRect(x: 16, y: 0, width: 60, height: 20)], in: 300, rtl: true).1.trailing, 16)
     }
 
-    func testAnAccentColorTintsItsSubtree() throws {
+    func testTheRootsAccentColorIsTheWindowsTint() throws {
         let p = presenter([
             ["op": "create", "id": 1, "kind": "view", "style": ["accent_color": [232, 28, 36, 255]]],
             ["op": "create", "id": 2, "kind": "button", "handlers": ["press"], "style": ["exact_apple_button_style": "plain"]],
@@ -79,7 +79,7 @@ final class NativeButtonIOSTests: XCTestCase {
         let tint = try XCTUnwrap(p.views[2]).tintColor.resolvedColor(with: UITraitCollection(userInterfaceStyle: .light))
         var (r, g, b, a) = (CGFloat(0), CGFloat(0), CGFloat(0), CGFloat(0))
         tint.getRed(&r, green: &g, blue: &b, alpha: &a)
-        XCTAssertEqual(r, 232.0 / 255, accuracy: 0.01, "the app's accent is UIKit's tint below it")
+        XCTAssertEqual(r, 232.0 / 255, accuracy: 0.01, "the root's accent is the window's tint, which every view inherits")
         XCTAssertEqual(g, 28.0 / 255, accuracy: 0.01)
     }
 
