@@ -1179,6 +1179,7 @@ final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, UIScrollV
         updateMaterial()
         syncVibrancy()
         TextCopy.apply(self)
+        syncAccentTint()
         syncScroll()
         applyAffordances()
         styleTextArea()
