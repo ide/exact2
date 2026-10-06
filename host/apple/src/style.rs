@@ -374,7 +374,45 @@ fn style_json_rows(
                 }
                 true
             }
-            RowValue::Transitions(_) => false, // the engine's, not the presenter's
+            // The engine runs transitions; the presenter runs only
+            // `-exact-enabled` (a native control becoming enabled or
+            // disabled): `["spring", stiffness, damping, mass, delay]`, or
+            // `[duration, delay, x1, y1, x2, y2]` for an easing as its
+            // cubic Bézier (steps and `linear()` as linear).
+            RowValue::Transitions(t) => match t.enabled() {
+                Some(tr) => {
+                    match &tr.timing {
+                        exact_motion::TimingFunction::Spring(c) => {
+                            out.push_str("[\"spring\",");
+                            for v in [c.stiffness, c.damping, c.mass, tr.delay] {
+                                push_num(&mut out, v as f32);
+                                out.push(',');
+                            }
+                            out.pop();
+                        }
+                        exact_motion::TimingFunction::Easing(e) => {
+                            use exact_motion::Easing as E;
+                            let b = match e {
+                                E::Ease => [0.25, 0.1, 0.25, 1.0],
+                                E::EaseIn => [0.42, 0.0, 1.0, 1.0],
+                                E::EaseOut => [0.0, 0.0, 0.58, 1.0],
+                                E::EaseInOut => [0.42, 0.0, 0.58, 1.0],
+                                E::CubicBezier { x1, y1, x2, y2 } => [*x1, *y1, *x2, *y2],
+                                _ => [0.0, 0.0, 1.0, 1.0],
+                            };
+                            out.push('[');
+                            for v in [tr.duration, tr.delay, b[0], b[1], b[2], b[3]] {
+                                push_num(&mut out, v as f32);
+                                out.push(',');
+                            }
+                            out.pop();
+                        }
+                    }
+                    out.push(']');
+                    true
+                }
+                None => false,
+            },
             // @ref LLP 1057.003 D2 — drag timelines are the engine's too.
             RowValue::DragTimeline(_)
             | RowValue::AnimationTimeline(_)
