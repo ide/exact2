@@ -25,7 +25,8 @@
       "tti": "failed",
       "presentMethod": "raf",
       "metrics": {"coldLaunchTime":0.25,"timeToFirstRender":0.1,"timeToInteractive":0.2},
-      "marks": {"process":0,"didFinishLaunching":2,"scene":3,"activation":4,"boot":4,"commit":50,"activated":60,"present":104,"interactive":204}
+      "marks": {"process":0,"didFinishLaunching":2,"scene":3,"activation":4,"boot":4,"commit":50,"activated":60,"present":104,"interactive":204},
+      "trace": ["110.0 [requests:stations, activation]", "180.0 [requests:stations]", "204.0 []"]
     },
     {
       "kind": "navigation",
@@ -112,7 +113,7 @@
                           {
                             "key": "expo.custom_params",
                             "value": {
-                              "stringValue": "{\"count\":2,\"exact.tti.reason\":\"failed\",\"expo.network.connected\":true,\"expo.network.type\":\"wifi\",\"tier\":\"gold\"}"
+                              "stringValue": "{\"count\":2,\"exact.tti.reason\":\"failed\",\"exact.tti.trace\":\"110.0 [requests:stations, activation] → 180.0 [requests:stations] → 204.0 []\",\"expo.network.connected\":true,\"expo.network.type\":\"wifi\",\"tier\":\"gold\"}"
                             }
                           }
                         ]

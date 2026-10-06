@@ -111,6 +111,8 @@ final class ObserveService {
             if name == "timeToInteractive" {
                 for (k, v) in device { params[k] = v }
                 params["exact.tti.reason"] = e["tti"] ?? "settled"
+                // What was outstanding over time, ms from process start: shows what held TTI.
+                if let trace = e["trace"] as? [String], !trace.isEmpty { params["exact.tti.trace"] = trace.joined(separator: " → ") }
                 if let failed = e["failed"] as? [String] { params["exact.tti.failed"] = failed.count }
             }
             store.addMetric(session: session, time: wall, category: "appStartup", name: name, value: value, params: params)
