@@ -1,6 +1,7 @@
 // @ref LLP 1069.001 D5 — `input type="range"` is a `UISlider`: HTML's
 // `input` as the thumb moves, `change` as the finger lifts, each value
-// clamped and snapped to `step` as HTML sanitizes it; the thumb stays
+// clamped and snapped to `step` as HTML sanitizes it, the thumb snapping
+// with it as it moves; the thumb stays
 // where the person put it until the bound value changes (D4, amended).
 #if os(iOS)
 import UIKit
@@ -38,7 +39,11 @@ extension ControlHost {
     }
 
     @objc func rangeMoved(_ slider: UISlider) {
-        guard let (id, value) = reported(slider), value != lastRange[id] else { return }
+        guard let (id, value) = reported(slider) else { return }
+        // The thumb snaps to the step as it moves, as a browser's does:
+        // UISlider has no step, so the value it reports is put back.
+        if let snapped = Float(value), slider.value != snapped { slider.value = snapped }
+        guard value != lastRange[id] else { return }
         lastRange[id] = value
         presenter.controlValue(id, value, input: true, change: false)
     }
