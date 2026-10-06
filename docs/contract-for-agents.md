@@ -834,7 +834,9 @@ natively), or `light-dark(a, b)`; the kernel parses it once for every host.
 an inherited one (`color`, fonts, `fill`…); `inherit` on a row CSS does not
 inherit is refused. `order` places flex and grid items. An image's accessible
 name is `alt` or `aria-label`; `enterkeyhint` labels a soft keyboard's enter
-key on the web and iOS.
+key on the web and iOS. `aria-busy=(not ready)` marks a region as still loading:
+assistive technology hears it, and time to interactive (`modules/observe`) waits
+until no element is busy.
 
 `border`, `border-top/right/bottom/left` take CSS width/style/color in any order,
 resetting omitted components to medium/none/currentcolor. Widths are px/pt,
