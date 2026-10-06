@@ -215,19 +215,18 @@ extension NodeView {
     var scrollCollapsed: CGFloat { get { extras?.scrollCollapsed ?? 0 } set { if newValue != 0 || extras != nil { more.scrollCollapsed = newValue } } }
     weak var underBars: UIView? { get { extras?.underBars } set { if newValue != nil || extras != nil { more.underBars = newValue } } }
     var layoutFrame: CGRect? { get { extras?.layoutFrame } set { if newValue != nil || extras != nil { more.layoutFrame = newValue } } }
-    /// CSS `accent-color` is inherited (LLP 1095, "There is no accent
-    /// role"): a node that sets it to a colour of its own gives its subtree
-    /// UIKit's `tintColor`, so `AccentColor` below it, a control's default
-    /// and an untinted symbol are that accent, dimmed behind an alert as
-    /// UIKit dims any tint. `AccentColor` itself (or none) inherits.
+    /// The root's `accent-color` is the app's accent (LLP 1095, "There is
+    /// no accent role"): its window's tint, as an app's AccentColor asset
+    /// sets (`Presenter.appAccent`). A control reads its own `accent-color`;
+    /// `AccentColor` and untinted symbols follow the window's tint.
     func syncAccentTint() {
+        guard let presenter, superview === presenter.root else { return }
         let own = style["accent_color"] != nil && !followsTint("accent_color")
         let wanted: [[Double]?]? = own ? [channels("accent_color", dark: false), channels("accent_color", dark: true)] : nil
         guard wanted != accentTint else { return }
         accentTint = wanted
-        tintColor = wanted == nil ? nil : UIColor { [weak self] traits in
-            self?.channels("accent_color", dark: traits.userInterfaceStyle == .dark).map { TextEngine.color($0) } ?? .systemBlue
-        }
+        let colors = (wanted ?? []).map { $0.map { TextEngine.color($0) } }
+        presenter.appAccent = wanted == nil ? nil : UIColor { traits in (traits.userInterfaceStyle == .dark ? colors[1] : colors[0]) ?? .systemBlue }
     }
     /// A collapsing title's scroller (LLP 1075.003 §3.7). CSS lays it out
     /// where its route's covers put it, between the bars, so percentages
