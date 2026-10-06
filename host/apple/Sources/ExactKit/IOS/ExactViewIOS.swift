@@ -175,7 +175,7 @@ public final class ExactView: UIView {
 
     public override func didMoveToWindow() {
         super.didMoveToWindow()
-        if window != nil { reportScheme() }
+        if window != nil { session.presenter.applyAppAccent(); reportScheme() }
         session.rasters.setPaused(window == nil)
         session.canvases.lifecycle.refresh()
         if window == nil {
