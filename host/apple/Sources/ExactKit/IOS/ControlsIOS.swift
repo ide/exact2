@@ -7,18 +7,33 @@
 #if os(iOS) || os(tvOS)
 import UIKit
 
-/// A native control becoming enabled or disabled changes look as the
-/// platform does, at once, unless its author's CSS `transition` covers
-/// opacity, color or background-color: then it crossfades over that
-/// duration (after its delay). Off screen or under the agent's held clock it
-/// is set at once.
+/// How a native control's look changes when it becomes enabled or
+/// disabled: at once, as UIKit does by default, unless its own `transition`
+/// names `-exact-enabled`. Then it crossfades from the old look to the new
+/// over that timing: `-exact-system` is the platform's default spring, an
+/// easing its curve over its duration. Off screen or under the agent's held
+/// clock it is set at once.
 enum EnabledFade {
     static func run(_ view: UIView, owner: NodeView, _ change: @escaping () -> Void) {
-        guard view.window != nil, !ExactEnv.agentFreezes, let t = owner.style["transition"]?.numbers,
-              let duration = t.first, duration > 0 else { return change() }
-        let delay = t.count > 1 ? t[1] : 0
-        let fade = { UIView.transition(with: view, duration: duration, options: [.transitionCrossDissolve, .allowUserInteraction, .beginFromCurrentState], animations: change) }
-        if delay > 0 { DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: fade) } else { fade() }
+        guard view.window != nil, !ExactEnv.agentFreezes, let spec = owner.style["transition"]?.array, !spec.isEmpty,
+              let before = view.snapshotView(afterScreenUpdates: false) else { return change() }
+        let timing: UITimingCurveProvider, duration: TimeInterval, delay: TimeInterval
+        if spec.first?.string == "spring", spec.count == 5, let k = spec[1].number, let d = spec[2].number, let m = spec[3].number {
+            timing = UISpringTimingParameters(mass: m, stiffness: k, damping: d, initialVelocity: .zero)
+            duration = 0.5 // a spring's own settling decides; UIKit asks for one
+            delay = spec[4].number ?? 0
+        } else if let n = owner.style["transition"]?.numbers, n.count == 6, n[0] > 0 {
+            timing = UICubicTimingParameters(controlPoint1: CGPoint(x: n[2], y: n[3]), controlPoint2: CGPoint(x: n[4], y: n[5]))
+            duration = n[0]; delay = n[1]
+        } else { return change() }
+        before.frame = view.bounds
+        before.isUserInteractionEnabled = false
+        view.addSubview(before)
+        change()
+        let fade = UIViewPropertyAnimator(duration: duration, timingParameters: timing)
+        fade.addAnimations { before.alpha = 0 }
+        fade.addCompletion { _ in before.removeFromSuperview() }
+        fade.startAnimation(afterDelay: delay)
     }
 }
 
