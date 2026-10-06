@@ -1299,6 +1299,7 @@ final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, UIScrollV
         video?.layout()
         if kind == "native" { presenter?.session?.natives.laidOut(self) }
         for case let button as NativeButton in subviews where button.frame != bounds { button.frame = bounds }
+        if underBars != nil { placeUnderBars() }
         layoutTextArea()
         layoutSymbol()
     }

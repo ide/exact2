@@ -166,6 +166,12 @@ final class NavigationBasicsIOSTests: XCTestCase {
         XCTAssertEqual(sv.contentInsetAdjustmentBehavior, .always, "UIKit insets it")
         XCTAssertEqual(list.convert(list.bounds, to: chat.view).minY, 0, accuracy: 0.5, "it starts under the bar")
         XCTAssertEqual(sv.adjustedContentInset.top, chat.view.safeAreaInsets.top, accuracy: 0.5, "inset to the bar's bottom")
+        // CSS lays it out where the bars leave room, as the web does: its
+        // percentages and centring are the visible area's.
+        let box = try XCTUnwrap(list.layoutFrame)
+        let laid = try XCTUnwrap(list.superview).convert(box, to: chat.view)
+        XCTAssertEqual(laid.minY, chat.view.safeAreaInsets.top, accuracy: 0.5, "its box starts at the bar's bottom")
+        XCTAssertEqual(laid.maxY, chat.view.bounds.maxY - chat.view.safeAreaInsets.bottom, accuracy: 0.5, "and ends at what the bottom leaves")
         XCTAssertFalse(nav.isNavigationBarHidden)
         let css = { sv.contentOffset.y + sv.adjustedContentInset.top }
         XCTAssertEqual(css(), 0, accuracy: 0.5, "at rest, CSS 0")
