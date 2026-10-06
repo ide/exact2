@@ -363,6 +363,8 @@ public final class ExactSession {
     /// Bumped by every reboot; a callback from an older generation is dropped.
     public private(set) var generation = 0
     private var activatedGeneration: Int?
+    /// An activation the data source wasn't ready for: retried on the session's wake.
+    private var pendingActivation: (generation: Int, token: UInt64)?
     private var updateToken: UInt64 = 0
 
     let runtime: Runtime
@@ -571,7 +573,11 @@ public final class ExactSession {
         let rt = ExactRuntime(UInt(bitPattern: ctx))
         DispatchQueue.main.async {
             guard let s = ExactSession.live[rt]?.session else { return }
-            s.whenIdle { [weak s] in guard let s else { return }; s.apply(s.runtime.pump(now: s.now())) }
+            s.whenIdle { [weak s] in
+                guard let s else { return }
+                s.apply(s.runtime.pump(now: s.now()))
+                if let p = s.pendingActivation { s.pendingActivation = nil; s.firstDrawn(generation: p.generation, token: p.token) }
+            }
         }
     }
 
@@ -1136,11 +1142,9 @@ public final class ExactSession {
             natives.prepareAppModule()
             let batch = runtime.dataReady()
             if batch.pending {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
-                    guard let self, generation == drawnGeneration, state != .destroyed else { return }
-                    activatedGeneration = nil
-                    firstDrawn(generation: drawnGeneration, token: token)
-                }
+                // The source wakes the session when it can answer (`when_preloaded`).
+                activatedGeneration = nil
+                pendingActivation = (drawnGeneration, token)
                 return
             }
             AppFiles.learn(runtime) // the roots storage configured

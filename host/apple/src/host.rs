@@ -60,6 +60,9 @@ use exact_runner::{Carried, DataSource, Event, Outcome, RequestOut, Runner, Runn
 pub use height::{HeightOwnerChange, HeightOwnerDisposition, HeightOwnerError};
 use height_drag::{HeightDrag, HeightHandle};
 #[cfg(test)]
+#[path = "activation_tests.rs"]
+mod activation_tests;
+#[cfg(test)]
 #[path = "box_motion_tests.rs"]
 mod box_motion_tests;
 #[path = "layout.rs"]
@@ -170,6 +173,10 @@ pub struct Host<D: DataSource> {
     /// or grants that do not parse).
     secrets: Option<Platform>,
     data_activated: bool,
+    /// The session's wake (`listen`): a pending activation asks it once the
+    /// data source can answer, instead of the host polling.
+    wake: Option<std::sync::Arc<dyn Fn() + Send + Sync>>,
+
     /// The update store's last line this host journaled, so a sync after
     /// a check writes it once.
     update_line: Option<String>,
@@ -438,6 +445,8 @@ impl<D: DataSource> Host<D> {
             viewport: (viewport.width as f32, viewport.height as f32),
             now_ms: 0.0,
             data_activated: false,
+            wake: None,
+
             secrets,
             update_line: None,
             delivery,
@@ -640,6 +649,7 @@ impl<D: DataSource> Host<D> {
 
     /// Take the source's announced topics, waking the host (LLP 1016.002).
     pub fn listen(&mut self, wake: std::sync::Arc<dyn Fn() + Send + Sync>) {
+        self.wake = Some(wake.clone());
         self.runner.listen(wake);
     }
 
@@ -669,7 +679,14 @@ impl<D: DataSource> Host<D> {
             return self.commit(&[], None);
         }
         match self.runner.data_ref().preload() {
-            Ok(false) => return "{\"ops\":[],\"pending\":true}".into(),
+            Ok(false) => {
+                if let Some(wake) = self.wake.clone() {
+                    self.runner
+                        .data_ref()
+                        .when_preloaded(Box::new(move || wake()));
+                }
+                return "{\"ops\":[],\"pending\":true}".into();
+            }
             Err(error) => return self.commit(&[], Some(format!("prepare data: {error:?}"))),
             Ok(true) => {}
         }

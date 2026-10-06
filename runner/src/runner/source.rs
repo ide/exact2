@@ -245,6 +245,12 @@ pub trait DataSource {
         Ok(true)
     }
 
+    /// Call `wake`, from any thread, once a pending [`DataSource::preload`]
+    /// can answer true: the host then activates without polling.
+    fn when_preloaded(&self, wake: Box<dyn FnOnce() + Send>) {
+        wake()
+    }
+
     /// Pair candidate logic with a plan, preserving this binary's admitted
     /// app identity and grants. Does not execute candidate code.
     fn replacement(&self, plan: &[u8], receipt: &str, module: Vec<u8>) -> Result<Self, DataError>
