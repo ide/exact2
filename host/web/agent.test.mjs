@@ -631,9 +631,10 @@ test('page facts: the platform off the agent, the drive\'s values under it (LLP 
   real.onChange(() => {});
   expect(listened).toEqual(['visibilitychange', 'online', 'offline']);
   const agent = pageReporter(true, new Proxy({}, {get() { throw new Error('agent read the platform'); }}));
-  expect(agent.bits()).toBe(4 | 8);
+  // The drive navigated to the page: `navigate` (bits 4–5: 1).
+  expect(agent.bits()).toBe(4 | 8 | 16);
   agent.prefer({ 'visibility-state': 'hidden', online: false, 'can-open-files': false });
-  expect(agent.bits()).toBe(1 | 2 | 4 | 8);
+  expect(agent.bits()).toBe(1 | 2 | 4 | 16);
   expect(() => agent.prefer({ online: 'maybe', 'can-share': false })).toThrow('prefer: online');
   expect(agent.read()['can-share']).toBe(true);
   agent.onChange(() => { throw new Error('agent listened to the platform'); });
