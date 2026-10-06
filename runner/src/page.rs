@@ -14,7 +14,13 @@ use exact_plan::Value;
 /// Reserved resource source, answered before the app data seam.
 pub const SOURCE: &str = "exactPage";
 /// Fields an app may declare, filled by name.
-pub const FIELDS: &[&str] = &["visibilityState", "onLine", "canShare", "canOpenFiles", "navigationType"];
+pub const FIELDS: &[&str] = &[
+    "visibilityState",
+    "onLine",
+    "canShare",
+    "canOpenFiles",
+    "navigationType",
+];
 
 /// `navigationType`'s words, by their wire code (bits 4–5): the web's
 /// `PerformanceNavigationTiming.type`, or none where the app is no page a
