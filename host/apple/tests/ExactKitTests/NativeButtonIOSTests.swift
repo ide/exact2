@@ -107,6 +107,24 @@ final class NativeButtonIOSTests: XCTestCase {
         XCTAssertEqual(a, 1, accuracy: 0.02, "as authored: the author's CSS says how disabled looks")
     }
 
+    /// Disabled, a system style is UIKit's disabled look: its colours are
+    /// handed back, so UIKit greys the fill, the label and the symbol.
+    func testADisabledSystemStyleIsUIKitsDisabledLook() throws {
+        let p = presenter([
+            ["op": "create", "id": 1, "kind": "button", "handlers": ["press"], "props": ["disabled": "true"],
+             "style": ["exact_apple_button_style": "tinted"]],
+            ["op": "create", "id": 2, "kind": "text", "props": ["text": "Front"], "style": ["text_color": [232, 28, 36, 255]]],
+            ["op": "children", "id": 1, "ids": [2]],
+            ["op": "roots", "ids": [1]],
+            ["op": "frame", "id": 1, "x": 0.0, "y": 0.0, "w": 120.0, "h": 44.0],
+            ["op": "frame", "id": 2, "x": 30.0, "y": 12.0, "w": 60.0, "h": 20.0],
+        ])
+        let b = try XCTUnwrap(button(try XCTUnwrap(p.views[1])))
+        try XCTUnwrap(b.configurationUpdateHandler)(b)
+        XCTAssertNil(b.configuration?.baseForegroundColor, "UIKit's disabled foreground")
+        XCTAssertNil(b.configuration?.baseBackgroundColor, "UIKit's disabled fill")
+    }
+
     func testADisabledButtonIsADisabledUIButton() throws {
         let p = presenter([
             ["op": "create", "id": 1, "kind": "button", "handlers": ["press"], "props": ["disabled": "true"]],

@@ -201,6 +201,13 @@ final class NativeButton: UIButton {
                         out.foregroundColor = rest.baseForegroundColor ?? .label
                         return out
                     }
+                } else if !button.isEnabled {
+                    // The authored colours go back to UIKit, which draws its
+                    // disabled look from its own: a template symbol, no base
+                    // colours, the title's font alone.
+                    config.image = rest.image?.withRenderingMode(.alwaysTemplate)
+                    config.baseForegroundColor = nil
+                    config.baseBackgroundColor = nil
                 } else if style != "plain" && button.isHighlighted {
                     config.image = dimImage ?? config.image
                     config.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { incoming in
