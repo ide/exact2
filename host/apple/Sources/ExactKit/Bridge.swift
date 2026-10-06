@@ -481,11 +481,11 @@ package final class Runtime {
         return on { read(exact_host_back(rt, id, now)) }
     }
     /// The navigation root's `traverse`: the key of the route the platform
-    /// went back to (LLP 1035.001.000; ABI kind 40).
+    /// went back to (LLP 1035.001.000; ABI kind 200).
     func traverse(_ view: UInt32, _ key: String, now: Double) -> Batch {
         return on {
             let n = write(key)
-            return read(exact_dispatch(rt, view, 40, n, now))
+            return read(exact_dispatch(rt, view, 200, n, now))
         }
     }
     func advance(now: Double, untilRequest: Bool = false) -> Batch { on { read(exact_advance(rt, now, untilRequest ? 1 : 0)) } }
