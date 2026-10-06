@@ -77,7 +77,7 @@ export function start(config, { boot = 0 } = {}) {
     const common = { 'exact.present.method': e.presentMethod ?? 'raf', 'exact.since_process_start.ttr': m.present !== undefined ? (m.present - from) / 1000 : undefined };
     for (const [name, value] of Object.entries(e.metrics ?? {})) {
       const p = params(common);
-      if (name === 'timeToInteractive') { p['exact.tti.reason'] = e.tti; Object.assign(p, device()); }
+      if (name === 'timeToInteractive') { p['exact.tti.reason'] = e.tti; if (e.trace?.length) p['exact.tti.trace'] = e.trace.join(' → '); Object.assign(p, device()); }
       metric('appStartup', name, value, e.wall, undefined, p);
     }
     if (launchRoute && m.present !== undefined) {
