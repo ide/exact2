@@ -365,6 +365,14 @@ guide's rules don't make obvious.
   request of its own that the view sends (a `flush` source called with the change).
   (Authoring bench, LLP 1087, t2-todo on iOS: about 20 minutes, 2026-10-05.)
 
+- **A control appears a moment after the first frame and pushes the card below
+  it down.** Lexy's climate switch was `when climate.ok or loading`, with
+  `loading = pending(read)`: `pending()` is false before the first ask, so the
+  first frame had neither. Cause: layout gated on load state. Fix: render the
+  control from the first frame and say the state with `disabled` (off until the
+  value arrives), so the box never changes size. (Lexy on an iPhone,
+  2026-10-05.)
+
 ## Driving and testing
 
 - **A test passes on the web and fails on iOS right after an input that saves.** An
