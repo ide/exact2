@@ -1220,6 +1220,12 @@ destructive), text hierarchy (`label`, `secondary-label`), data, and marks.
 Those never dim. The test: if the colour should change when the accent
 changes, it is `AccentColor`; if changing it would be wrong, name the role.
 
+**Set the app's accent once, on the root**: `accent-color` on the root element
+is the app's accent (`light-dark()` and `color(display-p3 …)` work). On iOS it
+is the window's tint, as an AccentColor asset is, so every `AccentColor`, bar,
+sheet and alert follows it. A switch or checkbox reads `accent-color` too, as in
+CSS; give it `accent-color="auto"` to keep the platform's own (iOS's green).
+
 Keep `id` and `testId` separate:
 
 - `id`: host command target, geometry, cross-node references.

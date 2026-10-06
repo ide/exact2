@@ -179,10 +179,15 @@ final class NativeButton: UIButton {
             // configuration runs the handler installed then, and the old one
             // put the old configuration back (a padding measured after the
             // first layout stayed unshown until a trait change ran the new
-            // handler). A plain button's fade is UIKit's own.
-            configurationUpdateHandler = style == "plain" ? nil : { button in
+            // handler). A plain button's press fade is UIKit's own.
+            //
+            // Disabled, a button keeps its own colours at half, as one look:
+            // HTML keeps an author's colours on a disabled button, and
+            // UIKit's grey would replace only the label, leaving an authored
+            // fill (a selected toggle's wash) bright behind a grey title.
+            configurationUpdateHandler = { button in
                 var config = rest
-                if button.isHighlighted {
+                if !button.isEnabled || (style != "plain" && button.isHighlighted) {
                     config.image = dimImage ?? config.image
                     config.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { incoming in
                         var out = titleTransformer?(incoming) ?? incoming
