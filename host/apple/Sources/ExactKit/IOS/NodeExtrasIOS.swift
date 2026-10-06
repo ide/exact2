@@ -110,6 +110,8 @@ final class NodeExtras {
     /// box CSS gave it (`placeUnderBars`).
     weak var underBars: UIView?
     var layoutFrame: CGRect?
+    /// The `accent-color` this node last gave its subtree as UIKit's tint.
+    var accentTint: [[Double]?]?
     /// What the style last said of the scroll view's indicators and deceleration.
     var scrollWritten: String?
     /// A hatched node whose hatch undoes its own additions: its row may be
@@ -219,6 +221,20 @@ extension NodeView {
     var scrollCollapsed: CGFloat { get { extras?.scrollCollapsed ?? 0 } set { if newValue != 0 || extras != nil { more.scrollCollapsed = newValue } } }
     weak var underBars: UIView? { get { extras?.underBars } set { if newValue != nil || extras != nil { more.underBars = newValue } } }
     var layoutFrame: CGRect? { get { extras?.layoutFrame } set { if newValue != nil || extras != nil { more.layoutFrame = newValue } } }
+    /// CSS `accent-color` is inherited (LLP 1095, "There is no accent
+    /// role"): a node that sets it to a colour of its own gives its subtree
+    /// UIKit's `tintColor`, so `AccentColor` below it, a control's default
+    /// and an untinted symbol are that accent, dimmed behind an alert as
+    /// UIKit dims any tint. `AccentColor` itself (or none) inherits.
+    func syncAccentTint() {
+        let own = style["accent_color"] != nil && !followsTint("accent_color")
+        let wanted: [[Double]?]? = own ? [channels("accent_color", dark: false), channels("accent_color", dark: true)] : nil
+        guard wanted != accentTint else { return }
+        accentTint = wanted
+        tintColor = wanted == nil ? nil : UIColor { [weak self] traits in
+            self?.channels("accent_color", dark: traits.userInterfaceStyle == .dark).map { TextEngine.color($0) } ?? .systemBlue
+        }
+    }
     /// A collapsing title's scroller (LLP 1075.003 §3.7). CSS lays it out
     /// where its route's covers put it, between the bars, so percentages
     /// and centring in it are the visible area's, as on the web
@@ -238,6 +254,7 @@ extension NodeView {
         if frame != out { frame = out }
         if scroll?.frame != bounds { scroll?.frame = bounds }
     }
+    var accentTint: [[Double]?]? { get { extras?.accentTint } set { if newValue != nil || extras != nil { more.accentTint = newValue } } }
     var scrollWritten: String? { get { extras?.scrollWritten } set { if newValue != nil || extras != nil { more.scrollWritten = newValue } } }
     var hatchReusable: Bool { get { extras?.hatchReusable ?? false } set { if newValue || extras != nil { more.hatchReusable = newValue } } }
     /// Where CSS's `scrollTop` 0 is in UIKit's offsets: past the scroller's
