@@ -143,6 +143,16 @@ open class ExactModule {
     open class var views: [String: ExactNativeFactory] { [:] }
     public let context: ExactModuleContext
     public required init(context: ExactModuleContext) { self.context = context }
+
+    /// Asks a module's service — one of Exact's, such as `observe` — that
+    /// this app runs (its `launch` in app.json). `reply` runs once, on any
+    /// thread, with the service's JSON answer, or nil when it is not loaded
+    /// yet or answers no queries. Observe answers `["op": "recent", "limit": n]`.
+    public func service(_ module: String, _ request: [String: Any], reply: @escaping ([String: Any]?) -> Void) {
+        guard let hooks else { return reply(nil) }
+        hooks.service(module, request, reply: reply)
+    }
+
     /// A long call (`native.later`): start the work and return; reply once.
     open func later(_ request: [String: Any], reply: ExactReply) {
         reply.fail("\(type(of: self)) answers no native.later")
@@ -225,10 +235,14 @@ final class ExactHooks {
     typealias LogFn = @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<UInt8>?, UInt32) -> Void
     typealias DelegateFn = @convention(c) (UnsafeMutableRawPointer?, UnsafeMutableRawPointer?, UnsafeMutableRawPointer?) -> Void
     typealias ToolbarItemFn = @convention(c) (UnsafeMutableRawPointer?, UnsafeMutableRawPointer?, UnsafeMutableRawPointer?) -> Void
+    typealias ServiceReplyFn = @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<UInt8>?, UInt32) -> Void
+    typealias ServiceFn = @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<UInt8>?, UInt32, UnsafePointer<UInt8>?, UInt32, UnsafeMutableRawPointer?, ServiceReplyFn) -> Void
     let host: UnsafeMutableRawPointer?
     let resolveFn: ResolveFn, actFn: ActFn, logFn: LogFn, delegateFn: DelegateFn
     /// A host table of 48 bytes or more: an item added to the window toolbar.
     let toolbarItemFn: ToolbarItemFn?
+    /// A host table of 56 bytes or more: a module's service asked.
+    let serviceFn: ServiceFn?
     #if os(iOS) || os(tvOS)
     var navigations: [ObjectIdentifier: ExactNavigation] = [:]
     var routes: [String: ExactRoute] = [:]
@@ -250,6 +264,29 @@ final class ExactHooks {
         delegateFn = unsafeBitCast(delegate, to: DelegateFn.self)
         toolbarItemFn = table.load(as: UInt32.self) >= 48
             ? table.load(fromByteOffset: 40, as: UnsafeRawPointer?.self).map { unsafeBitCast($0, to: ToolbarItemFn.self) } : nil
+        serviceFn = table.load(as: UInt32.self) >= 56
+            ? table.load(fromByteOffset: 48, as: UnsafeRawPointer?.self).map { unsafeBitCast($0, to: ServiceFn.self) } : nil
+    }
+
+    func service(_ module: String, _ request: [String: Any], reply: @escaping ([String: Any]?) -> Void) {
+        guard let serviceFn, let json = try? JSONSerialization.data(withJSONObject: request) else { return reply(nil) }
+        let box = Unmanaged.passRetained(ServiceReply(reply)).toOpaque()
+        let name = Array(module.utf8)
+        name.withUnsafeBufferPointer { n in
+            json.withUnsafeBytes { j in
+                serviceFn(host, n.baseAddress, UInt32(n.count), j.bindMemory(to: UInt8.self).baseAddress, UInt32(json.count), box) { context, bytes, length in
+                    guard let context else { return }
+                    let box = Unmanaged<ServiceReply>.fromOpaque(context).takeRetainedValue()
+                    let data = bytes.map { Data(bytes: $0, count: Int(length)) } ?? Data()
+                    box.reply(length == 0 ? nil : (try? JSONSerialization.jsonObject(with: data)) as? [String: Any])
+                }
+            }
+        }
+    }
+
+    private final class ServiceReply {
+        let reply: ([String: Any]?) -> Void
+        init(_ reply: @escaping ([String: Any]?) -> Void) { self.reply = reply }
     }
 
     func log(_ line: String) {

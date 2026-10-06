@@ -19,6 +19,9 @@
 //        controller whose own slot Exact keeps (nil clears it)
 //   40  toolbar_item(host, toolbar, item)    an item the app adds after
 //        Exact's to the window toolbar (macOS, LLP 1075.003.000 §3.7)
+//   48  service(host, module, moduleLen, json, len, ctx, reply)  a module's
+//        service asked (`ExactServices.query`); reply(ctx, json, len) once,
+//        any thread, len 0 for no answer. Size ≥ 56.
 //
 // `host` is the session's runtime handle, as for `changed` and `now`: a
 // destroyed session's is answered with nothing.
@@ -98,10 +101,22 @@ private let hookToolbarItem: HookToolbarFn = { host, toolbar, item in
     #endif
 }
 
+/// A module's service asked from the app's own module: the answer's JSON,
+/// or nothing when that service is not loaded or answers no queries.
+private let hookService: @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<UInt8>?, UInt32, UnsafePointer<UInt8>?, UInt32, UnsafeMutableRawPointer?,
+                                         @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<UInt8>?, UInt32) -> Void) -> Void = { _, module, moduleLength, json, length, context, reply in
+    let name = module.map { String(decoding: UnsafeBufferPointer(start: $0, count: Int(moduleLength)), as: UTF8.self) } ?? ""
+    let request = json.flatMap { (try? JSONSerialization.jsonObject(with: Data(bytes: $0, count: Int(length)))) as? [String: Any] } ?? [:]
+    ExactServices.query(name, request) { answer in
+        guard let answer, let data = try? JSONSerialization.data(withJSONObject: answer) else { return reply(context, nil, 0) }
+        data.withUnsafeBytes { reply(context, $0.bindMemory(to: UInt8.self).baseAddress, UInt32(data.count)) }
+    }
+}
+
 /// The host's callbacks, one table for the process: each finds its session
 /// by the handle it is called with.
 private let hookHostTable: UnsafeRawPointer = {
-    let size = 48
+    let size = 56
     let t = UnsafeMutableRawPointer.allocate(byteCount: size, alignment: 8)
     t.initializeMemory(as: UInt8.self, repeating: 0, count: size)
     t.storeBytes(of: UInt32(size), as: UInt32.self)
@@ -110,6 +125,7 @@ private let hookHostTable: UnsafeRawPointer = {
     t.storeBytes(of: unsafeBitCast(hookLog, to: UnsafeRawPointer.self), toByteOffset: 24, as: UnsafeRawPointer.self)
     t.storeBytes(of: unsafeBitCast(hookDelegate, to: UnsafeRawPointer.self), toByteOffset: 32, as: UnsafeRawPointer.self)
     t.storeBytes(of: unsafeBitCast(hookToolbarItem, to: UnsafeRawPointer.self), toByteOffset: 40, as: UnsafeRawPointer.self)
+    t.storeBytes(of: unsafeBitCast(hookService, to: UnsafeRawPointer.self), toByteOffset: 48, as: UnsafeRawPointer.self)
     return UnsafeRawPointer(t)
 }()
 
