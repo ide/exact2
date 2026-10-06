@@ -201,6 +201,13 @@ extension NavigationHost {
         guard let owned = askTabContainer(tabs, navs: navs, selected: routerTab) else {
             container.setViewControllers(navs, animated: false)
             container.selectedIndex = max(0, routerTab)
+            // Handed back, UIKit keeps the index but its bar shows no tab
+            // selected (iOS 26); reselecting another and back restores it.
+            if container.tabBar.selectedItem == nil, navs.count > 1 {
+                let index = max(0, routerTab)
+                container.selectedIndex = (index + 1) % navs.count
+                container.selectedIndex = index
+            }
             return
         }
         natives.tabsHatch(container, event: 1)
