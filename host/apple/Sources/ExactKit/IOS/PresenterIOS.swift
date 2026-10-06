@@ -777,7 +777,7 @@ final class Presenter {
     }
     func intrinsic(_ id: UInt32, _ size: CGSize?) { onIntrinsic?([(id, size)]) }
     /// What native containers cover of boxes (LLP 1075.003 §3.5).
-    var onCovers: (([(UInt32, HostCover?)]) -> Void)?
+    var onCovers: (([(UInt32, HostCover?)], _ applied: @escaping () -> Void) -> Void)?
     /// The root's `accent-color`, the app's accent: its window's tint, as an
     /// app's AccentColor asset is, so every view, sheet and alert inherits
     /// it, and the accent Exact resolves itself (`SystemColor.appTint`) is

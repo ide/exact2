@@ -119,7 +119,7 @@ extension NavigationHost {
         var navs: [UINavigationController] = []
         for (index, panel) in tabs.panels.enumerated() {
             let stack = index == p.at ? first : base(p.wanted[index])
-            let nav = makeNavigation(first: stack.first?.node)
+            let nav = makeNavigation(first: stack.first?.node, inPanel: true)
             prepareRoutes(stack, in: nav)
             nav.setViewControllers(stack, animated: false)
             recordOwned(nav)
@@ -250,6 +250,7 @@ extension NavigationHost {
                 recordOwned(nav)
             }
         }
+        stacks[ObjectIdentifier(navs[p.at])]?.selected = true
         // @ref LLP 1038 D6 — a tab change swaps immediately. Selected by
         // identity: a tab past the bar shows inside the More list, and the
         // More list itself, open over the tab the app still selects, is left
