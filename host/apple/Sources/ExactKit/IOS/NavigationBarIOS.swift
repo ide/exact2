@@ -627,10 +627,18 @@ extension NavigationHost {
             sv.contentInsetAdjustmentBehavior = .never
             old.scrollOrigin = 0
             old.scrollCollapsed = 0
+            old.underBars = nil
+            old.placeUnderBars()
+            old.layoutFrame = nil
             sv.contentOffset.y = top
         }
         c.collapseScroll = target
-        if let sv = target?.scroll { sv.contentInsetAdjustmentBehavior = .always }
+        if let target, let sv = target.scroll {
+            sv.contentInsetAdjustmentBehavior = .always
+            target.layoutFrame = target.layoutFrame ?? target.frame
+            target.underBars = c.view
+            target.placeUnderBars()
+        }
         c.setContentScrollView(target?.scroll, for: .top)
         let under = shape?.level == 1 ? "collapses its title with its scroller" : "scrolls its content under the bar"
         presenter.session?.log("navigation: route \(c.key) \(target == nil ? "keeps its title still" : under)")
@@ -798,9 +806,17 @@ extension NavigationHost {
             }
             if settled, c.viewIfLoaded?.window != nil {
                 let safe = c.view.safeAreaInsets, env = presenter.insets
-                let top = c.collapseScroll == nil ? max(0, safe.top - env.top) : 0
+                // A collapsing title's scroller is laid out between the bars,
+                // as the web lays it out between its header and tablist: the
+                // expanded title's bar at the top (fixed, so collapsing never
+                // relays the route out) and the tab bar at the bottom. Its
+                // view runs back under them (`placeUnderBars`).
+                let collapsing = c.collapseScroll != nil
+                if collapsing, c.collapseScroll?.scrollOrigin ?? 0 == 0 { continue }
+                let top = collapsing ? max(0, (c.collapseScroll?.scrollOrigin ?? 0) - env.top) : max(0, safe.top - env.top)
+                let tabBar = presenter.viewportFit == "cover" ? safe.bottom : max(0, safe.bottom - env.bottom)
                 edges = .init(top: top, right: whole ? max(0, safe.right - env.right) : 0,
-                              bottom: whole ? max(0, safe.bottom - env.bottom) : 0, left: whole ? max(0, safe.left - env.left) : 0)
+                              bottom: whole ? max(0, safe.bottom - env.bottom) : (collapsing ? tabBar : 0), left: whole ? max(0, safe.left - env.left) : 0)
             } else if case .edges(let e)? = covers[c.node.id] {
                 edges = e
             } else { continue }

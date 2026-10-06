@@ -1208,9 +1208,9 @@ package final class Presenter {
             // A frame is set untransformed (UIKit's `frame` is undefined
             // under a transform); the presentation goes back on after.
             v.transform = .identity
-            v.frame = CGRect(x: op.x, y: op.y, width: op.w, height: op.h)
+            let box = CGRect(x: op.x, y: op.y, width: op.w, height: op.h)
+            if v.underBars != nil { v.layoutFrame = box; v.placeUnderBars() } else { v.frame = box; v.scroll?.frame = v.bounds }
             v.textRasterGeometryChanged()
-            v.scroll?.frame = v.bounds
             v.layoutField()
             v.layoutTextArea()
             v.metal?.frame = v.bounds
