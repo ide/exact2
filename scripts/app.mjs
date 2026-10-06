@@ -358,6 +358,13 @@ export function checkModuleRoster(app, provided, where, release) {
   if (release) throw new Error(message);
   console.warn(`warning: ${message}; the node reports "error" at runtime`);
 }
+/** The module artifact's `creation: .beforeFirstPaint` tags into `dir`'s
+ * `exact-before-first-paint.json`, which makes the Apple host load the
+ * artifact before the first render; none removes the file. */
+export function placeBeforeFirstPaint(dir, tags) {
+  const listed = resolve(dir, 'exact-before-first-paint.json');
+  if (tags.length) writeFileSync(listed, JSON.stringify(tags)); else rmSync(listed, { force: true });
+}
 /** Public filename -> repo-relative source; omit groups to inventory every host file. */
 export function webHostFiles(...groups) {
   return Object.fromEntries((groups.length ? groups : Object.keys(WEB_HOST_GROUPS))

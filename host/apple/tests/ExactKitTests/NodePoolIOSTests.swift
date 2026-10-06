@@ -612,6 +612,33 @@ final class NodePoolIOSTests: XCTestCase {
         window.isHidden = true
     }
 
+    /// A tag whose factory says `creation: .beforeFirstPaint` is made in the
+    /// commit that mounts it, before activation opens the paint gate; any
+    /// other tag waits for activation.
+    func testABeforeFirstPaintTagIsMadeBeforeActivation() throws {
+        FakeModule.reset()
+        FakeModule.table.withUnsafeBytes { NativeViews.install(table: $0.baseAddress!) }
+        defer { NativeViews.uninstallTable() }
+        let p = Presenter()
+        let natives = NativeViews()
+        natives.install(module: UnsafeMutableRawPointer(bitPattern: 1)!, gateOpen: false)
+        func node(_ id: UInt32, _ tag: String) -> NodeView {
+            let v = NodeView(id: id, kind: "native", presenter: p)
+            v.frame = CGRect(x: 0, y: 0, width: 200, height: 100)
+            p.viewport.addSubview(v); p.views[id] = v
+            natives.create(owner: v)
+            v.props = ["nativeViewModuleName": tag, "nativeViewProps": "{}"]
+            natives.update(v)
+            return v
+        }
+        let early = node(1, "fake-early"), late = node(2, "fake-plain")
+        XCTAssertEqual(FakeModule.made.count, 1, "only the before-first-paint tag is made")
+        XCTAssertTrue(FakeModule.made.first?.view.superview === early)
+        natives.activated()
+        XCTAssertEqual(FakeModule.made.count, 2, "activation makes the rest")
+        XCTAssertTrue(FakeModule.made.last?.view.superview === late)
+    }
+
     func testHeavyLeafCostsLeaveOutEachKindsFirstCreation() {
         let kind = "test-kind-\(UUID().uuidString)"
         HeavyLeaves.record(kind, 0.5)
@@ -621,9 +648,9 @@ final class NodePoolIOSTests: XCTestCase {
     }
 }
 
-/// A module table in memory for the reuse test: two tags, `fake-map`
-/// (reuse) and `fake-plain`, each instance a plain view that records what
-/// the host asked of it.
+/// A module table in memory for the reuse and creation tests: `fake-map`
+/// (reuse), `fake-plain` and `fake-early` (before first paint), each
+/// instance a plain view that records what the host asked of it.
 private enum FakeModule {
     final class Instance {
         let view = UIView()
@@ -643,7 +670,7 @@ private enum FakeModule {
     nonisolated(unsafe) static var made: [Instance] = []
     static func reset() { made = [] }
     static func instance(_ raw: UnsafeMutableRawPointer?) -> Instance { Unmanaged<Instance>.fromOpaque(raw!).takeUnretainedValue() }
-    static let roster = strdup(#"{"fake-map":{"snapshot":false,"reuse":true},"fake-plain":{"snapshot":false}}"#)!
+    static let roster = strdup(#"{"fake-map":{"snapshot":false,"reuse":true},"fake-plain":{"snapshot":false},"fake-early":{"snapshot":false,"creation":"beforeFirstPaint"}}"#)!
     static let table: [UInt8] = {
         var t = [UInt8](repeating: 0, count: 112)
         func put<T>(_ value: T, _ offset: Int) { withUnsafeBytes(of: value) { for (i, b) in $0.enumerated() { t[offset + i] = b } } }

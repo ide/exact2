@@ -41,7 +41,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, resolve } from 'node:path';
 import { closeSync, copyFileSync, cpSync, existsSync, linkSync, mkdirSync, mkdtempSync, openSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { DOCUMENT_UTIS, HOST_DEV, checkModuleRoster, copyShaders, appleCargoClaims, awaitBuildOutput, cargoLibraryTarget, claimBuildOutput, appSourceKey, bakeOutput, buildBake, contractLast, bakeTarget, developmentBuildEnv, developmentURLScheme, gpuModules, hermesIos, injectedProfiles, resolveApp, verifyBakeFiles } from '../../scripts/app.mjs';
+import { DOCUMENT_UTIS, HOST_DEV, checkModuleRoster, placeBeforeFirstPaint, copyShaders, appleCargoClaims, awaitBuildOutput, cargoLibraryTarget, claimBuildOutput, appSourceKey, bakeOutput, buildBake, contractLast, bakeTarget, developmentBuildEnv, developmentURLScheme, gpuModules, hermesIos, injectedProfiles, resolveApp, verifyBakeFiles } from '../../scripts/app.mjs';
 import { copyStaticTreeIfPresent, listAssets } from '../web/serve.mjs';
 import { startSweep } from '../../scripts/sweep.mjs';
 import { writeDataKeys } from './data-keys.mjs';
@@ -1173,13 +1173,13 @@ async function main(args) {
   } finally { releaseSwift(); }
   const tSwift = Date.now();
   for (const placed of arms) await placed();
+  let provided = [], beforeFirstPaint = []; // the probed roster's `creation: .beforeFirstPaint` tags; none unprobed
   if (modules.tags.length) {
-    let provided = [];
     if (modulesBuilt && typeof Bun !== 'undefined' && !probeable) console.warn(`host/apple: an xcframework has no macOS slice, so the iOS module roster is not probed; the manifest's roster stands`);
     if (probed) {
       const { dlopen, read, CString } = import.meta.require('bun:ffi');
       const table = dlopen(probe, { exact_native_abi: { args: [], returns: 'ptr' } }).symbols.exact_native_abi();
-      provided = Object.keys(JSON.parse(new CString(read.ptr(table, 8)).toString()));
+      const roster = JSON.parse(new CString(read.ptr(table, 8)).toString()); provided = Object.keys(roster); beforeFirstPaint = provided.filter(tag => roster[tag].creation === 'beforeFirstPaint').sort();
     } else if (modulesBuilt) console.warn('host/apple: the module roster check needs Bun (bun:ffi); skipped');
     checkModuleRoster(app, modulesBuilt && (typeof Bun === 'undefined' || !probeable) ? modules.tags : provided, `host/apple ${ios ? 'iOS' : 'macOS'}`, cargoEnv.EXACT_UPDATE_TRUST === 'production');
   }
@@ -1262,7 +1262,7 @@ async function main(args) {
     // so two apps built here are two identities to the keychain (LLP 1018 D7).
     rmSync(resolve(binDir, 'Info.plist'), { force: true });
     rmSync(resolve(binDir, '_CodeSignature'), { recursive: true, force: true });
-    writeFileSync(resolve(binDir, `${products[0]}-Info.plist`), macInfoPlist(app, { development, reach: bakedCompat.reach }));
+    writeFileSync(resolve(binDir, `${products[0]}-Info.plist`), macInfoPlist(app, { development, reach: bakedCompat.reach })); placeBeforeFirstPaint(binDir, beforeFirstPaint);
     if (hasWeb) run('codesign', ['--force', '--sign', sha1 ?? '-', '--timestamp=none', webDest], { stdio: 'ignore' });
     if (modulesBuilt) run('codesign', ['--force', '--sign', sha1 ?? '-', '--timestamp=none', resolve(binDir, modulesLoadName)], { stdio: 'ignore' });
     if (hasSvg) run('codesign', ['--force', '--sign', sha1 ?? '-', '--timestamp=none', resolve(binDir, svgLoadName)], { stdio: 'ignore' });
@@ -1290,7 +1290,7 @@ async function main(args) {
       for (const file of ['ExactMac', ...loaded, ...(canvasGpuBuilt ? [canvasGpuLoadName] : []), ...(modulesBuilt ? [modulesLoadName] : []), ...serviceDylibs.map(svc => svc.load), ...(hasGpu ? [loadName] : []), ...moduleDylibs.map(m => m.load)]) copyFileSync(resolve(binDir, file), resolve(executables, file));
       writeFileSync(resolve(contents, 'Info.plist'), macInfoPlist(app, { development, reach: bakedCompat.reach }));
       copyAppleStaticTrees(paths.capture, resources);
-      verifyBakeFiles(bakedCompat, bakedPlan, listAssets(resources, true));
+      verifyBakeFiles(bakedCompat, bakedPlan, listAssets(resources, true)); placeBeforeFirstPaint(resources, beforeFirstPaint);
       writeFileSync(resolve(contents, 'Info.plist'), macInfoPlist(app, { development, reach: bakedCompat.reach, icon: appIcon(app, resources, 'macos') }));
       writeUsageStrings(bakedCompat.reach, resources);
       const whole = readFileSync(resolve(binDir, 'receipt.json'), 'utf8');
@@ -1328,7 +1328,7 @@ async function main(args) {
   // The GPU crate's shaders (LLP 1030 D8): files the presenter registers
   // with the module before a surface is created, never strings in the dylib.
   copyAppleStaticTrees(paths.capture, bundle);
-  verifyBakeFiles(bakedCompat, bakedPlan, listAssets(bundle, true));
+  verifyBakeFiles(bakedCompat, bakedPlan, listAssets(bundle, true)); placeBeforeFirstPaint(bundle, beforeFirstPaint);
   // tvOS icons are layered brand assets, which actool's iPhone/iPad icon set does not make; tvOS builds have none yet.
   writeFileSync(resolve(bundle, 'Info.plist'), infoPlist(app, device, { development, reach: bakedCompat.reach, icon: tv ? {} : iosAssets(app, bundle, device, { catalog: !!ipa, kept: { dir: resolve(linkRoot, 'assets'), stamp: swiftc } }), distribution: ipa ? distributionKeys() : null, tv }));
   writeUsageStrings(bakedCompat.reach, bundle);

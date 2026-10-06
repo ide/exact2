@@ -248,7 +248,9 @@ extension Presenter {
                 }
                 node.liveText = text
             } else { node.liveText = nil }
-            guard session?.autofocusHeld != true, !autofocusProcessed.contains(ObjectIdentifier(node)), node.props["autofocus"] == "true",
+            // A booted session's autofocus waits for the turn after its first drawn frame, as UIKit
+            // apps focus in `viewDidAppear`: the iOS keyboard or AppKit field editor would delay that frame.
+            guard session?.autofocusHeld != true, session.map({ !$0.booted || $0.firstFrameTurned }) != false, !autofocusProcessed.contains(ObjectIdentifier(node)), node.props["autofocus"] == "true",
                   node.accessibilityVisible, !node.disabled, node.bounds.width > 0, node.bounds.height > 0 else { continue }
             #if os(macOS)
             guard let window = node.window else { continue }
