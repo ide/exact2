@@ -1212,6 +1212,7 @@ package final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, U
         updateMaterial()
         syncVibrancy()
         TextCopy.apply(self)
+        syncAccentTint()
         syncScroll()
         applyAffordances()
         styleTextArea()
