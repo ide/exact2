@@ -467,6 +467,7 @@ export function res(name, source, args, initial, initialArgs, type, ph, carried 
   // Nothing kept: the placeholder shows, pending (LLP 1048.003 D6).
   const hold = () => {
     if (r.value !== undefined) return;
+    r.placeholder = true; // until an answer lands: what time-to-interactive waits for (marks.js)
     const v = typeof ph === "function" ? ph() : ph;
     if (v === undefined) throw new Failed(`${name} answers later and has nothing to show; give it an \`else\``);
     r.value = v;
@@ -474,7 +475,7 @@ export function res(name, source, args, initial, initialArgs, type, ph, carried 
   const take = (v, a, origin) => { // `origin`: when it was asked (overlay.js)
     if (type && !conforms(v, type, [0], r.checked)) throw new Failed(`${name}: the answer does not conform to its shape`, "shape");
     r.checked = v;
-    r.value = v; r.settled = a; r.origin = origin; if (keep && (keep[2] || r.store)) Kept.keep(name, source, keep[1], a, v, type);
+    r.value = v; r.settled = a; r.origin = origin; r.placeholder = false; if (keep && (keep[2] || r.store)) Kept.keep(name, source, keep[1], a, v, type);
   };
   // A reply the source cannot take leaves the value, failed for its arguments (`r.failed`, the runner's `failed_args`).
   // A stream's message (`o.more`) is a settlement that keeps the ticket (LLP 1016.000 D1); a message
@@ -536,8 +537,8 @@ export function res(name, source, args, initial, initialArgs, type, ph, carried 
     return r.value;
   })(), r.settled ?? r.asked, r.origin), type);
   Object.assign(r, {
-    save: () => [r.value, r.settled, r.ticket, r.ticket?.args, r.store, r.failed, r.baked, r.error, r.ticket?.again, r.code, r.origin, r.forced, r.reconciling, r.rev],
-    restore: x => { [r.value, r.settled, r.ticket] = x; if (r.ticket) { r.ticket.args = x[3]; r.ticket.again = x[8]; } r.store = x[4]; r.failed = x[5]; r.baked = x[6]; r.error = x[7]; r.code = x[9]; r.origin = x[10]; r.forced = x[11]; r.reconciling = x[12]; r.rev = x[13]; write(ver.n, ver.n.v + 1); }, // and what it shows is read again, from what was put back
+    save: () => [r.value, r.settled, r.ticket, r.ticket?.args, r.store, r.failed, r.baked, r.error, r.ticket?.again, r.code, r.origin, r.forced, r.reconciling, r.rev, r.placeholder],
+    restore: x => { [r.value, r.settled, r.ticket] = x; if (r.ticket) { r.ticket.args = x[3]; r.ticket.again = x[8]; } r.store = x[4]; r.failed = x[5]; r.baked = x[6]; r.error = x[7]; r.code = x[9]; r.origin = x[10]; r.forced = x[11]; r.reconciling = x[12]; r.rev = x[13]; r.placeholder = x[14]; write(ver.n, ver.n.v + 1); }, // and what it shows is read again, from what was put back
     force: undo => { r.forced = true; flag(ver, ver.n.v + 1, undo); },
     touch: undo => flag(ver, ver.n.v + 1, undo), // its writes changed: what it shows is laid over again
     reconcile: undo => { r.forced = r.reconciling = true; flag(ver, ver.n.v + 1, undo); },

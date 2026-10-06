@@ -193,7 +193,7 @@ public final class ExactLaunch: NSObject {
         guard let data = session.agent("{\"op\":\"outstanding\"}").data(using: .utf8),
               let o = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
         var out: [String] = []
-        for key in ["requests", "streams", "awaiting", "deferred", "oneShots", "thens", "busy"] {
+        for key in ["requests", "streams", "awaiting", "oneShots", "busy"] {
             out += (o[key] as? [String] ?? []).map { "\(key):\($0)" }
         }
         out += session.hostOutstanding.map { "host:\($0)" }
