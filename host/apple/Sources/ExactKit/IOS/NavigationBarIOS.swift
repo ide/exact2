@@ -14,6 +14,16 @@ import UIKit
 /// those after it trailing, each pressing its authored button. The stack's
 /// Back control is UIKit's back button, never an item. iOS does not paint
 /// the header; the web and the agent do (LLP 1021 D4's one presentation).
+/// What a route's bar item is projected from; a different one projects it again.
+struct BarSource: Equatable {
+    let header: UInt32?, title: String, level: Int, leading: [String], trailing: [String], group: String, canGoBack: Bool
+}
+
+/// What the route hook last heard; a different one runs it again.
+struct HookSource: Equatable {
+    let bar: BarSource, back: String, navigation: ObjectIdentifier, dataset: String, scroll: ObjectIdentifier?
+}
+
 struct HeaderShape: Equatable {
     struct Item: Equatable {
         let id: UInt32, title: String, symbol: String?, label: String?, disabled: Bool
@@ -377,11 +387,13 @@ extension NavigationHost {
             let canGoBack = index > 0 ? backPermitted(in: c.node) : nav === moreNavigation
             let scroll = contentScroll(of: c)
             let dataset = c.node.props["dataset"]
-            let source = "\(shape.map { "\($0.header.id)|\($0.title)|\($0.level)|\($0.leading.map(\.source))|\($0.trailing.map(\.source))|\($0.group?.source ?? "")" } ?? "-")|\(canGoBack)"
+            let source = BarSource(header: shape?.header.id, title: shape?.title ?? "", level: shape?.level ?? 0, leading: shape?.leading.map(\.source) ?? [],
+                                   trailing: shape?.trailing.map(\.source) ?? [], group: shape?.group?.source ?? "", canGoBack: canGoBack)
             // The hook runs again after anything Exact wrote to the item (the
             // Back control the route above gives it, too) and when the route
             // moves to another stack (a root whose tabs changed).
-            let signature = "\(source)|\(c.backSource ?? "")|\(ObjectIdentifier(nav))|\(dataset ?? "")|\(scroll.map { "\(ObjectIdentifier($0))" } ?? "-")"
+            let signature = HookSource(bar: source, back: c.backSource ?? "", navigation: ObjectIdentifier(nav), dataset: dataset ?? "",
+                                       scroll: scroll.map(ObjectIdentifier.init))
             if c.projectedSource != source {
                 c.projectedSource = source
                 project(shape, into: c, canGoBack: canGoBack, shows: shows)

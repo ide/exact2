@@ -165,7 +165,7 @@ final class NodeView: NSView, NSTextViewDelegate, NSTextFieldDelegate {
     /// from an older load, or for a view that was destroyed, is dropped.
     var symbolView: NSImageView? { didSet { layerPaintCache = nil } }
     var symbolFound = false
-    var symbolKey: String?
+    var symbolKey: SymbolKey?
     var symbolRefusal: String?
     var symbolClip: NSView?
     var image: NSImage?

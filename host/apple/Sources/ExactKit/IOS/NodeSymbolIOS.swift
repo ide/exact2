@@ -15,7 +15,7 @@ extension NodeView {
         let name = props["symbolName"] ?? "", points = number("font_size", 16)
         let weights: [UIImage.SymbolWeight] = [.ultraLight, .thin, .light, .regular, .medium, .semibold, .bold, .heavy, .black]
         let index = min(8, max(0, Int((number("font_weight", 400) / 100).rounded()) - 1))
-        let key = "\(source):\(name):\(points):\(index):\(symbolLookKey)"
+        let key = SymbolKey(source: source, name: name, points: points.bitPattern, weight: index, look: symbolLookKey)
         if symbolKey != key {
             symbolKey = key; loadGeneration += 1
             let generation = loadGeneration

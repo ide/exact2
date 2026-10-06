@@ -52,7 +52,13 @@ final class NativeButton: UIButton {
     /// Boxes the configuration draws instead.
     private var drawn: [NodeView] = []
     private var configured = false
-    private var signature = ""
+    private var signature: Signature?
+    /// What the configuration is made from; a different one makes it again.
+    private struct Signature: Equatable {
+        let style: String, title: String, symbolName: String
+        let symbolSize: CGFloat, symbolTint: UIColor, textColor: UIColor, textSize: CGFloat, textWeight: CGFloat
+        let radius: CGFloat, size: CGSize, symbolBox: CGRect, textBox: CGRect, accent: UIColor, tint: UIColor
+    }
 
     init(owner: NodeView) {
         self.owner = owner
@@ -150,7 +156,7 @@ final class NativeButton: UIButton {
                 drawn = []
                 owner.materialView?.isHidden = false
                 configured = false
-                signature = ""
+                signature = nil
             }
             return
         }
@@ -159,10 +165,10 @@ final class NativeButton: UIButton {
         let title = text.map { $0.paragraphSpec().runs.map(\.text).joined() }
         let radius = owner.number("border_radius", owner.number("border_radius_top_left"))
         let a = symbol.map { $0.convert($0.bounds, to: owner) } ?? .zero, b = text.map { $0.convert($0.bounds, to: owner) } ?? .zero
-        let key = [style, title ?? "", symbol?.props["symbolName"] ?? "", "\(symbol?.number("font_size") ?? 0)",
-                   "\(symbol?.color("tint_color", .label) ?? .clear)", "\(text?.color("text_color", .label) ?? .clear)",
-                   "\(text?.number("font_size") ?? 0)", "\(text?.number("font_weight") ?? 0)", "\(radius)", "\(owner.bounds.size)",
-                   "\(a)", "\(b)", "\(owner.color("accent_color", .clear))", "\(tintColor.resolvedColor(with: traitCollection))"].joined(separator: "|")
+        let key = Signature(style: style, title: title ?? "", symbolName: symbol?.props["symbolName"] ?? "", symbolSize: symbol?.number("font_size") ?? 0,
+                            symbolTint: symbol?.color("tint_color", .label) ?? .clear, textColor: text?.color("text_color", .label) ?? .clear,
+                            textSize: text?.number("font_size") ?? 0, textWeight: text?.number("font_weight") ?? 0, radius: radius, size: owner.bounds.size,
+                            symbolBox: a, textBox: b, accent: owner.color("accent_color", .clear), tint: tintColor.resolvedColor(with: traitCollection))
         if key != signature {
             signature = key
             var rest = NativeButton.configuration(style, owner: owner, text: text, symbol: symbol, title: title, radius: radius, symbolBox: a, textBox: b, accent: tintColor)

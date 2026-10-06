@@ -64,7 +64,7 @@ final class NodeExtras {
     var placement: [Double]?
     var symbolView: UIImageView?
     var symbolFound = false
-    var symbolKey: String?
+    var symbolKey: SymbolKey?
     var symbolRefusal: String?
     var focusRing: CAShapeLayer?
     var scrollEventQueued: Bool = false
@@ -158,7 +158,7 @@ extension NodeView {
     var placement: [Double]? { get { extras?.placement } set { if newValue != nil || extras != nil { more.placement = newValue } } }
     var symbolView: UIImageView? { get { extras?.symbolView } set { if newValue != nil || extras != nil { more.symbolView = newValue } } }
     var symbolFound: Bool { get { extras?.symbolFound ?? false } set { if newValue || extras != nil { more.symbolFound = newValue } } }
-    var symbolKey: String? { get { extras?.symbolKey } set { if newValue != nil || extras != nil { more.symbolKey = newValue } } }
+    var symbolKey: SymbolKey? { get { extras?.symbolKey } set { if newValue != nil || extras != nil { more.symbolKey = newValue } } }
     var symbolRefusal: String? { get { extras?.symbolRefusal } set { if newValue != nil || extras != nil { more.symbolRefusal = newValue } } }
     var focusRing: CAShapeLayer? { get { extras?.focusRing } set { if newValue != nil || extras != nil { more.focusRing = newValue } } }
     var scrollEventQueued: Bool { get { extras?.scrollEventQueued ?? false } set { if newValue || extras != nil { more.scrollEventQueued = newValue } } }

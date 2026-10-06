@@ -47,20 +47,21 @@ extension NodeView {
     /// change makes it again. Its colours are resolved into the
     /// configuration, so every trait they resolve by is here too, and the
     /// system colours' generation (LLP 1095 D5).
-    var symbolLookKey: String {
-        [style["symbol_rendering"]?.string ?? "", "\(style["symbol_palette"] ?? .null)",
-         "\(number("symbol_value", -1))", "\(style["tint_color"] ?? .null)", "\(drawsDark)",
-         "\(drawsHighContrast ?? SystemColor.highContrast)", "\(drawsElevated)", "\(SystemColor.generation)", bakedTintKey].joined(separator: "|")
+    var symbolLookKey: SymbolLookKey {
+        SymbolLookKey(rendering: style["symbol_rendering"]?.string ?? "", palette: style["symbol_palette"] ?? .null,
+                      value: number("symbol_value", -1).bitPattern, tint: style["tint_color"] ?? .null, dark: drawsDark,
+                      highContrast: drawsHighContrast ?? SystemColor.highContrast, elevated: drawsElevated,
+                      generation: SystemColor.generation, bakedTint: bakedTint)
     }
     /// The inherited tint, when the look bakes it into the image: a
     /// hierarchical glyph without its own tint or tinted by it (`Highlight`
-    /// too), or a palette naming it.
-    private var bakedTintKey: String {
+    /// too), or a palette naming it. Nil when it doesn't.
+    private var bakedTint: [Double]? {
         let mode = style["symbol_rendering"]?.string
         let bakes = (mode == "hierarchical" && (symbolTint == nil || style["tint_color"]?.namesTint == true))
             || (mode == "palette" && style["symbol_palette"]?.namesTint == true)
-        guard bakes, let tint = viewTint else { return "" }
-        return "\(SystemColor.channels("@tint", dark: drawsDark, tintColor: tint, fallback: nil) ?? [])"
+        guard bakes, let tint = viewTint else { return nil }
+        return SystemColor.channels("@tint", dark: drawsDark, tintColor: tint, fallback: nil) ?? []
     }
 
     /// The symbol's configuration: its size and weight, then its rendering
@@ -183,4 +184,24 @@ enum Haptics {
         NSHapticFeedbackManager.defaultPerformer.perform(pattern, performanceTime: .now)
         #endif
     }
+}
+
+/// What a symbol's image is made from; a different key makes it again.
+struct SymbolLookKey: Hashable {
+    let rendering: String
+    let palette: BatchValue
+    /// `symbol-value`'s bits, so a NaN still equals itself.
+    let value: UInt
+    let tint: BatchValue
+    let dark: Bool, highContrast: Bool, elevated: Bool
+    /// `SystemColor.generation`: platform colours resolved again.
+    let generation: Int
+    let bakedTint: [Double]?
+}
+
+struct SymbolKey: Hashable {
+    let source: String, name: String
+    /// The point size's bits, as `value`.
+    let points: UInt, weight: Int
+    let look: SymbolLookKey
 }
