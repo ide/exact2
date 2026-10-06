@@ -6,7 +6,7 @@
 // starts at an input within 1 s before it, else at the commit. A page hidden
 // during startup reports no further startup marks.
 // Events go to each launch module's web service, which receives earlier events first.
-import { inflight, Mutations, Resources, clock, After, Hosts, Routes, routeAt, busy } from './rt.js';
+import { inflight, Mutations, Resources, clock, After, Hosts, Routes, routeAt, busy, shown } from './rt.js';
 
 const STARTUP_TIMER_WINDOW_MS = 1000, TTI_TIMEOUT_MS = 30000;
 const events = [], services = [];
@@ -20,12 +20,12 @@ const record = (kind, fields = {}) => {
   for (const s of services) s.event(e);
 };
 
-/** What the screen still lacks, by name. A request counts only for a resource showing its placeholder: a refresh behind a
- * shown answer and a mutation the app sent don't hold TTI. A one-shot timer counts only when due within 1 s. */
+/** What the screen still lacks, by name. A request counts only for a resource showing its placeholder that a live view
+ * reads: a refresh behind a shown answer, a resource only an unbuilt tab reads, and a mutation the app sent don't hold TTI. A one-shot timer counts only when due within 1 s. */
 export function outstanding() {
   const out = [];
   let tickets = 0;
-  for (const r of Resources) if (r.ticket) { tickets++; if (r.placeholder) out.push(`requests:${r.name}`); }
+  for (const r of Resources) if (r.ticket) { tickets++; if (r.placeholder && shown(r)) out.push(`requests:${r.name}`); }
   for (const m of Mutations) if (m.ticket) tickets++;
   // Everything else in flight is the page's own loading (Markdown, canvas, motion, GPU).
   if (inflight.n > tickets) out.push(`loading:${inflight.n - tickets}`);

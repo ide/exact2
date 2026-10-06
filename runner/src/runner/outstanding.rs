@@ -2,9 +2,10 @@
 //! is clear. It has no clock; the host timestamps the moment it clears.
 //! Only what the screen still lacks counts: a request for a resource already
 //! showing an answer (kept, baked or settled) is a background refresh, and a
-//! mutation the app sent is a write, so neither holds TTI. Device holds don't
-//! count because they wait on a person. A resource whose current arguments
-//! failed counts as done.
+//! mutation the app sent is a write, so neither holds TTI. Nor does a
+//! resource no built node reads, such as one only a tab never selected shows.
+//! Device holds don't count because they wait on a person. A resource whose
+//! current arguments failed counts as done.
 
 use super::{Runner, Target};
 
@@ -82,6 +83,10 @@ impl<D: DataSource> Runner<D> {
             poisoned: self.poisoned,
             ..Outstanding::default()
         };
+        let shown = self.tree.as_ref().map_or_else(
+            || vec![true; self.plan.resources.len()],
+            |t| t.shown_resources(&self.plan, self.sites.deps()),
+        );
         for p in &self.pending {
             if !p.in_flight() || self.device_holds.iter().any(|h| h.ticket == p.ticket) {
                 continue;
@@ -89,7 +94,7 @@ impl<D: DataSource> Runner<D> {
             let Target::Resource(i) = p.target else {
                 continue;
             };
-            if matches!(&self.resources[i], Some(s) if !s.placeholder) {
+            if !shown[i] || matches!(&self.resources[i], Some(s) if !s.placeholder) {
                 continue;
             }
             let name = self.target_name(p.target);
@@ -99,7 +104,7 @@ impl<D: DataSource> Runner<D> {
                 out.requests.push(name);
             }
         }
-        for i in 0..self.plan.resources.len() {
+        for (i, _) in shown.iter().enumerate().filter(|(_, shown)| **shown) {
             let name = || self.plan.str(self.plan.resources[i].name).to_string();
             if matches!((&self.failed_args[i], &self.resources[i]), (Some(f), Some(s)) if f == &s.args)
             {

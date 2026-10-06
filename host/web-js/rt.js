@@ -92,7 +92,7 @@ export function memo(fn, t) {
   // Against its last value, which conformed: an unchanged part is not checked again.
   const n = node(t ? last => { const v = fn(); if (!conforms(v, t, [0], last)) throw new Refusal("a derive's value does not conform to its type"); return v; } : fn);
   Settle.push(n);
-  return () => read(n);
+  const g = () => read(n); g.n = n; return g;
 }
 export function effect(fn) { const n = node(fn, undefined, 1); if (Mask) n.m = Mask; fresh(n); return n; }
 /** A scope whose effects `dispose` ends, owned by `parent` (a region's
@@ -176,7 +176,7 @@ export function commit(f, what = "commit") {
   const tail = () => { // the tree update; inside a view transition when it may hand on a shared element's name (LLP 1013.000 D7)
     for (const f of Before) f();
     Pres?.before({ ops: [] }, Views); // presence measures what it tracks before the tree changes (LLP 1063)
-    try { flush(); } catch (e) { Poisoned = true; say(`poisoned: ${e.message}`); console.error(e); return false; }
+    try { flush(); openPanels(); } catch (e) { Poisoned = true; say(`poisoned: ${e.message}`); console.error(e); return false; }
     settled(); if (!ok) return false;
     clock.epoch++; Store.persist();
     for (const go of out) go(); for (const c of cmds) command(...c);
@@ -335,6 +335,11 @@ export const Store = {
 };
 /** Every resource, in plan order: the checkpoint a render writes reads them. */
 export const Resources = [];
+/** Whether a live view reads `r`, directly or through derives and other resources' arguments: what time-to-interactive waits for. */
+export function shown(r) {
+  const seen = new Set(), up = n => n.effect ? !n.gone : !seen.has(n) && (seen.add(n), [...n.obs].some(up));
+  return r.nodes.some(n => [...n.obs].some(up));
+}
 let Ticket = 0;
 const sameReq = (a, b) => a && b && a.storage === b.storage && a.method === b.method && a.url === b.url && a.body === b.body && JSON.stringify(a.headers) === JSON.stringify(b.headers) && a.http === b.http;
 /** Run a request after the commit publishes; `land(outcome)` on reply. */
@@ -459,6 +464,7 @@ export function res(name, source, args, initial, initialArgs, type, ph, carried 
     reread_: undo => { r.reread = true; flag(ver, ver.n.v + 1, undo); },
     revise: undo => { r.rev = true; flag(ver, ver.n.v + 1, undo); },
   });
+  r.nodes = [m.n, pend.n, fail.n];
   Resources.push(r);
   m.p = () => (m(), pend());
   m.f = () => (m(), fail() != null);
@@ -1018,6 +1024,27 @@ function build(b, f, own) {
 }
 /** A region's first arm while adopting: built in place, then its end anchor. */
 function adoptArm(p, f, own) { const s = f ? scope(() => f(p), own) : null; return [s, mark(p)]; }
+// ---------------------------------------------------------------- tab panels
+// A route in a `role="tabpanel"` builds its children once its panel holds the root's selected route
+// (a route whose `navigationKey` is the root's), then keeps them: runner/src/instance/tabs.rs.
+const Deferred = new Set();
+const navKey = e => e.getAttribute("navigationKey");
+export function dl(e, panel, root, f) {
+  (panel.$routes ??= new Set()).add(e);
+  onEnd(() => { panel.$routes.delete(e); Deferred.delete(e); });
+  // A rendered page's route with children was built where it was rendered.
+  if (Adopt && at(e)) { panel.$open = true; f(); return; }
+  const own = Owner;
+  e.$build = () => scope(f, own); e.$panel = panel; e.$root = root;
+  Deferred.add(e);
+}
+function openPanels() {
+  for (const e of Deferred) {
+    const p = e.$panel, k = navKey(e.$root);
+    if (!p.$open && k != null) for (const r of p.$routes) if (navKey(r) === k) { p.$open = true; break; }
+  }
+  for (const e of Deferred) if (e.$panel.$open) { Deferred.delete(e); untracked(() => unadopted(e.$build)); }
+}
 /** `when`: arm 0 while the subject holds, else arm 1 (or nothing). */
 export function when(p, subject, a0, a1) {
   let [a, b] = range(p), own = Owner;

@@ -37,6 +37,7 @@ TTI is the first frame where nothing on screen is loading. Loading means any of 
 These don't hold TTI:
 - **A background refresh.** This is a request for a resource already showing an answer (kept from the last launch, baked, or settled).
 - **A mutation the app sends.**
+- **A resource no built element reads**, directly or through derives: one that only a tab not yet selected shows.
 
 `aria-busy` is how an app marks anything else as still loading, for example `column aria-busy=(not ready)`. TTI waits until no element is busy. It can delay TTI, never advance it.
 

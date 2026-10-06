@@ -44,6 +44,7 @@ mod insets;
 mod instance;
 mod instance_work;
 mod keyframes;
+mod lazy_tabs;
 mod lint;
 mod lists;
 mod locals;

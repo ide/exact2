@@ -519,10 +519,11 @@ main navigationKey=`${top(nav).id}` navigationBack="back" navigate=follow displa
     button position="absolute" … // a root overlay: after the tablist, over everything
 ```
 
-- Each tab names its panel with `aria-controls`; the panels are the stacks, and every
-  tab's stack stays mounted, so a pushed screen, a draft and a scroll offset survive
-  a visit to another tab. A tab is `select(nav, name)`; selecting the shown tab
-  again pops it to its root.
+- Each tab names its panel with `aria-controls`; the panels are the stacks. A panel's
+  screens are built the first time its tab is selected (at launch, only the launch
+  tab's are), then stay mounted, so a pushed screen, a draft and a scroll offset
+  survive a visit to another tab. A child's `state` starts when its screen is built.
+  A tab is `select(nav, name)`; selecting the shown tab again pops it to its root.
 - On iOS the panels become a `UITabBarController`: a tab of one symbol over its label
   is its bar item, a filled box holding a text is the item's badge, and the
   tablist's `accent-color` (inherited, as in CSS) tints the selected item. Under the
@@ -537,7 +538,10 @@ main navigationKey=`${top(nav).id}` navigationBack="back" navigate=follow displa
   route under it is dimmed.
 - Without tabs, the routes are the root's own children, laid out the same way.
 - Tests reach a tab by `tap`, or deliver a location as `type <root> "/saved"` (LLP
-  1038 D11), which calls the root's `navigate`.
+  1038 D11), which calls the root's `navigate`. An element in a tab never selected
+  is not built: select its tab before `tap`ping it.
+- Resources are requested at launch whichever tab reads them; one that only an
+  unbuilt tab reads does not hold time to interactive.
 
 A `head` node supplies document metadata. The innermost active value wins for
 each field. `scroll document` declares page scrolling. Route `render`/`activate`

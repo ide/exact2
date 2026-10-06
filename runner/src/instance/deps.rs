@@ -487,6 +487,71 @@ impl RowWrites {
     }
 }
 
+impl super::Tree {
+    /// Which resources the built tree reads, directly or through derives and
+    /// other resources' arguments: the ones time-to-interactive waits for.
+    pub(crate) fn shown_resources(&self, plan: &Plan, deps: &Deps) -> Vec<bool> {
+        use super::{Active, Child};
+        fn walk(children: &[Child], plan: &Plan, deps: &Deps, reads: &mut Reads) {
+            for c in children {
+                match c {
+                    Child::Node(n) => {
+                        if n.collection.is_some() {
+                            reads.union(&deps.nodes[n.node.0 as usize], 0);
+                            continue;
+                        }
+                        let row = plan.node(n.node);
+                        for b in row.bindings.iter() {
+                            reads.union(&deps.bindings[b.0 as usize], 0);
+                        }
+                        if let Some(surface) = row.surface {
+                            for a in plan.surface(surface).args.iter() {
+                                reads.union(&deps.surface_args[a.0 as usize], 0);
+                            }
+                        }
+                        walk(&n.children, plan, deps, reads);
+                    }
+                    Child::Region(r) => {
+                        let i = r.region.0 as usize;
+                        reads.union(&deps.subjects[i], 0);
+                        reads.union(&deps.keys[i], 0);
+                        match &r.active {
+                            Active::Arm { roots, .. } => walk(roots, plan, deps, reads),
+                            Active::Rows { rows } => rows
+                                .iter()
+                                .for_each(|row| walk(&row.roots, plan, deps, reads)),
+                        }
+                    }
+                }
+            }
+        }
+        let mut shown = vec![false; plan.resources.len()];
+        let Some(layout) = deps.layout else {
+            return shown;
+        };
+        let mut reads = empty(layout);
+        walk(&self.children, plan, deps, &mut reads);
+        let mut derived = vec![false; plan.derives.len()];
+        let mut stack: Vec<Input> = deps.inputs(&reads).collect();
+        while let Some(input) = stack.pop() {
+            match input {
+                Input::Derive(d) if !derived[d] => {
+                    derived[d] = true;
+                    stack.extend(deps.inputs(&deps.derives[d]));
+                }
+                Input::Resource(r) | Input::PendingResource(r) | Input::FailedResource(r)
+                    if !shown[r] =>
+                {
+                    shown[r] = true;
+                    stack.extend(deps.inputs(&deps.resource_args[r]));
+                }
+                _ => {}
+            }
+        }
+        shown
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

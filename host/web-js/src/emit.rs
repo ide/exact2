@@ -12,7 +12,7 @@
 use crate::code::{self, Scope, Uses};
 use crate::style;
 use exact_kernel::{NodeType, PropId, StyleId};
-use exact_plan::{BindingKind, EventKind, Plan, RegionKind, Value};
+use exact_plan::{BindingKind, EventKind, NodesId, Plan, RegionKind, Value};
 use exact_web::host::template::Parts;
 use std::fmt::Write as _;
 
@@ -168,6 +168,8 @@ struct Em<'a> {
     site_attrs: bool,
     /// The JS dev loop's state checkpoint. Ordinary builds emit none of it.
     dev_reload: bool,
+    /// The routes built when their tab is first selected (rt.js `dl`).
+    tabs: Option<exact_runner::instance::Tabs>,
 }
 
 /// The runner's reserved sources the JS runtime answers itself: the page's
@@ -216,6 +218,7 @@ pub fn emit(plan: &Plan, site_attrs: bool, dev_reload: bool) -> Result<Output, S
         refs: rows::can_refer(plan),
         site_attrs,
         dev_reload,
+        tabs: exact_runner::instance::Tabs::of(plan),
     };
     em.heights = em.height_targets();
     em.transforms = em.transform_targets();
@@ -1302,6 +1305,13 @@ impl Em<'_> {
             }
             self.list = true;
             return self.each(r, &e, scope, Some(opts));
+        }
+        if let Some((panel, root)) = self.tabs.as_ref().and_then(|t| t.route(NodesId(i))) {
+            let dl = self.uses.rt("dl");
+            let _ = write!(self.out, "{dl}({e},e{},e{},()=>{{", panel.0, root.0);
+            self.children(self.sites.of_node(i), &e, scope)?;
+            self.out.push_str("});");
+            return Ok(());
         }
         self.children(self.sites.of_node(i), &e, scope)?;
         Ok(())

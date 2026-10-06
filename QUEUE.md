@@ -938,3 +938,5 @@ and the Linux headless CPU renderer without claiming display frame timing.
 
 
 - **Apple ABI pointer-event fixture fails** (2026-10-04, A2 verification): `abi::tests::dispatch_names_every_kind_and_refuses_unknown_ones` gets `NoHandler { view: 2, event: "pointerdown" }`. Reproduced with `cargo test -p exact-apple --no-fail-fast` on both A2 and `2ab8aca10`; the eight older content-region failures noted above also persist.
+- **nav-fixture `sim.mjs` loses physical taps** (2026-10-06): it times out at a Next or Back tap a few steps in, with and without tabs built on first selection; the same taps by hand, a second apart, work. `NavigationBasicsIOSTests.testARoutePushedWhileTheTablistIsHiddenHidesTheTabBar` fails the same way on both.
+- **`difftest --js` cannot bundle an app that draws symbols**: `drive.mjs` copies no `sf.js`, so `explore apps/nav-fixture/app.contract --js-only` is a driver error.

@@ -76,7 +76,16 @@ fn plan() -> Plan {
     body.refresh(progress);
     let body = b.code(body);
     b.action("refresh", &[], &[], body);
-    b.node(NodeType::View as u8, None, None, 0, &[], &[], None);
+    // A shown resource: one no built node reads holds no TTI.
+    let mut read = Asm::new();
+    read.load_resource(progress);
+    let read = b.code(read);
+    let shown = exact_plan::BindingsRow {
+        kind: exact_plan::BindingKind::Prop,
+        id: exact_kernel::PropId::TestId as u16,
+        expr: read,
+    };
+    b.node(NodeType::View as u8, None, None, 0, &[shown], &[], None);
     b.finish().unwrap()
 }
 

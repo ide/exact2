@@ -89,7 +89,7 @@ function runtime(dir) {
   mkdirSync(dir, { recursive: true });
   for (const f of readdirSync(webJs)) if (f.endsWith('.js')) cpSync(resolve(webJs, f), resolve(dir, f));
   for (const f of ['frames.js', 'motion-glue.js', 'input-glue.js', 'markup-editor.js', 'textflow-glue.js', 'timer-glue.js', 'presence-glue.js', 'native-glue.js',
-    'geometry-glue.js', 'media-glue.js', 'collection-glue.js', 'image-glue.js', 'navigation.js', 'canvas2d-glue.js', 'auth-glue.js', 'storage-environment.js', 'http-body.js', 'grant-admission.js'])
+    'geometry-glue.js', 'media-glue.js', 'collection-glue.js', 'image-glue.js', 'navigation.js', 'canvas2d-glue.js', 'auth-glue.js', 'storage-environment.js', 'http-body.js', 'grant-admission.js', 'chrome.js', 'touch.js'])
     cpSync(resolve(web, f), resolve(dir, f));
   writeFileSync(resolve(dir, 'admission.js'), readFileSync(resolve(webJs, 'admission.js'), 'utf8').replaceAll("'../web/grant-admission.js'", "'./grant-admission.js'"));
   writeFileSync(resolve(dir, 'draw.js'), 'export const drawer = null;\n');
@@ -168,9 +168,9 @@ async function drive(code, c, hostSources) {
   out.push(`outcome ${booted}`);
   if (booted === 'poisoned') return [...out, ...notes];
   const root = document.root;
-  // Elements in preorder; a virtualized list's rows are its window's (left out).
+  // Elements in preorder; a virtualized list's rows are its window's, and a tab panel's routes are built once its tab is selected (left out).
   const walk = (e, f, windowed) => { for (const k of e.childNodes) if (k.nodeType === 1) { f(k); if (!(windowed && windowedList(k))) walk(k, f, windowed); } };
-  const windowedList = e => e.getAttribute('role') === 'list' && e.hasAttribute('data-scroll');
+  const windowedList = e => (e.getAttribute('role') === 'list' && e.hasAttribute('data-scroll')) || e.getAttribute('role') === 'tabpanel';
   const find = id => { let hit = null; walk(root, e => { if (!hit && e.getAttribute('data-testid') === id) hit = e; }, false); return hit; };
   const observe = () => {
     names.forEach((group, g) => group.forEach((name, i) => {
