@@ -22,8 +22,10 @@ pub const MAX_STRING_BYTES: u32 = 1 << 24;
 /// A `transition` row's `border-color` shorthand (LLP 1062): the code after
 /// every property's (grammar: `schema.json` `_transitions`).
 const BORDER_COLOR: u8 = Property::COUNT as u8 + 1;
-/// `-exact-enabled`'s property code, after `border-color`.
-const ENABLED: u8 = BORDER_COLOR + 1;
+/// `-exact-enabled`'s property code: the last a byte holds, apart from the
+/// sequential codes upstream adds after `border-color` (its `d` took the
+/// next one).
+const ENABLED: u8 = u8::MAX;
 
 /// A path's `d` (LLP 1055.000 D15): its property's code, past the wire's.
 const PATH_D: u8 = Property::D as u8 + 1;
