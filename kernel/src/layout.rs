@@ -1038,10 +1038,17 @@ impl LayoutTree {
                         // reports, the kind's default. Native modules use the
                         // same non-ratio seam, with no default content size
                         // (LLP 1024 D4).
-                        let (iw, ih) = arena.intrinsic(slot).unwrap_or_else(|| {
-                            crate::ControlKind::of(arena.node_type(slot), arena.props(slot))
-                                .map_or((0.0, 0.0), crate::ControlKind::default_size)
-                        });
+                        // Before that, the platform's size for a kind whose
+                        // size is fixed, as the host's measurer says.
+                        let (iw, ih) =
+                            arena.intrinsic(slot).unwrap_or_else(|| {
+                                crate::ControlKind::of(arena.node_type(slot), arena.props(slot))
+                                    .map_or((0.0, 0.0), |kind| {
+                                        measurer
+                                            .control_size(kind)
+                                            .unwrap_or_else(|| kind.default_size())
+                                    })
+                            });
                         return Size {
                             width: known.width.unwrap_or(iw),
                             height: known.height.unwrap_or(ih),

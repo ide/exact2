@@ -8,8 +8,8 @@
 use crate::browser_cases::{css_rows as rows, mismatches, props};
 use crate::support::reader::number as n;
 use exact_kernel::{
-    Kernel, NodeType, Offer, Op, PropId, PropValue, StyleId, TextMeasureRequest, TextMeasurer,
-    TextMetrics,
+    ControlKind, Kernel, MonospaceMeasurer, NodeType, Offer, Op, PropId, PropValue, StyleId,
+    TextMeasureRequest, TextMeasurer, TextMetrics,
 };
 
 #[derive(Clone, Copy)]
@@ -295,6 +295,73 @@ fn controls_without_a_host_intrinsic_use_chromes_bare_defaults() {
         ));
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+/// A host whose platform switch has a fixed size (a UISwitch) and whose
+/// checkbox does not say.
+struct PlatformSwitch(MonospaceMeasurer);
+
+impl TextMeasurer for PlatformSwitch {
+    fn measure(&mut self, request: &TextMeasureRequest<'_>) -> TextMetrics {
+        self.0.measure(request)
+    }
+    fn control_size(&mut self, kind: ControlKind) -> Option<(f32, f32)> {
+        (kind == ControlKind::Switch).then_some((51.0, 31.0))
+    }
+}
+
+#[test]
+fn a_controls_first_layout_is_the_hosts_fixed_size_before_it_reports() {
+    for (role, expected) in [(Some("switch"), (51.0, 31.0)), (None, (13.0, 13.0))] {
+        let mut ops = vec![
+            Op::CreateView {
+                id: 1,
+                node_type: NodeType::View,
+            },
+            Op::SetStyle {
+                id: 1,
+                patch: Box::new(props(&vec![(StyleId::Width, n(400.0))])),
+            },
+            Op::CreateView {
+                id: 2,
+                node_type: NodeType::Control,
+            },
+            Op::SetStyle {
+                id: 2,
+                patch: Box::new(props(&rows("display:block"))),
+            },
+            Op::SetProp {
+                id: 2,
+                prop: PropId::Type,
+                value: PropValue::Str("checkbox".into()),
+            },
+        ];
+        if let Some(role) = role {
+            ops.push(Op::SetProp {
+                id: 2,
+                prop: PropId::AccessibilityRole,
+                value: PropValue::Str(role.into()),
+            });
+        }
+        ops.extend([
+            Op::SetChildren {
+                id: 1,
+                children: vec![2],
+            },
+            Op::AttachRoot { id: 1 },
+        ]);
+        let mut kernel = Kernel::new(Box::new(PlatformSwitch(MonospaceMeasurer::default())));
+        kernel.apply(0, 1, &ops).unwrap();
+        kernel
+            .compute_layout(1, Offer::definite(800.0, 600.0))
+            .unwrap();
+        let failures = mismatches(
+            &format!("{role:?}"),
+            &kernel,
+            &[(2, [0.0, 0.0, expected.0, expected.1])],
+        );
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
+    }
 }
 
 #[test]

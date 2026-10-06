@@ -223,6 +223,12 @@ pub type SymbolFn = extern "C" fn(
     out: *mut f32,
 ) -> u8;
 
+/// The size of the platform's own control of a kind (`ControlKind::code`):
+/// writes width and height and answers 1, or 0 when its size is not fixed
+/// or the host cannot say. Called on the runtime's thread with the context
+/// `exact_set_measure` was given.
+pub type ControlFn = extern "C" fn(ctx: *mut c_void, kind: u32, out: *mut f32) -> u8;
+
 /// The kernel's measurer for a runtime's hooks: the app's callbacks, or the
 /// monospace reference measurer when it set none.
 pub fn from_hooks(
@@ -230,9 +236,14 @@ pub fn from_hooks(
     ctx: *mut c_void,
     lines: Option<LinesFn>,
     symbol: Option<SymbolFn>,
+    control: Option<ControlFn>,
 ) -> Box<dyn TextMeasurer> {
     match measure {
-        Some(f) => Box::new(CallbackMeasurer::new(f, ctx, lines).with_symbol(symbol)),
+        Some(f) => Box::new(
+            CallbackMeasurer::new(f, ctx, lines)
+                .with_symbol(symbol)
+                .with_control(control),
+        ),
         None => Box::new(exact_kernel::MonospaceMeasurer::default()),
     }
 }
@@ -252,6 +263,9 @@ pub struct CallbackMeasurer {
     /// Each symbol's answer by name, point size and weight: a glyph's box
     /// does not change for the life of a catalog.
     symbols: std::collections::HashMap<(String, u32, u16), Option<(f32, f32)>>,
+    control: Option<ControlFn>,
+    /// Each control kind's answer: a fixed size does not change.
+    controls: std::collections::HashMap<u32, Option<(f32, f32)>>,
 }
 
 impl CallbackMeasurer {
@@ -270,7 +284,15 @@ impl CallbackMeasurer {
             language: String::new(),
             symbol: None,
             symbols: Default::default(),
+            control: None,
+            controls: Default::default(),
         }
+    }
+
+    /// Answer fixed control sizes with `f` too (`TextMeasurer::control_size`).
+    pub fn with_control(mut self, f: Option<ControlFn>) -> CallbackMeasurer {
+        self.control = f;
+        self
     }
 
     /// Measure system symbols with `f` too (LLP 1035.004.000).
@@ -500,6 +522,20 @@ impl TextMeasurer for CallbackMeasurer {
         if out.iter().all(|b| b.is_finite()) {
             bottoms.extend(out);
         }
+    }
+
+    fn control_size(&mut self, kind: exact_kernel::ControlKind) -> Option<(f32, f32)> {
+        let f = self.control?;
+        let code = kind.code();
+        if let Some(known) = self.controls.get(&code) {
+            return *known;
+        }
+        let mut out = [0f32; 2];
+        let ok = f(self.ctx, code, out.as_mut_ptr()) == 1;
+        let size =
+            (ok && out.iter().all(|v| v.is_finite() && *v >= 0.0)).then_some((out[0], out[1]));
+        self.controls.insert(code, size);
+        size
     }
 
     fn measure_symbol(

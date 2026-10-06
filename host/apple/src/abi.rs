@@ -43,6 +43,8 @@ pub struct Hooks {
     pub canvas_text: Option<crate::canvas_text::CanvasTextFn>,
     /// Measures a system symbol in layout (LLP 1035.004.000), with `ctx`.
     pub symbol: Option<crate::measure::SymbolFn>,
+    /// A fixed-size platform control's size in layout, with `ctx`.
+    pub control: Option<crate::measure::ControlFn>,
 }
 
 impl Hooks {
@@ -56,6 +58,7 @@ impl Hooks {
             wake_ctx: std::ptr::null_mut(),
             canvas_text: None,
             symbol: None,
+            control: None,
         }
     }
 }
@@ -482,6 +485,7 @@ impl<D: DataSource> Bridge<D> {
                     .with_field_chrome(self.field_chrome)
                     .with_button_measure(self.button_measure)
                     .with_symbol(hooks.symbol)
+                    .with_control(hooks.control)
                     .with_measure_revision(
                         self.measure_revision
                             .get_or_insert_with(|| Rc::new(std::cell::Cell::new(0)))
@@ -780,6 +784,7 @@ impl<D: DataSource> Bridge<D> {
                     .with_field_chrome(self.field_chrome)
                     .with_button_measure(self.button_measure)
                     .with_symbol(hooks.symbol)
+                    .with_control(hooks.control)
                     .with_measure_revision(
                         self.measure_revision
                             .get_or_insert_with(|| Rc::new(std::cell::Cell::new(0)))

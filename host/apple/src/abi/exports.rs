@@ -110,6 +110,16 @@ macro_rules! host {
             $crate::abi::with_entry(&EXACT_RUNTIMES, rt, |e| { e.hooks.symbol = measure; });
         }
 
+        /// A fixed-size platform control's size in layout
+        /// (`TextMeasurer::control_size`), so a first frame has its box.
+        #[no_mangle]
+        pub extern "C" fn exact_set_control_measure(
+            rt: u32,
+            measure: ::std::option::Option<$crate::measure::ControlFn>,
+        ) {
+            $crate::abi::with_entry(&EXACT_RUNTIMES, rt, |e| { e.hooks.control = measure; });
+        }
+
         /// A Canvas 2D image handle decoded (LLP 1056 D9): the handle is
         /// the input buffer's first `len` bytes; the batch's length.
         #[no_mangle]
