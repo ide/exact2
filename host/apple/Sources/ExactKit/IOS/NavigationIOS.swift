@@ -267,10 +267,11 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
         }
         let nav = makeNavigation(first: first.first?.node)
         parent.addChild(nav)
-        p.root.addSubview(nav.view)
-        nav.view.setPaintForeground(aboveAuthored: false)
+        // Sized before it joins the window, as `mount` does for tabs.
         nav.view.frame = p.root.bounds
         nav.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        p.root.addSubview(nav.view)
+        nav.view.setPaintForeground(aboveAuthored: false)
         nav.didMove(toParent: parent)
         primaryNavigation = nav
         prepareRoutes(first, in: nav)
@@ -396,10 +397,10 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
             guard presenter.modals.canPresent(from: owner, route: route) else { dirty = true; retry(); return }
             let nav = makeNavigation(first: route)
             owner.addChild(nav)
-            root.addSubview(nav.view)
-            nav.view.setPaintForeground(aboveAuthored: false)
             nav.view.frame = root.bounds
             nav.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+            root.addSubview(nav.view)
+            nav.view.setPaintForeground(aboveAuthored: false)
             nav.didMove(toParent: owner)
             presentedNavigations.append(nav)
             prepareRoutes(Array(wanted[part]), in: nav)
