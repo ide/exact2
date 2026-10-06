@@ -47,6 +47,7 @@ public final class ExactView: UIView {
         backgroundColor = UIColor(named: "ExactLaunch") ?? .white
         addSubview(session.presenter.viewport)
         #if !os(tvOS)
+        NativeButton.prepareTitles()
         keyboardObserver = NotificationCenter.default.addObserver(
             forName: UIResponder.keyboardWillChangeFrameNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.installKeyboardProbe() }

@@ -296,6 +296,18 @@ final class NativeButton: UIButton {
             : (.right, NSDirectionalEdgeInsets(top: 0, leading: rtl ? start : 0, bottom: 0, trailing: rtl ? 0 : end))
     }
 
+    /// A title's text-attributes transformer gets its attributes from UIKit
+    /// as an `AttributeContainer`, and the first one made reads UIKit's
+    /// attribute scopes by reflection, about 10 ms; Foundation keeps the
+    /// result for the process. Done once off main, before the first frame's
+    /// buttons need it.
+    static func prepareTitles() { _ = titlesPrepared }
+    private static let titlesPrepared: Void = {
+        DispatchQueue.global(qos: .userInitiated).async {
+            _ = try? AttributeContainer([.font: UIFont.systemFont(ofSize: 17)], including: \.uiKit)
+        }
+    }()
+
     static func weight(_ w: CGFloat) -> UIFont.Weight {
         switch w { case ..<150: .ultraLight; case ..<250: .thin; case ..<350: .light; case ..<450: .regular
         case ..<550: .medium; case ..<650: .semibold; case ..<750: .bold; case ..<850: .heavy; default: .black }
