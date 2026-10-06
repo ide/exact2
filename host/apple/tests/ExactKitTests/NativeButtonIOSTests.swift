@@ -83,9 +83,9 @@ final class NativeButtonIOSTests: XCTestCase {
         XCTAssertEqual(g, 28.0 / 255, accuracy: 0.01)
     }
 
-    /// Disabled, a configured button keeps its own colours at half, as one
-    /// look, not UIKit's grey over an authored fill.
-    func testADisabledStyledButtonKeepsItsColoursDimmed() throws {
+    /// Disabled, a configured button keeps its own colours (HTML keeps an
+    /// author's), not UIKit's grey over an authored fill.
+    func testADisabledStyledButtonKeepsItsColours() throws {
         let p = presenter([
             ["op": "create", "id": 1, "kind": "button", "handlers": ["press"], "props": ["disabled": "true"],
              "style": ["exact_apple_button_style": "plain", "background_color": [255, 0, 0, 40]]],
@@ -104,7 +104,7 @@ final class NativeButtonIOSTests: XCTestCase {
         var (r, g, bl, a) = (CGFloat(0), CGFloat(0), CGFloat(0), CGFloat(0))
         color.getRed(&r, green: &g, blue: &bl, alpha: &a)
         XCTAssertEqual(r, 232.0 / 255, accuracy: 0.02, "its own red, not grey")
-        XCTAssertEqual(a, 0.5, accuracy: 0.02, "at half")
+        XCTAssertEqual(a, 1, accuracy: 0.02, "as authored: the author's CSS says how disabled looks")
     }
 
     func testADisabledButtonIsADisabledUIButton() throws {
