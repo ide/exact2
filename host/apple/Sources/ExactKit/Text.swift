@@ -1195,14 +1195,19 @@ final class TextEngine {
         var words: [Run: CGFloat] = [:]
         var wordBytes = 0
         for r in spec.runs {
+            // A word's attributes don't depend on its text: made once a run.
+            var attributes: [NSAttributedString.Key: Any]?
             for word in r.text.split(whereSeparator: { $0.isWhitespace }) {
-                var one = spec
-                one.runs = [Run(text: String(word), size: r.size, weight: r.weight, family: r.family, italic: r.italic, lineHeight: r.lineHeight, letterSpacing: r.letterSpacing, numeric: r.numeric)]
-                let key = one.runs[0]
+                let key = Run(text: String(word), size: r.size, weight: r.weight, family: r.family, italic: r.italic, lineHeight: r.lineHeight, letterSpacing: r.letterSpacing, numeric: r.numeric)
                 if let width = words[key] { widest = max(widest, width); continue }
+                if attributes == nil {
+                    var one = spec
+                    one.runs = [Run(text: "x", size: r.size, weight: r.weight, family: r.family, italic: r.italic, lineHeight: r.lineHeight, letterSpacing: r.letterSpacing, numeric: r.numeric)]
+                    attributes = attributed(one).attributes(at: 0, effectiveRange: nil)
+                }
                 // This probe needs one scalar, never a cached width-specific
                 // Paragraph or a historical per-word CTTypesetter.
-                let line = CTLineCreateWithAttributedString(attributed(one))
+                let line = CTLineCreateWithAttributedString(NSAttributedString(string: key.text, attributes: attributes))
                 let width = CSSLineBox.layoutWidth(CGFloat(CTLineGetTypographicBounds(line, nil, nil, nil)))
                 widest = max(widest, width)
                 let bytes = key.text.utf8.count + MemoryLayout<Run>.stride + MemoryLayout<CGFloat>.stride
