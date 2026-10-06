@@ -20,7 +20,8 @@ enum WireHarness {
         let service = ObserveService(config: config, handoff: handoff, root: root, clientId: UUID(uuidString: fixture["clientId"] as! String)!)
         for e in fixture["events"] as! [Any] { service.event(try JSONSerialization.data(withJSONObject: e)) }
         let out = service.queue.sync {
-            ["metrics": service.chunk("metrics", limit: 200)?.body ?? [:], "logs": service.chunk("logs", limit: 200)?.body ?? [:]]
+            ["metrics": service.chunk("metrics", limit: 200)?.body ?? [:], "logs": service.chunk("logs", limit: 200)?.body ?? [:],
+             "recent": service.query(["op": "recent", "limit": 3]), "unknown": service.query(["op": "everything"])]
         }
         FileHandle.standardOutput.write(try JSONSerialization.data(withJSONObject: out))
     }

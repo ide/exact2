@@ -71,6 +71,9 @@ public final class ExactJournal {
 
     func background() { for s in services { s.background() } }
 
+    /// The loaded service of `module`, if it is loaded (main thread).
+    func service(_ module: String) -> ExactService? { services.first { $0.module == module } }
+
     private func scheduleDelivery() {
         guard !delivering, !subscribers.isEmpty else { return }
         delivering = true
@@ -170,9 +173,15 @@ final class ExactService {
     typealias Start = @convention(c) (UnsafePointer<UInt8>?, UInt32, UnsafePointer<UInt8>?, UInt32) -> UnsafeMutableRawPointer?
     typealias Event = @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<UInt8>?, UInt32) -> Void
     typealias Background = @convention(c) (UnsafeMutableRawPointer?) -> Void
+    /// Optional: `exact_service_query(state, json, length, context, reply)`;
+    /// the service calls `reply(context, json, length)` once, on any thread.
+    typealias Reply = @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<UInt8>?, UInt32) -> Void
+    typealias Query = @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<UInt8>?, UInt32, UnsafeMutableRawPointer?, Reply) -> Void
+    let module: String
     private let state: UnsafeMutableRawPointer?
     private let eventFn: Event
     private let backgroundFn: Background
+    private let queryFn: Query?
 
     /// Loads from beside the executable on macOS, or from Frameworks on iOS.
     static func load(module: String, config: Data, handoff: Data) -> ExactService? {
@@ -196,13 +205,36 @@ final class ExactService {
                 start(c.bindMemory(to: UInt8.self).baseAddress, UInt32(config.count), r.bindMemory(to: UInt8.self).baseAddress, UInt32(handoff.count))
             }
         }
-        return ExactService(state: state, event: unsafeBitCast(e, to: Event.self), background: unsafeBitCast(b, to: Background.self))
+        return ExactService(module: module, state: state, event: unsafeBitCast(e, to: Event.self), background: unsafeBitCast(b, to: Background.self),
+                            query: dlsym(h, "exact_service_query").map { unsafeBitCast($0, to: Query.self) })
     }
 
-    private init(state: UnsafeMutableRawPointer?, event: Event, background: Background) {
+    private init(module: String, state: UnsafeMutableRawPointer?, event: Event, background: Background, query: Query?) {
+        self.module = module
         self.state = state
         eventFn = event
         backgroundFn = background
+        queryFn = query
+    }
+
+    /// Asks the service; `reply` gets its JSON object, or nil when it answers
+    /// no queries or its answer is not one.
+    func query(_ request: [String: Any], reply: @escaping ([String: Any]?) -> Void) {
+        guard let queryFn, let bytes = try? JSONSerialization.data(withJSONObject: request) else { return reply(nil) }
+        let box = Unmanaged.passRetained(ReplyBox(reply)).toOpaque()
+        bytes.withUnsafeBytes { b in
+            queryFn(state, b.bindMemory(to: UInt8.self).baseAddress, UInt32(bytes.count), box) { context, json, length in
+                guard let context else { return }
+                let box = Unmanaged<ReplyBox>.fromOpaque(context).takeRetainedValue()
+                let data = json.map { Data(bytes: $0, count: Int(length)) } ?? Data()
+                box.reply((try? JSONSerialization.jsonObject(with: data)) as? [String: Any])
+            }
+        }
+    }
+
+    private final class ReplyBox {
+        let reply: ([String: Any]?) -> Void
+        init(_ reply: @escaping ([String: Any]?) -> Void) { self.reply = reply }
     }
 
     func event(_ e: ExactJournalEvent) {
@@ -211,6 +243,19 @@ final class ExactService {
     }
 
     func background() { backgroundFn(state) }
+}
+
+/// A module's service, asked by the app's own module (LLP 1067.000 keeps
+/// one module per app; a service such as Observe's is the framework's).
+/// `reply` runs once, on any thread, with the service's JSON answer, or nil
+/// when that service is not loaded (yet) or answers no queries.
+public enum ExactServices {
+    public static func query(_ module: String, _ request: [String: Any], reply: @escaping ([String: Any]?) -> Void) {
+        DispatchQueue.main.async {
+            guard let service = ExactJournal.shared.service(module) else { return reply(nil) }
+            service.query(request, reply: reply)
+        }
+    }
 }
 
 extension ExactLaunch {
