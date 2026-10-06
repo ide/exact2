@@ -84,6 +84,16 @@ test.skipIf(process.platform !== 'darwin')('the Apple service sends wire.json\'s
     expect(build.status, build.stderr).toBe(0);
     const run = spawnSync(exe, [join(dir, 'wire.json'), join(work, 'store')], { encoding: 'utf8' });
     expect(run.status, run.stderr).toBe(0);
-    check(JSON.parse(run.stdout), 'apple');
+    const out = JSON.parse(run.stdout);
+    check(out, 'apple');
+    // What an app's own screen reads back (`ExactServices.query("observe", …)`):
+    // the newest rows first, none sent yet, at most the limit.
+    const { session, metrics } = out.recent;
+    expect(session).toBe(fixture.session);
+    expect(metrics.length).toBeLessThanOrEqual(3);
+    expect(metrics.length).toBeGreaterThan(0);
+    expect(metrics.every(m => m.sent === false && typeof m.value === 'number' && typeof m.name === 'string')).toBe(true);
+    expect(metrics.map(m => m.time)).toEqual([...metrics.map(m => m.time)].sort((a, b) => b - a));
+    expect(out.unknown.error).toContain('recent');
   } finally { rmSync(work, { recursive: true, force: true }); }
 }, 120_000);
