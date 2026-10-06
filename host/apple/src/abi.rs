@@ -457,7 +457,8 @@ impl<D: DataSource> Bridge<D> {
         if let Some(compat) = self.compat {
             exact_runner::delivery::refuse_analysis(compat).map_err(str::to_string)?;
         }
-        let measurer = crate::measure::from_hooks(hooks.measure, hooks.ctx, hooks.lines, hooks.symbol);
+        let measurer =
+            crate::measure::from_hooks(hooks.measure, hooks.ctx, hooks.lines, hooks.symbol);
         // The app's bindings, once (LLP 1016 D6; LLP 1018 D6): the secrets it
         // kept are read into a snapshot before the runner boots, so the first
         // frame is a returning user's; the executor thread takes the same
@@ -723,7 +724,8 @@ impl<D: DataSource> Bridge<D> {
         // Build the candidate beside the live host. A decode, app-identity,
         // or runner refusal must not turn a reload into an empty window.
         let carried = carried.or_else(|| self.host.as_ref().map(Host::carry));
-        let measurer = crate::measure::from_hooks(hooks.measure, hooks.ctx, hooks.lines, hooks.symbol);
+        let measurer =
+            crate::measure::from_hooks(hooks.measure, hooks.ctx, hooks.lines, hooks.symbol);
         // A reload carries the running store (`Carried::store`). A fresh
         // session takes the granted platform snapshot before its first query,
         // just like boot_fresh; neither path releases effects until commit.
@@ -913,7 +915,7 @@ impl<D: DataSource> Bridge<D> {
             // @ref LLP 1038 D8 — the next ABI kind after scroll.
             14 => Event::Navigate(payload),
             // @ref LLP 1035.001.000 — the destination's navigation key.
-            40 => Event::Traverse(payload),
+            200 => Event::Traverse(payload),
             15 => {
                 let Some(event) = Event::height_release_payload(&payload) else {
                     let out = self.host.as_ref().map_or_else(not_booted, |h| {

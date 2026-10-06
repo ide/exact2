@@ -62,9 +62,9 @@ pub mod host;
 pub mod image;
 #[cfg(target_os = "linux")]
 pub mod input;
-mod media_session;
 pub mod journal;
 pub mod launch_marks;
+mod media_session;
 pub mod navigation;
 pub mod paint;
 pub mod picker;
