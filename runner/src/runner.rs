@@ -30,7 +30,8 @@ mod checkpoint;
 mod collection;
 mod source;
 pub use source::{
-    Announce, DataError, DataSource, InFlight, Interrupt, Native, NativeCall, NativeHandler, Target,
+    Announce, DataError, DataSource, InFlight, Interrupt, Native, NativeCall, NativeHandler,
+    PreloadWake, Target,
 };
 mod delivery;
 mod device;

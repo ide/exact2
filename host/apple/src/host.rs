@@ -173,9 +173,9 @@ pub struct Host<D: DataSource> {
     /// or grants that do not parse).
     secrets: Option<Platform>,
     data_activated: bool,
-    /// The session's wake (`listen`): a pending activation asks it once the
-    /// data source can answer, instead of the host polling.
-    wake: Option<std::sync::Arc<dyn Fn() + Send + Sync>>,
+    /// The session's wake (`listen`), which a pending activation leaves
+    /// with the data source.
+    preload_wake: exact_runner::PreloadWake,
 
     /// The update store's last line this host journaled, so a sync after
     /// a check writes it once.
@@ -445,7 +445,7 @@ impl<D: DataSource> Host<D> {
             viewport: (viewport.width as f32, viewport.height as f32),
             now_ms: 0.0,
             data_activated: false,
-            wake: None,
+            preload_wake: Default::default(),
 
             secrets,
             update_line: None,
@@ -649,7 +649,7 @@ impl<D: DataSource> Host<D> {
 
     /// Take the source's announced topics, waking the host (LLP 1016.002).
     pub fn listen(&mut self, wake: std::sync::Arc<dyn Fn() + Send + Sync>) {
-        self.wake = Some(wake.clone());
+        self.preload_wake.set(wake.clone());
         self.runner.listen(wake);
     }
 
@@ -680,11 +680,7 @@ impl<D: DataSource> Host<D> {
         }
         match self.runner.data_ref().preload() {
             Ok(false) => {
-                if let Some(wake) = self.wake.clone() {
-                    self.runner
-                        .data_ref()
-                        .when_preloaded(Box::new(move || wake()));
-                }
+                self.preload_wake.ask(self.runner.data_ref());
                 return "{\"ops\":[],\"pending\":true}".into();
             }
             Err(error) => return self.commit(&[], Some(format!("prepare data: {error:?}"))),

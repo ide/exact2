@@ -9,10 +9,10 @@ use std::sync::{Arc, Mutex};
 
 type Wake = Box<dyn FnOnce() + Send>;
 
-/// Prepares in the background until `ready`; keeps the wake it is given.
+/// Prepares in the background until `ready`; keeps the wakes it is given.
 struct Loading {
     ready: Arc<AtomicBool>,
-    waiting: Arc<Mutex<Option<Wake>>>,
+    waiting: Arc<Mutex<Vec<Wake>>>,
 }
 impl DataSource for Loading {
     fn app_id(&self) -> &str {
@@ -25,7 +25,7 @@ impl DataSource for Loading {
         Ok(self.ready.load(Ordering::SeqCst))
     }
     fn when_preloaded(&self, wake: Wake) {
-        *self.waiting.lock().unwrap() = Some(wake);
+        self.waiting.lock().unwrap().push(wake);
     }
 }
 
@@ -34,7 +34,10 @@ fn a_pending_activation_wakes_the_session_once_the_source_is_ready() {
     let mut builder = PlanBuilder::new(exact_kernel::SCHEMA_DIGEST, 1);
     builder.node(NodeType::View as u8, None, None, 0, &[], &[], None);
     let plan = builder.finish().unwrap().encode();
-    let (ready, waiting) = (Arc::new(AtomicBool::new(false)), Arc::new(Mutex::new(None)));
+    let (ready, waiting) = (
+        Arc::new(AtomicBool::new(false)),
+        Arc::new(Mutex::new(Vec::new())),
+    );
     let source = Loading {
         ready: ready.clone(),
         waiting: waiting.clone(),
@@ -53,19 +56,23 @@ fn a_pending_activation_wakes_the_session_once_the_source_is_ready() {
         counted.fetch_add(1, Ordering::SeqCst);
     }));
     assert!(host.activate_data().contains("\"pending\":true"));
-    let wake = waiting
-        .lock()
-        .unwrap()
-        .take()
-        .expect("the source holds the session's wake");
+    assert!(host.activate_data().contains("\"pending\":true"));
+    let held = || std::mem::take(&mut *waiting.lock().unwrap());
+    let mut first = held();
+    assert_eq!(first.len(), 1, "a retry while loading adds no waiter");
+    assert_eq!(wakes.load(Ordering::SeqCst), 0);
+    first.pop().unwrap()();
+    assert_eq!(wakes.load(Ordering::SeqCst), 1, "the session is woken");
+    assert!(host.activate_data().contains("\"pending\":true"));
+    let mut second = held();
     assert_eq!(
-        wakes.load(Ordering::SeqCst),
-        0,
-        "no wake before the source is ready"
+        second.len(),
+        1,
+        "a wake that finds it still loading asks again"
     );
     ready.store(true, Ordering::SeqCst);
-    wake();
-    assert_eq!(wakes.load(Ordering::SeqCst), 1, "the session is woken");
+    second.pop().unwrap()();
+    assert_eq!(wakes.load(Ordering::SeqCst), 2);
     assert!(
         !host.activate_data().contains("\"pending\":true"),
         "and activates"

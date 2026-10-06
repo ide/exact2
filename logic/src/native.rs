@@ -111,13 +111,13 @@ fn prepare(bytes: &[u8], idle_only: bool) -> Result<bool, String> {
                 .name("exact-rust-loader".into())
                 .spawn(move || {
                     for (bytes, entry, queued) in receiver {
+                        let digest = format!("{:x}", Sha256::digest(&bytes));
                         eprintln!(
-                            "exact rust: native {:x}: queue {:.1} ms",
-                            Sha256::digest(&bytes),
+                            "exact rust: native {digest}: queue {:.1} ms",
                             queued.elapsed().as_secs_f64() * 1000.0
                         );
                         entry.get_or_init(|| load_symbols(&bytes));
-                        loaded(&format!("{:x}", Sha256::digest(&bytes)));
+                        loaded(&digest);
                     }
                 })
                 .map(|_| sender)

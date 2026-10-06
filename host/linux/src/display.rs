@@ -456,6 +456,10 @@ pub fn run<D: DataSource + Default>(config: &mut Config, started: Instant) -> i3
             now,
             frame_ms,
         );
+        // An activation after this turn's paint left a commit to show.
+        if p.dirty() && !display.pending() {
+            timeout = 0;
+        }
         if config.dev_plan.is_some() || config.dev_url.is_some() {
             timeout = if timeout < 0 { 100 } else { timeout.min(100) };
         }

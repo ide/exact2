@@ -76,9 +76,9 @@ pub struct Host<D: DataSource> {
     #[cfg(test)]
     layout_calls: usize,
     data_activated: bool,
-    /// The executor's wake: a pending activation asks it once the data
-    /// source can answer, so the display loop doesn't poll.
-    wake: Option<std::sync::Arc<dyn Fn() + Send + Sync>>,
+    /// The executor's wake, which a pending activation leaves with the data
+    /// source, so the display loop doesn't poll.
+    preload_wake: exact_runner::PreloadWake,
     router_op: Option<exact_runner::RouterChange>,
     navigation: crate::navigation::Navigation,
     presence: presence::Presence,
@@ -194,7 +194,7 @@ impl<D: DataSource> Host<D> {
             #[cfg(test)]
             layout_calls: 0,
             data_activated: false,
-            wake: None,
+            preload_wake: Default::default(),
             router_op: None,
             navigation: Default::default(),
             presence: Default::default(),
@@ -582,11 +582,7 @@ impl<D: DataSource> Host<D> {
             .preload()
             .map_err(|e| format!("prepare data: {e:?}"))?
         {
-            if let Some(wake) = self.wake.clone() {
-                self.runner
-                    .data_ref()
-                    .when_preloaded(Box::new(move || wake()));
-            }
+            self.preload_wake.ask(self.runner.data_ref());
             return Ok(false);
         }
         if let Err(error) = self
@@ -632,7 +628,7 @@ impl<D: DataSource> Host<D> {
     /// also wake (LLP 1016.002).
     pub fn executor(&mut self) -> crate::executor::Executor {
         let executor = crate::executor::Executor::start(&self.grants());
-        self.wake = Some(executor.waker());
+        self.preload_wake.set(executor.waker());
         self.runner.listen(executor.waker());
         executor
     }
