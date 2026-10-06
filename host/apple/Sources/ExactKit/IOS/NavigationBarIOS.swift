@@ -305,6 +305,9 @@ final class NavigationStack {
     let order: Int
     let label: String
     var hooked = false
+    /// Its first route was not built yet (a tab never selected, LLP
+    /// 1075.003 §3.7): `showsBar` waits for its header.
+    var undecided = false
     var written: [ObjectIdentifier] = []
     init(showsBar: Bool, order: Int) {
         self.showsBar = showsBar
@@ -334,13 +337,14 @@ extension NavigationHost {
         let shape = first.flatMap { HeaderShape(route: $0, back: container?.props["navigationBack"]) }
         stackCount += 1
         let stack = NavigationStack(showsBar: shape != nil, order: stackCount)
+        stack.undecided = first.map(Self.unbuilt) ?? false
         stack.proxy.host = self
         stacks[ObjectIdentifier(nav)] = stack
         nav.delegate = stack.proxy
         #if !os(tvOS)
         nav.navigationBar.prefersLargeTitles = true
         #endif
-        if presenter.session?.natives.hooksConnected == true {
+        if !stack.undecided, presenter.session?.natives.hooksConnected == true {
             stack.showsBar = presenter.session?.natives.navigationHook(nav, built: true, showsBar: stack.showsBar, label: stack.label) ?? stack.showsBar
             stack.hooked = true
         }
@@ -348,12 +352,28 @@ extension NavigationHost {
         return nav
     }
 
+    /// A route with no children: one in a tab never selected.
+    static func unbuilt(_ route: NodeView) -> Bool {
+        !route.container.subviews.contains { $0 is NodeView }
+    }
+
+    /// A stack built before its first route was: once the route has its
+    /// children, its header decides the bar, as `makeNavigation` would have.
+    private func decideBar(_ nav: UINavigationController, first: NodeView?) {
+        let nav = nav === moreNavigation ? moreHeldNavigation ?? nav : nav
+        guard let stack = stacks[ObjectIdentifier(nav)], stack.undecided,
+              let first, !Self.unbuilt(first) else { return }
+        stack.undecided = false
+        stack.showsBar = HeaderShape(route: first, back: container?.props["navigationBack"]) != nil
+        nav.setNavigationBarHidden(!barShows(nav), animated: false)
+    }
+
     /// The `navigation` hook for a stack built before the module connected
     /// (a cold launch's), before any of its routes' hooks run. A changed
     /// `showsBar` moves the content once, journaled (LLP 1075.003 Q3 (c)).
     func hookNavigation(_ nav: UINavigationController) {
         guard let natives = presenter.session?.natives, natives.hooksConnected,
-              let stack = stacks[ObjectIdentifier(nav)], !stack.hooked else { return }
+              let stack = stacks[ObjectIdentifier(nav)], !stack.hooked, !stack.undecided else { return }
         let before = barShows(nav)
         stack.showsBar = natives.navigationHook(nav, built: true, showsBar: stack.showsBar, label: stack.label)
         stack.hooked = true
@@ -372,6 +392,7 @@ extension NavigationHost {
     /// authored source changed, then run the route hook — before UIKit lays
     /// the stack out (LLP 1075.003 §3.2, §3.5 "projected defaults").
     func prepareRoutes(_ routes: [RouteController], in nav: UINavigationController) {
+        decideBar(nav, first: routes.first?.node)
         hookNavigation(nav)
         projectBack(routes, in: nav)
         followTablist(routes, in: nav)
@@ -688,7 +709,9 @@ extension NavigationHost {
             // UIKit's own does, but a title's insets are not sampled.
             let search = searching(c)
             let settled = search || nav.isNavigationBarHidden != routeShowsBar(c, in: nav)
-            if settled, !search, let node = c.collapseScroll, let sv = node.scroll, sv.adjustedContentInset.top > 0 {
+            // A header lifted in this report still takes room in the layout the scroller has.
+            let laidOut = c.lifted.map { covers[$0.id] == .whole } ?? true
+            if settled, !search, laidOut, let node = c.collapseScroll, let sv = node.scroll, sv.adjustedContentInset.top > 0 {
                 let inset = sv.adjustedContentInset.top
                 // tvOS has no large titles: every title is inline.
                 #if os(tvOS)
