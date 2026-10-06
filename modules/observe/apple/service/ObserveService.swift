@@ -326,6 +326,30 @@ final class ObserveService {
     }
 }
 
+// MARK: Queries from the app's own module
+
+extension ObserveService {
+    /// What this device recorded, newest first, for an app's own screens
+    /// (`ExactServices.query("observe", …)`). `{"op": "recent", "limit": n}`
+    /// (1–500, default 50) answers `{"session", "metrics": [{session, time,
+    /// category, name, value, route, sent, params}]}`: `time` in seconds since
+    /// 1970, `value` in seconds as sent, `sent` whether it has gone to Observe.
+    func query(_ request: [String: Any]) -> [String: Any] {
+        guard request["op"] as? String == "recent" else { return ["error": "observe answers {\"op\": \"recent\"}"] }
+        guard let store else { return ["session": session, "metrics": []] }
+        let limit = max(1, min(500, (request["limit"] as? Int) ?? 50))
+        let sent = store.cursor("metrics")
+        let rows = store.rows("SELECT id, session, time, category, name, value, route, params FROM metrics ORDER BY id DESC LIMIT ?", [limit])
+        let metrics = rows.map { r -> [String: Any] in
+            var m: [String: Any] = ["session": r[1] ?? "", "time": r[2] ?? 0.0, "category": r[3] ?? "", "name": r[4] ?? "",
+                                    "value": r[5] ?? 0.0, "route": r[6] ?? "", "sent": ((r[0] as? Int64) ?? .max) <= sent]
+            if let p = r[7] as? String, let o = try? JSONSerialization.jsonObject(with: Data(p.utf8)) { m["params"] = o }
+            return m
+        }
+        return ["session": session, "metrics": metrics]
+    }
+}
+
 // MARK: C entry points bound by ExactKit's service loader
 
 @_cdecl("exact_service_start")
@@ -347,4 +371,16 @@ public func exactServiceBackground(_ state: UnsafeMutableRawPointer?) {
     guard let state else { return }
     let service = Unmanaged<ObserveService>.fromOpaque(state).takeUnretainedValue()
     service.queue.async { service.dispatch() }
+}
+
+@_cdecl("exact_service_query")
+public func exactServiceQuery(_ state: UnsafeMutableRawPointer?, _ json: UnsafePointer<UInt8>?, _ length: UInt32, _ context: UnsafeMutableRawPointer?,
+                              _ reply: @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<UInt8>?, UInt32) -> Void) {
+    guard let state else { return reply(context, nil, 0) }
+    let service = Unmanaged<ObserveService>.fromOpaque(state).takeUnretainedValue()
+    let request = json.flatMap { (try? JSONSerialization.jsonObject(with: Data(bytes: $0, count: Int(length)))) as? [String: Any] } ?? [:]
+    service.queue.async {
+        let data = (try? JSONSerialization.data(withJSONObject: service.query(request))) ?? Data("{}".utf8)
+        data.withUnsafeBytes { reply(context, $0.bindMemory(to: UInt8.self).baseAddress, UInt32(data.count)) }
+    }
 }
