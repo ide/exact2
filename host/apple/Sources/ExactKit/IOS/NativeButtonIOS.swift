@@ -131,8 +131,11 @@ final class NativeButton: UIButton {
         // Its configuration follows at once: UIKit would otherwise draw its
         // own disabled (or enabled) look for a frame before the handler ran.
         if isEnabled == owner.disabled {
-            isEnabled = !owner.disabled
-            if configured { updateConfiguration() }
+            let enabled = !owner.disabled
+            EnabledFade.run(self, owner: owner) { [self] in
+                isEnabled = enabled
+                if configured { updateConfiguration() }
+            }
         }
         accessibilityIdentifier = owner.props["testId"] ?? owner.props["id"]
         accessibilityLabel = owner.props["accessibilityLabel"]
