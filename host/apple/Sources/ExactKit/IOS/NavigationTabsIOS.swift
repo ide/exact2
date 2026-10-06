@@ -197,19 +197,12 @@ extension NavigationHost {
               let root = self.container, let tabs = NavigationTabs.of(root, presenter), let parent = container.parent else { return }
         tabContainerAsked = true
         let navs = tabPanels.compactMap { tabNavigations[$0] }
-        container.setViewControllers([], animated: false)
-        guard let owned = askTabContainer(tabs, navs: navs, selected: routerTab) else {
-            container.setViewControllers(navs, animated: false)
-            container.selectedIndex = max(0, routerTab)
-            // Handed back, UIKit keeps the index but its bar shows no tab
-            // selected (iOS 26); reselecting another and back restores it.
-            if container.tabBar.selectedItem == nil, navs.count > 1 {
-                let index = max(0, routerTab)
-                container.selectedIndex = (index + 1) % navs.count
-                container.selectedIndex = index
-            }
-            return
-        }
+        // Offered while Exact's controller still holds them: the app's
+        // container takes each as its child, which `addChild` moves out of
+        // the old one. A module that keeps Exact's (most) changes nothing on
+        // screen; emptying first and refilling showed the bar unselected,
+        // then selected, after first paint.
+        guard let owned = askTabContainer(tabs, navs: navs, selected: routerTab) else { return }
         natives.tabsHatch(container, event: 1)
         container.delegate = nil
         tablistRoot = nil

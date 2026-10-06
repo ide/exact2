@@ -83,6 +83,30 @@ final class NativeButtonIOSTests: XCTestCase {
         XCTAssertEqual(g, 28.0 / 255, accuracy: 0.01)
     }
 
+    /// Disabled, a configured button keeps its own colours at half, as one
+    /// look, not UIKit's grey over an authored fill.
+    func testADisabledStyledButtonKeepsItsColoursDimmed() throws {
+        let p = presenter([
+            ["op": "create", "id": 1, "kind": "button", "handlers": ["press"], "props": ["disabled": "true"],
+             "style": ["exact_apple_button_style": "plain", "background_color": [255, 0, 0, 40]]],
+            ["op": "create", "id": 2, "kind": "text", "props": ["text": "Front"], "style": ["text_color": [232, 28, 36, 255]]],
+            ["op": "children", "id": 1, "ids": [2]],
+            ["op": "roots", "ids": [1]],
+            ["op": "frame", "id": 1, "x": 0.0, "y": 0.0, "w": 120.0, "h": 44.0],
+            ["op": "frame", "id": 2, "x": 30.0, "y": 12.0, "w": 60.0, "h": 20.0],
+        ])
+        let b = try XCTUnwrap(button(try XCTUnwrap(p.views[1])))
+        XCTAssertFalse(b.isEnabled)
+        // What UIKit asks of the button for its state (a test host draws no frame).
+        try XCTUnwrap(b.configurationUpdateHandler, "a configured button has a state handler")(b)
+        let attributes = b.configuration?.titleTextAttributesTransformer?.transform(AttributeContainer()) ?? AttributeContainer()
+        let color = try XCTUnwrap(attributes.uiKit.foregroundColor)
+        var (r, g, bl, a) = (CGFloat(0), CGFloat(0), CGFloat(0), CGFloat(0))
+        color.getRed(&r, green: &g, blue: &bl, alpha: &a)
+        XCTAssertEqual(r, 232.0 / 255, accuracy: 0.02, "its own red, not grey")
+        XCTAssertEqual(a, 0.5, accuracy: 0.02, "at half")
+    }
+
     func testADisabledButtonIsADisabledUIButton() throws {
         let p = presenter([
             ["op": "create", "id": 1, "kind": "button", "handlers": ["press"], "props": ["disabled": "true"]],
