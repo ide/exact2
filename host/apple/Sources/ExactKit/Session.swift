@@ -1275,9 +1275,13 @@ public final class ExactSession {
         DispatchQueue.main.async { [weak self] in
             guard let self, state != .destroyed, generation == drawnGeneration else { return }
             // Prepare before any source calls the module (LLP 1067.000 D8).
-            natives.prepareAppModule(); presenter.releaseLaunchAutofocus() // the next turn, never waiting on a loading source
+            let started = CACurrentMediaTime()
+            natives.prepareAppModule()
+            let loaded = CACurrentMediaTime()
+            presenter.releaseLaunchAutofocus() // the next turn, never waiting on a loading source
             restoreKeptDocuments() // before any answer reads a kept document (LLP 1069.010.000 D4)
             let batch = runtime.dataReady()
+            ExactLaunch.shared.dataStep(self, appModule: loaded - started, ready: CACurrentMediaTime() - loaded, pending: batch.pending)
             if batch.pending {
                 // Still starting the data module: the launch tracker samples
                 // now, so what waits on it shows from the first frame on.
@@ -1286,7 +1290,9 @@ public final class ExactSession {
                 return
             }
             appFileRoots = AppFiles.learn(runtime) // the roots storage configured
+            let applying = CACurrentMediaTime()
             apply(batch)
+            ExactLaunch.shared.dataApplied(self, CACurrentMediaTime() - applying)
             dataGeneration = drawnGeneration
             ExactLaunch.shared.activated(self, ok: batch.error == nil)
             activityOutput?.drain()
