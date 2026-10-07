@@ -60,6 +60,15 @@ final class NativeButton: UIButton {
     private var configured = false
     /// Its look changed while a finger held it (`configurationUpdateHandler`).
     var restyledWhileHeld = false
+    /// Released into a new look: what UIKit animates in its content until
+    /// the next turn stops at once (`settleContent`).
+    var settlingLook = false
+    /// Stops the configuration's own animations (title, symbol, fill), so
+    /// what shows is the look as it now is; the author's boxes are left.
+    func settleContent() {
+        func settle(_ v: UIView) { v.layer.removeAllAnimations(); v.subviews.forEach(settle) }
+        for v in subviews where !(v is NodeView) { settle(v) }
+    }
     private var signature = ""
 
     init(owner: NodeView) {
@@ -108,6 +117,7 @@ final class NativeButton: UIButton {
     /// button highlights too.
     override func layoutSubviews() {
         super.layoutSubviews()
+        if settlingLook { settleContent() }
         guard configured else { return }
         var ancestor = superview
         while let v = ancestor, !(v is UIScrollView) { ancestor = v.superview }
@@ -239,7 +249,12 @@ final class NativeButton: UIButton {
                 // its title not fading in over a background already there.
                 if let b = button as? NativeButton, b.restyledWhileHeld, !button.isHighlighted {
                     b.restyledWhileHeld = false
+                    b.settlingLook = true
                     UIView.performWithoutAnimation { button.configuration = config; button.layoutIfNeeded() }
+                    b.settleContent()
+                    // UIKit lays the content out again on a later pass, and
+                    // crossfades the title there: that one settles too.
+                    DispatchQueue.main.async { [weak b] in b?.settleContent(); b?.settlingLook = false }
                 } else { button.configuration = config }
             }
             if configured, isHighlighted || isTracking { restyledWhileHeld = true }
@@ -252,8 +267,7 @@ final class NativeButton: UIButton {
             ApplyProfile.time("btn.assign") {
                 if configured, window != nil {
                     UIView.performWithoutAnimation { configuration = rest; layoutIfNeeded() }
-                    func settle(_ v: UIView) { v.layer.removeAllAnimations(); v.subviews.forEach(settle) }
-                    for v in subviews where !(v is NodeView) { settle(v) }
+                    settleContent()
                 } else { configuration = rest }
             }
             // Behind an alert UIKit dims the tint (the accent) to grey, as the
