@@ -1,7 +1,7 @@
 # Visibility: "back to the foreground" is not "visible"
 
 **Status:** Writeup, 2026-10-06. Nothing changed yet.
-**Context:** Lexy's TTI trace lists a task `onVisible` at launch. It is meant to run when the app returns from the background.
+**Context:** an app's TTI trace lists a task `onVisible` at launch. It is meant to run only when the app returns from the background.
 
 ## 1. What each platform does
 
@@ -24,9 +24,10 @@ Both platforms agree: "visible" is a state, and "came back" is a change of that 
 
 So `task returned when page.visibilityState == "visible"` with `after(1, onVisible)` runs once at launch and once after each real return. A `when` task follows a state. It is not an event.
 
-## 3. What it costs Lexy
+## 3. What it costs an app
 
-`onVisible` guards itself (`if lastTick > 0`), so the launch run does nothing. But it is an `after(1)` one-shot, so TTI waits for it. On a device it ran 313–346 ms from process start, alongside `start`. The real cost is small. The meaning is wrong, though, and the next app's "on return" logic won't have the guard.
+- **Wrong meaning:** an "on return" action runs at every launch too. One that refreshes data, logs a resume or resets state does it once too often unless it guards itself.
+- **Slower TTI:** an `after(ms ≤ 1000)` one-shot counts as loading, so TTI waits for that launch run. It takes about a frame or two after the data module is ready.
 
 ## 4. Options
 
@@ -49,4 +50,4 @@ So `task returned when page.visibilityState == "visible"` with `after(1, onVisib
 ## 5. Recommendation
 
 - **B in Exact:** it's the web standard and it fits both platforms' own lifecycles. Document beside the gated-task section that a `when` on a state is not an event, and point to `visibilitychange` for "came back".
-- **Until then, A in Lexy:** it takes `onVisible` out of the launch TTI.
+- **Until then, A in apps that need it:** it takes the return task out of the launch.
