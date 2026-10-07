@@ -214,8 +214,10 @@ extension NodeView {
         if inside, presenter?.views[id] === self { presenter?.press(id, held: KeyCodes.held(event?.modifierFlags ?? [])); finishPointerPress() }
         if takesFocus && !focusFirst {
             DispatchQueue.main.async { [weak self] in
-                // Unless the press moved the focus itself (an app's `focus()`).
-                guard let self, window != nil, canBecomeFirstResponder, !isFirstResponder, presenter?.focusedNode === held else { return }
+                // Unless the press moved the focus itself (an app's `focus()`),
+                // or left this screen: a transition it started is in flight.
+                guard let self, window != nil, canBecomeFirstResponder, !isFirstResponder, presenter?.focusedNode === held,
+                      presenter?.navigation.inFlight != true else { return }
                 _ = becomeFirstResponder()
             }
         }
