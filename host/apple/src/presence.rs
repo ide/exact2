@@ -313,6 +313,7 @@ impl<D: DataSource> Host<D> {
         }
         self.holds.retain(|_, token| self.engine.has_hold(*token));
         let mut colored: Vec<(ViewId, bool)> = Vec::new();
+        self.play_transitions(batch, now);
         let frame = self.engine.frame();
 
         for p in frame {
@@ -378,5 +379,77 @@ impl<D: DataSource> Host<D> {
         }
         self.svg.emit(self.runner.kernel(), &self.engine, batch);
         self.land_flights(batch);
+    }
+}
+
+/// Whether the presenter plays transitions in Core Animation: on iOS and
+/// tvOS, except under the agent, whose clock is the session's own and whose
+/// screenshots and `clock` sample the engine (LLP 1055 D7 keeps the engine
+/// the source of truth there).
+fn plays_transitions() -> bool {
+    static PLAYS: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *PLAYS.get_or_init(|| {
+        cfg!(any(target_os = "ios", target_os = "tvos"))
+            && std::env::var_os("EXACT_AGENT").is_none()
+    })
+}
+
+impl<D: DataSource> Host<D> {
+    /// Each `opacity` transition that started (or turned back) since the
+    /// last frame goes to Core Animation, as Linux's reader plays them
+    /// (`Engine::play_transition`): the engine presents its target from now
+    /// on and samples it no more, so a fade sends one op, not one batch a
+    /// frame, and does not keep the display link or TTI waiting on the
+    /// runner. Its curve, easing or spring, goes as the engine's own values
+    /// at 60 Hz, played linearly.
+    fn play_transitions(&mut self, batch: &mut Batch, now: f64) {
+        if !plays_transitions() {
+            return;
+        }
+        let running: Vec<(u64, Property)> = self
+            .engine
+            .running_transitions()
+            .filter(|(_, p)| *p == Property::Opacity)
+            .collect();
+        for (node, property) in running {
+            let Some(&view) = self.keys.get(&node_key(node)) else {
+                continue;
+            };
+            if self.inline_runs.contains_key(&view) || self.svg.presented(view) {
+                continue;
+            }
+            let Some(played) = self.engine.play_transition(node, property) else {
+                continue;
+            };
+            let (duration, values) = match played.curve {
+                exact_motion::PlayedCurve::Easing { easing, duration } => {
+                    let n = ((duration * 60.0).ceil() as usize).max(1);
+                    let values = (0..=n)
+                        .map(|i| {
+                            let t = easing.progress(i as f64 / n as f64);
+                            played.from.x + (played.to.x - played.from.x) * t
+                        })
+                        .collect::<Vec<_>>();
+                    (duration, values)
+                }
+                exact_motion::PlayedCurve::Frames { duration, values } => {
+                    // The engine's 240 Hz grid, every fourth: 60 Hz.
+                    let mut v: Vec<f64> = values.iter().step_by(4).map(|v| v.x).collect();
+                    if let Some(last) = values.last() {
+                        if v.last() != Some(&last.x) {
+                            v.push(last.x);
+                        }
+                    }
+                    (duration, v)
+                }
+            };
+            batch.animate(
+                view,
+                "opacity",
+                (played.start - now).max(0.0),
+                duration,
+                &values,
+            );
+        }
     }
 }
