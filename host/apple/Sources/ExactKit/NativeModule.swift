@@ -510,6 +510,11 @@ final class NativeViews {
         let path = NativeViews.modulePath(session: session)
         guard FileManager.default.fileExists(atPath: path) else { return }
         hasAppModule = true
+        // dyld maps and binds the artifact off the main thread while the
+        // app boots (`dlopen` is thread-safe; dyld serialises loads), so the
+        // paint gate's own `dlopen` (`NativeTable.load`) finds it loaded.
+        // Nothing of the module runs until then (LLP 1024 D2).
+        DispatchQueue.global(qos: .userInitiated).async { _ = dlopen(path, RTLD_NOW | RTLD_LOCAL) }
         let rt = session.runtime.rt
         session.runtime.on { exact_set_app_module(rt, nativeLaterCallback, nativeCallCallback, UnsafeMutableRawPointer(bitPattern: UInt(rt))) }
         // The build writes this file when the roster has `beforeFirstPaint`
