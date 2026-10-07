@@ -1057,9 +1057,9 @@ package final class Presenter {
                 if let gone, !modals.retainsRemovedView(gone) { gone.removeFromSuperview() }
             case .roots:
                 root.subviews.forEach { $0.removeFromSuperview() }
-                for r in op.ids.compactMap({ views[UInt32($0)] }) { root.addSubview(r) }
+                ApplyProfile.time("roots.attach") { for r in op.ids.compactMap({ views[UInt32($0)] }) { root.addSubview(r) } }
                 // A new root says its own accent, or none.
-                for r in op.ids.compactMap({ views[UInt32($0)] }) { r.accentTint = nil; r.syncAccentTint() }
+                ApplyProfile.time("roots.accent") { for r in op.ids.compactMap({ views[UInt32($0)] }) { r.accentTint = nil; r.syncAccentTint() } }
                 if op.ids.compactMap({ views[UInt32($0)] }).allSatisfy({ $0.accentTint == nil }) { appAccent = nil }
             case .frame, .content:
                 if flats.isFlat(id) {
