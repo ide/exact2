@@ -1132,6 +1132,7 @@ mod tests {
             (StyleId::MarkerMid, text("url(#a)")),
             (StyleId::MarkerEnd, text("url(#a)")),
             (StyleId::ColorInterpolationFilters, text("sRGB")),
+            (StyleId::TextBoxEdge, text("cap-alphabetic")),
         ];
         let mut covered = StyleMask::EMPTY;
         for (id, value) in samples {

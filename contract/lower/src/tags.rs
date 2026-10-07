@@ -802,6 +802,9 @@ pub fn attr(name: &str) -> Option<AttrTarget> {
         // not hold (`auto` columns, `thin`/`medium`/`thick` rules), project
         // through `shorthands`.
         "columns" | "column-count" | "column-rule" | "column-rule-width" => AttrTarget::Shorthand,
+        // CSS Inline Layout 3 §4.
+        "text-box-trim" => styles(&[StyleId::TextBoxTrim]),
+        "text-box-edge" | "text-box" => AttrTarget::Shorthand,
         "column-width" => styles(&[StyleId::ColumnWidth]),
         "column-fill" => styles(&[StyleId::ColumnFill]),
         "column-rule-style" => styles(&[StyleId::ColumnRuleStyle]),

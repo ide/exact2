@@ -29,6 +29,10 @@ pub(crate) fn rows(name: &str) -> &'static [StyleId] {
         "column-rule" => &[ColumnRuleWidth, ColumnRuleStyle, ColumnRuleColor],
         "column-count" => &[ColumnCount],
         "column-rule-width" => &[ColumnRuleWidth],
+        // CSS Inline Layout 3 §4: one row holds both edges (`cap-alphabetic`
+        // for CSS's `cap alphabetic`); `text-box` is trim, then edge.
+        "text-box-edge" => &[TextBoxEdge],
+        "text-box" => &[TextBoxTrim, TextBoxEdge],
         _ => unreachable!("known shorthand"),
     }
 }
@@ -46,6 +50,11 @@ pub(crate) fn component(value: &Expr, name: &str, index: usize) -> Result<Expr, 
         _ if longhand && !matches!(value, Expr::Ternary(..) | Expr::Match { .. } | Expr::Let { .. }) => {}
         Expr::Str(text, span) if name == "columns" => {
             out = columns(text, *span)?[index].clone();
+        }
+        Expr::Str(text, span) if name == "text-box-edge" || name == "text-box" => {
+            // `text-box-edge`'s one row is the shorthand's second.
+            let i = if name == "text-box-edge" { 1 } else { index };
+            out = Expr::Str(text_box(name, text, *span)?[i].clone(), *span);
         }
         Expr::Ternary(_, yes, no, _) => {
             **yes = component(yes, name, index)?;
@@ -256,6 +265,40 @@ fn columns_longhand(name: &str, text: &str, span: Span) -> Result<Expr, LowerErr
             span,
         ),
     }
+}
+
+/// `text-box` (`normal`, or a trim and/or edge, Inline Layout 3 §4) or
+/// `text-box-edge` (`auto`, or an over edge and an optional under edge): the
+/// trim and the edge as their rows spell them. One over keyword alone keeps a
+/// `text` under edge, as CSS does when the under edge cannot take it.
+fn text_box(name: &str, text: &str, span: Span) -> Result<[String; 2], LowerError> {
+    let mut trim = None;
+    let mut over = None;
+    let mut under = None;
+    let words = words(text);
+    for word in &words {
+        let w = word.to_ascii_lowercase();
+        match w.as_str() {
+            "normal" if name == "text-box" && words.len() == 1 => return Ok(["none".into(), "auto".into()]),
+            "auto" if words.len() == 1 => return Ok([if name == "text-box" { "trim-both" } else { "none" }.into(), "auto".into()]),
+            "none" | "trim-start" | "trim-end" | "trim-both" if name == "text-box" && trim.is_none() && over.is_none() => trim = Some(w),
+            "text" | "cap" | "ex" if over.is_none() => over = Some(w),
+            "text" | "alphabetic" if over.is_some() && under.is_none() => under = Some(w),
+            "ideographic" | "ideographic-ink" => {
+                return err("lower-css-shorthand", format!("`{name}`: `{word}` edges are not implemented; use text, cap, ex or alphabetic"), span)
+            }
+            _ => return err("lower-css-shorthand", format!("`{name}`: `{word}` is not a text-box value here; write e.g. `trim-both cap alphabetic`"), span),
+        }
+    }
+    let edge = match (over.as_deref(), under.as_deref()) {
+        (None, _) => "auto".to_string(),
+        (Some(o), None | Some("text")) => o.to_string(),
+        (Some(o), Some(_)) => format!("{o}-alphabetic"),
+    };
+    // `text-box: cap alphabetic` trims both ends, as its trim's initial
+    // `trim-both` in the shorthand (Inline Layout 3 §4.3).
+    let trim = trim.unwrap_or_else(|| if over.is_some() { "trim-both".into() } else { "none".into() });
+    Ok([trim, edge])
 }
 
 fn decoration(text: &str, span: Span) -> Result<String, LowerError> {

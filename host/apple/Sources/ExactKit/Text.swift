@@ -123,6 +123,13 @@ struct Spec: Hashable {
     /// blur in points, then the colour's r g b a (0–255), resolved for the
     /// appearance. Nil when the runs' own differ (`gatherShadows`).
     var shadow: [Double]? = nil
+    /// CSS `text-box-trim` (0 none, 1 trim-start, 2 trim-end, 3 trim-both)
+    /// and `text-box-edge`'s over (0 text, 1 cap, 2 ex) and under (0 text,
+    /// 1 alphabetic) edges: the paragraph is cut to its fonts' own metrics,
+    /// for measuring and painting alike.
+    var textBoxTrim = 0
+    var textBoxOver = 0
+    var textBoxUnder = 0
 }
 
 /// Where collapsed white space went, from `exact_text_collapse`: offsets
@@ -1127,8 +1134,18 @@ final class TextEngine {
         // up once, on iOS (CSSLineBox). A width rounds up to the browser's
         // 1/64 layout unit, so text laid out again at its own measured width
         // still fits on its lines.
+        var height = explicit ? y : ceil(y)
+        // CSS `text-box-trim`: the first line cut at its fonts' text, cap or
+        // ex top, the last at their baseline or descent, as the measurer and
+        // the painter both see it (`Spec.textBoxTrim`).
+        if spec.textBoxTrim != 0, !lines.isEmpty {
+            let (top, bottom) = TextEngine.textBoxTrim(spec, lines: lines, baselines: baselines, height: height)
+            baselines = baselines.map { $0 - top }
+            lineBottoms = lineBottoms.map { $0 - top }
+            height = max(0, height - top - bottom)
+        }
         let paragraph = Paragraph(lines: lines, baselines: baselines, width: CSSLineBox.layoutWidth(maxWidth),
-                                  height: explicit ? y : ceil(y), lineBottoms: lineBottoms,
+                                  height: height, lineBottoms: lineBottoms,
                                   shape: shape, offeredWidth: width, glyphCount: glyphCount)
         paragraph.clampedRange = clampedRange
         paragraph.insets = insets
@@ -1372,6 +1389,7 @@ final class TextEngine {
         // Metric-only keys match the geometry used by the colored presenter.
         var made = Spec(runs: runs, align: Int(request.align), lineClamp: Int(request.line_clamp), color: [0, 0, 0, 255], overflowWrap: Int(request.overflow_wrap), direction: Int(request.direction), whiteSpace: Int(request.white_space), strut: run(request.strut))
         made.textIndent = CGFloat(request.text_indent); made.hyphens = Int(request.hyphens)
+        made.textBoxTrim = Int(request.text_box_trim); made.textBoxOver = Int(request.text_box_over); made.textBoxUnder = Int(request.text_box_under)
         if made.hyphens == 2, let lang = request.lang {
             made.language = String(decoding: UnsafeBufferPointer(start: lang, count: request.lang_len), as: UTF8.self)
         }
@@ -1482,5 +1500,39 @@ enum TextLinePaint {
         return merged.map { lo, hi, fill in
             (CGRect(x: origin.x + lo, y: origin.y - fill.ascent, width: hi - lo, height: fill.ascent + fill.descent), fill.color)
         }
+    }
+}
+
+
+extension TextEngine {
+    /// How much `text-box-trim` cuts off a paragraph's top and bottom: from
+    /// the first line's baseline up to its fonts' largest ascent, cap height
+    /// or x-height, and from the last line's baseline down to their largest
+    /// descent or nothing (Inline Layout 3 §4.2). Each font is the one the
+    /// line was set in, read from CoreText, so a future face or OS answers
+    /// for itself.
+    static func textBoxTrim(_ spec: Spec, lines: [CTLine], baselines: [CGFloat], height: CGFloat) -> (CGFloat, CGFloat) {
+        func fonts(_ line: CTLine) -> [CTFont] {
+            (CTLineGetGlyphRuns(line) as! [CTRun]).compactMap {
+                (CTRunGetAttributes($0) as NSDictionary)[kCTFontAttributeName].map { $0 as! CTFont }
+            }
+        }
+        var top: CGFloat = 0, bottom: CGFloat = 0
+        if spec.textBoxTrim == 1 || spec.textBoxTrim == 3, let first = lines.first, let baseline = baselines.first {
+            let faces = fonts(first)
+            let over = faces.map { f -> CGFloat in
+                switch spec.textBoxOver {
+                case 1: return CTFontGetCapHeight(f)
+                case 2: return CTFontGetXHeight(f)
+                default: return CTFontGetAscent(f)
+                }
+            }.max() ?? 0
+            top = baseline - over
+        }
+        if spec.textBoxTrim == 2 || spec.textBoxTrim == 3, let last = lines.last, let baseline = baselines.last {
+            let under = spec.textBoxUnder == 1 ? 0 : (fonts(last).map { CTFontGetDescent($0) }.max() ?? 0)
+            bottom = height - (baseline + under)
+        }
+        return (top.isFinite ? top : 0, bottom.isFinite ? bottom : 0)
     }
 }

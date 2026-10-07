@@ -199,6 +199,12 @@ pub struct Paragraph {
     /// CSS `hyphens`. `none` already reached the runs' text
     /// ([`crate::Hyphens::shown`]); a host hyphenates `auto` where it can.
     pub hyphens: crate::Hyphens,
+    /// CSS `text-box-trim` and `text-box-edge` (Inline Layout 3 §4): the
+    /// measurer cuts the first line's over edge and the last line's under
+    /// edge to these font metrics, so its height and first baseline are the
+    /// trimmed box's, and the host paints the lines where it measured them.
+    pub text_box_trim: crate::TextBoxTrim,
+    pub text_box_edge: crate::TextBoxEdge,
 }
 
 impl TextAlign {
@@ -245,6 +251,8 @@ impl Paragraph {
             white_space: p.white_space,
             text_indent: p.text_indent,
             hyphens: p.hyphens,
+            text_box_trim: p.text_box_trim,
+            text_box_edge: p.text_box_edge,
         }
     }
 
@@ -261,6 +269,8 @@ impl Paragraph {
             white_space: s.white_space,
             text_indent: s.text_indent,
             hyphens: s.hyphens,
+            text_box_trim: s.text_box_trim,
+            text_box_edge: s.text_box_edge,
         }
     }
 }
@@ -330,6 +340,99 @@ impl TextMetrics {
             && self
                 .first_baseline
                 .is_none_or(|baseline| baseline.is_finite() && baseline >= 0.0)
+    }
+}
+
+/// Where a paragraph's text-box edges stand, in points from its top
+/// (Inline Layout 3 §4.2): its first line's over edges and its last line's
+/// under edges, read from the fonts that line is set in.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TextEdges {
+    /// The first line's text-over edge: the top of its fonts' ascent.
+    pub text_over: f32,
+    /// The first line's cap height above its baseline.
+    pub cap_over: f32,
+    /// The first line's x-height above its baseline.
+    pub ex_over: f32,
+    /// The last line's alphabetic baseline.
+    pub alphabetic_under: f32,
+    /// The last line's text-under edge: the bottom of its fonts' descent.
+    pub text_under: f32,
+}
+
+impl crate::TextBoxTrim {
+    /// Whether the first line's over edge is cut.
+    pub fn start(self) -> bool {
+        matches!(self, crate::TextBoxTrim::TrimStart | crate::TextBoxTrim::TrimBoth)
+    }
+    /// Whether the last line's under edge is cut.
+    pub fn end(self) -> bool {
+        matches!(self, crate::TextBoxTrim::TrimEnd | crate::TextBoxTrim::TrimBoth)
+    }
+}
+
+/// `text-box-edge`'s over edge.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OverEdge {
+    Text = 0,
+    Cap = 1,
+    Ex = 2,
+}
+
+/// `text-box-edge`'s under edge.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UnderEdge {
+    Text = 0,
+    Alphabetic = 1,
+}
+
+impl crate::TextBoxEdge {
+    /// The over edge: `auto` is `text`.
+    pub fn over(self) -> OverEdge {
+        use crate::TextBoxEdge::*;
+        match self {
+            Cap | CapAlphabetic => OverEdge::Cap,
+            Ex | ExAlphabetic => OverEdge::Ex,
+            Auto | Text | TextAlphabetic => OverEdge::Text,
+        }
+    }
+    /// The under edge: one keyword leaves it `text`.
+    pub fn under(self) -> UnderEdge {
+        use crate::TextBoxEdge::*;
+        match self {
+            TextAlphabetic | CapAlphabetic | ExAlphabetic => UnderEdge::Alphabetic,
+            Auto | Text | Cap | Ex => UnderEdge::Text,
+        }
+    }
+}
+
+impl Paragraph {
+    /// `text-box-trim` applied to a measurement: how much comes off the top,
+    /// and the trimmed metrics (height, and a first baseline that many points
+    /// higher). With no trim, nothing changes. A host paints the lines that
+    /// many points up, where the measurement put them.
+    pub fn trimmed(&self, metrics: TextMetrics, edges: TextEdges) -> (f32, TextMetrics) {
+        let trim = self.text_box_trim;
+        let top = if trim.start() {
+            match self.text_box_edge.over() {
+                OverEdge::Cap => edges.cap_over,
+                OverEdge::Ex => edges.ex_over,
+                OverEdge::Text => edges.text_over,
+            }
+        } else {
+            0.0
+        };
+        let under = match self.text_box_edge.under() {
+            UnderEdge::Alphabetic => edges.alphabetic_under,
+            UnderEdge::Text => edges.text_under,
+        };
+        let bottom = if trim.end() { metrics.height - under } else { 0.0 };
+        if !(top.is_finite() && bottom.is_finite()) {
+            return (0.0, metrics);
+        }
+        let height = (metrics.height - top - bottom).max(0.0);
+        let first_baseline = metrics.first_baseline.map(|b| (b - top).max(0.0));
+        (top, TextMetrics { height, first_baseline, ..metrics })
     }
 }
 
@@ -528,6 +631,43 @@ impl MonospaceMeasurer {
 
 impl TextMeasurer for MonospaceMeasurer {
     fn measure(&mut self, request: &TextMeasureRequest<'_>) -> TextMetrics {
+        let metrics = self.measure_lines(request);
+        let p = &request.paragraph;
+        if p.text_box_trim == crate::TextBoxTrim::None {
+            return metrics;
+        }
+        // The reference face: cap height 0.7 em and x-height 0.5 em above the
+        // baseline, its ascent and descent the line box's.
+        let mut line = self.line_height(&p.strut);
+        let mut size = p.strut.font_size;
+        for run in request.runs {
+            line = line.max(self.line_height(&run.style));
+            size = size.max(run.style.font_size);
+        }
+        let baseline = metrics.first_baseline.unwrap_or(line * self.baseline_frac);
+        let last = metrics.height - line + line * self.baseline_frac;
+        let edges = TextEdges {
+            text_over: 0.0,
+            cap_over: baseline - 0.7 * size,
+            ex_over: baseline - 0.5 * size,
+            alphabetic_under: last,
+            text_under: metrics.height,
+        };
+        p.trimmed(metrics, edges).1
+    }
+
+    fn lines(
+        &mut self,
+        stamp: &ParagraphStamp,
+        request: &TextMeasureRequest<'_>,
+        bottoms: &mut Vec<f32>,
+    ) {
+        self.line_bottoms(stamp, request, bottoms);
+    }
+}
+
+impl MonospaceMeasurer {
+    fn measure_lines(&mut self, request: &TextMeasureRequest<'_>) -> TextMetrics {
         if let AxisOffer::Definite(width) = request.width {
             if !request.exclusions.is_empty() {
                 return self.flow(request, width);
@@ -643,15 +783,17 @@ impl TextMeasurer for MonospaceMeasurer {
             first_baseline: Some(line_height * self.baseline_frac),
         }
     }
+}
 
+impl MonospaceMeasurer {
     /// Every line is one line height, so each bottom is a multiple of it.
-    fn lines(
+    fn line_bottoms(
         &mut self,
         _stamp: &ParagraphStamp,
         request: &TextMeasureRequest<'_>,
         bottoms: &mut Vec<f32>,
     ) {
-        let height = self.measure(request).height;
+        let height = self.measure_lines(request).height;
         let line_height = request
             .runs
             .iter()
@@ -724,7 +866,7 @@ impl TextRows {
 }
 
 /// The paragraph rows [`Paragraph::from_style`] reads besides its strut.
-const PARAGRAPH_ROWS: [StyleId; 8] = [
+const PARAGRAPH_ROWS: [StyleId; 10] = [
     StyleId::Direction,
     StyleId::TextAlign,
     StyleId::LineClamp,
@@ -733,6 +875,8 @@ const PARAGRAPH_ROWS: [StyleId; 8] = [
     StyleId::WhiteSpace,
     StyleId::TextIndent,
     StyleId::Hyphens,
+    StyleId::TextBoxTrim,
+    StyleId::TextBoxEdge,
 ];
 
 struct ParagraphRows {
@@ -744,6 +888,8 @@ struct ParagraphRows {
     white_space: crate::WhiteSpace,
     text_indent: f32,
     hyphens: crate::Hyphens,
+    text_box_trim: crate::TextBoxTrim,
+    text_box_edge: crate::TextBoxEdge,
 }
 
 impl ParagraphRows {
@@ -757,6 +903,8 @@ impl ParagraphRows {
             white_space: s.white_space,
             text_indent: s.text_indent,
             hyphens: s.hyphens,
+            text_box_trim: s.text_box_trim,
+            text_box_edge: s.text_box_edge,
         }
     }
     fn take(&mut self, s: &StyleProps, mask: StyleMask) {
@@ -783,6 +931,12 @@ impl ParagraphRows {
         }
         if mask.has(StyleId::Hyphens) {
             self.hyphens = s.hyphens;
+        }
+        if mask.has(StyleId::TextBoxTrim) {
+            self.text_box_trim = s.text_box_trim;
+        }
+        if mask.has(StyleId::TextBoxEdge) {
+            self.text_box_edge = s.text_box_edge;
         }
     }
 }
@@ -839,7 +993,29 @@ mod tests {
             white_space: crate::WhiteSpace::Normal,
             text_indent: 0.0,
             hyphens: crate::Hyphens::Manual,
+            text_box_trim: crate::TextBoxTrim::None,
+            text_box_edge: crate::TextBoxEdge::Auto,
         }
+    }
+
+    /// `text-box: trim-both cap alphabetic` cuts a line to its cap height:
+    /// the reference face's cap is 0.7 em above a baseline 0.8 down a 1.2 em
+    /// line, so 10 pt text keeps 7 pt, its baseline at the bottom.
+    #[test]
+    fn text_box_trim_cuts_to_the_cap_height_and_baseline() {
+        let runs = [TextRun { text: "Ab".into(), style: style(10.0) }];
+        let mut p = paragraph();
+        let mut m = MonospaceMeasurer::default();
+        let plain = m.measure(&TextMeasureRequest { runs: &runs, paragraph: p, width: AxisOffer::MaxContent, height: AxisOffer::MaxContent, exclusions: &[] });
+        assert_eq!((plain.height, plain.first_baseline), (12.0, Some(9.6)));
+        p.text_box_trim = crate::TextBoxTrim::TrimBoth;
+        p.text_box_edge = crate::TextBoxEdge::CapAlphabetic;
+        let cut = m.measure(&TextMeasureRequest { runs: &runs, paragraph: p, width: AxisOffer::MaxContent, height: AxisOffer::MaxContent, exclusions: &[] });
+        assert!((cut.height - 7.0).abs() < 1e-4, "{cut:?}");
+        assert!((cut.first_baseline.unwrap() - 7.0).abs() < 1e-4, "{cut:?}");
+        p.text_box_trim = crate::TextBoxTrim::TrimStart;
+        let start = m.measure(&TextMeasureRequest { runs: &runs, paragraph: p, width: AxisOffer::MaxContent, height: AxisOffer::MaxContent, exclusions: &[] });
+        assert!((start.height - 9.4).abs() < 1e-4, "only the top: {start:?}");
     }
 
     fn measure(text: &str, width: AxisOffer, lines: u32) -> TextMetrics {
