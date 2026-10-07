@@ -421,6 +421,8 @@ public final class ExactSession {
     public private(set) var bootMs = 0.0
     public private(set) var rustMs = 0.0
     public private(set) var applyMs = 0.0
+    /// The first batch's apply, part by part, in ms (`ApplyProfile`).
+    public private(set) var applyParts: [String: Double] = [:]
     /// Commands from the batch being applied, delivered after it (D2).
     private var pendingCommands: [(String, [Any], UInt32?)] = []
     private(set) var applying = false
@@ -870,7 +872,9 @@ public final class ExactSession {
             text.commitFonts()
             appFileRoots = AppFiles.learn(runtime) // before the first frame's `app:/` images load (LLP 1069.002 D7)
         }
+        ApplyProfile.begin()
         apply(batch)
+        applyParts = ApplyProfile.end()
         treeIsIn()
         if batch.error == nil { tellTime(); refuseUnheardLaunch(); ExactLaunch.shared.treeApplied(self, path: "baked") }
         // A fresh runner must receive the view's current viewport and insets.
