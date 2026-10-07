@@ -626,17 +626,14 @@ extension Agent {
         let action = element == nil ? (n as? NodeView)?.activationTarget(at: p) : nil
         var f: UIView? = n
         var took = false
-        var focusAfter: NodeView?
         while let cur = f {
             if let node = cur as? NodeView, let field = (node.textArea as UIView?) ?? node.field { if !field.isFirstResponder { _ = field.becomeFirstResponder() }; took = true; break }
             if cur.canBecomeFirstResponder {
                 // Under `retainFocus` the press takes nothing (`touchesEnded`).
-                // As a finger's press (`touchesEnded`): a node not hearing
-                // focus or blur takes the focus after the press.
-                if !presenter.contextRetainsFocus(cur) {
-                    if !cur.isFirstResponder {
-                        if let node = cur as? NodeView, node.handlers.isDisjoint(with: NodeView.focusEvents) { focusAfter = node } else { _ = cur.becomeFirstResponder() }
-                    }
+                // As a finger's press (`touchesEnded`): only a node that
+                // asked for focus takes it; a button alone does not.
+                if !presenter.contextRetainsFocus(cur), (cur as? NodeView)?.focusesOnPress ?? true {
+                    if !cur.isFirstResponder { _ = cur.becomeFirstResponder() }
                     took = true
                 }
                 break
@@ -653,9 +650,7 @@ extension Agent {
         // An iPad's hardware keys held through the tap (gallery F20).
         let held = (req["modifiers"] as? String).map { $0.hasSuffix("+") || $0.isEmpty ? $0 : $0 + "+" } ?? ""
         if let element { presenter.press(element, held: held); pressed = Int(element) }
-        let focused = presenter.focusedNode
         if let action, presenter.views[action.id] === action { presenter.press(action.id, held: held); action.finishPointerPress(); pressed = Int(action.id) }
-        if let node = focusAfter, node.window != nil, node.canBecomeFirstResponder, !node.isFirstResponder, presenter.focusedNode === focused { _ = node.becomeFirstResponder() }
         return ["tapped": Int(v.id), "at": at, "pressed": pressed]
     }
 

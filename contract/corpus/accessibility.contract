@@ -24,7 +24,9 @@ component Accessibility
       when shown
         button autofocus press=increment testId="first"
           text "Increment"
-      button press=increment testId="other"
+      // A tabindex asks for focus on a tap everywhere: iOS gives a button
+      // none from a touch alone, as UIKit does.
+      button press=increment tabindex=0 testId="other"
         text "Other"
       button autofocus=false press=toggle aria-expanded=shown testId="toggle"
         text "Toggle"

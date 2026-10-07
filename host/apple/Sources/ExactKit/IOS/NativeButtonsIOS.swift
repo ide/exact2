@@ -63,12 +63,13 @@ extension NodeView {
     }
 
     /// D4: the control's primary action is what a custom button's touch-up
-    /// does, once. Each node from this one up to the press's target takes
-    /// the focus when it can, unless a `retainFocus` ancestor keeps the
-    /// editor's (as the touch-up walks the responder chain); the target is
-    /// this node or, without a handler, the nearest ancestor with one whose
-    /// box holds the touch (refused at a disabled one), resolved first; a
-    /// target that did not take the focus ends the editing; then `press`
+    /// does, once. Each node from this one up to the press's target that
+    /// asked for focus takes it (`focusesOnPress`; UIKit's buttons never
+    /// do), unless a `retainFocus` ancestor keeps the editor's (as the
+    /// touch-up walks the responder chain); the target is this node or,
+    /// without a handler, the nearest ancestor with one whose box holds the
+    /// touch (refused at a disabled one), resolved first; a target that did
+    /// not take the focus ends the editing; then `press`
     /// and the canvas's pointer return.
     func activateNative() {
         guard let presenter, !disabled, !inert else { return }
@@ -76,7 +77,7 @@ extension NodeView {
         var at: UIView? = self
         while let view = at, view !== presenter.viewport {
             if let node = view as? NodeView {
-                if node.canBecomeFirstResponder, !node.isFirstResponder, presenter.contextRetainsFocus(node) != true {
+                if node.focusesOnPress, !node.isFirstResponder, presenter.contextRetainsFocus(node) != true {
                     _ = node.becomeFirstResponder()
                 }
                 if node === target { break }

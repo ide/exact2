@@ -103,10 +103,10 @@ final class GesturePrecedenceIOSTests: XCTestCase {
         XCTAssertFalse(outer.nearer(touched), "a disabled inner node passes it out")
     }
 
-    /// A pressed button takes the focus after its press, so UIKit's
-    /// keyboard bookkeeping for a new first responder does not hold the
-    /// handler; one that hears focus takes it first, the web's order.
-    func testAPressedButtonTakesTheFocusAfterItsPress() throws {
+    /// A tapped button takes no focus, as UIKit's never becomes first
+    /// responder from a touch; one that hears focus asked for it, and takes
+    /// it before its press, the web's order.
+    func testATappedButtonTakesTheFocusOnlyWhenItAskedForIt() throws {
         let p = host([
             ["op": "create", "id": 1, "kind": "button", "handlers": ["press"]],
             ["op": "create", "id": 2, "kind": "button", "handlers": ["press", "focus"]],
@@ -120,9 +120,9 @@ final class GesturePrecedenceIOSTests: XCTestCase {
         p.onPress = { id in log.append("press \(id) focused \(p.views[id]?.isFirstResponder == true)") }
         let touch: Set<UITouch> = [UITouch()]
         plain.touchesBegan(touch, with: nil); plain.touchesEnded(touch, with: nil)
-        XCTAssertFalse(plain.isFirstResponder, "not yet: the press goes first")
         drain()
-        XCTAssertTrue(plain.isFirstResponder, "the next turn")
+        XCTAssertFalse(plain.isFirstResponder, "a button alone takes no focus")
+        XCTAssertTrue(plain.canBecomeFirstResponder, "the keyboard can still focus it")
         heard.touchesBegan(touch, with: nil); heard.touchesEnded(touch, with: nil)
         XCTAssertEqual(log, ["press 1 focused false", "press 2 focused true"])
     }
