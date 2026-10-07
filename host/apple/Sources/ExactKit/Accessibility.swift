@@ -281,6 +281,21 @@ extension Presenter {
             let target: NSView = node.textArea ?? node.field ?? node
             if target.acceptsFirstResponder { _ = window.makeFirstResponder(target) }
             #else
+            // A focus a batch brings (a pushed screen's field, a sheet's)
+            // is taken the turn after, once the batch's frame commits, as
+            // UIKit apps focus in `viewDidAppear`: bringing the keyboard up
+            // inside the batch held that frame for the keyboard's load.
+            if applying {
+                if !autofocusTurnOwed {
+                    autofocusTurnOwed = true
+                    DispatchQueue.main.async { [weak self] in
+                        guard let self else { return }
+                        autofocusTurnOwed = false
+                        if session?.state != .destroyed { syncAccessibility() }
+                    }
+                }
+                continue
+            }
             // The session's own view holding the focus for its shortcuts (ShortcutsIOS) is no focus a node took.
             func hasFocus(_ view: UIView) -> Bool { (view.isFirstResponder && (view as? NodeView)?.canvasInput == nil && !(view is ExactView)) || view.subviews.contains(where: hasFocus) }
             if !views.values.contains(where: { $0.isFirstResponder && $0.returnsPointerFocusToCanvas }) { autofocusProcessed.insert(ObjectIdentifier(node)) }
