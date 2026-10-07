@@ -698,6 +698,7 @@ package final class Presenter {
     /// inline run) has its action only. True when it ran to the default.
     @discardableResult
     package func press(_ id: UInt32, held: String = "") -> Bool {
+        navigation.settleBeforeInput()
         pressHeld = held; defer { pressHeld = "" }
         guard let node = views[id] else { onPress?(id); return true }
         if let refusal = activationRefusal(node) { session?.log("activation of #\(id) refused: \(refusal)"); return false }
