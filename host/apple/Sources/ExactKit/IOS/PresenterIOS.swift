@@ -867,14 +867,14 @@ final class Presenter {
             if outermost {
                 applying = false
                 reaimFixedGradients()
-                paintPresentedText()
+                ApplyProfile.time("pass.text") { paintPresentedText() }
                 if !boxFilters.isEmpty { boxFilters.render() }
                 videoVisibility?.changed()
                 let q = waiting
                 waiting = []
                 for (id, f) in q where id.map({ textHost($0) != nil }) ?? true { f() }
                 scrollPump.batchApplied()
-                leaves.batchApplied(moved: moved)
+                ApplyProfile.time("pass.leaves") { leaves.batchApplied(moved: moved) }
                 #if os(iOS)
                 resolveStatusBar()
                 #endif
@@ -887,6 +887,8 @@ final class Presenter {
         let rowsOnly = onlyListRows(batch)
         for op in batch.ops {
             let kind = op.op
+            let opBegan = ApplyProfile.on ? CACurrentMediaTime() : 0
+            defer { if ApplyProfile.on { ApplyProfile.add("op.\(kind)", since: opBegan) } }
             switch kind {
             case .create, .props, .style, .children, .paragraph, .flow, .frame: touchedIDs.append(op.id)
             default: break
@@ -1077,7 +1079,7 @@ final class Presenter {
         if !flights.isEmpty { flightsBatchApplied() }
         // A batch that only builds, moves or drops a list's rows changes no
         // route, header or bar: the projection would come out the same.
-        if !rowsOnly || navigation.syncOwed { navigation.sync(batch) }
+        ApplyProfile.time("pass.navigation") { if !rowsOnly || navigation.syncOwed { navigation.sync(batch) } }
         #if os(tvOS)
         menuKey.sync()
         focusGuides.sync()
@@ -1089,11 +1091,11 @@ final class Presenter {
             viewport.isScrollEnabled = !navigation.holdsScreens
             if navigation.holdsScreens { viewport.contentOffset = .zero }
         }
-        segments.sync()
-        controls.sync(contents: batch.controls, touched: touchedIDs)
-        menus.sync()
+        ApplyProfile.time("pass.segments") { segments.sync() }
+        ApplyProfile.time("pass.controls") { controls.sync(contents: batch.controls, touched: touchedIDs) }
+        ApplyProfile.time("pass.menus") { menus.sync() }
         glassGroups.reconcile()
-        nativeButtons.sync()
+        ApplyProfile.time("pass.buttons") { nativeButtons.sync() }
         let changed = touchedAndAbove(touchedIDs)
         swipeActions.sync(changed: changed)
         groupedLists.sync(changed: changed)
