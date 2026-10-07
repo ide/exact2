@@ -374,7 +374,13 @@ public final class ExactLaunch: NSObject {
         if !changes.isEmpty { out["changes"] = changes }
         // Boot's two parts (ms): the runner's boot with the first layout, and
         // applying its batch to the views.
-        if let s = launchSession, s.rustMs > 0 { out["boot"] = ["runner": (s.rustMs * 10).rounded() / 10, "apply": (s.applyMs * 10).rounded() / 10] }
+        if let s = launchSession, s.rustMs > 0 {
+            var boot: [String: Any] = ["runner": (s.rustMs * 10).rounded() / 10, "apply": (s.applyMs * 10).rounded() / 10]
+            // The apply's largest parts, so a slow first batch says which part.
+            let parts = s.applyParts.filter { $0.value >= 0.5 }.sorted { $0.value > $1.value }
+            if !parts.isEmpty { boot["parts"] = parts.prefix(8).map { "\($0.key) \(Int($0.value.rounded()))" }.joined(separator: ", ") }
+            out["boot"] = boot
+        }
         if data.first != nil {
             let ms = { (s: Double) in (s * 1000 * 10).rounded() / 10 }
             // From the first commit to the first node's draw receipt, which
