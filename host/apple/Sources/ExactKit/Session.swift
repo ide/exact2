@@ -1036,7 +1036,12 @@ public final class ExactSession {
             let payload = op.payload
             DispatchQueue.main.async { [weak self] in if let self, state != .destroyed { authOp(payload) } }
         }
+        // A batch that changes the route, part by part, for its screen's
+        // render (`exact.nav.parts`); the boot's own is the launch's.
+        let profiled = !ApplyProfile.on && batch.ops.contains { $0.op == .router }
+        if profiled { ApplyProfile.begin() }
         presenter.apply(batch)
+        if profiled { NavigationMarks.shared.batchParts(self, ApplyProfile.end()) }
         if !batch.canvasImages.isEmpty { presenter.canvas2d.load(batch.canvasImages) }
         AnimatedRasters.shared.poke()
         for op in batch.ops where op.op == .reorder { presenter.reorder?.observe(ReorderState(op.payload)); presenter.reorderGroup?.observe(ReorderGroupState(op.payload)) }

@@ -1143,8 +1143,8 @@ package final class Presenter {
         #endif
         ApplyProfile.time("pass.menus") { menus.sync() }
         glassGroups.reconcile()
-        ApplyProfile.time("pass.buttons") { nativeButtons.sync() }
         let changed = touchedAndAbove(touchedIDs)
+        ApplyProfile.time("pass.buttons") { nativeButtons.sync(changed: changed) }
         swipeActions.sync(changed: changed)
         groupedLists?.sync(changed: changed)
         // `prepare` put carried rows back under the list's hidden sheet, where
