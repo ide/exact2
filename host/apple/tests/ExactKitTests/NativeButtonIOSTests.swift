@@ -202,6 +202,27 @@ final class NativeButtonIOSTests: XCTestCase {
         XCTAssertFalse(box.interactions.contains { $0 is UIEditMenuInteraction })
     }
 
+    /// The menu points at the text pressed, not the whole box: a tall
+    /// box's menu stood above or below it, away from the words.
+    func testCopysMenuPointsAtTheTextPressed() throws {
+        let p = presenter([
+            ["op": "create", "id": 1, "kind": "view", "style": ["user_select": "text"]],
+            ["op": "create", "id": 2, "kind": "text", "props": ["text": "TTI 289 ms"]],
+            ["op": "create", "id": 3, "kind": "text", "props": ["text": "Phases: exec 53 ms, initializers 3 ms"]],
+            ["op": "children", "id": 1, "ids": [2, 3]],
+            ["op": "roots", "ids": [1]],
+            ["op": "frame", "id": 1, "x": 0.0, "y": 0.0, "w": 300.0, "h": 400.0],
+            ["op": "frame", "id": 2, "x": 16.0, "y": 8.0, "w": 268.0, "h": 40.0],
+            ["op": "frame", "id": 3, "x": 16.0, "y": 200.0, "w": 268.0, "h": 120.0],
+        ])
+        let box = try XCTUnwrap(p.views[1]), copy = try XCTUnwrap(box.textCopy)
+        let config = UIEditMenuConfiguration(identifier: nil, sourcePoint: .zero)
+        copy.pressedAt = CGPoint(x: 100, y: 250)
+        XCTAssertEqual(copy.editMenuInteraction(copy.menu, targetRectFor: config), CGRect(x: 16, y: 200, width: 268, height: 120), "the paragraph under the finger")
+        copy.pressedAt = CGPoint(x: 100, y: 120)
+        XCTAssertEqual(copy.editMenuInteraction(copy.menu, targetRectFor: config), CGRect(x: 16, y: 8, width: 268, height: 40), "between paragraphs: the nearest")
+    }
+
     /// The edit menu's Copy reaches a node through the responder chain. A
     /// node claims it only inside a `user-select: text` box or with a `copy`
     /// handler; anywhere else it is not the node's, and sending it to a node
