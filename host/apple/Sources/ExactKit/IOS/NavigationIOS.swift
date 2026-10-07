@@ -323,14 +323,14 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
         guard primaryNavigation == nil, !syncing, presenter.session?.view?.window != nil else { return }
         syncing = true
         defer { syncing = false }
-        guard let p = projection(batch) else { return }
+        guard let p = ApplyProfile.time("nav.projection", { projection(batch) }) else { return }
         let parts = NavigationRules.segments(presentations: p.routes[...p.selected].map { $0.props["navigationPresentation"] })
-        installPrimary(p, first: Array(p.chosen[parts[0]]))
-        primaryOwner?.view.layoutIfNeeded()
-        applied = observe()
+        ApplyProfile.time("nav.primary") { installPrimary(p, first: Array(p.chosen[parts[0]])) }
+        ApplyProfile.time("nav.layout") { primaryOwner?.view.layoutIfNeeded() }
+        applied = ApplyProfile.time("nav.observe") { observe() }
         // The content area the bar leaves reaches layout in this turn, before
         // the first frame (LLP 1075.003 Q3 (c)).
-        reportCovers()
+        ApplyProfile.time("nav.covers") { reportCovers() }
         refitForBars()
     }
 
