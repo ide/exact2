@@ -225,3 +225,40 @@ fn fragmentation_outside_columns_is_refused_by_what_it_would_need() {
         assert!(e.message.contains("write `view`"), "{tag}: {e}");
     }
 }
+
+/// CSS `text-box` (Inline Layout 3 §4): the shorthand, `text-box-edge`'s two
+/// words, the trim's own row, and a laid-out box that keeps only the cap
+/// height (the monospace face's 0.7 em) when trimmed to cap and baseline.
+#[test]
+fn text_box_trims_a_paragraph_to_its_edges() {
+    use exact_kernel::{TextBoxEdge, TextBoxTrim};
+    let r = boot(concat!(
+        "component App\n  view\n    column align-items=\"flex-start\" text-box-edge=\"cap alphabetic\"\n",
+        "      text \"TTI\" font-size=10 testId=\"plain\"\n",
+        "      text \"TTI\" font-size=10 text-box=\"trim-both cap alphabetic\" testId=\"both\"\n",
+        "      text \"TTI\" font-size=10 text-box-trim=\"trim-start\" testId=\"start\"\n",
+        "      text \"TTI\" font-size=10 text-box=\"ex\" testId=\"ex\"\n",
+        "      text \"TTI\" font-size=10 text-box=\"normal\" testId=\"normal\"\n",
+    ));
+    let mut r = r;
+    let root = r.kernel().roots()[0];
+    r.kernel_mut().compute_layout(root, exact_kernel::Offer::definite(400.0, 400.0)).unwrap();
+    let k = r.kernel();
+    let node = |t: &str| k.node_by_key(k.find_by_test_id(t)[0]).unwrap();
+    let rows = exact_kernel::StyleMask::ALL;
+    let style = |t: &str| node(t).computed_style(rows);
+    assert_eq!((style("both").text_box_trim, style("both").text_box_edge), (TextBoxTrim::TrimBoth, TextBoxEdge::CapAlphabetic));
+    // The edge inherits; the trim does not.
+    assert_eq!((style("plain").text_box_trim, style("plain").text_box_edge), (TextBoxTrim::None, TextBoxEdge::CapAlphabetic));
+    assert_eq!((style("start").text_box_trim, style("start").text_box_edge), (TextBoxTrim::TrimStart, TextBoxEdge::CapAlphabetic));
+    assert_eq!((style("ex").text_box_trim, style("ex").text_box_edge), (TextBoxTrim::TrimBoth, TextBoxEdge::Ex));
+    assert_eq!(style("normal").text_box_trim, TextBoxTrim::None);
+    // 10 pt on a 12 pt line, baseline at 9.6: trimmed to cap and baseline, 7.
+    assert_eq!(node("plain").frame.height, 12.0);
+    assert!((node("both").frame.height - 7.0).abs() < 1e-3, "{:?}", node("both").frame);
+    assert!((node("start").frame.height - 9.4).abs() < 1e-3, "{:?}", node("start").frame);
+    for (value, says) in [("\"trim-both ideographic\"", "not implemented"), ("\"cap cap\"", "not a text-box value")] {
+        let e = contract::compile(&format!("component App\n  view\n    text \"a\" text-box={value}\n")).unwrap_err();
+        assert!(e.message.contains(says), "{value}: {e}");
+    }
+}
