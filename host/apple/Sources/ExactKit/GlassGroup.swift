@@ -282,7 +282,7 @@ extension NodeView {
         let (container, reasons) = glassPath()
         guard container != nil else {
             guard let slot = glassSlot, slot.effect != nil else { return false }
-            slot.effect = nil
+            clearEffect(slot)
             return true
         }
         let slot = glassSlot ?? {
@@ -298,8 +298,26 @@ extension NodeView {
         }()
         let isolated = !reasons.isEmpty
         guard (slot.effect != nil) != isolated else { return false }
-        slot.effect = isolated ? UIGlassContainerEffect() : nil
+        if isolated { slot.effect = UIGlassContainerEffect() } else { clearEffect(slot) }
         return true
+    }
+
+    /// The slot joins its group again: no effect. iOS 26.0 keeps a
+    /// container effect set to nil (the slot still has it, and the glass
+    /// stays isolated), so there the slot is made anew, empty of effect,
+    /// with what it held.
+    private func clearEffect(_ slot: GlassSlot) {
+        slot.effect = nil
+        guard slot.effect != nil, glassSlot === slot, let parent = slot.superview else { return }
+        let made = GlassSlot(effect: nil)
+        made.frame = slot.frame
+        made.autoresizingMask = slot.autoresizingMask
+        GlassGroups.moving(in: self) {
+            parent.insertSubview(made, aboveSubview: slot)
+            for held in slot.contentView.subviews { made.contentView.addSubview(held) }
+            slot.removeFromSuperview()
+        }
+        glassSlot = made
     }
 }
 #else
