@@ -113,6 +113,8 @@ final class ObserveService {
                 params["exact.tti.reason"] = e["tti"] ?? "settled"
                 // What was outstanding over time, ms from process start: shows what held TTI.
                 if let trace = e["trace"] as? [String], !trace.isEmpty { params["exact.tti.trace"] = trace.joined(separator: " → ") }
+                // Batches that still changed the screen once nothing was outstanding.
+                if let changes = e["changes"] as? [String], !changes.isEmpty { params["exact.tti.changes"] = changes.joined(separator: "; ") }
                 // Each item that held it, ms from process start, the latest to clear first.
                 if let items = e["items"] as? [[String: Any]], !items.isEmpty {
                     let ordered = items.sorted { ($0["to"] as? Double ?? .infinity) > ($1["to"] as? Double ?? .infinity) }
