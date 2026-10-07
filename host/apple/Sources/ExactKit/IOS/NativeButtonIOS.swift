@@ -222,7 +222,7 @@ final class NativeButton: UIButton {
                     // The authored colours go back to UIKit, which draws its
                     // disabled look from its own: a template symbol, no base
                     // colours, the title's font alone.
-                    config.image = rest.image?.withRenderingMode(.alwaysTemplate)
+                    config.imageColorTransformer = nil
                     config.baseForegroundColor = nil
                     config.baseBackgroundColor = nil
                 }
@@ -291,16 +291,20 @@ final class NativeButton: UIButton {
             // The authored size, not the scale a configuration would pick for
             // its button's size.
             config.preferredSymbolConfigurationForImage = sized
-            let glyph = UIImage(systemName: symbol.props["symbolName"] ?? "", withConfiguration: sized)
+            config.image = UIImage(systemName: symbol.props["symbolName"] ?? "", withConfiguration: sized)
             let tint = symbol.followsTint("tint_color") ? tintNow : symbol.color("tint_color", .label)
             if text == nil { config.baseForegroundColor = tint }
-            // A symbol in the title's colour is a template UIKit tints and
-            // fades with it; one of its own colour is drawn in it.
+            // The symbol is a template its configuration colours, as it does
+            // the title: in the title's colour it is the foreground, which
+            // UIKit tints and changes (and fades while held) with the title;
+            // in its own, the configuration's image colour. Glass draws a
+            // template in its own foreground whatever colour it is given, so
+            // there a symbol of its own colour carries it.
             let traits = owner.traitCollection
-            // Only plain tints its template with the foreground; the other
-            // styles draw the symbol in its own colour.
-            let same = style == "plain" && (config.baseForegroundColor.map { $0.resolvedColor(with: traits) == tint.resolvedColor(with: traits) } ?? false)
-            config.image = same ? glyph : glyph?.withTintColor(tint, renderingMode: .alwaysOriginal)
+            if config.baseForegroundColor?.resolvedColor(with: traits) != tint.resolvedColor(with: traits) {
+                if style.hasSuffix("glass") { config.image = config.image?.withTintColor(tint, renderingMode: .alwaysOriginal) }
+                else { config.imageColorTransformer = UIConfigurationColorTransformer { _ in tint } }
+            }
         }
         // A symbol and a title are UIKit's own pairing: the author's
         // `flex-direction` is its placement and the `gap` its padding, as
