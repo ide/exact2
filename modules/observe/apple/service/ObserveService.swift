@@ -95,6 +95,13 @@ final class ObserveService {
             return Self.seconds(x - y)
         }
         var phases: [String: Any] = [:]
+        // Before the app has control: dyld and this image's constructor, the
+        // other images' initializers up to `main`, UIKit up to the app
+        // delegate's init, and the delegate's launch up to didFinishLaunching.
+        phases["exact.phase.exec"] = ms("constructor", "process")
+        phases["exact.phase.initializers"] = ms("main", "constructor")
+        phases["exact.phase.uikit"] = ms("delegateInit", "main")
+        phases["exact.phase.launching"] = ms("didFinishLaunching", "delegateInit")
         phases["exact.phase.scene"] = ms("scene", "didFinishLaunching")
         phases["exact.phase.boot_wait"] = ms("boot", "scene")
         phases["exact.phase.boot"] = ms("commit", "boot")
