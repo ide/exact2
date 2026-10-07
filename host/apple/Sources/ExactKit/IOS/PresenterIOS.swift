@@ -972,6 +972,7 @@ package final class Presenter {
                 if kind == .frame { pool.framed(id) }
                 if flightFrame(op) { continue }
                 if views[id] != nil { applyGeometry(op) }
+            case .animate: playTransition(op)
             case .present:
                 if flats.isFlat(id) {
                     if op.property == "opacity" { flats.opacity(id, Float(op.x)); continue }
