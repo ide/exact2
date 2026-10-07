@@ -152,16 +152,18 @@ final class NativeButtonsIOSTests: XCTestCase {
                           + [["op": "children", "id": 1, "ids": [2, 3]], ["op": "roots", "ids": [1]]], faces: faces)
         let fade = try button(p, 3), node = try XCTUnwrap(p.views[3])
         XCTAssertTrue(fade.isGlass)
-        let slot = try XCTUnwrap(node.glassSlot, "a glass button in a group gets a slot")
-        XCTAssertTrue(fade.superview === slot.contentView)
-        XCTAssertNil(slot.effect, "joined")
+        _ = try XCTUnwrap(node.glassSlot, "a glass button in a group gets a slot")
+        // The slot the node holds now: iOS 26.0 makes it anew to join (`clearEffect`).
+        var slot: GlassSlot? { node.glassSlot }
+        XCTAssertTrue(fade.superview === slot?.contentView)
+        XCTAssertNil(slot?.effect, "joined")
         p.apply(wireBatch([["op": "present", "id": 3, "property": "opacity", "x": 0.3, "y": 0.0, "w": 0.0, "h": 0.0]]))
-        XCTAssertNotNil(slot.effect, "fading: isolated")
+        XCTAssertNotNil(slot?.effect, "fading: isolated")
         p.apply(wireBatch([["op": "present", "id": 3, "property": "opacity", "x": 1.0, "y": 0.0, "w": 0.0, "h": 0.0]]))
-        XCTAssertNil(slot.effect)
+        XCTAssertNil(slot?.effect)
         // Two more batches: the control host and the pass leave it where it is.
         p.apply(wireBatch([])); p.apply(wireBatch([]))
-        XCTAssertTrue(fade.superview === slot.contentView)
+        XCTAssertTrue(fade.superview === slot?.contentView)
         // Glass to plain: the button back on its node, the slot gone.
         faces[3] = face("Fade", style: "plain", ios: "plain")
         p.buttonFace = { faces[$0] ?? ButtonFace() }
