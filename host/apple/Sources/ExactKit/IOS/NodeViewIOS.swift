@@ -317,6 +317,10 @@ package final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, U
         get { accessibilityExposed && super.isAccessibilityElement }
         set { super.isAccessibilityElement = newValue }
     }
+    /// Takes the focus when pressed: it asked for focus, as a UIKit view
+    /// calling `becomeFirstResponder` does. A button alone does not: UIKit's
+    /// never becomes first responder from a touch.
+    var focusesOnPress: Bool { canBecomeFirstResponder && (explicitTabIndex != nil || canvases?.wantsInput(id) == true || !handlers.isDisjoint(with: Self.focusEvents)) }
     package override var canBecomeFirstResponder: Bool { !formDisabled && !inert && !cssVisibilityHidden && !isHidden && field == nil && textArea == nil && (kind == "button" || isNativeButton || isRadio || explicitTabIndex != nil || canvases?.wantsInput(id) == true || !handlers.isDisjoint(with: Self.focusEvents)) }
     package override func becomeFirstResponder() -> Bool {
         guard !formDisabled, !inert, !cssVisibilityHidden else { return false }

@@ -196,35 +196,19 @@ extension NodeView {
         // it lowers the keyboard, and under `resizes-content` that moves this
         // control (a composer's toolbar) out from under the finger at once.
         let inside = pressed && (touches.first.map(pressInside) ?? false)
-        // A press under `retainFocus` leaves the editor its focus, as macOS's
-        // mouseDown does: every pressable can take the focus now.
-        let takesFocus = canBecomeFirstResponder && !isFirstResponder && presenter?.contextRetainsFocus(self) != true
-        // A node that hears focus or blur takes it before its press, the
-        // web's order. Any other takes it after: a new first responder
-        // costs UIKit's keyboard bookkeeping ~10 ms, which ran ahead of the
-        // press's handler and its frame.
-        let focusFirst = takesFocus && !handlers.isDisjoint(with: Self.focusEvents)
-        if focusFirst { _ = takeTouchFocus() }
-        guard pressed else {
-            if takesFocus && !focusFirst { _ = takeTouchFocus() }
-            return super.touchesEnded(touches, with: event)
-        }
+        // A tap takes the focus as UIKit's does: a button, a radio, a native
+        // button never become first responder from a touch. A node that
+        // asked for focus (it hears focus, blur or keys, names a tabindex,
+        // or is a canvas taking input) takes it, as a view calling
+        // `becomeFirstResponder` does, before its press: the web's order.
+        // Under `retainFocus` the press takes nothing.
+        if focusesOnPress, !isFirstResponder, presenter?.contextRetainsFocus(self) != true { _ = takeTouchFocus() }
+        guard pressed else { return super.touchesEnded(touches, with: event) }
         pressed = false
-        // A pressed node that does not take the focus: the field being
-        // edited loses it, as a click on a button blurs a page's input. One
-        // taking it after its press ends the editing now, as taking it would.
+        // A pressed node that did not take the focus: the field being edited
+        // loses it, as a click on a button blurs a page's input.
         if !isFirstResponder && presenter?.contextRetainsFocus(self) != true { presenter?.viewport.endEditing(true) }
-        let held = presenter?.focusedNode
         if inside, presenter?.views[id] === self { presenter?.press(id, held: KeyCodes.held(event?.modifierFlags ?? [])); finishPointerPress() }
-        if takesFocus && !focusFirst {
-            DispatchQueue.main.async { [weak self] in
-                // Unless the press moved the focus itself (an app's `focus()`),
-                // or left this screen: a transition it started is in flight.
-                guard let self, window != nil, canBecomeFirstResponder, !isFirstResponder, presenter?.focusedNode === held,
-                      presenter?.navigation.inFlight != true else { return }
-                _ = takeTouchFocus()
-            }
-        }
     }
     package override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
         inlinePressed = nil; linkPressed = nil; svgPressed = nil
