@@ -883,8 +883,6 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
         // willShow again for the source, although the coordinator's .to is
         // still the pop destination. Keep that contact's source until didShow.
         if interactiveTransition, interactiveSource != nil { return }
-        // UIKit's own (its Back button, a swipe): Observe's render mark is now.
-        if !syncing { NavigationMarks.shared.platformBeganShowing() }
         let transition = navigationController.transitionCoordinator
         begunTransition = transition.map(ObjectIdentifier.init)
         changing = animated && transition?.viewController(forKey: .to) === viewController
@@ -896,6 +894,14 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
             interactiveDepth = navigationController.viewControllers.count + 1
         }
         bindKeyboardReveal(to: transition)
+        // UIKit's own (its Back button, its menu, a swipe): Observe's render
+        // mark is this transition's first frame, unless it is cancelled.
+        if !syncing {
+            NavigationMarks.shared.platformBeganShowing()
+            transition?.animate(alongsideTransition: nil) { context in
+                if context.isCancelled { NavigationMarks.shared.platformCancelled() }
+            }
+        }
         // The route coming into view was out of the window while it was
         // covered, so no scroll asked for its text; paint what shows of it
         // as the transition starts, not when the reader next scrolls.
