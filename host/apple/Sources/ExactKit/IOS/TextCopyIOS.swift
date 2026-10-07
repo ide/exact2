@@ -51,8 +51,28 @@ final class TextCopy: NSObject, UIEditMenuInteractionDelegate {
     @objc private func pressed(_ g: UILongPressGestureRecognizer) {
         guard g.state == .began, let owner, !TextCopy.text(of: owner).isEmpty else { return }
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-        let at = CGPoint(x: owner.bounds.midX, y: owner.bounds.minY)
+        let at = g.location(in: owner)
+        pressedAt = at
         menu.presentEditMenu(with: UIEditMenuConfiguration(identifier: nil, sourcePoint: at))
+    }
+    var pressedAt: CGPoint?
+
+    /// The text under the finger, or else the nearest: its box, in the
+    /// owner's space. The whole copyable box can be far taller than that
+    /// text, and a menu pointing at it stood above or below the box.
+    private static func textRect(in owner: NodeView, at point: CGPoint) -> CGRect? {
+        var texts: [CGRect] = []
+        func walk(_ view: UIView) {
+            for sub in view.subviews where !sub.isHidden {
+                if let node = sub as? NodeView, node.kind == "text" {
+                    texts.append(node.convert(node.bounds, to: owner))
+                } else { walk(sub) }
+            }
+        }
+        if owner.kind == "text" { return nil }
+        walk(owner)
+        if let hit = texts.first(where: { $0.contains(point) }) { return hit }
+        return texts.min { abs($0.midY - point.y) < abs($1.midY - point.y) }
     }
 
     func editMenuInteraction(_ interaction: UIEditMenuInteraction, menuFor configuration: UIEditMenuConfiguration, suggestedActions: [UIMenuElement]) -> UIMenu? {
@@ -63,9 +83,11 @@ final class TextCopy: NSObject, UIEditMenuInteractionDelegate {
         return UIMenu(children: [copy])
     }
 
-    /// The menu points at the box, as at a selected label.
+    /// The menu points at the text pressed, as at a selection: the text
+    /// node itself, or the one under the finger in a larger box.
     func editMenuInteraction(_ interaction: UIEditMenuInteraction, targetRectFor configuration: UIEditMenuConfiguration) -> CGRect {
-        owner?.bounds ?? .zero
+        guard let owner else { return .zero }
+        return pressedAt.flatMap { TextCopy.textRect(in: owner, at: $0) } ?? owner.bounds
     }
 }
 #elseif os(tvOS)
