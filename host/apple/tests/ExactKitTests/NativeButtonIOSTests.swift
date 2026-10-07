@@ -176,5 +176,34 @@ final class NativeButtonIOSTests: XCTestCase {
         XCTAssertNil(box.accessibilityCustomActions)
         XCTAssertFalse(box.interactions.contains { $0 is UIEditMenuInteraction })
     }
+
+    /// The edit menu's Copy reaches a node through the responder chain. A
+    /// node claims it only inside a `user-select: text` box or with a `copy`
+    /// handler; anywhere else it is not the node's, and sending it to a node
+    /// never reaches UIResponder, which implements none (it threw
+    /// "unrecognized selector" and crashed the app).
+    func testCopyIsANodesOnlyWhereItCanCopy() throws {
+        let p = presenter([
+            ["op": "create", "id": 1, "kind": "view", "style": ["user_select": "text"]],
+            ["op": "create", "id": 2, "kind": "text", "props": ["text": "TTI 521 ms"]],
+            ["op": "create", "id": 3, "kind": "text", "props": ["text": "Plain"]],
+            ["op": "children", "id": 1, "ids": [2]],
+            ["op": "roots", "ids": [1, 3]],
+            ["op": "frame", "id": 1, "x": 0.0, "y": 0.0, "w": 300.0, "h": 40.0],
+            ["op": "frame", "id": 2, "x": 0.0, "y": 0.0, "w": 300.0, "h": 40.0],
+            ["op": "frame", "id": 3, "x": 0.0, "y": 50.0, "w": 300.0, "h": 40.0],
+        ])
+        let inside = try XCTUnwrap(p.views[2]), plain = try XCTUnwrap(p.views[3])
+        let copy = #selector(UIResponderStandardEditActions.copy(_:))
+        XCTAssertTrue(inside.canPerformAction(copy, withSender: nil))
+        XCTAssertFalse(plain.canPerformAction(copy, withSender: nil))
+        XCTAssertFalse(plain.canPerformAction(#selector(UIResponderStandardEditActions.paste(_:)), withSender: nil))
+        plain.copy(nil)
+        plain.cut(nil)
+        plain.paste(nil)
+        // What it writes is TextCopy's (the test above); the pasteboard
+        // reads nothing back under a test runner.
+        inside.copy(nil)
+    }
 }
 #endif
