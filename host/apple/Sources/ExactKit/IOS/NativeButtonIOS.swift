@@ -182,7 +182,7 @@ final class NativeButton: UIButton {
         let key = [style, title ?? "", symbol?.props["symbolName"] ?? "", "\(symbol?.number("font_size") ?? 0)",
                    "\(symbol?.color("tint_color", .label) ?? .clear)", "\(text?.color("text_color", .label) ?? .clear)",
                    "\(text?.number("font_size") ?? 0)", "\(text?.number("font_weight") ?? 0)", "\(radius)", "\(owner.bounds.size)",
-                   "\(a)", "\(b)", "\(owner.color("accent_color", .clear))", "\(tintColor.resolvedColor(with: traitCollection))"].joined(separator: "|")
+                   "\(a)", "\(b)", owner.style["button_content_direction"]?.string ?? "", "\(owner.style["button_content_gap"]?.number ?? -1)", "\(owner.color("accent_color", .clear))", "\(tintColor.resolvedColor(with: traitCollection))"].joined(separator: "|")
         if key != signature {
             signature = key
             var rest = NativeButton.configuration(style, owner: owner, text: text, symbol: symbol, title: title, radius: radius, symbolBox: a, textBox: b, accent: tintColor)
@@ -292,18 +292,20 @@ final class NativeButton: UIButton {
             let same = style == "plain" && (config.baseForegroundColor.map { $0.resolvedColor(with: traits) == tint.resolvedColor(with: traits) } ?? false)
             config.image = same ? glyph : glyph?.withTintColor(tint, renderingMode: .alwaysOriginal)
         }
-        // The author's flex-direction says how the symbol and the title
-        // stand (the frames are not laid out yet on a first configuration,
-        // and two empty boxes read as one above the other); the boxes'
-        // frames, once they are, say how far apart, else the authored gap.
+        // A symbol and a title are UIKit's own pairing: the author's
+        // `flex-direction` is its placement and the `gap` its padding, as
+        // the host sends them (`button_content_direction`, `_gap`); with no
+        // gap written the padding is UIKit's. A button that is not a flex
+        // box has its laid-out boxes read instead.
         if symbol != nil, text != nil {
-            let stacked = (owner.style["flex_direction"]?.string ?? "row").hasPrefix("column")
-            config.imagePlacement = stacked ? .top : .leading
-            if a.isEmpty || b.isEmpty {
-                config.imagePadding = owner.number(stacked ? "row_gap" : "column_gap", 0)
-            } else {
-                let glyph = config.image?.size ?? a.size
-                config.imagePadding = max(0, stacked ? b.minY - a.maxY + (a.height - glyph.height) / 2 : b.minX - a.maxX + (a.width - glyph.width) / 2)
+            if let direction = owner.style["button_content_direction"]?.string {
+                config.imagePlacement = direction == "column" ? .top : direction == "column-reverse" ? .bottom
+                    : direction == "row-reverse" ? .trailing : .leading
+                if let gap = owner.style["button_content_gap"]?.number { config.imagePadding = CGFloat(gap) }
+            } else if !a.isEmpty, !b.isEmpty {
+                let stacked = b.minY >= a.maxY - 1
+                config.imagePlacement = stacked ? .top : .leading
+                config.imagePadding = max(0, stacked ? b.minY - a.maxY : b.minX - a.maxX)
             }
         }
         // The kernel sized the box for its content; the configuration adds

@@ -65,6 +65,31 @@ final class NativeButtonIOSTests: XCTestCase {
         XCTAssertEqual(NativeButton.horizontal([CGRect(x: 16, y: 0, width: 60, height: 20)], in: 300, rtl: true).1.trailing, 16)
     }
 
+    /// A symbol and a title are UIKit's pairing: the author's flex-direction
+    /// is the placement and the gap the padding, from the first
+    /// configuration on, before any box is laid out (Lock's icon over its
+    /// label, Last Parked's beside it).
+    func testASymbolAndTitleStandAsTheFlexDirectionAndGapSay() throws {
+        let p = presenter([
+            ["op": "create", "id": 1, "kind": "button", "handlers": ["press"],
+             "style": ["exact_apple_button_style": "filled", "button_content_direction": "column", "button_content_gap": 4]],
+            ["op": "create", "id": 2, "kind": "image", "props": ["imageSource": "symbol:sf/lock.fill", "symbolName": "lock.fill"], "style": ["font_size": 20.0]],
+            ["op": "create", "id": 3, "kind": "text", "props": ["text": "Lock"]],
+            ["op": "children", "id": 1, "ids": [2, 3]],
+            ["op": "roots", "ids": [1]],
+        ])
+        let b = try XCTUnwrap(button(try XCTUnwrap(p.views[1])))
+        XCTAssertEqual(b.configuration?.imagePlacement, .top)
+        XCTAssertEqual(b.configuration?.imagePadding, 4)
+        p.apply(wireBatch([["op": "style", "id": 1, "style": ["exact_apple_button_style": "filled", "button_content_direction": "row-reverse", "button_content_gap": 8]]]))
+        XCTAssertEqual(b.configuration?.imagePlacement, .trailing)
+        XCTAssertEqual(b.configuration?.imagePadding, 8)
+        // No gap written: UIKit's own padding.
+        p.apply(wireBatch([["op": "style", "id": 1, "style": ["exact_apple_button_style": "filled", "button_content_direction": "row"]]]))
+        XCTAssertEqual(b.configuration?.imagePlacement, .leading)
+        XCTAssertEqual(b.configuration?.imagePadding, UIButton.Configuration.filled().imagePadding)
+    }
+
     func testTheRootsAccentColorIsTheWindowsTint() throws {
         let p = presenter([
             ["op": "create", "id": 1, "kind": "view", "style": ["accent_color": [232, 28, 36, 255]]],
