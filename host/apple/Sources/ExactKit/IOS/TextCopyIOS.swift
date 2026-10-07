@@ -68,4 +68,12 @@ final class TextCopy: NSObject, UIEditMenuInteractionDelegate {
         owner?.bounds ?? .zero
     }
 }
+#elseif os(tvOS)
+import UIKit
+
+// tvOS has no edit menu or pasteboard: a `user-select: text` box is copied
+// by nothing there.
+final class TextCopy {
+    static func apply(_ view: NodeView) {}
+}
 #endif
