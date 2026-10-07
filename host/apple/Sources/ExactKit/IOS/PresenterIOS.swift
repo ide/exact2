@@ -913,10 +913,10 @@ package final class Presenter {
                 scrollPump.batchApplied()
                 ApplyProfile.time("pass.leaves") { leaves.batchApplied(moved: moved) }
                 #if os(iOS)
-                resolveStatusBar()
+                ApplyProfile.time("pass.statusbar") { resolveStatusBar() }
                 #endif
                 if moved { session?.natives.refreshWorldGeometry() }
-                flushPendingFocus()
+                ApplyProfile.time("pass.focus") { flushPendingFocus() }
             }
         }
         var beganGeometry = false
@@ -1147,14 +1147,14 @@ package final class Presenter {
         glassGroups.reconcile()
         let changed = touchedAndAbove(touchedIDs)
         ApplyProfile.time("pass.buttons") { nativeButtons.sync(changed: changed) }
-        swipeActions.sync(changed: changed)
-        groupedLists?.sync(changed: changed)
+        ApplyProfile.time("pass.swipe") { swipeActions.sync(changed: changed) }
+        ApplyProfile.time("pass.grouped") { groupedLists?.sync(changed: changed) }
         // `prepare` put carried rows back under the list's hidden sheet, where
         // the pass above judged a segmented control in one unavailable (shown
         // dimmed, deaf to a finger); judge it again where it shows, in its cell.
         if groupedLists?.carriesRows == true { segments.sync() }
-        positionContexts()
-        syncAccessibility(changed: changed)
+        ApplyProfile.time("pass.contexts") { positionContexts() }
+        ApplyProfile.time("pass.accessibility") { syncAccessibility(changed: changed) }
         #if os(iOS)
         syncScrollsToTop()
         #endif
