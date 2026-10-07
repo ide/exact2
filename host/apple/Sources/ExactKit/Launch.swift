@@ -377,8 +377,11 @@ public final class ExactLaunch: NSObject {
         if let s = launchSession, s.rustMs > 0 { out["boot"] = ["runner": (s.rustMs * 10).rounded() / 10, "apply": (s.applyMs * 10).rounded() / 10] }
         if data.first != nil {
             let ms = { (s: Double) in (s * 1000 * 10).rounded() / 10 }
+            // From the first commit to the first node's draw receipt, which
+            // starts activation (the render server's first draw).
+            let receipt = marks[.commit].flatMap { c in data.first.map { ms(max(0, $0 - c)) } }
             out["data"] = ["appModule": ms(data.module), "waited": ms(max(0, data.waited)), "polls": data.polls,
-                           "ready": ms(data.ready), "apply": ms(data.apply)]
+                           "ready": ms(data.ready), "apply": ms(data.apply), "receipt": receipt as Any]
         }
         if let p = marks[.process], !spans.isEmpty {
             let ms = { (t: Double) in ((t - p) * 1000 * 10).rounded() / 10 }
