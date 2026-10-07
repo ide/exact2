@@ -317,6 +317,21 @@ extension Presenter {
             let target = keyView(of: node)
             if target.acceptsFirstResponder { _ = window.makeFirstResponder(target) }
             #else
+            // A focus a batch brings (a pushed screen's field, a sheet's)
+            // is taken the turn after, once the batch's frame commits, as
+            // UIKit apps focus in `viewDidAppear`: bringing the keyboard up
+            // inside the batch held that frame for the keyboard's load.
+            if applying {
+                if !autofocusTurnOwed {
+                    autofocusTurnOwed = true
+                    DispatchQueue.main.async { [weak self] in
+                        guard let self else { return }
+                        autofocusTurnOwed = false
+                        if session?.state != .destroyed { syncAccessibility() }
+                    }
+                }
+                continue
+            }
             // The session's own view holding the focus for its shortcuts (ShortcutsIOS) is no focus a node took,
             // nor is a button's that came from a touch (Safari's buttons take none from a tap): the button that
             // opened a sheet must not keep the sheet's field from its autofocus. A button reached by Tab or

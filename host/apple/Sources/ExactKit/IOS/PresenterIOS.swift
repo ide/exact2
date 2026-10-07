@@ -14,6 +14,8 @@ package final class Presenter {
     static let signposts = OSSignposter(subsystem: "com.exact.host", category: "scroll")
 
     var autofocusProcessed: Set<ObjectIdentifier> = []
+    /// An autofocus a batch brought waits for the turn after it (`syncAccessibility`).
+    var autofocusTurnOwed = false
     /// Set the turn after the session's first activation. A booted session's autofocus waits for it.
     var launchAutofocusReleased = false
     private var projectionSyncOwed = false
