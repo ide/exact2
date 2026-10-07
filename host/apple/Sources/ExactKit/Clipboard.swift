@@ -105,16 +105,26 @@ extension NodeView {
         return super.responds(to: aSelector)
     }
     #else
-    // UIView implements none of the three: forwarding an unheard one to
-    // super raised doesNotRecognizeSelector (a field's Cut, empty, crashed).
-    package override func copy(_ sender: Any?) { clipboard(#selector(copy(_:))) }
+    // UIResponder declares these edit actions but implements none, so a
+    // node never hands one to `super` (an unrecognized selector). It claims
+    // only what it does: a handler's event, or the Copy of a `user-select:
+    // text` box it is in (`TextCopy`); anything else goes up the responder
+    // chain, as UIKit asks `canPerformAction` before it sends.
+    package override func copy(_ sender: Any?) {
+        if clipboard(#selector(copy(_:))) { return }
+        if let box = textCopyBox { UIPasteboard.general.string = TextCopy.text(of: box) }
+    }
     package override func cut(_ sender: Any?) { clipboard(#selector(cut(_:))) }
     package override func paste(_ sender: Any?) { clipboard(#selector(paste(_:))) }
-    /// A copy, cut or paste is this node's only while a node hears it;
-    /// UIResponder's default would claim it because the class implements it.
     package override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
-        if [#selector(copy(_:)), #selector(cut(_:)), #selector(paste(_:))].contains(action) { return clipboardTarget(action) != nil }
+        if action == #selector(copy(_:)) { return clipboardTarget(action) != nil || textCopyBox != nil }
+        if action == #selector(cut(_:)) || action == #selector(paste(_:)) { return clipboardTarget(action) != nil }
         return super.canPerformAction(action, withSender: sender)
+    }
+
+    /// The nearest `user-select: text` box at or above this node.
+    private var textCopyBox: NodeView? {
+        sequence(first: self as UIView, next: \.superview).lazy.compactMap { $0 as? NodeView }.first { $0.textCopy != nil }
     }
     #endif
 }
