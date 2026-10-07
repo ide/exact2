@@ -16,7 +16,7 @@ public final class ExactLaunch: NSObject {
     public static let shared = ExactLaunch()
 
     public enum Mark: String, CaseIterable {
-        case process, constructor, delegateInit, didFinishLaunching, scene, boot, commit, present, activated, interactive
+        case process, constructor, main, delegateInit, didFinishLaunching, scene, boot, commit, present, activated, interactive
     }
 
     let facts = exact_launch_constructor_facts()
@@ -73,6 +73,12 @@ public final class ExactLaunch: NSObject {
     }
 
     // MARK: Host hooks (the adapter's app delegate)
+
+    /// Called first thing in the adapter's `main`: what ran between the
+    /// constructor and here is every other image's initializers.
+    public func main() {
+        if marks[.main] == nil { marks[.main] = CACurrentMediaTime() }
+    }
 
     /// Called from the app delegate's init, inside `UIApplicationMain` and after
     /// any prewarm pause. Observe calls this mark "main".

@@ -787,7 +787,6 @@ final class Presenter {
         if let accent = appAccent {
             if windowTint?.window !== window { windowTint = (window, window.tintColor) }
             if window.tintColor != accent {
-                if ApplyProfile.on { ApplyProfile.time("accent.probe") { window.tintColor = .systemPink } }
                 ApplyProfile.time("accent.window") { window.tintColor = accent }
             }
         } else if let saved = windowTint, saved.window === window {
