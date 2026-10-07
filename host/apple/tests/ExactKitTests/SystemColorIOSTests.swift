@@ -202,6 +202,28 @@ final class SystemColorIOSTests: XCTestCase {
         XCTAssertEqual(reads, 1, "in a window: reported")
     }
 
+    /// A root's accent becomes its window's tint while the batch applies;
+    /// the report that tint change asks for is made once the batch is in,
+    /// so the runner never re-presents in the middle of a batch.
+    func testATintSetInsideABatchIsReportedAfterIt() throws {
+        let session = ExactApp.shared.makeSession(label: "colours-after-batch")
+        defer { session.destroy() }
+        XCTAssertNil(session.boot(size: CGSize(width: 390, height: 844)).error)
+        let view = ExactView(session: session)
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        window.addSubview(view)
+        var reports: [Bool] = []
+        session.runtime.observeBatch = { _, _ in reports.append(session.presenter.views[9001]?.layer.bounds.width == 123) }
+        defer { session.runtime.observeBatch = nil }
+        session.apply(wireBatch([
+            ["op": "create", "id": 9001, "kind": "view", "props": [:], "handlers": [], "style": ["accent_color": [255, 59, 48, 255]]],
+            ["op": "roots", "ids": [9001]],
+            ["op": "frame", "id": 9001, "x": 0.0, "y": 0.0, "w": 123.0, "h": 45.0],
+        ]))
+        XCTAssertFalse(reports.isEmpty, "the tint change was reported")
+        XCTAssertEqual(reports.filter { !$0 }.count, 0, "no report before the batch's last op applied")
+    }
+
     /// LLP 1095 D9: the report's `AccentColor` is the tint read on main,
     /// wherever the resolution runs.
     func testAReportedTintIsTheOneReadOnMain() throws {
