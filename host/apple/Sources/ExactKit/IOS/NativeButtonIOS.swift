@@ -163,7 +163,7 @@ final class NativeButton: UIButton {
         func collect(_ v: UIView) {
             for case let n as NodeView in v.subviews where n !== owner { nodes.append(n); collect(n.container) }
         }
-        if explicit != nil || glass { collect(owner.container) }
+        if explicit != nil || glass { ApplyProfile.time("btn.collect") { collect(owner.container) } }
         let texts = nodes.filter { $0.kind == "text" }
         let symbols = nodes.filter { $0.kind == "image" && ($0.imageSource ?? "").hasPrefix("symbol:") }
         let simple = (explicit != nil || glass) && texts.count <= 1 && symbols.count <= 1 && !(texts.isEmpty && symbols.isEmpty)
@@ -185,13 +185,13 @@ final class NativeButton: UIButton {
         let title = text.map { $0.paragraphSpec().runs.map(\.text).joined() }
         let radius = owner.number("border_radius", owner.number("border_radius_top_left"))
         let a = symbol.map { $0.convert($0.bounds, to: owner) } ?? .zero, b = text.map { $0.convert($0.bounds, to: owner) } ?? .zero
-        let key = [style, title ?? "", symbol?.props["symbolName"] ?? "", "\(symbol?.number("font_size") ?? 0)",
+        let key = ApplyProfile.time("btn.key") { [style, title ?? "", symbol?.props["symbolName"] ?? "", "\(symbol?.number("font_size") ?? 0)",
                    "\(symbol?.color("tint_color", .label) ?? .clear)", "\(text?.color("text_color", .label) ?? .clear)",
                    "\(text?.number("font_size") ?? 0)", "\(text?.number("font_weight") ?? 0)", "\(radius)", "\(owner.bounds.size)",
-                   "\(a)", "\(b)", owner.style["button_content_direction"]?.string ?? "", "\(owner.style["button_content_gap"]?.number ?? -1)", "\(owner.color("accent_color", .clear))", "\(tintColor.resolvedColor(with: traitCollection))"].joined(separator: "|")
+                   "\(a)", "\(b)", owner.style["button_content_direction"]?.string ?? "", "\(owner.style["button_content_gap"]?.number ?? -1)", "\(owner.color("accent_color", .clear))", "\(tintColor.resolvedColor(with: traitCollection))"].joined(separator: "|") }
         if key != signature {
             signature = key
-            var rest = NativeButton.configuration(style, owner: owner, text: text, symbol: symbol, title: title, radius: radius, symbolBox: a, textBox: b, accent: tintColor)
+            var rest = ApplyProfile.time("btn.config") { NativeButton.configuration(style, owner: owner, text: text, symbol: symbol, title: title, radius: radius, symbolBox: a, textBox: b, accent: tintColor) }
             let (align, inset) = NativeButton.horizontal([a, b], in: owner.bounds.width,
                                                              rtl: effectiveUserInterfaceLayoutDirection == .rightToLeft)
             if contentHorizontalAlignment != align { contentHorizontalAlignment = align }
@@ -228,7 +228,7 @@ final class NativeButton: UIButton {
                 }
                 button.configuration = config
             }
-            configuration = rest
+            ApplyProfile.time("btn.assign") { configuration = rest }
             // Behind an alert UIKit dims the tint (the accent) to grey, as the
             // platform should; every other colour here is authored (a title's
             // `color`, a symbol's `tint-color`, an `accent-color` fill) and
