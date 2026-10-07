@@ -458,15 +458,15 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
         guard primaryNavigation == nil, !syncing, presenter.session?.view?.window != nil else { giveBackBootCover(); return }
         syncing = true
         defer { syncing = false }
-        guard let p = projection(batch) else { giveBackBootCover(); return }
+        guard let p = ApplyProfile.time("nav.projection", { projection(batch) }) else { giveBackBootCover(); return }
         // After the projection, whose first `reset` clears the covers.
         _ = adoptBootCover()
         let parts = NavigationRules.segments(presentations: p.routes[...p.selected].map { $0.props["navigationPresentation"] })
-        installPrimary(p, first: Array(p.chosen[parts[0]]))
-        primaryOwner?.view.layoutIfNeeded()
+        ApplyProfile.time("nav.primary") { installPrimary(p, first: Array(p.chosen[parts[0]])) }
+        ApplyProfile.time("nav.layout") { primaryOwner?.view.layoutIfNeeded() }
         // The content area the bar leaves reaches layout in this turn, before
         // the first frame (LLP 1075.003 Q3 (c)).
-        reportCovers()
+        ApplyProfile.time("nav.covers") { reportCovers() }
         refitForBars()
     }
 
