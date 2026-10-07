@@ -135,6 +135,25 @@ final class NavigationBasicsIOSTests: XCTestCase {
         XCTAssertTrue(item.titleView === hooks, "the hook's title view is left alone")
     }
 
+    /// D4: a tap on the screen UIKit shows after its own pop reaches the
+    /// app after the app has heard the pop, however soon it comes: the
+    /// settle point is due before the press, not only on the next turn.
+    func testATapStraightAfterAPlatformPopLandsOnTheScreenUIKitShows() throws {
+        let session = try fixture("basics-tap-after-pop")
+        let tabs = try XCTUnwrap(session.presenter.navigation.tabController)
+        let nav = try XCTUnwrap(tabs.selectedViewController as? UINavigationController)
+        try tapNode(session, "detail")
+        until("Detail pushed") { nav.viewControllers.count == 2 && nav.transitionCoordinator == nil }
+        spin(0.3)
+        // UIKit's own pop, laid out this turn: Home is on screen, and
+        // the settle point UIKit's callback asked for has not run yet.
+        nav.popViewController(animated: false)
+        nav.view.layoutIfNeeded()
+        try tapNode(session, "chat")
+        until("Chat pushed") { nav.viewControllers.count == 2 && nav.transitionCoordinator == nil }
+        XCTAssertEqual(session.presenter.navigation.appSnapshot()?.chain.count, 2, "the app is on Chat, over Home")
+    }
+
     func testARoutePushedWhileTheTablistIsHiddenHidesTheTabBar() throws {
         let session = try fixture("basics-tabbar")
         let tabs = try XCTUnwrap(session.presenter.navigation.tabController)

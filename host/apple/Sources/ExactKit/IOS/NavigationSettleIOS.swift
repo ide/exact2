@@ -41,31 +41,44 @@ extension NavigationHost {
     func settle() {
         guard !settling else { return }
         settling = true
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            settling = false
-            guard holdsScreens, container != nil, presenter.session?.view?.window != nil, !syncing, !delivering else { return }
-            // Its own completion settles again.
-            if inFlight {
-                let navs = allNavigations + [moreNavigation].compactMap { $0 }
-                for nav in navs { nav.transitionCoordinator?.animate(alongsideTransition: nil) { [weak self] _ in self?.settle() } }
-                return
-            }
-            let observed = observe()
-            if let applied, owed == nil, let change = NavigationRules.platformChange(applied: applied, observed: observed) {
-                owed = change
-            }
-            applied = observed
-            deliver()
-            sync(Batch(ops: [], timers: false, motion: false, clock: nil, error: nil))
-            presenter.syncModal()
-            presenter.session?.view?.fit()
-            presenter.flushPendingFocus()
-            #if os(iOS)
-            // At rest, the status bar's style resolves (LLP 1105).
-            presenter.resolveStatusBar(settled: true)
-            #endif
+        DispatchQueue.main.async { [weak self] in self?.settleNow() }
+    }
+
+    /// A press on the screen UIKit shows reaches the app after the app has
+    /// heard what the platform did there (D4). A tap that came between a
+    /// back swipe's end and its settle point went to the route UIKit had
+    /// already left, and the late "back" then undid what it did.
+    func settleBeforeInput() {
+        guard holdsScreens, !syncing, !delivering, !inFlight, let applied else { return }
+        guard owed != nil || NavigationRules.platformChange(applied: applied, observed: observe()) != nil else { return }
+        settling = true
+        settleNow()
+    }
+
+    private func settleNow() {
+        guard settling else { return }
+        settling = false
+        guard holdsScreens, container != nil, presenter.session?.view?.window != nil, !syncing, !delivering else { return }
+        // Its own completion settles again.
+        if inFlight {
+            let navs = allNavigations + [moreNavigation].compactMap { $0 }
+            for nav in navs { nav.transitionCoordinator?.animate(alongsideTransition: nil) { [weak self] _ in self?.settle() } }
+            return
         }
+        let observed = observe()
+        if let applied, owed == nil, let change = NavigationRules.platformChange(applied: applied, observed: observed) {
+            owed = change
+        }
+        applied = observed
+        deliver()
+        sync(Batch(ops: [], timers: false, motion: false, clock: nil, error: nil))
+        presenter.syncModal()
+        presenter.session?.view?.fit()
+        presenter.flushPendingFocus()
+        #if os(iOS)
+        // At rest, the status bar's style resolves (LLP 1105).
+        presenter.resolveStatusBar(settled: true)
+        #endif
     }
 
     /// D4: tell the app what the platform did, once, through what the app
