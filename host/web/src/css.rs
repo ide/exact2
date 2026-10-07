@@ -299,6 +299,12 @@ fn css_text_in(
                 });
                 out.push(';');
             }
+            // CSS Inline Layout 3 §4.2: one row holds both edges.
+            (StyleId::TextBoxEdge, RowValue::Enum(edge)) => {
+                out.push_str("text-box-edge:");
+                out.push_str(&edge.replace("-alphabetic", " alphabetic"));
+                out.push(';');
+            }
             (StyleId::LineClamp, RowValue::Number(n)) => {
                 if *n > 0.0 {
                     // The legacy clamp requires an old flex box and clipping. It
