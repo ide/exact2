@@ -1198,6 +1198,9 @@ public final class ExactSession {
             natives.prepareAppModule()
             let batch = runtime.dataReady()
             if batch.pending {
+                // Still starting the data module: the launch tracker samples
+                // now, so what waits on it shows from the first frame on.
+                ExactLaunch.shared.waitingForData(self)
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
                     guard let self, generation == drawnGeneration, state != .destroyed else { return }
                     activatedGeneration = nil
