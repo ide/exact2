@@ -84,10 +84,13 @@ final class NativeButtonIOSTests: XCTestCase {
         p.apply(wireBatch([["op": "style", "id": 1, "style": ["exact_apple_button_style": "filled", "button_content_direction": "row-reverse", "button_content_gap": 8]]]))
         XCTAssertEqual(b.configuration?.imagePlacement, .trailing)
         XCTAssertEqual(b.configuration?.imagePadding, 8)
-        // No gap written: UIKit's own padding.
+        // No gap written: the platform's system spacing between them, read
+        // from UIKit's layout (a configuration's own default is none).
         p.apply(wireBatch([["op": "style", "id": 1, "style": ["exact_apple_button_style": "filled", "button_content_direction": "row"]]]))
         XCTAssertEqual(b.configuration?.imagePlacement, .leading)
-        XCTAssertEqual(b.configuration?.imagePadding, UIButton.Configuration.filled().imagePadding)
+        let font = UIFont.systemFont(ofSize: 17, weight: .regular)
+        XCTAssertEqual(b.configuration?.imagePadding, NativeButton.systemSpacing(stacked: false, image: b.configuration?.image, font: font))
+        XCTAssertGreaterThan(b.configuration?.imagePadding ?? 0, 0)
     }
 
     func testTheRootsAccentColorIsTheWindowsTint() throws {
