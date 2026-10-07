@@ -806,6 +806,7 @@ public final class ExactSession {
     @discardableResult
     public func boot(size: CGSize) -> Batch {
         let t = CACurrentMediaTime()
+        ApplyProfile.begin()
         ExactLaunch.shared.bootEntered(self)
         primePreferences()
         primeTime()  // `prepare` primes again; the fallback boot reads this
@@ -816,6 +817,7 @@ public final class ExactSession {
             if let candidate = prepare(bytes, resolver: app.resolver, token: app.selectedToken, module: app.lastModule, size: size) {
                 let batch = commit(candidate)
                 presentCommitted(batch, label: "selected")
+                _ = ApplyProfile.end() // only the baked boot's first batch is profiled
                 return batch
             }
             let reason = app.resolver.refusal ?? "initial plan refused"
@@ -834,6 +836,7 @@ public final class ExactSession {
     @discardableResult
     public func boot(plan bytes: Data, size: CGSize) -> Batch {
         let t = CACurrentMediaTime()
+        ApplyProfile.begin()
         ExactLaunch.shared.bootEntered(self)
         primePreferences()
         primeTime()
@@ -858,7 +861,8 @@ public final class ExactSession {
             text.commitFonts()
             appFileRoots = AppFiles.learn(runtime) // before the first frame's `app:/` images load (LLP 1069.002 D7)
         }
-        ApplyProfile.begin()
+        if !ApplyProfile.on { ApplyProfile.begin() }
+        ApplyProfile.add("runner", since: started)
         apply(batch)
         applyParts = ApplyProfile.end()
         treeIsIn()
