@@ -140,6 +140,29 @@ public final class ExactLaunch: NSObject {
         scheduleEvaluate()
     }
 
+    /// What activation spent, seconds: the app's Swift module load, each
+    /// `dataReady` call (the last one runs the data module's start), how
+    /// long and how often it said pending, and applying its first batch.
+    private var data: (module: Double, waited: Double, polls: Int, ready: Double, apply: Double, first: Double?) = (0, 0, 0, 0, 0, nil)
+
+    func dataStep(_ session: ExactSession, appModule: Double, ready: Double, pending: Bool) {
+        guard session === launchSession, ttiOutcome == nil else { return }
+        let now = CACurrentMediaTime()
+        if data.first == nil { data.first = now - appModule - ready }
+        data.module += appModule
+        if pending {
+            data.polls += 1
+        } else {
+            data.ready = ready
+            data.waited = now - ready - appModule - (data.first ?? now)
+        }
+    }
+
+    func dataApplied(_ session: ExactSession, _ seconds: Double) {
+        guard session === launchSession, ttiOutcome == nil else { return }
+        data.apply = seconds
+    }
+
     /// The data module is still starting (activation pending): sample what
     /// is outstanding, so its span starts when it does, not at the next apply.
     func waitingForData(_ session: ExactSession) {
@@ -349,6 +372,14 @@ public final class ExactLaunch: NSObject {
         if !failedResources.isEmpty { out["failed"] = failedResources }
         if !trace.isEmpty { out["trace"] = trace }
         if !changes.isEmpty { out["changes"] = changes }
+        // Boot's two parts (ms): the runner's boot with the first layout, and
+        // applying its batch to the views.
+        if let s = launchSession, s.rustMs > 0 { out["boot"] = ["runner": (s.rustMs * 10).rounded() / 10, "apply": (s.applyMs * 10).rounded() / 10] }
+        if data.first != nil {
+            let ms = { (s: Double) in (s * 1000 * 10).rounded() / 10 }
+            out["data"] = ["appModule": ms(data.module), "waited": ms(max(0, data.waited)), "polls": data.polls,
+                           "ready": ms(data.ready), "apply": ms(data.apply)]
+        }
         if let p = marks[.process], !spans.isEmpty {
             let ms = { (t: Double) in ((t - p) * 1000 * 10).rounded() / 10 }
             out["items"] = spanOrder.compactMap { item -> [String: Any]? in
