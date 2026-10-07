@@ -182,7 +182,7 @@ fn nested_ancestor_scroll_changes_mapping_and_cancels_before_any_late_action() {
 #[test]
 fn an_arrange_sample_publishes_concurrent_height_layout_then_cancels_changed_port() {
     let source=APP.replace("  state grips = true", "  state panelHeight = 180\n  action grow\n    panelHeight = 320\n  state grips = true")
-        .replace("    column width=\"100%\" height=\"100%\"", "    column testId=\"panel\" width=400 height=panelHeight box-sizing=\"border-box\" transition=\"height spring(300,30,1)\" press=grow")
+        .replace("    column width=\"100%\" height=\"100%\"", "    column testId=\"panel\" width=400 height=panelHeight box-sizing=\"border-box\" transition=\"height -exact-spring(300,30,1)\" press=grow")
         .replace("width=width height=180", "width=width height=\"100%\" flex-shrink=0");
     let (mut p, error) = Presenter::boot_with(
         &contract::compile(&source).unwrap().encode(),
@@ -520,6 +520,13 @@ fn a_new_lift_waits_out_a_hold_but_ends_a_landing() {
         p.group.as_ref().map(|s| s.token),
         Some(first),
         "the hold refuses"
+    );
+    assert!(
+        p.host
+            .runner()
+            .journal()
+            .any(|l| l.contains("reorder: a drag refused: the last drop is held")),
+        "and says so (LLP 1102 §3.17)"
     );
     p.pointer_up(x + 12., y, 60.).unwrap();
     // The board's timer answers at 200 ms: the move shows and the ghost lands.

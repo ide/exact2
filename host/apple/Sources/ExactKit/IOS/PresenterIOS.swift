@@ -64,6 +64,8 @@ final class Presenter {
     func takeChangedNames() -> Set<String> { chrome.takeChangedNames() }
     var scrollers: Set<UInt32> = []
     var pendingScrolls: Set<UInt32> = []
+    /// The batch's suppression triggers for scroll anchoring (`ScrollAnchoring.swift`).
+    var anchorChanges = ScrollAnchoring.Changes()
     var materialNodes: Set<UInt32> = []
     let glassGroups = GlassGroups()
     /// Every `button`, which NativeButtonIOS makes a UIButton.
@@ -614,7 +616,8 @@ final class Presenter {
     var onHover: ((UInt32, Bool) -> Void)?
     var onFocus: ((UInt32) -> Void)?
     var onBlur: ((UInt32) -> Void)?
-    var onKey: ((UInt32, String) -> Void)?
+    /// A `key` or `keyup` (`KeyPress.up`) at a node (KeyEvents.swift).
+    var onKey: ((UInt32, KeyPress) -> Void)?
     var onClipboard: ((UInt32, UInt32, String) -> Void)?
     var onContextmenu: ((UInt32) -> Void)?
     var onDblclick: ((UInt32) -> Void)?
@@ -752,7 +755,7 @@ final class Presenter {
     }
     func focus(_ id: UInt32) { send(id) { [self] in onFocus?(id) } }
     func blur(_ id: UInt32) { send(id) { [self] in onBlur?(id) } }
-    func key(_ id: UInt32, _ name: String) { send(id) { [self] in onKey?(id, name) } }
+    func key(_ id: UInt32, _ press: KeyPress) { send(id) { [self] in onKey?(id, press) } }
     func clipboard(_ id: UInt32, _ kind: UInt32, _ text: String) { send(id) { [self] in onClipboard?(id, kind, text) } }
     func contextmenu(_ id: UInt32) { send(id) { [self] in onContextmenu?(id) } }
     /// A `contextmenu` with its point (studio diary R22): kind 10 and its line.
@@ -850,6 +853,7 @@ final class Presenter {
         prepareContexts(batch)
         modals.prepare(batch)
         navigation.prepare(batch)
+        anchorChanges.reset()
         for id in scrollers where !collections.owns(id) { views[id]?.captureScrollPosition() }
         if let e = batch.error { FileHandle.standardError.write(Data("exact: \(e)\n".utf8)) }
         if let text = session?.text {
@@ -968,8 +972,9 @@ final class Presenter {
             case .style:
                 if flats.isFlat(id), flats.style(id, op) { continue }
                 guard let v = views[id] ?? leaving[id]?.view else { continue }
-                let color = v.style["text_color"]
+                let color = v.style["text_color"], old = v.style
                 v.applyStyle(op.style)
+                anchorChanges.note(id, from: old, to: v.style)
                 flats.styleChanged(id)
                 if v.surface != nil { v.applySurface() }
                 // Paint motion re-sends a style per frame (LLP 1055.000 D6):

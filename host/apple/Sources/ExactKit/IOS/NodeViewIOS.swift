@@ -365,7 +365,7 @@ final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, UIScrollV
         // (the platformer's diary, R8).
         let name = presses.first?.key.map(NodeView.keyName)
         let held = presses.first?.key.map { KeyCodes.held($0.modifierFlags) } ?? ""
-        if !formDisabled, isFirstResponder, let name, presenter?.keyDown(at: self, name, held: held) == true || presenter?.controls.radioKey(self, name, held: held) == true { return }
+        if !formDisabled, isFirstResponder, let key = presses.first?.key, let name, hardwareKey(key, down: true) || presenter?.controls.radioKey(self, name, held: held) == true { return }
         if inputCanvas?.canvasInput?.presses(presses, down: true, source: self) == true { return }
         if !disabled, activatable, let name, name == "Enter" || (name == " " && props["href"] == nil && UIDevice.current.userInterfaceIdiom != .tv) { presenter?.press(id); return }
         super.pressesBegan(presses, with: event)
@@ -376,6 +376,8 @@ final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, UIScrollV
         #endif
         let presses=pressedControls(presses,down:false)
         if presses.isEmpty {return}
+        // The release's `keyup` handlers (#140), as `pressesBegan` the down's.
+        if !formDisabled, isFirstResponder, let key = presses.first?.key { _ = hardwareKey(key, down: false) }
         if inputCanvas?.canvasInput?.presses(presses, down: false, source: self) != true { super.pressesEnded(presses, with: event) }
     }
     override func pressesCancelled(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
@@ -831,7 +833,7 @@ final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, UIScrollV
     // display:none removes the CSS box, but retains its stored scroll position.
     // UIKit/AppKit collapse the native extent; keep that transient reset out of
     // scroll events and restore only when the box returns.
-    private var hasScrollLayoutBox: Bool {
+    var hasScrollLayoutBox: Bool {
         var ancestor: UIView? = self
         while let current = ancestor {
             if let node = current as? NodeView, node.style["display"]?.string == "none" { return false }
@@ -844,8 +846,11 @@ final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, UIScrollV
         beforeLayoutScroll = scroll?.contentOffset
         followedScroll = nil
         readingAnchors.removeAll(keepingCapacity: true)
+        scrollAnchor = nil
         guard props["scrollFollowEnd"] == "true", let sv = scroll else {
-            activeReadingAnchor = nil; anchoredScrollTop = nil; retainedScrollTop = nil; return
+            activeReadingAnchor = nil; anchoredScrollTop = nil; retainedScrollTop = nil
+            if let sv = scroll { captureScrollAnchor(sv) }
+            return
         }
         let maximum = max(-sv.adjustedContentInset.top, sv.contentSize.height + sv.adjustedContentInset.bottom - sv.bounds.height)
         // A retained route can gain height when another route hides the keyboard.
@@ -879,8 +884,11 @@ final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, UIScrollV
         anchors(in: sv)
     }
     func restoreScrollPosition() {
-        defer { followedScroll = nil; readingAnchors.removeAll(keepingCapacity: true) }
-        guard props["scrollFollowEnd"] == "true", let sv = scroll else { return }
+        defer { followedScroll = nil; readingAnchors.removeAll(keepingCapacity: true); scrollAnchor = nil }
+        guard props["scrollFollowEnd"] == "true", let sv = scroll else {
+            if let sv = scroll { restoreScrollAnchor(sv) }
+            return
+        }
         let minimum = -sv.adjustedContentInset.top
         let maximum = max(minimum, sv.contentSize.height + sv.adjustedContentInset.bottom - sv.bounds.height)
         let prior = followedScroll ?? (top: maximum, end: true)

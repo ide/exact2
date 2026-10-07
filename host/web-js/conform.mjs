@@ -23,6 +23,13 @@
 //   plan whose first lines say `// data: <app>` runs on that app's dist
 //   instead, for its sources and the capabilities it links; one that says
 //   `// agent: timeZone=<zone> epoch=<ms>` is driven with those facts.
+//   Every page freezes media time (`mediaClock: 'frozen'`: rate 0 from a
+//   media element's first load): a playing video would otherwise follow the
+//   wall clock, so two pages read different positions; play, pause and seeks
+//   still happen as the app drives them. In --browser mode both engines also
+//   take a fixed body line height (scripts/agent-launch.mjs `parityScript`),
+//   since `line-height: normal` is each engine's own font metric; authored
+//   line heights still compare.
 //   --linux adds a second reference beside the wasm page: the Rust runner
 //   headless on the Linux host (`agent.mjs linux`, the data app's release
 //   binary, built by --build), driven by the same steps on the same plan,
@@ -262,14 +269,18 @@ async function drive(t, report, fail, dir, ws, js) {
     // A plan's `// agent: timeZone=… epoch=…` line: the drive's facts, on both.
     const facts = Object.fromEntries([...(t.contract ? /^\/\/ agent: (.*)$/m.exec(readFileSync(t.contract, 'utf8'))?.[1] ?? '' : '').matchAll(/(\w+)=(\S+)/g)].map(([, k, v]) => [k, k === 'epoch' ? Number(v) : v]));
     if (crossBrowser) {
-      try { J = await open({ host: 'web', browser: crossBrowser, app: t.app, ...facts, url: js.url }); }
+      // Both engines hold media time and the default line height equal (agent-launch.mjs `parityScript`):
+      // `line-height: normal` is each engine's own font metric (Firefox 20 px where Chrome is 18 at 16px
+      // system-ui, in plain HTML), so the comparison measures what the page does, not the font's metric.
+      const parity = { mediaClock: 'frozen', lineHeight: '1.2' };
+      try { J = await open({ host: 'web', browser: crossBrowser, app: t.app, ...facts, url: js.url, ...parity }); }
       catch (e) { return fail(`${other}-open`, e.message.replace(/\s+/g, ' ').trim()); }
-      try { W = await open({ host: 'web', browser: 'chrome', app: t.app, ...facts, url: t.urls ? ws.url : js.url }); }
+      try { W = await open({ host: 'web', browser: 'chrome', app: t.app, ...facts, url: t.urls ? ws.url : js.url, ...parity }); }
       catch (e) { return fail(`${reference}-open`, e.message.replace(/\s+/g, ' ').trim()); }
     } else {
-      try { W = await open({ host: 'web', browser: 'chrome', app: t.app, ...facts, ...(t.contract ? { webDist: t.wasm, plan: t.plan } : { url: ws.url }) }); }
+      try { W = await open({ host: 'web', browser: 'chrome', app: t.app, ...facts, ...(t.contract ? { webDist: t.wasm, plan: t.plan } : { url: ws.url }) , mediaClock: 'frozen' }); }
       catch (e) { return fail(`${reference}-open`, e.message.split('\n')[0]); }
-      try { J = await open({ host: 'web', browser: 'chrome', app: t.app, ...facts, url: js.url }); }
+      try { J = await open({ host: 'web', browser: 'chrome', app: t.app, ...facts, url: js.url , mediaClock: 'frozen' }); }
       catch (e) { return fail(`${other}-open`, e.message.split('\n')[0]); }
     }
     const linux = crossBrowser || t.urls ? null : linuxFor(t);
@@ -390,7 +401,7 @@ async function drive(t, report, fail, dir, ws, js) {
     let diverged = false;
     if (existsSync(script)) for (const line of readFileSync(script, 'utf8').split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('#'))) {
       const [op, target, ...rest] = line.split(/\s+/);
-      const run = s => op === 'tap' ? s.tap(target) : op === 'menu' ? s.tap(target, { contextmenu: true }) : op === 'type' ? s.type(target, rest.join(' ')) : op === 'key' ? s.type(target, { key: rest[0] }) : op === 'clock' ? s.clock(target) : op === 'back' ? s.tap(target, { history: -1 }) : op === 'wheel' ? s.tap(target, { wheel: [Number(rest[1] ?? 0), Number(rest[0])] }) : op === 'into' ? s.tap(target, { into: { key: rest[0], ...(rest[1] ? { block: rest[1] } : {}) } }) : op === 'pinch' ? s.tap(target, { pinch: Number(rest[0]) }) : op === 'down' ? s.tap(target, { down: true }) : op === 'up' ? s.pointer('up') : op === 'move' ? s.pointer('move', { dx: Number(target), dy: Number(rest[0]), ms: Number(rest[1] ?? 200) }) : op === 'drag' && rest[0] === 'to' ? s.tap(target, { drag: { to: rest[1], over: Number(rest[2] ?? 200) } }) : op === 'drag' && rest[3] === 'hold' ? s.tap(target, { drag: { dx: Number(rest[0]), dy: Number(rest[1]), over: Number(rest[2]), hold: Number(rest[4]) } }) : op === 'drag' ? s.tap(target, { down: true }).then(() => s.pointer('move', { dx: Number(rest[0]), dy: Number(rest[1]), ms: Number(rest[2] ?? 200) })).then(() => s.pointer('up')) : op === 'mediasession' ? s.tap(target, { mediaSession: rest[0], ...(rest[1] != null ? { seconds: Number(rest[1]) } : {}) }) : op === 'prefer' ? s.prefer(Object.fromEntries([target, ...rest].flatMap((a, i, all) => i % 2 ? [] : [[a, all[i + 1]]]))) : Promise.reject(new Error(`unknown op ${op}`));
+      const run = s => op === 'tap' ? s.tap(target) : op === 'menu' ? s.tap(target, { contextmenu: true }) : op === 'type' ? s.type(target, rest.join(' ')) : op === 'key' ? s.type(target, { key: rest[0], ...(rest[1] === 'for' ? { for: Number(rest[2]) } : rest[1] ? { phase: rest[1] } : {}) }) : op === 'clock' ? s.clock(target) : op === 'back' ? s.tap(target, { history: -1 }) : op === 'wheel' ? s.tap(target, { wheel: [Number(rest[1] ?? 0), Number(rest[0])] }) : op === 'into' ? s.tap(target, { into: { key: rest[0], ...(rest[1] ? { block: rest[1] } : {}) } }) : op === 'pinch' ? s.tap(target, { pinch: Number(rest[0]) }) : op === 'down' ? s.tap(target, { down: true }) : op === 'up' ? s.pointer('up') : op === 'move' ? s.pointer('move', { dx: Number(target), dy: Number(rest[0]), ms: Number(rest[1] ?? 200) }) : op === 'drag' && rest[0] === 'to' ? s.tap(target, { drag: { to: rest[1], over: Number(rest[2] ?? 200) } }) : op === 'drag' && rest[3] === 'hold' ? s.tap(target, { drag: { dx: Number(rest[0]), dy: Number(rest[1]), over: Number(rest[2]), hold: Number(rest[4]) } }) : op === 'drag' ? s.tap(target, { down: true }).then(() => s.pointer('move', { dx: Number(rest[0]), dy: Number(rest[1]), ms: Number(rest[2] ?? 200) })).then(() => s.pointer('up')) : op === 'mediasession' ? s.tap(target, { mediaSession: rest[0], ...(rest[1] != null ? { seconds: Number(rest[1]) } : {}) }) : op === 'prefer' ? s.prefer(Object.fromEntries([target, ...rest].flatMap((a, i, all) => i % 2 ? [] : [[a, all[i + 1]]]))) : Promise.reject(new Error(`unknown op ${op}`));
       // Playwright cannot make trusted phased touches in Firefox/WebKit.
       // Skip before resolving a target or touching either page; the carrier's
       // named, side-effect-free refusals are exercised by agent.test.mjs.

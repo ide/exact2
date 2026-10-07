@@ -127,6 +127,8 @@ final class NodeView: NSView, NSTextViewDelegate, NSTextFieldDelegate {
     /// While it flies as a shared element (LLP 1013.000 D4): where its image is drawn.
     var flightLook: FlightLook?
     var materialView: NSView?
+    /// The backdrop blur's σ and mirrored box as last set (`Backdrop.swift`).
+    var backdropDrawn: BackdropDrawn?
     /// `glassGroup`'s view and a grouped glass's isolation (`GlassGroup.swift`).
     var glassGroupView: NSView?
     var glassIsolation: NSView?
@@ -817,9 +819,9 @@ final class NodeView: NSView, NSTextViewDelegate, NSTextFieldDelegate {
     // display:none removes the CSS box, but retains its stored scroll position.
     // UIKit/AppKit collapse the native extent; keep that transient reset out of
     // scroll events and restore only when the box returns.
-    private var beforeLayoutScroll: CGPoint?
+    var beforeLayoutScroll: CGPoint?
     private var hiddenScroll: CGPoint?
-    private var hasScrollLayoutBox: Bool {
+    var hasScrollLayoutBox: Bool {
         var ancestor: NSView? = self
         while let current = ancestor {
             if let node = current as? NodeView, node.style["display"]?.string == "none" { return false }
@@ -829,24 +831,8 @@ final class NodeView: NSView, NSTextViewDelegate, NSTextFieldDelegate {
     }
 
     var followedScroll: (top: CGFloat, end: Bool)?
-    func captureScrollPosition() {
-        beforeLayoutScroll = scroll?.contentView.bounds.origin
-        followedScroll = nil
-        guard props["scrollFollowEnd"] == "true", let sv = scroll, let doc = sv.documentView else { return }
-        let maximum = max(0, doc.bounds.height - sv.contentView.bounds.height)
-        followedScroll = (sv.contentView.bounds.minY, sv.contentView.bounds.minY >= maximum - 1)
-    }
-    func restoreScrollPosition() {
-        defer { followedScroll = nil }
-        guard props["scrollFollowEnd"] == "true", let sv = scroll, let doc = sv.documentView else { return }
-        let maximum = max(0, doc.bounds.height - sv.contentView.bounds.height)
-        let prior = followedScroll ?? (top: maximum, end: true)
-        let y = prior.end ? maximum : min(maximum, max(0, prior.top))
-        if sv.contentView.bounds.minY != y {
-            sv.contentView.scroll(to: NSPoint(x: sv.contentView.bounds.minX, y: y))
-            sv.reflectScrolledClipView(sv.contentView)
-        }
-    }
+    /// The scroll anchor chosen before a batch (`ScrollAnchoringMac.swift`).
+    var scrollAnchor: (node: NodeView, y: CGFloat)?
     func applyPendingScroll() {
         defer { pendingScrollTop = nil; pendingScrollLeft = nil }
         guard let sv = scroll, let doc = sv.documentView else { return }
@@ -1158,6 +1144,13 @@ final class NodeView: NSView, NSTextViewDelegate, NSTextFieldDelegate {
     /// differing radii clip to the bounds, as UIKit's layer path does. The
     /// box's own layer paint decides the radius with it (`applyBoxLayer`).
     func applyClipRadius() { applyBoxLayer() }
+
+    /// A backdrop mirrors its box where its parent hands it the backdrop.
+    override func setFrameOrigin(_ newOrigin: NSPoint) {
+        let moved = newOrigin != frame.origin
+        super.setFrameOrigin(newOrigin)
+        if moved, number("backdrop_blur") > 0 { applyBackdrop() }
+    }
 
     /// The reduction depends on the size, which the kernel's layout sets
     /// after the style.

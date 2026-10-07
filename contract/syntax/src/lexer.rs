@@ -224,30 +224,26 @@ impl Lexer {
                 }
                 let span = col_of(pos);
                 // A vendor-prefixed CSS name, as the Compat Standard spells
-                // some (`-webkit-text-stroke`, LLP 1077 D7): the two
-                // prefixes only, and only as an attribute's name (followed
-                // by `=`), so `-webkit-x` in an expression stays a negation.
-                // Exact's own (`-exact-apple-button-style`), after a space,
-                // so a negated name (`-x`) is never one, and the Compat ones:
-                let vendor = (c == '-'
-                    && trimmed[pos..].starts_with("-exact-")
-                    && (pos == 0 || bytes[pos - 1] == b' '))
-                    || ["-webkit-", "-apple-"].iter().any(|p| {
-                        trimmed[pos..].starts_with(p)
-                            && bytes
-                                .get(pos + p.len())
-                                .is_some_and(|n| (*n as char).is_ascii_alphabetic())
-                            && {
-                                let rest = &trimmed[pos + 1..];
-                                let end = rest
-                                    .find(|c: char| {
-                                        !(c.is_ascii_alphanumeric() || c == '-' || c == '_')
-                                    })
-                                    .unwrap_or(rest.len());
-                                let after = rest[end..].trim_start_matches([' ', '\t']);
-                                after.starts_with('=') && !after.starts_with("==")
-                            }
-                    });
+                // some (`-webkit-text-stroke`, LLP 1077 D7), or one Exact
+                // invents (`-exact-press-scale`, LLP 1081 D7): these prefixes
+                // only, and only as an attribute's name (followed by `=`),
+                // so `-webkit-x` in an expression stays a negation.
+                let vendor = ["-webkit-", "-apple-", "-exact-"].iter().any(|p| {
+                    trimmed[pos..].starts_with(p)
+                        && bytes
+                            .get(pos + p.len())
+                            .is_some_and(|n| (*n as char).is_ascii_alphabetic())
+                        && {
+                            let rest = &trimmed[pos + 1..];
+                            let end = rest
+                                .find(|c: char| {
+                                    !(c.is_ascii_alphanumeric() || c == '-' || c == '_')
+                                })
+                                .unwrap_or(rest.len());
+                            let after = rest[end..].trim_start_matches([' ', '\t']);
+                            after.starts_with('=') && !after.starts_with("==")
+                        }
+                });
                 if c.is_ascii_alphabetic() || c == '_' || vendor {
                     // An identifier may contain hyphens — `font-size`,
                     // `aria-label` — as CSS's do; so, as in CSS `calc()`,

@@ -56,6 +56,8 @@ final class Presenter {
     let glassGroups = GlassGroups()
     /// Views with an authored offset waiting for their frames.
     var pendingScrolls: Set<UInt32> = []
+    /// The batch's suppression triggers for scroll anchoring (`ScrollAnchoring.swift`).
+    var anchorChanges = ScrollAnchoring.Changes()
     var heightBindings: [UInt32: HeightDragBinding] = [:]
     var transformBindings: [UInt32: TransformDragBinding] = [:]
     lazy var transformGeometry = TransformGeometryHost(self)
@@ -684,7 +686,8 @@ final class Presenter {
     var onHover: ((UInt32, Bool) -> Void)?
     var onFocus: ((UInt32) -> Void)?
     var onBlur: ((UInt32) -> Void)?
-    var onKey: ((UInt32, String) -> Void)?
+    /// A `key` or `keyup` (`KeyPress.up`) at a node (KeyEvents.swift).
+    var onKey: ((UInt32, KeyPress) -> Void)?
     var onClipboard: ((UInt32, UInt32, String) -> Void)?
     /// A `text`'s part of the selection changed: its text and source offsets.
     var onSelectionChange: ((UInt32, String, Int, Int) -> Void)?
@@ -862,7 +865,7 @@ final class Presenter {
     }
     func focus(_ id: UInt32) { send(id) { [self] in onFocus?(id) } }
     func blur(_ id: UInt32) { send(id) { [self] in onBlur?(id) } }
-    func key(_ id: UInt32, _ name: String) { send(id) { [self] in onKey?(id, name) } }
+    func key(_ id: UInt32, _ press: KeyPress) { send(id) { [self] in onKey?(id, press) } }
     func clipboard(_ id: UInt32, _ kind: UInt32, _ text: String) { send(id) { [self] in onClipboard?(id, kind, text) } }
     func selectionChange(_ id: UInt32, _ text: String, _ start: Int, _ end: Int) { send(id) { [self] in onSelectionChange?(id, text, start, end) } }
     func contextmenu(_ id: UInt32) { send(id) { [self] in onContextmenu?(id) } }
@@ -898,6 +901,7 @@ final class Presenter {
         viewport.invalidateDocumentFit()
         collections.beginBatch(batch)
         toolbar.prepare()
+        anchorChanges.reset()
         for id in scrollers where !collections.owns(id) { views[id]?.captureScrollPosition() }
         if let e = batch.error { FileHandle.standardError.write(Data("exact: \(e)\n".utf8)) }
         if let text = session?.text {
@@ -990,8 +994,9 @@ final class Presenter {
                 views[id]?.applyFlow(op.payload["shapes"] as? [[String: Any]] ?? [])
             case .style:
                 guard let v = views[id] ?? leaving[id]?.view else { continue }
-                let color = v.style["text_color"]
+                let color = v.style["text_color"], old = v.style
                 v.applyStyle(op.style)
+                anchorChanges.note(id, from: old, to: v.style)
                 if v.surface != nil { v.applySurface() }
                 // Paint motion re-sends a style per frame (LLP 1055.000 D6);
                 // a view that paints in an appearance of its own says so

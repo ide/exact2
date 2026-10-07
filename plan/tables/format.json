@@ -732,6 +732,7 @@
       "nexttrack",
       "stop",
       "fullscreenchange",
+      "keyup",
       "traverse"
     ]
   },

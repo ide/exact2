@@ -420,6 +420,50 @@ read the starting cell, and the last write wins. Calls in exclusive branches
 A derive is not mutable storage, an async effect, or a timer. Derive cycles are
 refused. Avoid unnecessary state that can be calculated from existing values.
 
+### Editing a value: the field's contract
+
+A text field is re-set only when what its `value` binding reads changes, never
+after each keystroke (React writes the bound value back; Exact does not, so a
+half-typed `-` or `1.` survives). That makes the contract:
+
+- **while editing**, the field is bound to raw text in state that `input`
+  always writes;
+- **validation** reads the parsed value (`parseNumber`, a trim, a length) and
+  shows a hint, without touching the text;
+- **on commit** (`change`, which a text field fires on Enter and on blur), the
+  action writes the accepted value and writes the normalized text back into the
+  draft, which changes the binding and redraws the field.
+
+A field bound straight to the accepted value breaks this: an action that
+normalizes `-2` to the `0` it already held leaves the binding unchanged, so the
+field keeps showing `-2`.
+
+```contract
+component Quantity
+  state count = 1
+  state draft = "1"
+  action edit(text: string)
+    draft = text
+  action commit(text: string)
+    match parseNumber(text)
+      case some(n)
+        count = max(0, round(n))
+        draft = `${max(0, round(n))}`
+      case none
+        draft = `${count}`
+  view
+    column gap=8
+      input value=draft input=edit change=commit inputmode="numeric" aria-label="Quantity" testId="qty"
+      text (match parseNumber(draft) { case some(n) => (n < 0 ? "Must be 0 or more" : ""), case none => "Enter a number" }) testId="qty-hint"
+      text `Ordered: ${count}` testId="qty-count"
+```
+
+`type "qty" "-2"` leaves `-2` in the field with the hint; `type "qty" key
+"Enter"` commits, and the field reads `0`. A checkbox bound to a resource's
+field follows the same rule from the other side: it shows the resource's value,
+so it snaps back until the save answers and the resource is read again (LLP 1102
+§3.16).
+
 ## Composition and lifetime
 
 The first component is the root. Each component use is `Name(prop=value, …)`.
@@ -711,7 +755,7 @@ drawn title bar) is a bug. On iOS:
 | `input type="range"` | `UISlider` |
 | `input type="date"`, `"time"`, `"datetime-local"` | `UIDatePicker` |
 | `select` of `option`s | a pop-up button with its menu |
-| `popover="auto" role="menu"` of `button`s, opened by `popovertarget` | `UIMenu` (LLP 1021) |
+| `popover="auto" role="menu"` of `button`s, opened by `popovertarget` (a row whose `popovertarget` names another menu: its submenu) | `UIMenu`, nested (LLP 1021) |
 | `role="tablist"`: each tab a symbol over a label / one text or image | `UITabBar` / `UISegmentedControl`, the tablist at least its native height unless `min-height` says otherwise (LLP 1059) |
 | a route whose first child is a `header` holding one heading and its buttons | the navigation bar; a level-1 heading (`aria-level=1`) is a large title |
 | a route with `navigationPresentation="modal"` | a sheet |
@@ -1123,8 +1167,8 @@ in the viewer's zone, format it in TypeScript with
 `new Intl.DateTimeFormat(time.locale, { timeZone: time.timeZone })`.
 
 Use admitted CSS transitions and keyframes. Check which properties animate and
-which require optional capabilities. `spring(…)` (a `transition` timing
-function), `exit-animation`, `layout-transition`, and presentation timelines have
+which require optional capabilities. `-exact-spring(…)` (a `transition` timing
+function), `-exact-exit-animation`, `-exact-layout-transition`, and presentation timelines have
 specific documented behavior;
 they do not admit arbitrary frame callbacks or a second app-state graph.
 
@@ -1150,6 +1194,15 @@ lifting and the preview popping into the screen its press pushes; macOS an
 the node. The node's own `contextmenu` action runs first, so one popover can
 serve every row of a list. The agent opens it with `tap <node> contextmenu`
 ([LLP 1021](../llp/1021-menus.rfc.md) §5.1).
+
+A submenu is a row whose `popovertarget` names another menu popover (`Copy ▸
+path / link`): a submenu `NSMenuItem` on macOS, a nested `UIMenu` on iOS, and
+on the web and under the agent the nested popover, opened by `tap <row>`. Place
+it beside its row with `position-area="right span-bottom"`; give its items
+`popovertarget="<outer menu id>" popovertargetaction="hide"` so a choice closes
+the whole menu; write no `press` on the row that opens it (a native menu never
+runs it); and draw the web's `›` as an `aria-hidden` text, since the native
+menus draw their own arrow ([LLP 1021](../llp/1021-menus.rfc.md) §5.2).
 
 `frame(id)` and `measure("literal-id")` are action-only geometry reads returning
 `Geometry` (`x`, `y`, `width`, `height`, `provisional`, `unavailable`). Handle `unavailable` and `provisional`. `frame` reads the last layout's border box
@@ -1177,9 +1230,9 @@ and `inert`; any other known name (`color`, `value`, `command`, `href`) is refus
 so give the module prop another name. Do not
 turn a missing widget or canvas operation into invented Contract syntax.
 
-Haptics are already there (LLP 1077 D14). `press-haptic` (`selection`,
+Haptics are already there (LLP 1077 D14). `-exact-press-haptic` (`selection`,
 `impact-light|medium|heavy|soft|rigid`) plays at touch-down without a round
-trip, as `press-scale` does. `haptic("selection" | "impact-…" | "success" |
+trip, as `-exact-press-scale` does. `haptic("selection" | "impact-…" | "success" |
 "warning" | "error")` is a host command an action runs, for example when a
 drag crosses a threshold. iOS uses the feedback generators; the web vibrates
 where it can; Linux does nothing.
@@ -1198,7 +1251,12 @@ stored size again. Do not multiply a scale factor into every size instead.
 
 Platform facts are reserved sources (`exactViewport`, `exactPage`, `exactDelivery`,
 `exactSurface`, `exactTime`); the bake refuses a declared field the source does
-not have. Use dimensions, media preferences, page facts,
+not have. `exactPage` answers `visibilityState`, `onLine`, `canShare`,
+`canOpenFiles` and `hasFocus` (`document.hasFocus()`: the app's window has the
+system's focus; false while another app or window is in front, so an app can
+choose an in-window message over a system notification). Under the agent each
+is the drive's (`prefer has-focus false`; `state.device`). Use dimensions,
+media preferences, page facts,
 and capability state rather than suffixing files by platform. Preference facts
 inform authored policy; the engine does not automatically remove all motion.
 
@@ -1367,6 +1425,15 @@ test "the list shows an error, then retries and loads"
   expect tree has "recipes"
 ```
 
+A slow server is bounded in the source, not the view: `fetch(url, {
+exactTimeout: 10000 })` cancels the exchange after 10 s (headers and body) and
+rejects with a `FetchError` of kind `"Timeout"`, which the source catches and
+answers as any failure (a Rust source's request takes `Request::timeout(ms)`).
+Without it a stalled fetch waits the platform's limit (60 s without data on
+Apple). Test the error state with `fail fetch`, as above; a timeout itself is
+tested against a stand-in server that never answers (the reference's
+"exactTimeout").
+
 A test whose text depends on the date names its `epoch`; without one it runs at
 the driver's 2026-01-01 UTC. The steps are `tap "id" [hover|dblclick|contextmenu]`,
 `tap "id" modifiers "Shift+Meta"` (a press with keys held),
@@ -1386,7 +1453,9 @@ swipe, where the web's tap scrolls the row to it, and `--touch platform`, as in
 `bun exact.mjs test ios --touch platform`, makes every tap a real touch),
 `type "id" "text"` (sets the value), `type "id" "text" append` (after the value
 the tree shows, as typing after a prefill), or `type "id" key "Name"`
-(`down`, `up`, or `for <ms>` on the virtual clock),
+(`down`, `up` — its `keyup` handlers hear it — or `for <ms>` on the virtual
+clock, repeating as a held key does: a keydown with `repeat` true 500 ms after
+the down, then every 83 ms),
 `type "id" paste "text"` (⌘V on macOS, Ctrl+V elsewhere, then the paste; a `key` handler that `preventDefault()`s that chord keeps it from landing), `type "id" copy`, `type "id" cut`, `pick "id" "path"…` or
 `pick "id" cancel` (a held picker or export, by its node or capability as
 above; paths are the test file's), `clock settle|data|+ms|+ms real|ms` (`data`:
@@ -1421,7 +1490,8 @@ focuses the target if it takes the focus (else leaves the focus where it is)
 and presses the key as a keyboard would on every host: its `key` handlers,
 then its default — `"7"` types into a field, `"Enter"` submits it (a
 textarea's breaks the line), `"Space"` presses a button, `"r"` reaches an
-`aria-keyshortcuts="r"` button. A chord holds its modifiers for the key, in
+`aria-keyshortcuts="r"` button — then releases it through the `keyup`
+handlers at the focus. A chord holds its modifiers for the key, in
 Playwright's spelling: `"Shift+Enter"`, `"Meta+s"`, `"Control+Alt+ArrowLeft"`
 ([keys](contract-grammar.md#keys)). Not every interactive
 driver operation is a test-file statement. `contract test` parses and prints JSON;
@@ -1516,10 +1586,10 @@ keyframes interpolate the two parts as CSS does a `calc()`. `calc()` itself is
 refused.
 
 Transitions animate translate/scale/rotate/opacity, box paint (color,
-background-color, border colors, tint-color, box-shadow), SVG paint/geometry
+background-color, border colors, -exact-tint-color, box-shadow), SVG paint/geometry
 and the admitted numeric height path. `width` and other general layout
 properties cannot interpolate yet: native layout is not run per frame.
-The diagnostic names this engine limit; `layout-transition` animates a
+The diagnostic names this engine limit; `-exact-layout-transition` animates a
 change in the laid-out box using the existing measured projection.
 
 `cursor` takes CSS cursor keywords (`pointer`, `grab`, `grabbing`, etc.) and
@@ -1607,7 +1677,7 @@ status bar: of what the bar sits over, the declaration painted on top wins, and
 a flip shows in its own batch's frame; `status-bar-animation="fade"` fades it
 (LLP 1105). Other hosts ignore both.
 `currentcolor` takes the node's `color` on borders, `background-color`,
-`tint-color`, text stroke and SVG paint. `unset` clears any row, and `inherit`
+`-exact-tint-color`, text stroke and SVG paint. `unset` clears any row, and `inherit`
 an inherited one (`color`, fonts, `fill`…); `inherit` on a row CSS does not
 inherit is refused. `order` places flex and grid items. An image's accessible
 name is `alt` or `aria-label`; `enterkeyhint` labels a soft keyboard's enter

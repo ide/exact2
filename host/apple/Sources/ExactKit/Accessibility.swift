@@ -127,6 +127,15 @@ extension NodeView {
 /// the ARIA states AppKit has no property for (`NodeView.ariaAttribute`),
 /// read from the node that holds the field.
 final class FieldCell: NSTextFieldCell {
+    private lazy var clipboardEditor: FieldEditor = {
+        let editor = FieldEditor(frame: .zero)
+        editor.isFieldEditor = true
+        return editor
+    }()
+    /// Its own editor while a clipboard event would be heard (`FieldEditor`, #125).
+    override func fieldEditor(for controlView: NSView) -> NSTextView? {
+        (controlView.superview as? NodeView)?.hearsFieldClipboard() == true ? clipboardEditor : super.fieldEditor(for: controlView)
+    }
     override func accessibilityAttributeNames() -> [NSAccessibility.Attribute] {
         super.accessibilityAttributeNames() + NodeView.ariaAttributes.filter { (controlView?.superview as? NodeView)?.ariaAttribute($0) != nil }.map { .init(rawValue: $0) }
     }
@@ -435,6 +444,8 @@ extension Presenter {
     func focusPlace(tree json: String) -> FocusPlace? {
         focusedNode.flatMap { FocusTree(json)?.place(of: $0.id) }
     }
+    /// A booted session's launch autofocus has not run yet: the agent's settle waits for it.
+    var launchAutofocusPending: Bool { session?.booted == true && !launchAutofocusReleased }
     /// Runs a booted session's first autofocus the turn after its first activation, as UIKit apps focus
     /// in `viewDidAppear`. Showing the iOS keyboard or AppKit field editor earlier delays that frame.
     func releaseLaunchAutofocus() {

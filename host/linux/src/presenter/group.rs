@@ -19,7 +19,7 @@ const BAND: f32 = 24.;
 const SPEED: f32 = 300.;
 /// The lifted look, the same on every host (D6).
 const LIFTED: f32 = 1.03;
-/// The ghost's return: the preview's `spring(300,30,1)`.
+/// The ghost's return: the preview's `-exact-spring(300,30,1)`.
 const SPRING: SpringConfig = SpringConfig {
     stiffness: 300.,
     damping: 30.,
@@ -116,6 +116,10 @@ impl<D: DataSource> Presenter<D> {
             self.finish_group();
         }
         if self.group.is_some() || self.arrange.is_some() {
+            // Said, as the web says it (LLP 1102 §3.17): a drive's reply reads like a success otherwise.
+            if self.group.is_some() {
+                self.host.log("reorder: a drag refused: the last drop is held until its move shows (LLP 1094 D8); a person waits for the card to land; a drive waits with `clock settle` before the next drag".to_string());
+            }
             return Ok(false);
         }
         let Some(group) = self.group_of(&binding) else {

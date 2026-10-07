@@ -221,7 +221,7 @@ impl<'a> Reader<'a> {
         match self.u8()? {
             0 => Ok(ColorValue::Fixed(self.color()?)),
             1 => Ok(ColorValue::LightDark(self.color()?, self.color()?)),
-            // @ref LLP 1095 D1 — a role by id, a `platform-color()` as written.
+            // @ref LLP 1095 D1 — a role by id, a `-exact-platform-color()` as written.
             2 => match self.u8()? {
                 i if (i as usize) < crate::generated::COLOR_ROLES.len() => Ok(ColorValue::Role(i)),
                 _ => Err(DecodeError::BadColorValue(2)),
@@ -705,7 +705,7 @@ mod tests {
         // schema. The literal makes an accidental removal of that coupling a
         // test failure whenever the byte snapshot above is intentionally moved.
         // Recomputed when the schema changes; the digest test prints the value.
-        assert_eq!(SCHEMA_DIGEST, 0xe457_036e_8e5f_569f);
+        assert_eq!(SCHEMA_DIGEST, 0xffaa_f532_2451_b120);
     }
 
     #[test]

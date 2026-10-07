@@ -318,7 +318,7 @@ fn check_tasks(c: &Component) -> Result<(), AnalyzeError> {
 
 /// The handler attributes (the web's events, LLP 1005 §3): `press`,
 /// `change`, `input`, `hover`, `focus`, `blur`, `key`, `submit`, `load`, `message`.
-pub const HANDLERS: [&str; 59] = [
+pub const HANDLERS: [&str; 60] = [
     "press",
     "change",
     "input",
@@ -329,6 +329,9 @@ pub const HANDLERS: [&str; 59] = [
     "focus",
     "blur",
     "key",
+    // DOM's `keyup`: the key's release, a modifier's included, bubbling as
+    // `key` (keydown) does, with the same name and `KeyboardEvent` (#140).
+    "keyup",
     "submit",
     "load",
     "message",
@@ -417,7 +420,7 @@ pub fn is_handler(name: &str, value: &Expr) -> bool {
 /// may then offer its record ([`contract_types::event_record`]).
 pub fn handler_payload(attr: &str) -> Option<&'static str> {
     match attr {
-        "change" | "input" | "key" | "message" | "navigate" | "traverse" | "error" => {
+        "change" | "input" | "key" | "keyup" | "message" | "navigate" | "traverse" | "error" => {
             Some("string")
         }
         "timeupdate" | "durationchange" => Some("number"),

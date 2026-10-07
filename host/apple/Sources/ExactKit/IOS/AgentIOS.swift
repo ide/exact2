@@ -98,7 +98,7 @@ extension Agent {
         // `scrollIntoView`) is UIKit's scroll animation under platform timing
         // (LLP 1070.000 §11): the fixed point is where it lands, within
         // settle's bound (LLP 1035.003 D5).
-        if !presenter.collections.animating.isEmpty || session.natives.activationQueued { return true }
+        if !presenter.collections.animating.isEmpty || session.natives.activationQueued || presenter.launchAutofocusPending { return true }
         guard let editor = pendingTextReveal else { return false }
         guard let node = editor.owner, presenter.views[node.id] === node,
               node.textArea === editor, !presenter.navigation.isInactiveRoute(containing: node),
@@ -818,15 +818,25 @@ extension Agent {
             else if let f = v.field { if !f.isFirstResponder { _ = f.becomeFirstResponder() } }
             else if v.canBecomeFirstResponder, !v.isFirstResponder { _ = v.becomeFirstResponder() }
             let focus = v.field != nil || v.textArea != nil || v.isFirstResponder || v.activatable ? v : nil
+            // The release's `keyup` handlers at the focus (#140): after the
+            // down, or when a held key comes up. A modifier's own keydown
+            // holds it and its keyup no longer does, as DOM's.
+            let phase = req["phase"] as? String, code = device.code, lone = KeyCodes.modifier(code)
+            let downHeld = lone ? KeyCodes.held(held, name, true) : held, upHeld = lone ? KeyCodes.held(held, name, false) : held
+            let heardUp = { [weak presenter, weak focus] in _ = presenter?.keyUp(at: focus, name, held: upHeld, code: code) }
+            defer {
+                if phase != "down" { heardUp() }
+                if phase == "down", let token = req["releaseKey"] as? String { keyReleases[token] = { heardUp(); return ["phase": "up", "delivery": "recognized"] } }
+            }
             // The page's shortcuts first, as the web's capture listener and
             // macOS's `routeKey` hear them (gallery F18, ShortcutsIOS).
             #if os(iOS)
-            if req["phase"] as? String != "up", let node = presenter.shortcut(key: name, held: held, focus: focus ?? presenter.focusedNode) {
+            if phase != "up", let node = presenter.shortcut(key: name, held: held, focus: focus ?? presenter.focusedNode) {
                 presenter.press(node.id)
                 return ["typed": Int(v.id), "key": key, "shortcut": Int(node.id), "delivery": "recognized"]
             }
             #endif
-            if req["phase"] as? String != "up", !presenter.keyDown(at: focus, name, held: held), let focus {
+            if phase != "up", !presenter.keyDown(at: focus, name, held: downHeld, code: code, repeats: req["repeat"] as? Bool == true), let focus {
                 if let f = focus.textArea {
                     if name == "Enter" { f.insertText("\n") } else if name == "Backspace" { f.deleteBackward() }
                     else if Agent.caretKey(name, in: f) {} else if types { f.insertText(name) }
@@ -934,6 +944,13 @@ extension Agent {
         var r: [String: Any] = ["screenshot": path, "w": Agent.r2(size.width), "h": Agent.r2(size.height), "scale": Agent.r2(scale)]
         if req["window"] as? Bool == true { r["window"] = true }
         if loading > 0 { r["imagesPending"] = loading }
+        // The software keyboard is not in the capture and the app may stand above it (LLP 1102 §3.17):
+        // say so, where the image alone reads as a shortened screen.
+        let container = session.presenter.modals.coordinateView ?? session.view
+        if let top = container.flatMap({ session.presenter.keyboardGuideTop(in: $0) }) {
+            r["keyboard"] = ["visible": true, "top": Agent.r2(top)]
+            r["note"] = "the software keyboard is up: it is not in the capture, and the app above it may be shortened (state shows keyboard.top)"
+        }
         return r
     }
 

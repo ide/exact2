@@ -396,6 +396,7 @@ public final class Agent {
             case ("online", "true"), ("online", "false"): facts.onLine = value == "true"
             case ("can-share", "true"), ("can-share", "false"): facts.canShare = value == "true"
             case ("can-open-files", "true"), ("can-open-files", "false"): facts.canOpenFiles = value == "true"
+            case ("has-focus", "true"), ("has-focus", "false"): facts.hasFocus = value == "true"
             case ("root-font-size", _) where (Double(value) ?? 0) > 0 && Double(value)!.isFinite: facts.rootFontSize = Double(value)!
             default: return ["error": "prefer: \(name): \(value) is not a page fact this host sets"]
             }
@@ -419,7 +420,8 @@ public final class Agent {
                           "color-gamut": DisplayPreferences.gamut,
                           "dynamic-range": DisplayPreferences.highDynamicRange ? "high" : "standard"],
                 "page": ["visibility-state": PageFacts.hidden ? "hidden" : "visible",
-                         "online": PageFacts.onLine, "can-share": PageFacts.canShare, "can-open-files": PageFacts.canOpenFiles, "root-font-size": PageFacts.rootFontSize],
+                         "online": PageFacts.onLine, "can-share": PageFacts.canShare, "can-open-files": PageFacts.canOpenFiles,
+                         "has-focus": PageFacts.hasFocus(session.view?.window), "root-font-size": PageFacts.rootFontSize],
                 "fold": presenter.fold.env]
     }
 
@@ -559,6 +561,15 @@ public final class Agent {
                 continue
             }
             let next = max(landed, self.settle() ?? landed, world.settleAt ?? landed)
+            // Work the launch queued for a later main-queue turn (module views
+            // after activation's commit, LLP 1024 D3; the launch autofocus,
+            // LLP 1035.000 D9) runs before the fixed point; what it started
+            // (a `load` or focus handler's request) is then checked again.
+            if next <= landed && !world.pending && launchQueued() {
+                rounds += 1
+                if rounds >= 16 || !drainLaunch(until: deadline) { return reply(landed, false, reason: "transition") }
+                continue
+            }
             if next <= landed && !world.pending {
                 // A responder or presentation completion can enqueue a keyboard
                 // resize before its animation exists. Require an idle native turn
@@ -661,6 +672,7 @@ public final class Agent {
         for _ in 0..<16 {
             while !session.dataActivated && Date() < deadline { RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.02)) }
             if !session.dataActivated { return ["clock": from, "settled": false, "reason": "data"] }
+            if !drainLaunch(until: deadline) { return ["clock": from, "settled": false, "reason": "data"] }
             if !waitForReplies(until: deadline) { return ["clock": from, "settled": false, "reason": "requests"] }
             let batch = session.runtime.landThen()
             session.apply(batch)
@@ -679,6 +691,18 @@ public final class Agent {
               let o = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
               let b = o["background"] as? [String: Any] else { return 0 }
         return (b["queued"] as? Int ?? 0) + (b["inFlight"] as? Int ?? 0)
+    }
+
+    /// Whether the launch left work for a later main-queue turn.
+    func launchQueued() -> Bool { session.natives.activationQueued || session.presenter.launchAutofocusPending }
+
+    /// Turn the run loop until that work has run, or until `deadline`.
+    func drainLaunch(until deadline: Date) -> Bool {
+        while launchQueued() {
+            if Date() >= deadline { return false }
+            RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.01))
+        }
+        return true
     }
 
     /// How many requests the runner has in flight (`state.pending`).

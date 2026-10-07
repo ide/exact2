@@ -98,8 +98,8 @@ function runtime(dir) {
   writeFileSync(resolve(dir, 'entry.js'), [
     "import app from './app.js';",
     "import names, { types } from './names.js';",
-    "import { data, journal, clock, advance, Hosts, inflight, Mutations } from './rt.js';",
-    'globalThis.__drive = { app, names, types, data, journal, clock, advance, Hosts, inflight, Mutations };',
+    "import { data, journal, clock, advance, Hosts, inflight, Mutations, Sounds } from './rt.js';",
+    'globalThis.__drive = { app, names, types, data, journal, clock, advance, Hosts, inflight, Mutations, Sounds };',
   ].join('\n'));
 }
 
@@ -124,10 +124,13 @@ async function drive(code, c, hostSources) {
     getComputedStyle: () => ({ getPropertyValue: () => '' }),
     setTimeout, clearTimeout, queueMicrotask, performance, console: quiet, fetch: () => Promise.reject(new Error('no network in a drive')), URL, URLSearchParams, TextEncoder, TextDecoder,
     Event: class {}, CustomEvent: class {}, __exactRender: true,
+    // The render DOM has one element class: the runtime's `instanceof HTML…Element` is a tag check here.
+    ...Object.fromEntries([['HTMLInputElement', 'input'], ['HTMLTextAreaElement', 'textarea'], ['HTMLSelectElement', 'select'], ['HTMLOptionElement', 'option'],
+      ['HTMLButtonElement', 'button'], ['HTMLIFrameElement', 'iframe']].map(([name, tag]) => [name, { [Symbol.hasInstance]: el => el?.localName === tag }])),
   });
   ctx.globalThis = ctx; ctx.self = ctx; ctx.window = ctx;
   vm.runInContext(code, ctx, { filename: 'app.js' });
-  const { app, names, types, data, journal, clock, advance, Hosts, Mutations } = ctx.__drive;
+  const { app, names, types, data, journal, clock, advance, Hosts, Mutations, Sounds } = ctx.__drive;
   const notes = [];
   // The runner's transcript answers every call; one it never made is a divergence.
   const answers = new Map(c.answers.map(([source, args, answer]) => [source + key(decode(args)), answer]));
@@ -150,6 +153,21 @@ async function drive(code, c, hostSources) {
   let commands = [];
   const record = name => (...args) => { commands.push(`command ${name}${args.map(a => ' ' + untyped(a)).join('')}`); };
   for (const k of Object.keys(Hosts)) Hosts[k] = record(k);
+  // The voice table's commands are the runtime's own (rt.js `Sounds.own`): they reach `Sounds.apply`
+  // with the commit's whole command list, in order, not `Hosts`. Record the list as the runner does:
+  // the host commands just recorded from it are replaced by the whole of it.
+  let applySounds = Sounds.apply;
+  Object.defineProperty(Sounds, 'apply', {
+    configurable: true,
+    get: () => cmds => {
+      if (cmds.some(([name]) => Sounds.own.has(name))) {
+        const hosts = cmds.filter(([name]) => !Sounds.own.has(name)).length;
+        commands.splice(commands.length - hosts, hosts, ...cmds.map(([name, args]) => `command ${name}${args.map(a => ' ' + untyped(a)).join('')}`));
+      }
+      return applySounds?.(cmds);
+    },
+    set: f => { applySounds = f; },
+  });
   Object.setPrototypeOf(Hosts, new Proxy({}, { get: (_, name) => typeof name === 'string' ? record(name) : undefined }));
 
   const out = ['== boot'];
@@ -168,9 +186,11 @@ async function drive(code, c, hostSources) {
   out.push(`outcome ${booted}`);
   if (booted === 'poisoned') return [...out, ...notes];
   const root = document.root;
-  // Elements in preorder, leaving out a virtualized list's rows and a literal tab panel's contents.
+  // Elements in preorder; a virtualized list's rows are its window's (left out), as observe.rs leaves
+  // out a collection's. Such a list is the one list.js windows: its rows are `listitem` wrappers keyed
+  // by `data-listitemkey`. A grouped list (`list appearance="auto"`) scrolls too but builds every row. A literal tab panel's contents are left out too.
   const walk = (e, f, windowed) => { for (const k of e.childNodes) if (k.nodeType === 1) { f(k); if (!(windowed && windowedList(k))) walk(k, f, windowed); } };
-  const windowedList = e => (e.getAttribute('role') === 'list' && e.hasAttribute('data-scroll')) || e.$tabpanel; // a literal role="tabpanel", as observe.rs and Lean read it
+  const windowedList = e => (e.getAttribute('role') === 'list' && [...e.childNodes].some(k => k.nodeType === 1 && k.getAttribute('role') === 'listitem' && k.getAttribute('data-listitemkey') !== null)) || e.$tabpanel; // a literal role="tabpanel", as observe.rs and Lean read it
   const find = id => { let hit = null; walk(root, e => { if (!hit && e.getAttribute('data-testid') === id) hit = e; }, false); return hit; };
   const observe = () => {
     names.forEach((group, g) => group.forEach((name, i) => {

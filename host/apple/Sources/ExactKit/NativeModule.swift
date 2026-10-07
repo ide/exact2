@@ -370,7 +370,7 @@ final class NativeViews {
         #if os(macOS)
         let standard = Bundle.main.executableURL!.deletingLastPathComponent().appendingPathComponent("libexact_modules.dylib").path
         #else
-        let standard = (Bundle.main.privateFrameworksPath ?? Bundle.main.bundlePath) + "/libexact_modules.dylib"
+        let standard = embeddedModule(framework: "ExactModules", dylib: "libexact_modules.dylib")
         #endif
         let trust = ((GpuModule.bakedCompatibility["inputs"] as? [String: Any])?["trust"] as? String) ?? "development"
         guard trust != "production", let override = ExactEnv.environment["EXACT_MODULES"], !override.isEmpty else { return standard }
@@ -408,18 +408,25 @@ final class NativeViews {
         loadIfNeeded()
     }
 
-    /// True from activation until `activated` runs. The agent's settle counts
-    /// it as work in flight.
-    private(set) var activationQueued = false
+    /// True from activation until `activated` runs (or a stale session's turn
+    /// passes): the agent's settle counts it as work in flight.
+    var activationQueued: Bool { queuedActivations > 0 }
+    private var queuedActivations = 0
     /// Calls `activated` after activation's Core Animation commit, if `live()`
     /// still holds. A plain main-queue hop can run before that commit: the run
     /// loop drains queued blocks before its before-waiting and exit observers,
     /// where Core Animation commits (order 2000000). Exit covers a turn that
     /// never waits.
     func activateAfterCommit(_ live: @escaping () -> Bool) {
-        activationQueued = true
+        queuedActivations += 1
         let observer = CFRunLoopObserverCreateWithHandler(nil, CFRunLoopActivity.beforeWaiting.rawValue | CFRunLoopActivity.exit.rawValue, false, 2_000_001) { [weak self] _, _ in
-            DispatchQueue.main.async { [weak self] in guard let self else { return }; activationQueued = false; if live() { activated() } }
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                if live() { activated() }
+                // A view's events are main-queue blocks its creation queued (`load`):
+                // the count drops after them, so the agent's settle sees their handlers.
+                DispatchQueue.main.async { [weak self] in self?.queuedActivations -= 1 }
+            }
         }
         CFRunLoopAddObserver(CFRunLoopGetMain(), observer, .commonModes)
     }
@@ -962,7 +969,7 @@ final class NativeViews {
         case 2: presenter.hover(owner, text == "true")
         case 3: presenter.focus(id)
         case 4: presenter.blur(id)
-        case 5: presenter.key(id, text)
+        case 5: presenter.key(id, KeyPress(text))
         case 6: presenter.submit(id)
         case 7: presenter.load(id)
         default: presenter.message(id, text)

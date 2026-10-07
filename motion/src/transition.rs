@@ -61,7 +61,7 @@ impl TransitionProperty {
             // A path's `d` transitions (LLP 1055.000 D15); no keyframe names it.
             "d" => Some(TransitionProperty::Property(Property::D)),
             "-exact-enabled" => Some(TransitionProperty::Enabled),
-            name => Property::from_name(name).map(TransitionProperty::Property),
+            name => Property::from_author_name(name).map(TransitionProperty::Property),
         }
     }
 

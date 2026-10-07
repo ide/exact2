@@ -20,7 +20,7 @@
 // `tap … wheel <dx> <dy> gesture` sends the wheel as a trackpad's gesture —
 // began, changed, and the zero-delta lift that ends it (LLP 1033 D4a, macOS
 // only); `tap … hover` moves the pointer onto the target (LLP 1005 §3). --device: build/install first with build.mjs --device; no Mac-local plan/assets paths.
-import { Cdp, closePage, exclusiveIOS, copyCdpFailureContext, chromium, closeWindowsBrowser, retainCleanupError, removeBrowserProfile, driveStore, traceLocators, parseFlags, launchFacts, launchEnvironment, withFaults, refuseStale, unchecked, depInfoChanges, packagedBuildChanges, receiptChanges, webChanges, bakedPlans } from './agent-launch.mjs';
+import { Cdp, closePage, exclusiveIOS, copyCdpFailureContext, chromium, closeWindowsBrowser, retainCleanupError, removeBrowserProfile, driveStore, traceLocators, parseFlags, launchFacts, launchEnvironment, withFaults, refuseStale, unchecked, depInfoChanges, packagedBuildChanges, receiptChanges, webChanges, bakedPlans, parityScript } from './agent-launch.mjs';
 export { Cdp } from './agent-launch.mjs';
 import { sourceMapReaders, identifyInspectedNode, render, perfOp, readTrace, renderTrace, layoutArgs, tapRefusal, worldView, phoneTrace } from './agent-inspect.mjs';
 import { LAUNCH_MEDIA, preferGroups, preferOp, preferWeb } from './agent-prefer.mjs';
@@ -49,10 +49,10 @@ import { dragTap, duringAllowed, duringOp } from './agent-drag.mjs';
 import { runTests, nodeNamed, targetsIn, unbuiltTabs } from './agent-test.mjs';
 import { cdpKey, browserKey, nativeKey, typeFor, ticketOf, holdOf, heldTicket, typeArguments, typeCommand, pickedPaths, mouseContact, withHeldModifiers, pasteChord, deliverClipboard, tapWords, pointerGap } from './agent-keys.mjs';
 export { cdpKey, browserKey, nativeKey, typeFor, ticketOf, holdOf, heldTicket, typeArguments, typeCommand, pickedPaths, mouseContact, pasteChord, deliverClipboard, tapWords, pointerGap } from './agent-keys.mjs';
-import { appleArtifacts, appleExecutable, assertAppleIdentity, bundleId, install } from '../host/apple/build.mjs';
+import { appleArtifacts, assertAppleIdentity, bundleId, install } from '../host/apple/build.mjs';
 import { crashReports, developmentLaunchEnvironment, phone, phoneBridge, showSimulator, simulator } from '../host/apple/devices.mjs';
 import { builtAppMatches, jsTargetBuild, serveBuildTree, serveStatic } from '../host/web/serve.mjs';
-import { bakeOutput, bakeTarget, linuxBinary, linuxBuild, resolveApp, webDist as defaultWebDist } from './app.mjs';
+import { bakeOutput, bakeTarget, executableName, linuxBinary, linuxBuild, resolveApp, webDist as defaultWebDist } from './app.mjs';
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // A completed operation must release its deadline too, so an otherwise closed
@@ -93,13 +93,13 @@ export async function assertWebDistApp(dist, app) {
   if (!await builtAppMatches(dist, app)) throw new Error(`web dist is not a complete build for selected app ${app.id}; stale receipt ${resolve(dist, ".exact-build.json")}; run ${ownWebBuild(app, dist) ?? `EXACT_APP_DIR=${shellQuote(app.dir)} EXACT_WEB_DIST=${shellQuote(resolve(dist))} bun host/web/build.mjs ${app.crate('web')}`}`);
 }
 
-async function openWeb({ browser = 'chrome', plan, world, size = VIEWPORT, url: pageURL, app, webDist, onProcess, reuse, storage, fresh = false, facts, env }) {
+async function openWeb({ browser = 'chrome', plan, world, size = VIEWPORT, url: pageURL, app, webDist, onProcess, reuse, storage, fresh = false, facts, env, mediaClock = 'wall', lineHeight = null }) {
   if (browser !== 'chrome') {
     const { openPlaywrightWeb } = await import('./agent-playwright.mjs');
-    return openPlaywrightWeb({ browser, plan, world, size, url: pageURL, app, webDist, onProcess, reuse, storage, facts });
+    return openPlaywrightWeb({ browser, plan, world, size, url: pageURL, app, webDist, onProcess, reuse, storage, facts, parity: parityScript({ mediaClock, lineHeight }) });
   }
   if (reuse) {
-    if (reuse.browser === 'chrome' && JSON.stringify(reuse.launchFacts) === JSON.stringify(facts)) {
+    if (reuse.browser === 'chrome' && JSON.stringify(reuse.launchFacts) === JSON.stringify(facts) && (reuse.mediaClock ?? 'wall') === mediaClock && (reuse.lineHeight ?? null) === lineHeight) {
       try { await reuse.reset(); return reuse; }
       catch (error) { await reuse.close(); throw error; }
     }
@@ -233,6 +233,8 @@ async function openWeb({ browser = 'chrome', plan, world, size = VIEWPORT, url: 
       // the page 1-10 px low in some runs. Off, on every target.
       addEventListener('DOMContentLoaded', () => { document.documentElement.style.overscrollBehavior = 'none'; });
     ` });
+    // Conformance's parity (agent-launch.mjs `parityScript`): a frozen media clock, a fixed line height.
+    if (parityScript({ mediaClock, lineHeight })) await call('Page.addScriptToEvaluateOnNewDocument', { source: parityScript({ mediaClock, lineHeight }) });
     // The page has the focus, as a person's page does and as Playwright makes it: an unfocused page's `focus()`
     // (the document's autofocus at boot) moved the focus and fired no `focus` event, which iOS fires (splitter rough 13).
     await call('Emulation.setFocusEmulationEnabled', { enabled: true });
@@ -274,9 +276,7 @@ async function openWeb({ browser = 'chrome', plan, world, size = VIEWPORT, url: 
       await evaluate(`fetch('/__plan').then((r) => r.arrayBuffer()).then((b) => { ${carry} return exact.reload(new Uint8Array(b), true); })`);
     }
     const frame = () => waitAtMost(evaluate('new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r(true))))'), 250);
-    // The one contact this carrier may hold (LLP 1035.003 D1), and whether
-    // Chrome's touch emulation is on — switched on by the first contact.
-    let touch = false;
+    // The one contact this carrier may hold (LLP 1035.003 D1).
     let contact = null;
     const ask = async (req) => {
       // The existing resize input uses Chrome's real viewport and resize event.
@@ -295,7 +295,7 @@ async function openWeb({ browser = 'chrome', plan, world, size = VIEWPORT, url: 
       return JSON.parse(await evaluate(`(typeof globalThis.exact?.agentSettled === 'function' ? exact.agentSettled(${JSON.stringify(req)}) : Promise.reject(new Error('the page has no agent adapter: open a development build with ?agent=1'))).then((r) => JSON.stringify(r))`, timeout));
     };
     return {
-      host: 'web', browser: 'chrome', boot: Number(boot), hostLines, evaluate, call, launchFacts: facts,
+      host: 'web', browser: 'chrome', boot: Number(boot), hostLines, evaluate, call, launchFacts: facts, mediaClock, lineHeight,
       async gpuMs() {
         const ms = await evaluate("document.getElementById('exact-root')?.dataset.gpuMs ?? null");
         return ms == null ? null : Number(ms);
@@ -308,8 +308,6 @@ async function openWeb({ browser = 'chrome', plan, world, size = VIEWPORT, url: 
         else if (contact) await call('Input.dispatchTouchEvent', {type:'touchCancel', touchPoints:[]});
         await frame();
         contact = null;
-        if (touch) await call('Emulation.setTouchEmulationEnabled', {enabled:false});
-        touch = false;
         await evaluate('sessionStorage.clear()');
         if (!keep) await call('Storage.clearDataForOrigin', {origin:page.origin, storageTypes:'all'});
         const destination = withFaults(keep ? await evaluate('location.href') : page.href, failFetch);
@@ -376,21 +374,21 @@ async function openWeb({ browser = 'chrome', plan, world, size = VIEWPORT, url: 
         if (kind === 'mouse' && !await evaluate(`exact.views.get(${id})?.localName === 'canvas' || !!exact.views.get(${id})?.querySelector('canvas')`)) throw new Error('mouse requires a canvas target');
         if (kind === 'down' || kind === 'move' || kind === 'hold' || kind === 'up' || kind === 'cancel') {
           // A held contact (LLP 1035.003 D1) is a finger here: CDP touch
-          // events under touch emulation, enabled the first time a contact
-          // is used. Chrome recognizes, scrolls and flings from them exactly
+          // events. Chrome recognizes, scrolls and flings from them exactly
           // as it would from a hand; a timed move is delivered as steps on
           // real time so its velocity is real too. Each event carries the
           // contact's own timestamp (LLP 1057 §10.6): a lift follows the last
           // move by one frame, as a finger's does, however long the driver
           // takes between ops; `tap hold <ms>` is how a pause is said.
-          // `mouse` (a drag's, files diary F10): the left button instead, with
-          // touch emulation off, so the page's pointer is `fine` and a
+          // `mouse` (a drag's, files diary F10): the left button instead, so a
           // desktop path is what runs — and nothing scrolls by the contact.
           const mouse = kind === 'down' ? !!opts.mouse : !!contact?.mouse;
           // The modifiers held through the contact (#107): its down's, until a move or an up names others.
           const held = kind === 'down' || opts.modifiers !== undefined ? modifiers : contact?.modifiers ?? 0;
-          if (mouse && touch) { await call('Emulation.setTouchEmulationEnabled', { enabled: false }); touch = false; await frame(); }
-          if (!mouse && !touch) { await call('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 2 }); touch = true; }
+          // A finger is injected as touch input without Chrome's touch emulation, which would flip
+          // the page's `(pointer)` to coarse and `(hover)` to none for the rest of the drive: a
+          // simulated finger does not change the device (Charlie, 2026-10-07; a real touch device,
+          // `--touch platform` or iOS, stays coarse).
           const button = (type, at, t, buttons) => call('Input.dispatchMouseEvent', { type, x: at.x, y: at.y, button: 'left', buttons, clickCount: type === 'mouseMoved' ? 0 : 1, timestamp: t, modifiers: held });
           const finger = (type, touchPoints, timestamp) => call('Input.dispatchTouchEvent', { type, touchPoints, timestamp, modifiers: held });
           if (kind === 'down') {
@@ -433,7 +431,6 @@ async function openWeb({ browser = 'chrome', plan, world, size = VIEWPORT, url: 
           return { phase: kind, at, delivery: 'platform' };
         }
         if (kind === 'pinch') { // two fingers spread from d to d·scale about the middle (LLP 1057.001 §5)
-          if (!touch) { await call('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 2 }); touch = true; }
           const [cx, cy] = opts.at ? [r.x + opts.at[0], r.y + opts.at[1]] : [x, y], d = Math.max(8, Math.min(r.w, r.h) * 0.3), fingers = (k) => [0, 1].map((i) => ({ x: cx + (i ? 1 : -1) * d * k / 2, y: cy, id: i }));
           await call('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: fingers(1) });
           for (let i = 1; i <= 8; i++) { await call('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: fingers(1 + (opts.pinch - 1) * i / 8) }); await sleep(16); }
@@ -470,7 +467,6 @@ async function openWeb({ browser = 'chrome', plan, world, size = VIEWPORT, url: 
         else if (kind === 'press' && await evaluate(`(() => { const hit = document.elementFromPoint(${x}, ${y}), host = hit?.closest('[data-gpu-input]'), el = ${id == null ? 'null' : `exact.views.get(${id})`}; return !!host && (hit === host || hit.localName === 'canvas') && (!el || el === host || el.contains(host) || host.contains(el)); })()`)) {
           // A tap on a world's canvas is a finger, as a held contact is here and
           // every tap is on iOS and Linux, so a proof leaves one world everywhere.
-          if (!touch) { await call('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 2 }); touch = true; }
           await call('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] });
           await call('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
         }
@@ -579,14 +575,14 @@ async function openStdio({ host, plan, world, size, app, env: extra = {}, sessio
   const sample = host === 'host';
   const artifacts = portable ? null : appleArtifacts(a, { destination: device ? 'ios' : 'macos', host: sample });
   const deviceBundle = artifacts?.bundle;
-  const bin = windows ? (process.env.EXACT_WINDOWS_BIN ?? resolve(a.dir, `dist-windows/${a.crate('windows')}.exe`))
+  const bin = windows ? (process.env.EXACT_WINDOWS_BIN ?? resolve(a.dir, 'dist-windows', `${executableName(a)}.exe`))
     : linux ? (process.env.EXACT_LINUX_BIN ?? linuxBinary(a)) : (process.env.EXACT_MAC_BIN ?? artifacts.binary);
   if (!existsSync(device ? deviceBundle : bin)) throw new Error(device ? 'run bun host/apple/build.mjs --device first' : windows ? 'run bun host/windows/build.mjs first' : linux ? `run ${linuxBuild(a).join(' ')} first` : sample ? 'run bun host/apple/build.mjs --host first' : `run ${ownAppleBuild(a, 'mac') ?? `bun host/apple/build.mjs ${a.crate('apple')}`} first`);
-  if (!portable) assertAppleIdentity(a, device ? resolve(deviceBundle, appleExecutable(a)) : bin);
+  if (!portable) assertAppleIdentity(a, device ? resolve(deviceBundle, artifacts.executable) : bin);
   if (windows && process.env.EXACT_WINDOWS_BIN) unchecked('windows', 'EXACT_WINDOWS_BIN');
   else if (windows) {
     const receipt = resolve(bakeOutput(a), `windows-${bakeTarget('windows')}.build.json`);
-    refuseStale('windows', bin, packagedBuildChanges(receipt, dirname(bin)), `bun host/windows/build.mjs ${a.crate('windows')}`);
+    refuseStale('windows', bin, packagedBuildChanges(receipt, dirname(bin), a), `bun host/windows/build.mjs ${a.crate('windows')}`);
   }
   else if (linux && process.env.EXACT_LINUX_BIN) unchecked('linux', 'EXACT_LINUX_BIN');
   else if (linux) refuseStale('linux', bin, depInfoChanges(bin), linuxBuild(a).join(' '));
@@ -747,7 +743,7 @@ async function openIOSOwned({ a, bundle, id, dev, plan, size, extra, session, ho
   const lines = jsonLines(socket, socket, hostLines);
   const exited = new Promise((r) => socket.on('close', async () => {
     const exit = closing ? null : await waitAtMost(consoleExited, 1000);
-    lines.fail(closing ? 'the app was closed' : hangup({ what: 'the app hung up', pid, exit, hostLines, reports: crashReports(hostFixture ? 'ExactHostIOS' : appleExecutable(a), launched) })); r();
+    lines.fail(closing ? 'the app was closed' : hangup({ what: 'the app hung up', pid, exit, hostLines, reports: crashReports(hostFixture ? 'ExactHostIOS' : executableName(a), launched) })); r();
   }));
   const close = async () => {
     closing = true;
@@ -839,7 +835,7 @@ export const clockSpan = (span, elapsedMs) => Math.max(CLOCK_STEP_MS, Math.min(s
 /** Open a session on `host` ('web' | 'macos' | 'ios' | 'linux'); `url` opens
  * the same app address on each host; `plan` boots a local compiled contract;
  * `env` adds to a native host's environment. @ref LLP 1030.000 §7 */
-export async function open({onProcess, host = 'web', browser, plan, world, size, env, app, session, documents, url, webDist, reuse, device = false, phone: pick, timing = 'agent', touch = 'agent', chrome = 'agent', storage, seed, locale, timeZone, epoch, failFetch } = {}) {
+export async function open({onProcess, host = 'web', browser, plan, world, size, env, app, session, documents, url, webDist, reuse, device = false, phone: pick, timing = 'agent', touch = 'agent', chrome = 'agent', storage, seed, locale, timeZone, epoch, failFetch, mediaClock = 'wall', lineHeight = null } = {}) {
   browser ??= 'chrome';
   if (!['chrome', 'firefox', 'webkit'].includes(browser)) throw new Error(`browser: chrome, firefox or webkit, not ${browser}`);
   const facts = launchFacts({seed, locale, timeZone, epoch, failFetch, env});
@@ -849,6 +845,7 @@ export async function open({onProcess, host = 'web', browser, plan, world, size,
   if (world && host !== 'web' && !device) env = {...env, EXACT_WORLD:resolve(world)};
   if (device && host !== 'ios') throw new Error('--device is supported for the standalone ios client');
   if (host !== 'web' && browser !== 'chrome') throw new Error(`--browser is only supported by the web carrier, not ${host}`);
+  if ((mediaClock !== 'wall' || lineHeight != null) && host !== 'web') throw new Error('mediaClock and lineHeight are the web\'s (conformance)');
   // `timing: 'platform'` (LLP 1035.003 D5, opt-in): the carrier stays and the driver still owns the runner's clock,
   // but UIKit's own transitions, sheet presentations and keyboard animations run at their natural timing — the
   // ordinary app with a socket, for observing an interactive gesture's native motion. The frozen clock is the
@@ -892,13 +889,13 @@ export async function open({onProcess, host = 'web', browser, plan, world, size,
     : host === 'linux' ? await openStdio({ host: 'linux', plan, size: size ?? VIEWPORT, env, app, onProcess })
     : host === 'windows' ? await openStdio({ host: 'windows', plan, size: size ?? VIEWPORT, env, app, onProcess })
     : host === 'ios' ? await openIOS({ plan, env, app, size, touch, onProcess })
-    : await openWeb({ browser, plan, world, size, url, app, webDist, onProcess, reuse, storage, fresh: env?.EXACT_AGENT_STORAGE_FRESH === '1', facts, env });
+    : await openWeb({ browser, plan, world, size, url, app, webDist, onProcess, reuse, storage, fresh: env?.EXACT_AGENT_STORAGE_FRESH === '1', facts, env, mediaClock, lineHeight });
   const mapLocator = plan ?? (url && /^https?:\/\//i.test(url) ? url : env?.EXACT_DEV_PLAN ?? process.env.EXACT_DEV_PLAN)
     // The dist the carrier serves — an app outside the repo's own (shop F2), never Caltrain's by default.
     ?? (carrier.host === 'web' ? resolve(webDist ?? defaultWebDist(), 'app.plan') : null);
   // Without a plan of the drive's own, a native host runs its bake's: the maps a development bake left (LLP 1012.001.000 D6).
   const baked = () => { const a = resolveApp(app); const bin = host === 'windows'
-    ? process.env.EXACT_WINDOWS_BIN ?? resolve(a.dir, `dist-windows/${a.crate('windows')}.exe`)
+    ? process.env.EXACT_WINDOWS_BIN ?? resolve(a.dir, 'dist-windows', `${executableName(a)}.exe`)
     : process.env.EXACT_LINUX_BIN ?? linuxBinary(a); return bakedPlans(bin, bakeOutput(a)); };
   const sourceMaps = sourceMapReaders(mapLocator ? [mapLocator] : carrier.host !== 'web' ? baked() : []);
   const s = {
@@ -1274,7 +1271,7 @@ export async function open({onProcess, host = 'web', browser, plan, world, size,
       const r = { ...(await s.op({ op: 'tap', close: true })), carrier: host };
       return r.closed ? r : s.landed(r);
     },
-    /** The device facts by their web names (LLP 1061 D5; LLP 1069.000 D6), grouped on the wire as LLP 1069.007 D2 groups them. `media`: `{"prefers-reduced-motion": "reduce"}`, `"prefers-reduced-transparency"` likewise, `"prefers-contrast": "more"|"less"|"custom"|"no-preference"`, `"prefers-color-scheme": "dark"|"light"` (the system's; an app's `setScheme` still wins). `page`: `"visibility-state": "visible"|"hidden"`, `online`, `can-share` and `can-open-files` `"true"|"false"`, `"root-font-size"` in px (what `rem` follows). `fold` (LLP 1078 D7): `posture folded|continuous`, `segments <cols>x<rows>`, `gap <points>` — a host without a fold splits its viewport evenly with the gap centred on each divider; a host with a real fold refuses ("the device decides"). Unnamed facts stay. The reply is what the host now reports, by group. */
+    /** The device facts by their web names (LLP 1061 D5; LLP 1069.000 D6), grouped on the wire as LLP 1069.007 D2 groups them. `media`: `{"prefers-reduced-motion": "reduce"}`, `"prefers-reduced-transparency"` likewise, `"prefers-contrast": "more"|"less"|"custom"|"no-preference"`, `"prefers-color-scheme": "dark"|"light"` (the system's; an app's `setScheme` still wins). `page`: `"visibility-state": "visible"|"hidden"`, `online`, `can-share`, `can-open-files` and `has-focus` `"true"|"false"`, `"root-font-size"` in px (what `rem` follows). `fold` (LLP 1078 D7): `posture folded|continuous`, `segments <cols>x<rows>`, `gap <points>` — a host without a fold splits its viewport evenly with the gap centred on each divider; a host with a real fold refuses ("the device decides"). Unnamed facts stay. The reply is what the host now reports, by group. */
     async prefer(facts) {
       if (s.held) throw new Error(`a drag's finger is down (${s.held}): only reads and the clock until it lifts`);
       const { media, page, fold } = preferGroups(facts);
@@ -1339,6 +1336,11 @@ export async function open({onProcess, host = 'web', browser, plan, world, size,
       const l = await carrier.ask({ op: 'clock', land: true });
       if (l.error) return { ...r, error: l.error };
       delete r.epoch; delete r.incarnation; delete r.clock;
+      // No scratch store: the input's reply says so, for an `open()` script as for the CLI, on every carrier (LLP 1102 §3.17); the read is bounded, advice only.
+      if (storage === undefined && !s.storageSaid && (s.storageProbes = (s.storageProbes ?? 0) + 1) <= 20) {
+        const j = await Promise.race([s.op({ op: 'logs', since: s.storagePeek ?? 0 }).catch(() => null), new Promise((done) => setTimeout(() => done(null), 2000))]), hit = Array.isArray(j?.lines) && (s.storagePeek = j.next, j.lines.some((x) => /unavailable in agent mode/.test(typeof x === 'string' ? x : JSON.stringify(x))));
+        if (hit) { s.storageSaid = true; r.note = [r.note, 'a data source was refused storage: this drive names no scratch store, so writes do nothing; open it with storage: <name> (--storage <name>)'].filter(Boolean).join('; '); }
+      }
       return s.tagged(r);
     },
     /** Every reply carries the runner's `epoch`, `incarnation` and `clock` (LLP 1035.002 D3). A host that answered
@@ -1450,14 +1452,15 @@ async function main(argv) {
       return [op, r];
   };
   // A drive that names no scratch store has no storage, and a source's write fails only in the
-  // journal; say so the first time, beside the op that caused it (authoring bench, LLP 1087).
-  // The web carrier only: its journal read is an in-page call, where a native carrier's
-  // could time out and fail the transport for the ops after it.
-  let peek = 0, probes = 0, warned = host !== 'web' || flags.json || flags.storage !== undefined;
+  // journal; say so on stderr, which a --json reader's stdout never carries (authoring bench,
+  // LLP 1087; LLP 1102 §3.17). The web reads its journal beside each op that could have caused
+  // it (an in-page call); a native carrier, whose journal read could be slow, once when the
+  // drive ends, bounded, so it never fails the ops.
+  let peek = 0, probes = 0, warned = flags.storage !== undefined;
   const storageNote = async () => {
     if (warned || ++probes > 20) return; // a missing store shows at the first writes
     try {
-      const j = await s.op({ op: 'logs', since: peek });
+      const j = await Promise.race([s.op({ op: 'logs', since: peek }).catch(() => null), new Promise((done) => setTimeout(() => done(null), 3000))]);
       if (!Array.isArray(j?.lines)) return;
       peek = j.next;
       if (j.lines.some((l) => /unavailable in agent mode/.test(typeof l === 'string' ? l : JSON.stringify(l)))) {
@@ -1471,10 +1474,13 @@ async function main(argv) {
       at = k + 1;
       const [op, r] = await step(line);
       console.log(flags.json ? JSON.stringify(r) : render(op, r));
-      if (['tap', 'type', 'clock'].includes(op)) await storageNote();
+      if (host === 'web' && ['tap', 'type', 'clock'].includes(op)) await storageNote();
     }
+    if (host !== 'web' && ops.some((line) => /^\s*(tap|type|clock)\b/.test(line))) await storageNote();
     return 0;
   } catch (e) {
+    // A drive that fails (an `expect`, a refused op) is where a missing store is found: say it first.
+    if (host !== 'web' && ops.slice(0, at).some((line) => /^\s*(tap|type|clock)\b/.test(line))) await storageNote();
     e.message = `op ${at}/${ops.length} \`${ops[at - 1]?.trim()}\`: ${e.message}`;
     throw e;
   } finally {

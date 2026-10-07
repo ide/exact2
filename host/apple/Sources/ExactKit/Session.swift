@@ -377,6 +377,7 @@ public final class ExactSession {
     #endif
     var text: TextEngine
     let presenter: Presenter
+    var launchLocation: String? // a pre-boot `openURL`'s location, until the first frame (LaunchURL.swift)
     private var textPressure: DispatchSourceMemoryPressure?
     let canvases: Canvases
     let webviews: WebViews
@@ -585,7 +586,7 @@ public final class ExactSession {
         DispatchQueue.main.async {
             guard let s = ExactSession.live[rt]?.session else { return }
             s.whenIdle { [weak s] in guard let s else { return }; s.apply(s.runtime.pump(now: s.now()))
-                if let p = s.pendingActivation { s.pendingActivation = nil; s.firstDrawn(generation: p.generation, token: p.token) }
+                if let p = s.pendingActivation { s.pendingActivation = nil; if p.generation == s.generation { s.activatedGeneration = nil; s.firstDrawn(generation: p.generation, token: p.token) } } // a redraw never retries it
             }
         }
     }
@@ -760,7 +761,7 @@ public final class ExactSession {
         presenter.onHover = { [unowned self] id, over in apply(runtime.hover(id, over: over, now: now())) }
         presenter.onFocus = { [unowned self] id in apply(runtime.focus(id, now: now())) }
         presenter.onBlur = { [unowned self] id in apply(runtime.blur(id, now: now())) }
-        presenter.onKey = { [unowned self] id, name in apply(runtime.key(id, name, now: now())) }
+        presenter.onKey = { [unowned self] id, press in apply(runtime.key(id, press.payload, up: press.up, now: now())) }
         presenter.onContextmenu = { [unowned self] id in apply(runtime.contextmenu(id, now: now())) }
         presenter.onSwiperight = { [unowned self] id in apply(runtime.swiperight(id, now: now())) }
         presenter.onRefresh = { [unowned self] id in apply(runtime.refresh(id, now: now())) }
@@ -846,7 +847,7 @@ public final class ExactSession {
             // replaced its host.
             routerOp = nil
             generation += 1
-            if booted { presenter.reset(); forgetAppearances() }
+            if booted { presenter.reset(); forgetAppearances(); presenter.launchAutofocusReleased = false } // a fresh boot's autofocus waits again
             booted = true
             text.commitFonts()
             AppFiles.learn(runtime) // before the first frame's `app:/` images load (LLP 1069.002 D7)
@@ -855,7 +856,7 @@ public final class ExactSession {
         ApplyProfile.add("runner", since: started)
         apply(batch)
         applyParts = ApplyProfile.end()
-        if batch.error == nil { tellTime(); ExactLaunch.shared.treeApplied(self, path: "baked") }
+        if batch.error == nil { tellTime(); ExactLaunch.shared.treeApplied(self, path: "baked"); refuseUnheardLaunch() }
         // A fresh runner must receive the view's current viewport and insets.
         if batch.error == nil { view?.rebooted() }
         applyMs = (CACurrentMediaTime() - tApply) * 1000
@@ -941,6 +942,7 @@ public final class ExactSession {
         apply(batch)
         tellTime()
         ExactLaunch.shared.treeApplied(self, path: label)
+        refuseUnheardLaunch()
         view?.rebooted()
         autofocusHeld = false
         if restart { presenter.restoreFocus(kept, tree: agent("{\"op\":\"tree\"}")) }
@@ -1225,7 +1227,7 @@ public final class ExactSession {
             // The app module is ready before any source can call it: its load
             // never lands inside a `native.call`'s budget (LLP 1067.000 D8).
             let started = CACurrentMediaTime()
-            natives.prepareAppModule()
+            natives.prepareAppModule(); presenter.releaseLaunchAutofocus() // the next turn, never waiting on a loading source
             let loaded = CACurrentMediaTime()
             let batch = runtime.dataReady()
             ExactLaunch.shared.dataStep(self, appModule: loaded - started, ready: CACurrentMediaTime() - loaded, pending: batch.pending)
@@ -1233,8 +1235,7 @@ public final class ExactSession {
                 // Still starting the data module: the launch tracker samples
                 // now, so what waits on it shows from the first frame on.
                 ExactLaunch.shared.waitingForData(self)
-                activatedGeneration = nil
-                pendingActivation = (drawnGeneration, token) // the source wakes the session when ready
+                pendingActivation = (drawnGeneration, token) // the generation stays activated: only the source's wake retries
                 return
             }
             AppFiles.learn(runtime) // the roots storage configured
@@ -1249,7 +1250,7 @@ public final class ExactSession {
             }
             canvases.loadIfNeeded()
             natives.activateAfterCommit { [weak self] in self.map { $0.state != .destroyed && $0.generation == drawnGeneration } ?? false } // @ref LLP 1024 D3
-            drainSurfaceWork(); presenter.releaseLaunchAutofocus()
+            drainSurfaceWork()
             frames.run(frames.motion || canvases.wantsFrames)
             frames.run(frames.motion || frames.timerSoon || canvases.wantsFrames)
         }
@@ -1320,7 +1321,7 @@ public final class ExactSession {
     /// notification, in the same turn.
     func tellPage() {
         guard booted, state != .destroyed else { return }
-        let bits = PageFacts.bits
+        let bits = PageFacts.bits(view?.window)
         // Back from the background: missed beats fire once, as UIKit's do (the agent's clock is its own).
         if pageHidden, bits & 1 == 0, !ExactEnv.agentMode { runtime.coalesceMissed(now: now()) }
         pageHidden = bits & 1 != 0
@@ -1436,7 +1437,7 @@ public final class ExactSession {
     @discardableResult public func openURL(_ url: URL) -> Bool {
         guard state != .destroyed else { return false }
         let location = runtime.location(of: url.absoluteString)
-        if !booted { runtime.launch(location); return true }
+        if !booted { runtime.launch(location); launchLocation = location; return true }
         return navigate(location)
     }
     /// A link the reader followed — a `link href`, a text run's `href`, a
@@ -1452,10 +1453,7 @@ public final class ExactSession {
     }
     @discardableResult public func navigate(_ location: String) -> Bool {
         guard state != .destroyed, booted else { return false }
-        guard let node = presenter.views.values.first(where: { $0.props["navigationBack"] != nil && $0.handlers.contains("navigate") }) else {
-            log("navigate refused: no navigation root handler")
-            return false
-        }
+        guard let node = navigationRoot else { log("navigate refused: no navigation root handler"); return false }
         let batch = runtime.navigate(node.id, location, now: now())
         apply(batch)
         return batch.error == nil
