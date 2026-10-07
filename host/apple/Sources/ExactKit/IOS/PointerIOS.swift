@@ -193,14 +193,32 @@ extension NodeView {
         }
         // A press under `retainFocus` leaves the editor its focus, as macOS's
         // mouseDown does: every pressable can take the focus now.
-        if canBecomeFirstResponder, !isFirstResponder, presenter?.contextRetainsFocus(self) != true { _ = becomeFirstResponder() }
-        guard pressed else { return super.touchesEnded(touches, with: event) }
+        let takesFocus = canBecomeFirstResponder && !isFirstResponder && presenter?.contextRetainsFocus(self) != true
+        // A node that hears focus or blur takes it before its press, the
+        // web's order. Any other takes it after: a new first responder
+        // costs UIKit's keyboard bookkeeping ~10 ms, which ran ahead of the
+        // press's handler and its frame.
+        let focusFirst = takesFocus && !handlers.isDisjoint(with: Self.focusEvents)
+        if focusFirst { _ = becomeFirstResponder() }
+        guard pressed else {
+            if takesFocus && !focusFirst { _ = becomeFirstResponder() }
+            return super.touchesEnded(touches, with: event)
+        }
         pressed = false
-        // A pressed node that did not take the focus: the field being edited
-        // loses it, as a click on a button blurs a page's input.
+        // A pressed node that does not take the focus: the field being
+        // edited loses it, as a click on a button blurs a page's input. One
+        // taking it after its press ends the editing now, as taking it would.
         let inside = touches.first.map(pressInside) ?? false
         if !isFirstResponder && presenter?.contextRetainsFocus(self) != true { presenter?.viewport.endEditing(true) }
+        let held = presenter?.focusedNode
         if inside, presenter?.views[id] === self { presenter?.press(id, held: KeyCodes.held(event?.modifierFlags ?? [])); finishPointerPress() }
+        if takesFocus && !focusFirst {
+            DispatchQueue.main.async { [weak self] in
+                // Unless the press moved the focus itself (an app's `focus()`).
+                guard let self, window != nil, canBecomeFirstResponder, !isFirstResponder, presenter?.focusedNode === held else { return }
+                _ = becomeFirstResponder()
+            }
+        }
     }
     override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
         inlinePressed = nil; linkPressed = nil; svgPressed = nil
