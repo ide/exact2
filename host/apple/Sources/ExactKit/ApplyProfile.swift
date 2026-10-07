@@ -1,6 +1,7 @@
-// What the launch's first batch cost UIKit, part by part (`exact.boot.apply.*`
-// in the launch report): each op kind and each pass after the ops, timed only
-// while the boot applies that batch, so no later batch pays for it.
+// What the launch's boot cost, part by part (`exact.boot.parts` in the launch
+// report): the runner's paragraphs measured by the host, then each op kind
+// and each pass of the first batch, timed only while the boot runs, so no
+// later batch pays for it.
 import Foundation
 import QuartzCore
 
@@ -17,6 +18,9 @@ enum ApplyProfile {
     @inline(__always) static func add(_ part: String, since: Double) {
         parts[part, default: 0] += (CACurrentMediaTime() - since) * 1000
     }
+
+    /// One more of `part`, counted rather than timed (shown as a count).
+    @inline(__always) static func count(_ part: String) { parts["#" + part, default: 0] += 1 }
 
     /// `body`, timed as `part` while on.
     @inline(__always) static func time<T>(_ part: String, _ body: () -> T) -> T {
