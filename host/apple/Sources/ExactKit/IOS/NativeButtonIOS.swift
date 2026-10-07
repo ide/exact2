@@ -58,17 +58,6 @@ final class NativeButton: UIButton {
     /// Boxes the configuration draws instead.
     private var drawn: [NodeView] = []
     private var configured = false
-    /// Its look changed while a finger held it (`configurationUpdateHandler`).
-    var restyledWhileHeld = false
-    /// Released into a new look: what UIKit animates in its content until
-    /// the next turn stops at once (`settleContent`).
-    var settlingLook = false
-    /// Stops the configuration's own animations (title, symbol, fill), so
-    /// what shows is the look as it now is; the author's boxes are left.
-    func settleContent() {
-        func settle(_ v: UIView) { v.layer.removeAllAnimations(); v.subviews.forEach(settle) }
-        for v in subviews where !(v is NodeView) { settle(v) }
-    }
     private var signature = ""
 
     init(owner: NodeView) {
@@ -87,7 +76,9 @@ final class NativeButton: UIButton {
         // and a symbol image resolved for the traits it was made under, and
         // no batch touches the button for a change of appearance.
         registerForTraitChanges([UITraitUserInterfaceStyle.self, UITraitAccessibilityContrast.self]) { (b: NativeButton, _: UITraitCollection) in
-            if b.configured { b.update() }
+            guard b.configured else { return }
+            b.signature = ""
+            b.update()
         }
     }
     required init?(coder: NSCoder) { nil }
@@ -117,7 +108,6 @@ final class NativeButton: UIButton {
     /// button highlights too.
     override func layoutSubviews() {
         super.layoutSubviews()
-        if settlingLook { settleContent() }
         guard configured else { return }
         var ancestor = superview
         while let v = ancestor, !(v is UIScrollView) { ancestor = v.superview }
@@ -206,7 +196,7 @@ final class NativeButton: UIButton {
         let key = ApplyProfile.time("btn.key") { [style, title ?? "", symbol?.props["symbolName"] ?? "", "\(symbol?.number("font_size") ?? 0)",
                    "\(symbol?.color("tint_color", .label) ?? .clear)", "\(text?.color("text_color", .label) ?? .clear)",
                    "\(text?.number("font_size") ?? 0)", "\(text?.number("font_weight") ?? 0)", "\(radius)", "\(owner.bounds.size)",
-                   "\(a)", "\(b)", owner.style["button_content_direction"]?.string ?? "", "\(owner.style["button_content_gap"]?.number ?? -1)", "\(owner.color("accent_color", .clear))", "\(tintColor.resolvedColor(with: traitCollection))", "\(traitCollection.userInterfaceStyle.rawValue)", "\(traitCollection.accessibilityContrast.rawValue)"].joined(separator: "|") }
+                   "\(a)", "\(b)", owner.style["button_content_direction"]?.string ?? "", "\(owner.style["button_content_gap"]?.number ?? -1)", "\(owner.color("accent_color", .clear))", "\(tintColor.resolvedColor(with: traitCollection))"].joined(separator: "|") }
         if key != signature {
             signature = key
             var rest = ApplyProfile.time("btn.config") { NativeButton.configuration(style, owner: owner, text: text, symbol: symbol, title: title, radius: radius, symbolBox: a, textBox: b, accent: tintColor) }
@@ -214,16 +204,11 @@ final class NativeButton: UIButton {
                                                              rtl: effectiveUserInterfaceLayoutDirection == .rightToLeft)
             if contentHorizontalAlignment != align { contentHorizontalAlignment = align }
             rest.contentInsets = inset
-            // SwiftUI's bordered styles dim the whole button while pressed,
-            // its label too; UIKit's configurations darken only the fill.
-            let tint: UIColor = symbol.map { $0.followsTint("tint_color") ? tintColor : $0.color("tint_color", .label) } ?? .label
-            let dimImage = rest.image?.withTintColor(tint.withAlphaComponent(0.5), renderingMode: .alwaysOriginal)
-            let titleTransformer = rest.titleTextAttributesTransformer
             // The handler goes in before the configuration: assigning a
             // configuration runs the handler installed then, and the old one
             // put the old configuration back (a padding measured after the
             // first layout stayed unshown until a trait change ran the new
-            // handler). A plain button's press fade is UIKit's own.
+            // handler). Held, it is UIKit's own highlight.
             //
             // Disabled with no colours of the author's, it is UIKit's own
             // disabled look, fill and label together (`applyEnabled`).
@@ -236,40 +221,10 @@ final class NativeButton: UIButton {
                     config.image = rest.image?.withRenderingMode(.alwaysTemplate)
                     config.baseForegroundColor = nil
                     config.baseBackgroundColor = nil
-                } else if style != "plain" && button.isHighlighted {
-                    config.image = dimImage ?? config.image
-                    config.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { incoming in
-                        var out = titleTransformer?(incoming) ?? incoming
-                        out.foregroundColor = (rest.baseForegroundColor ?? .label).withAlphaComponent(0.5)
-                        return out
-                    }
                 }
-                // Released after its look changed (the press's own batch
-                // landing while it was held): the new look stands at once,
-                // its title not fading in over a background already there.
-                if let b = button as? NativeButton, b.restyledWhileHeld, !button.isHighlighted {
-                    b.restyledWhileHeld = false
-                    b.settlingLook = true
-                    UIView.performWithoutAnimation { button.configuration = config; button.layoutIfNeeded() }
-                    b.settleContent()
-                    // UIKit lays the content out again on a later pass, and
-                    // crossfades the title there: that one settles too.
-                    DispatchQueue.main.async { [weak b] in b?.settleContent(); b?.settlingLook = false }
-                } else { button.configuration = config }
+                button.configuration = config
             }
-            if configured, isHighlighted || isTracking { restyledWhileHeld = true }
-            // A button already showing changes its look in one step. UIKit
-            // animates a configuration's title and symbol on its own: the
-            // release of a press fades them back from their held dimming
-            // while the new background is set at once (a defrost chip
-            // turning on faded its text over a background that had already
-            // jumped). What is still animating in it stops at the new look.
-            ApplyProfile.time("btn.assign") {
-                if configured, window != nil {
-                    UIView.performWithoutAnimation { configuration = rest; layoutIfNeeded() }
-                    settleContent()
-                } else { configuration = rest }
-            }
+            ApplyProfile.time("btn.assign") { configuration = rest }
             // Behind an alert UIKit dims the tint (the accent) to grey, as the
             // platform should; every other colour here is authored (a title's
             // `color`, a symbol's `tint-color`, an `accent-color` fill) and
@@ -308,9 +263,9 @@ final class NativeButton: UIButton {
         // An `AccentColor` fill is left to the configuration, which takes it
         // from the tint and so dims it with the tint.
         if accent != .clear, !owner.followsTint("accent_color") { config.baseBackgroundColor = accent }
-        if let text, let title {
+        let font = text.map { UIFont.systemFont(ofSize: $0.number("font_size", 17), weight: weight($0.number("font_weight", 400))) }
+        if let text, let title, let font {
             config.title = title
-            let font = UIFont.systemFont(ofSize: text.number("font_size", 17), weight: weight(text.number("font_weight", 400)))
             // `AccentColor` is the tint as UIKit draws it now: grey behind an
             // alert (the button redraws when it changes, tintColorDidChange).
             let color = text.followsTint("text_color") ? tintNow : text.color("text_color", .label)
@@ -345,15 +300,12 @@ final class NativeButton: UIButton {
         // gap written the padding is the platform's system spacing between
         // them (a configuration's own default is none at all). A button
         // that is not a flex box has its laid-out boxes read instead.
-        if let symbol, let text {
+        if symbol != nil, let font {
             if let direction = owner.style["button_content_direction"]?.string {
                 config.imagePlacement = direction == "column" ? .top : direction == "column-reverse" ? .bottom
                     : direction == "row-reverse" ? .trailing : .leading
                 if let gap = owner.style["button_content_gap"]?.number { config.imagePadding = CGFloat(gap) }
-                else {
-                    let font = UIFont.systemFont(ofSize: text.number("font_size", 17), weight: weight(text.number("font_weight", 400)))
-                    config.imagePadding = systemSpacing(stacked: direction.hasPrefix("column"), image: config.image, font: font)
-                }
+                else { config.imagePadding = systemSpacing(stacked: direction.hasPrefix("column"), image: config.image, font: font) }
             } else if !a.isEmpty, !b.isEmpty {
                 let stacked = b.minY >= a.maxY - 1
                 config.imagePlacement = stacked ? .top : .leading
