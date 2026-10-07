@@ -3,6 +3,9 @@
 // otherwise at the commit. It is cold if its entry was not shown before in the session.
 // Render time is the first vsync after the committing run-loop turn ends.
 // TTI is when outstanding work clears, never before render. A newer change cancels it.
+// Only a cold navigation has a TTI: a screen already shown (back, a tab seen
+// before) was interactive before, as Observe's markInteractive on mount is
+// never called again for it. A warm one ends at its warm_ttr.
 // A change UIKit made itself (its Back button, a back swipe, LLP 1035.001.000)
 // reaches the app once its transition has ended, but the screen it shows was
 // drawn from the transition's first frame: render is that frame, the first vsync
@@ -118,6 +121,11 @@ final class NavigationMarks: NSObject {
             f["value"] = shown - p.start
             ExactJournal.shared.record("navigation", f)
             note("\(f["name"] ?? "") \(f["route"] ?? "") \(String(format: "%.1f", (shown - p.start) * 1000)) ms (UIKit's)")
+            guard cold else {
+                pending = nil
+                deadline?.cancel()
+                return
+            }
             deadline?.cancel()
             let item = DispatchWorkItem { [weak self, weak p] in
                 guard let self, let p, pending === p else { return }
@@ -169,6 +177,12 @@ final class NavigationMarks: NSObject {
         f["value"] = g - p.start
         ExactJournal.shared.record("navigation", f)
         note("\(f["name"] ?? "") \(f["route"] ?? "") \(String(format: "%.1f", (g - p.start) * 1000)) ms")
+        guard p.cold else {
+            pending = nil
+            deadline?.cancel()
+            stop()
+            return
+        }
         evaluate()
     }
 
