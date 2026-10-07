@@ -157,6 +157,7 @@ public struct BatchOp {
         case sticky // LLP 1083: a sticky box's constraint, or none
         case fragments // LLP 1093 D7: a box's column fragments or a container's columns
         case sound // LLP 1096 D8: the voice table's ops, and a boot's files
+        case animate // a transition Core Animation plays (TransitionsIOS.swift)
     }
     package let op: Kind
     var nodeID: UInt32?

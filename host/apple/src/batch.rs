@@ -655,6 +655,18 @@ impl Batch {
         ));
     }
 
+    /// `{"op":"animate","id":…,"property":"opacity","delay":…,"duration":…,
+    /// "values":[…]}`: a transition the presenter plays in Core Animation,
+    /// its values evenly spaced over `duration` seconds after `delay`,
+    /// linear between them (the engine's own curve, `play_transition`).
+    pub fn animate(&mut self, id: u32, property: &str, delay: f64, duration: f64, values: &[f64]) {
+        let values: Vec<String> = values.iter().map(|v| format!("{v}")).collect();
+        self.ops.push(format!(
+            "{{\"op\":\"animate\",\"id\":{id},\"property\":\"{property}\",\"delay\":{delay},\"duration\":{duration},\"values\":[{}]}}",
+            values.join(",")
+        ));
+    }
+
     /// `{"op":"present","id":…,"property":"layout","x":…,"y":…,"w":…,"h":…}`
     /// — a layout transition's offset and scale of the laid-out box (LLP
     /// 1063).
