@@ -354,7 +354,7 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
         nativeMoved = false; settled = false
         syncing = true
         defer { syncing = false; presenter.flushPendingFocus() }
-        guard let p = projection(batch) else { settled = true; return }
+        guard let p = ApplyProfile.time("nav.projection", { projection(batch) }) else { settled = true; return }
         // LLP 1035.001.000 D5: nothing is projected over a platform change
         // the app has not been told, nor under a transition (a tab switch
         // included); the latest tree is projected once it settles. The first
@@ -366,11 +366,11 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
         dirty = false
         let root = p.root, wanted = p.chosen
         let parts = NavigationRules.segments(presentations: p.routes[...p.selected].map { $0.props["navigationPresentation"] })
-        reshape(p)
-        installPrimary(p, first: Array(wanted[parts[0]]))
+        ApplyProfile.time("nav.reshape") { reshape(p) }
+        ApplyProfile.time("nav.primary") { installPrimary(p, first: Array(wanted[parts[0]])) }
         // The other tabs' stacks, the selected tab and its items (LLP 1075.003 §3.7).
-        if p.tabs != nil { syncTabs(p) }
-        defer { applied = observe() }
+        if p.tabs != nil { ApplyProfile.time("nav.tabs") { syncTabs(p) } }
+        defer { applied = ApplyProfile.time("nav.observe") { observe() } }
         // Initial content draws before presentation takes over its viewport.
         if parts.count > 1, let session = presenter.session, session.firstDrawMs == nil { return }
         let boundaries = parts.dropFirst().map { wanted[$0.lowerBound].node }
@@ -387,7 +387,7 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
             // UIKit's chrome, as a menu is: left as it is.
             if index == 0, moreListOpen { continue }
             let stack = Array(wanted[parts[index]])
-            prepareRoutes(stack, in: nav)
+            ApplyProfile.time("nav.prepare") { prepareRoutes(stack, in: nav) }
             // A stack tab shown inside the More list sits on UIKit's list.
             let wantedStack = held(nav) + stack
             let same = nav.viewControllers.count == wantedStack.count && zip(nav.viewControllers, wantedStack).allSatisfy { $0 === $1 }
@@ -406,7 +406,7 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
                     presenter.session?.log("navigation: UIKit did not take the stack the routes name")
                 }
             }
-            nav.view.layoutIfNeeded()
+            ApplyProfile.time("nav.layout") { nav.view.layoutIfNeeded() }
         }
         unanimated = false
         if mounted.count > common {
