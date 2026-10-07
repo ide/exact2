@@ -219,8 +219,10 @@ extension NodeView {
     /// no accent role"): its window's tint, as an app's AccentColor asset
     /// sets (`Presenter.appAccent`). A control reads its own `accent-color`;
     /// `AccentColor` and untinted symbols follow the window's tint.
-    func syncAccentTint() {
-        guard let presenter, superview === presenter.root else { return }
+    /// `asRoot`: this view is about to become the root's, so its accent is
+    /// the window's before it joins (`Presenter`'s roots op).
+    func syncAccentTint(asRoot: Bool = false) {
+        guard let presenter, asRoot || superview === presenter.root else { return }
         let own = style["accent_color"] != nil && !followsTint("accent_color")
         let wanted: [[Double]?]? = own ? [channels("accent_color", dark: false), channels("accent_color", dark: true)] : nil
         guard wanted != accentTint else { return }
