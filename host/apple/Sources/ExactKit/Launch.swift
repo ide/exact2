@@ -47,6 +47,9 @@ public final class ExactLaunch: NSObject {
     /// TTI, by item, not only the set at each change the trace keeps).
     private var spans: [String: (from: Double, to: Double?)] = [:]
     private var spanOrder: [String] = []
+    /// Each batch that changed the screen after nothing was outstanding: ms
+    /// from process start and what it changed.
+    private var changes: [String] = []
     /// Each distinct set of outstanding work, with ms from process start, for
     /// debugging how time to interactive was reached.
     private(set) var trace: [String] = []
@@ -145,7 +148,7 @@ public final class ExactLaunch: NSObject {
     }
 
     /// Re-reads outstanding work after this run-loop turn and its commit finish.
-    func applied(_ session: ExactSession, changed: Bool) {
+    func applied(_ session: ExactSession, changed: Bool, what: () -> String = { "" }) {
         guard session === launchSession, ttiOutcome == nil else { return }
         // Nothing outstanding, but the screen still changing: TTI waits for
         // a frame with no change, so this is what holds it then (a fresh
@@ -154,6 +157,9 @@ public final class ExactLaunch: NSObject {
             let now = CACurrentMediaTime(), item = "screen:changing"
             if spans[item] == nil { spanOrder.append(item) }
             spans[item] = (spans[item]?.from ?? now, now)
+            if changes.count < 12, let p = marks[.process] {
+                changes.append("\(String(format: "%.0f", (now - p) * 1000)) \(what())")
+            }
         }
         if changed { contentDirty = true; candidate = nil }
         scheduleEvaluate()
@@ -342,6 +348,7 @@ public final class ExactLaunch: NSObject {
         if !lastOutstanding.isEmpty { out["outstanding"] = lastOutstanding }
         if !failedResources.isEmpty { out["failed"] = failedResources }
         if !trace.isEmpty { out["trace"] = trace }
+        if !changes.isEmpty { out["changes"] = changes }
         if let p = marks[.process], !spans.isEmpty {
             let ms = { (t: Double) in ((t - p) * 1000 * 10).rounded() / 10 }
             out["items"] = spanOrder.compactMap { item -> [String: Any]? in
