@@ -6,6 +6,7 @@
 // The callback's scheme, host, path and `state` are checked in Rust
 // (`exact_runner::auth::accept`), since `.customScheme` matches the scheme
 // only. Under the agent nothing opens: the request is held for `type @t`.
+#if EXACT_AUTH
 import AuthenticationServices
 #if canImport(UIKit)
 import UIKit
@@ -108,3 +109,17 @@ extension ExactSession {
         #endif
     }
 }
+#else
+// Prototype: no AuthenticationServices linked; a sheet request is refused.
+#if canImport(UIKit)
+import UIKit
+#endif
+final class AuthSessions: NSObject { weak var owner: ExactSession? }
+extension ExactSession {
+    func authOp(_ op: [String: Any]) {
+        guard let ticket = (op["ticket"] as? NSNumber)?.uint64Value, op["cancel"] as? Bool != true else { return }
+        runtime.auth(["op": "done", "ticket": ticket, "status": 501, "message": "no web authentication session in this build"])
+    }
+    func cancelAuthSessions() {}
+}
+#endif

@@ -13,7 +13,9 @@ import AVFoundation
 import UniformTypeIdentifiers
 #if canImport(UIKit)
 import UIKit
+#if EXACT_PHOTOS
 import PhotosUI
+#endif
 #else
 import AppKit
 #endif
@@ -220,24 +222,14 @@ extension Picker {
     }
 }
 #elseif canImport(UIKit)
-extension Picker: PHPickerViewControllerDelegate, UIDocumentPickerDelegate {
+extension Picker: UIDocumentPickerDelegate {
     func present(_ r: Request) {
         guard var controller = session.presenter.root.window?.rootViewController else {
             session.log("picker: refused: no window"); cancel(r.view); return
         }
         while let presented = controller.presentedViewController { controller = presented }
         let media = !r.accept.isEmpty && r.accept.allSatisfy { $0.hasPrefix("image/") || $0.hasPrefix("video/") }
-        if media {
-            var config = PHPickerConfiguration()
-            config.selectionLimit = r.multiple ? 0 : 1
-            let images = r.accept.contains { $0.hasPrefix("image/") }, videos = r.accept.contains { $0.hasPrefix("video/") }
-            config.filter = images && videos ? .any(of: [.images, .videos]) : images ? .images : .videos
-            // D6: HEVC/ProRes stays as is under `video/*`; otherwise H.264.
-            config.preferredAssetRepresentationMode = r.accept.contains("video/*") || !videos ? .current : .compatible
-            let picker = PHPickerViewController(configuration: config)
-            picker.delegate = self
-            requests[ObjectIdentifier(picker)] = r
-            controller.present(picker, animated: true)
+        if media, Picker.photos(self, r, controller) {
         } else {
             let picker = UIDocumentPickerViewController(forOpeningContentTypes: Picker.types(r.accept), asCopy: true)
             picker.allowsMultipleSelection = r.multiple
@@ -245,6 +237,24 @@ extension Picker: PHPickerViewControllerDelegate, UIDocumentPickerDelegate {
             requests[ObjectIdentifier(picker)] = r
             controller.present(picker, animated: true)
         }
+    }
+}
+#if EXACT_PHOTOS
+extension Picker: PHPickerViewControllerDelegate {
+    static func photos(_ p: Picker, _ r: Request, _ controller: UIViewController) -> Bool {
+        do {
+            var config = PHPickerConfiguration()
+            config.selectionLimit = r.multiple ? 0 : 1
+            let images = r.accept.contains { $0.hasPrefix("image/") }, videos = r.accept.contains { $0.hasPrefix("video/") }
+            config.filter = images && videos ? .any(of: [.images, .videos]) : images ? .images : .videos
+            // D6: HEVC/ProRes stays as is under `video/*`; otherwise H.264.
+            config.preferredAssetRepresentationMode = r.accept.contains("video/*") || !videos ? .current : .compatible
+            let picker = PHPickerViewController(configuration: config)
+            picker.delegate = p
+            p.requests[ObjectIdentifier(picker)] = r
+            controller.present(picker, animated: true)
+        }
+        return true
     }
 
     func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
@@ -277,6 +287,13 @@ extension Picker: PHPickerViewControllerDelegate, UIDocumentPickerDelegate {
         }
     }
 
+}
+#else
+extension Picker {
+    static func photos(_ p: Picker, _ r: Request, _ controller: UIViewController) -> Bool { false }
+}
+#endif
+extension Picker {
     func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
         if exportFinished(controller, urls: urls) || documentFinished(controller, urls: urls) { return }
         guard let r = requests.removeValue(forKey: ObjectIdentifier(controller)) else { return }
