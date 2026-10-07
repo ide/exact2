@@ -72,6 +72,12 @@ final class NativeButton: UIButton {
             if presenter.contextRetainsFocus(owner) != true { presenter.viewport.endEditing(true) }
             presenter.press(owner.id)
         }, for: .primaryActionTriggered)
+        // Light, dark or increased contrast: the configuration holds colours
+        // and a symbol image resolved for the traits it was made under, and
+        // no batch touches the button for a change of appearance.
+        registerForTraitChanges([UITraitUserInterfaceStyle.self, UITraitAccessibilityContrast.self]) { (b: NativeButton, _: UITraitCollection) in
+            if b.configured { b.update() }
+        }
     }
     required init?(coder: NSCoder) { nil }
 
@@ -188,7 +194,7 @@ final class NativeButton: UIButton {
         let key = ApplyProfile.time("btn.key") { [style, title ?? "", symbol?.props["symbolName"] ?? "", "\(symbol?.number("font_size") ?? 0)",
                    "\(symbol?.color("tint_color", .label) ?? .clear)", "\(text?.color("text_color", .label) ?? .clear)",
                    "\(text?.number("font_size") ?? 0)", "\(text?.number("font_weight") ?? 0)", "\(radius)", "\(owner.bounds.size)",
-                   "\(a)", "\(b)", owner.style["button_content_direction"]?.string ?? "", "\(owner.style["button_content_gap"]?.number ?? -1)", "\(owner.color("accent_color", .clear))", "\(tintColor.resolvedColor(with: traitCollection))"].joined(separator: "|") }
+                   "\(a)", "\(b)", owner.style["button_content_direction"]?.string ?? "", "\(owner.style["button_content_gap"]?.number ?? -1)", "\(owner.color("accent_color", .clear))", "\(tintColor.resolvedColor(with: traitCollection))", "\(traitCollection.userInterfaceStyle.rawValue)", "\(traitCollection.accessibilityContrast.rawValue)"].joined(separator: "|") }
         if key != signature {
             signature = key
             var rest = ApplyProfile.time("btn.config") { NativeButton.configuration(style, owner: owner, text: text, symbol: symbol, title: title, radius: radius, symbolBox: a, textBox: b, accent: tintColor) }
@@ -228,7 +234,13 @@ final class NativeButton: UIButton {
                 }
                 button.configuration = config
             }
-            ApplyProfile.time("btn.assign") { configuration = rest }
+            // A button already showing changes its look in one step: UIKit
+            // animates a new configuration's title and symbol on its own
+            // while the background is set at once (a defrost chip turning
+            // on faded its text over a background that had already jumped).
+            ApplyProfile.time("btn.assign") {
+                if configured, window != nil { UIView.performWithoutAnimation { configuration = rest; layoutIfNeeded() } } else { configuration = rest }
+            }
             // Behind an alert UIKit dims the tint (the accent) to grey, as the
             // platform should; every other colour here is authored (a title's
             // `color`, a symbol's `tint-color`, an `accent-color` fill) and
@@ -301,13 +313,18 @@ final class NativeButton: UIButton {
         // A symbol and a title are UIKit's own pairing: the author's
         // `flex-direction` is its placement and the `gap` its padding, as
         // the host sends them (`button_content_direction`, `_gap`); with no
-        // gap written the padding is UIKit's. A button that is not a flex
-        // box has its laid-out boxes read instead.
-        if symbol != nil, text != nil {
+        // gap written the padding is the platform's system spacing between
+        // them (a configuration's own default is none at all). A button
+        // that is not a flex box has its laid-out boxes read instead.
+        if let symbol, let text {
             if let direction = owner.style["button_content_direction"]?.string {
                 config.imagePlacement = direction == "column" ? .top : direction == "column-reverse" ? .bottom
                     : direction == "row-reverse" ? .trailing : .leading
                 if let gap = owner.style["button_content_gap"]?.number { config.imagePadding = CGFloat(gap) }
+                else {
+                    let font = UIFont.systemFont(ofSize: text.number("font_size", 17), weight: weight(text.number("font_weight", 400)))
+                    config.imagePadding = systemSpacing(stacked: direction.hasPrefix("column"), image: config.image, font: font)
+                }
             } else if !a.isEmpty, !b.isEmpty {
                 let stacked = b.minY >= a.maxY - 1
                 config.imagePlacement = stacked ? .top : .leading
@@ -334,6 +351,35 @@ final class NativeButton: UIButton {
         let (start, end) = rtl ? (max(0, right), max(0, left)) : (max(0, left), max(0, right))
         return left < right ? (.left, NSDirectionalEdgeInsets(top: 0, leading: rtl ? 0 : start, bottom: 0, trailing: rtl ? end : 0))
             : (.right, NSDirectionalEdgeInsets(top: 0, leading: rtl ? start : 0, bottom: 0, trailing: rtl ? 0 : end))
+    }
+
+    /// UIKit's system spacing between an icon and its title, as Auto
+    /// Layout's `equalToSystemSpacing` gives it (what a stack view's system
+    /// spacing is): laid out once per font, image size and direction, and
+    /// read back, never stored as a number.
+    private static var spacings: [String: CGFloat] = [:]
+    static func systemSpacing(stacked: Bool, image: UIImage?, font: UIFont) -> CGFloat {
+        let size = image?.size ?? .zero
+        let key = "\(stacked)|\(font.fontName)|\(font.pointSize)|\(size)"
+        if let known = spacings[key] { return known }
+        let box = UIView(frame: CGRect(x: 0, y: 0, width: 400, height: 400))
+        let icon = UIImageView(image: image), label = UILabel()
+        label.font = font
+        label.text = "M"
+        for v in [icon, label] as [UIView] { v.translatesAutoresizingMaskIntoConstraints = false; box.addSubview(v) }
+        var constraints = [icon.leadingAnchor.constraint(equalTo: box.leadingAnchor), icon.topAnchor.constraint(equalTo: box.topAnchor)]
+        if stacked {
+            constraints += [label.leadingAnchor.constraint(equalTo: box.leadingAnchor),
+                            label.topAnchor.constraint(equalToSystemSpacingBelow: icon.bottomAnchor, multiplier: 1)]
+        } else {
+            constraints += [label.topAnchor.constraint(equalTo: box.topAnchor),
+                            label.leadingAnchor.constraint(equalToSystemSpacingAfter: icon.trailingAnchor, multiplier: 1)]
+        }
+        NSLayoutConstraint.activate(constraints)
+        box.layoutIfNeeded()
+        let spacing = max(0, stacked ? label.frame.minY - icon.frame.maxY : label.frame.minX - icon.frame.maxX)
+        spacings[key] = spacing
+        return spacing
     }
 
     static func weight(_ w: CGFloat) -> UIFont.Weight {
