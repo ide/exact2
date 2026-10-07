@@ -5,7 +5,8 @@
 // TTI is when outstanding work clears, never before render. A newer change cancels it.
 // A change UIKit made itself (its Back button, a back swipe, LLP 1035.001.000)
 // reaches the app once its transition has ended, but the screen it shows was
-// drawn from the transition's first frame: render is when UIKit began to show it.
+// drawn from the transition's first frame: render is that frame, the first vsync
+// after the turn in which UIKit began to show it (`willShow` comes before it).
 import Foundation
 import QuartzCore
 
@@ -45,10 +46,30 @@ final class NavigationMarks: NSObject {
 
     func input(at timestamp: TimeInterval) { lastInput = timestamp }
 
-    /// When UIKit last began showing a screen on its own (`willShow` outside
-    /// Exact's projection), in seconds on the `CACurrentMediaTime` clock.
+    /// The first frame of UIKit's last transition of its own (its Back
+    /// button, a back swipe), in seconds on the `CACurrentMediaTime` clock.
     private var platformShowing: Double?
-    func platformBeganShowing() { platformShowing = CACurrentMediaTime() }
+    private var platformTurnEnded: Double?
+    private var platformLink: CADisplayLink?
+
+    /// UIKit begins showing a screen itself (`willShow` outside Exact's
+    /// projection): its first frame is the next vsync after this turn, as
+    /// Core Animation commits the transition at the turn's end.
+    func platformBeganShowing() {
+        platformShowing = nil
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            platformTurnEnded = CACurrentMediaTime()
+            if platformLink == nil { platformLink = mainDisplayLink(self, #selector(platformTick(_:))) }
+        }
+    }
+
+    @objc private func platformTick(_ link: CADisplayLink) {
+        defer { platformLink?.invalidate(); platformLink = nil }
+        guard let ended = platformTurnEnded, let g = Vsync(link).next(after: ended) else { return }
+        platformShowing = g
+        platformTurnEnded = nil
+    }
 
     func routerChanged(_ session: ExactSession, payload: [String: Any]) {
         guard let top = (payload["top"] as? NSNumber)?.uint64Value else { return }
