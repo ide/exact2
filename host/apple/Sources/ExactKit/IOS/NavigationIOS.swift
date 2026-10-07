@@ -883,6 +883,8 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
         // willShow again for the source, although the coordinator's .to is
         // still the pop destination. Keep that contact's source until didShow.
         if interactiveTransition, interactiveSource != nil { return }
+        // UIKit's own (its Back button, a swipe): Observe's render mark is now.
+        if !syncing { NavigationMarks.shared.platformBeganShowing() }
         let transition = navigationController.transitionCoordinator
         begunTransition = transition.map(ObjectIdentifier.init)
         changing = animated && transition?.viewController(forKey: .to) === viewController
