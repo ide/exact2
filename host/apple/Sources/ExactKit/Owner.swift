@@ -97,6 +97,7 @@ final class Owner: @unchecked Sendable {
             if main { mainWaits = job }
             lock.unlock()
             work.signal()
+            if main, let idle = whileMainWaits { whileMainWaits = nil; idle() }
             while true {
                 lock.lock()
                 if job.done {
@@ -113,6 +114,10 @@ final class Owner: @unchecked Sendable {
             return result!
         }
     }
+
+    /// Main-thread work for the next wait on the owner, run once while the
+    /// owner works: the launch's UIKit warm-up while the runner boots.
+    var whileMainWaits: (() -> Void)?
 
     func sync<T>(_ body: () -> T) -> T {
         sync(body, busy: Owner.unserved())

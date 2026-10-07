@@ -816,6 +816,23 @@ public final class ExactSession {
         }
         let cp = text.checkpoint()
         runtime.setProfileResolver(app.resolver)
+        #if os(iOS)
+        // Main waits while the runner boots (its first layout and text):
+        // UIKit's containers, made once meanwhile, start their classes,
+        // appearance and bar images, which the first batch's navigation
+        // install paid for (apply ~8 ms faster on the simulator).
+        if ExactLaunch.shared.isLaunchSession(self) {
+            Owner.shared.whileMainWaits = {
+                ApplyProfile.time("warm") {
+                    let nav = UINavigationController(rootViewController: UIViewController())
+                    let tabs = UITabBarController()
+                    tabs.viewControllers = [nav]
+                    tabs.view.frame = CGRect(origin: .zero, size: size)
+                    tabs.view.layoutIfNeeded()
+                }
+            }
+        }
+        #endif
         let batch = runtime.boot(width: size.width, height: size.height)
         if batch.error != nil { text.restore(cp) }
         return finishBoot(batch, started: t)
