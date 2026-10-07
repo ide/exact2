@@ -22,7 +22,7 @@ These settings are optional:
 | `expo.app_startup.cold_launch_time` / `warm_launch_time` | process start | launch end: didFinishLaunching on Apple, the display opening on Linux |
 | `expo.app_startup.ttr` | launch end (page activation on the web) | the first frame on screen |
 | `expo.app_startup.tti` | launch end | the first frame where nothing on screen is loading (below) |
-| `expo.navigation.cold_ttr` / `warm_ttr` / `tti` | the input (or commit) that changed the route | the same marks for the new screen |
+| `expo.navigation.cold_ttr` / `warm_ttr` / `tti` | the input (or commit) that changed the route | the same marks for the new screen; `tti` only with `cold_ttr` (a screen shown before, as on a back or a tab seen before, has none) |
 | `expo.updates.download_time` (Apple) | the first file requested | the update staged |
 
 ## Time to interactive

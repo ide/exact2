@@ -92,6 +92,8 @@ function startNavigation(url) {
     if (nav !== n) return;
     n.presented = t;
     record('navigation', { ...fields, name: cold ? 'cold_ttr' : 'warm_ttr', value: (t - n.start) / 1000 });
+    // A screen shown before has no TTI (NavigationMarks.swift).
+    if (!cold) { n.done = true; return; }
     evaluate();
   });
 }
