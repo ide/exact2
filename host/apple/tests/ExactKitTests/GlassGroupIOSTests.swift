@@ -126,9 +126,11 @@ final class GlassGroupIOSTests: XCTestCase {
     func testAGlassIsIsolatedWhileItsPathFadesMasksOrClips() throws {
         let p = presenter(cluster())
         let inner = try XCTUnwrap(p.views[4]), outer = try XCTUnwrap(p.views[2])
-        let slot = try XCTUnwrap(inner.glassSlot, "a glass found in a group gets a slot")
-        XCTAssertTrue(inner.materialView?.superview === slot.contentView)
-        XCTAssertNil(slot.effect, "joined")
+        _ = try XCTUnwrap(inner.glassSlot, "a glass found in a group gets a slot")
+        // The slot the node holds now: iOS 26.0 makes it anew to join (`clearEffect`).
+        var slot: GlassSlot? { inner.glassSlot }
+        XCTAssertTrue(inner.materialView?.superview === slot?.contentView)
+        XCTAssertNil(slot?.effect, "joined")
         XCTAssertNotNil(outer.glassSlot)
         func isolated(_ node: NodeView) -> [String] {
             var native: [String: Any] = [:]
@@ -140,27 +142,27 @@ final class GlassGroupIOSTests: XCTestCase {
             p.apply(wireBatch([["op": "present", "id": id, "property": "opacity", "x": opacity, "y": 0.0, "w": 0.0, "h": 0.0]]))
         }
         present(3, 0.5)
-        XCTAssertTrue(slot.effect is UIGlassContainerEffect, "an ancestor fades")
+        XCTAssertTrue(slot?.effect is UIGlassContainerEffect, "an ancestor fades")
         XCTAssertEqual(isolated(inner), ["opacity"])
         XCTAssertNil(outer.glassSlot?.effect, "its neighbour stays joined")
         present(3, 1)
-        XCTAssertNil(slot.effect)
+        XCTAssertNil(slot?.effect)
         present(4, 0.3)
-        XCTAssertNotNil(slot.effect, "its own opacity")
+        XCTAssertNotNil(slot?.effect, "its own opacity")
         present(4, 1)
         p.apply(wireBatch([["op": "style", "id": 3, "style": ["overflow_x": "hidden", "overflow_y": "hidden", "text_color": [0, 0, 0, 255]]]]))
         XCTAssertEqual(isolated(inner), ["clip"])
         p.apply(wireBatch([["op": "style", "id": 3, "style": ["text_color": [0, 0, 0, 255]]]]))
-        XCTAssertNil(slot.effect)
+        XCTAssertNil(slot?.effect)
         // Its own clip does not isolate it: its bounds hold its glass.
         p.apply(wireBatch([["op": "style", "id": 4, "style": ["border_radius": 20.0, "overflow_x": "hidden", "overflow_y": "hidden", "text_color": [0, 0, 0, 255]]]]))
         XCTAssertEqual(isolated(inner), [])
         // Out of every group, a slot holds no container.
         present(3, 0.5)
         p.apply(wireBatch([["op": "props", "id": 1, "set": [:], "clear": ["glassGroup"]]]))
-        XCTAssertNil(slot.effect)
+        XCTAssertNil(slot?.effect)
         // The batch's reorder keeps the slot, not the glass in it, at the back.
-        XCTAssertTrue(inner.subviews.first === slot && inner.materialView?.superview === slot.contentView)
+        XCTAssertTrue(inner.subviews.first === slot && inner.materialView?.superview === slot?.contentView)
     }
 
     func testTheGroupViewIsNeverAHitTarget() throws {
