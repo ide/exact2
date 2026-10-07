@@ -482,7 +482,7 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
                 nav.setViewControllers(stack, animated: (pushOrPop || arrives) && index == owners.count - 1 && mounted.count == boundaries.count && !ExactEnv.agentFreezes && !unanimated && nav.view.window != nil)
                 recordOwned(nav)
             }
-            nav.view.layoutIfNeeded()
+            ApplyProfile.time("nav.layout") { nav.view.layoutIfNeeded() }
         }
         unanimated = false
         if mounted.count > common {
