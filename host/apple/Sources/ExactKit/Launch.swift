@@ -131,8 +131,6 @@ public final class ExactLaunch: NSObject {
         marks[.boot] = CACurrentMediaTime()
     }
 
-    func isLaunchSession(_ session: ExactSession) -> Bool { session === launchSession }
-
     /// The launch session's first tree is applied. Core Animation draws and
     /// commits it next, which `drawn` records.
     func treeApplied(_ session: ExactSession, path: String) {
