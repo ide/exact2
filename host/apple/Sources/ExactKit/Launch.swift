@@ -42,6 +42,11 @@ public final class ExactLaunch: NSObject {
     /// How time to interactive ended: settled, declared, failed, timeout, or a failure.
     private(set) var ttiOutcome: String?
     private(set) var lastOutstanding: [String] = []
+    /// Each outstanding item's span, seconds on the `CACurrentMediaTime`
+    /// clock: first seen at an evaluation, cleared at a later one (what held
+    /// TTI, by item, not only the set at each change the trace keeps).
+    private var spans: [String: (from: Double, to: Double?)] = [:]
+    private var spanOrder: [String] = []
     /// Each distinct set of outstanding work, with ms from process start, for
     /// debugging how time to interactive was reached.
     private(set) var trace: [String] = []
@@ -209,6 +214,12 @@ public final class ExactLaunch: NSObject {
         if outstanding != lastOutstanding || trace.isEmpty, trace.count < 32, let p = marks[.process] {
             trace.append("\(String(format: "%.1f", (CACurrentMediaTime() - p) * 1000)) [\(outstanding.joined(separator: ", "))]")
         }
+        let seen = CACurrentMediaTime()
+        for item in outstanding where spans[item]?.to != nil || spans[item] == nil {
+            if spans[item] == nil { spanOrder.append(item) }
+            spans[item] = (spans[item]?.from ?? seen, nil)
+        }
+        for item in lastOutstanding where !outstanding.contains(item) { spans[item]?.to = seen }
         lastOutstanding = outstanding
         guard outstanding.isEmpty, marks[.present] != nil else { candidate = nil; return }
         let now = CACurrentMediaTime()
@@ -316,6 +327,15 @@ public final class ExactLaunch: NSObject {
         if !lastOutstanding.isEmpty { out["outstanding"] = lastOutstanding }
         if !failedResources.isEmpty { out["failed"] = failedResources }
         if !trace.isEmpty { out["trace"] = trace }
+        if let p = marks[.process], !spans.isEmpty {
+            let ms = { (t: Double) in ((t - p) * 1000 * 10).rounded() / 10 }
+            out["items"] = spanOrder.compactMap { item -> [String: Any]? in
+                guard let span = spans[item] else { return nil }
+                var o: [String: Any] = ["item": item, "from": ms(span.from)]
+                if let to = span.to { o["to"] = ms(to) }
+                return o
+            }
+        }
         if !NavigationMarks.shared.recent.isEmpty { out["navigation"] = NavigationMarks.shared.recent }
         if let session { out["launchSession"] = session === launchSession }
         if facts.traced != 0 { out["debugger"] = true }
