@@ -137,6 +137,13 @@ public final class ExactLaunch: NSObject {
         scheduleEvaluate()
     }
 
+    /// The data module is still starting (activation pending): sample what
+    /// is outstanding, so its span starts when it does, not at the next apply.
+    func waitingForData(_ session: ExactSession) {
+        guard session === launchSession, ttiOutcome == nil else { return }
+        scheduleEvaluate()
+    }
+
     /// Re-reads outstanding work after this run-loop turn and its commit finish.
     func applied(_ session: ExactSession, changed: Bool) {
         guard session === launchSession, ttiOutcome == nil else { return }
