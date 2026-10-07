@@ -103,6 +103,17 @@ final class ObserveService {
         phases["exact.since_process_start.ttr"] = marks["present"].map { Self.seconds($0) }
         phases["exact.since_process_start.tti"] = marks["interactive"].map { Self.seconds($0) }
         phases["exact.present.method"] = "next_vsync"
+        // Activation's parts (ms): the app module's load, the wait for the
+        // data module (and how many polls), its ready call, its first batch.
+        if let b = e["boot"] as? [String: Any] {
+            for key in ["runner", "apply"] { if let v = b[key] as? Double { phases["exact.boot.\(key)"] = Self.seconds(v / 1000) } }
+        }
+        if let d = e["data"] as? [String: Any] {
+            for (key, name) in [("appModule", "app_module"), ("waited", "wait"), ("ready", "ready"), ("apply", "apply")] {
+                if let v = d[key] as? Double { phases["exact.data.\(name)"] = Self.seconds(v / 1000) }
+            }
+            if let polls = d["polls"] as? Int { phases["exact.data.polls"] = polls }
+        }
         if let path = e["bootPath"] { phases["exact.boot.path"] = path }
         if e["debugger"] as? Bool == true { phases["exact.launch.debugger"] = true }
         for (name, value) in metrics {
