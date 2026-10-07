@@ -786,7 +786,10 @@ final class Presenter {
         guard let window = viewport.window else { return }
         if let accent = appAccent {
             if windowTint?.window !== window { windowTint = (window, window.tintColor) }
-            if window.tintColor != accent { window.tintColor = accent }
+            if window.tintColor != accent {
+                if ApplyProfile.on { ApplyProfile.time("accent.probe") { window.tintColor = .systemPink } }
+                ApplyProfile.time("accent.window") { window.tintColor = accent }
+            }
         } else if let saved = windowTint, saved.window === window {
             window.tintColor = saved.tint
             windowTint = nil
@@ -900,10 +903,10 @@ final class Presenter {
                 // content geometry lets UIKit settle its scroll relationship.
                 if let first = root.subviews.first as? NodeView {
                     for frame in batch.ops where frame.op == .frame && frame.id == first.id {
-                        applyGeometry(frame)
+                        ApplyProfile.time("geom.first") { applyGeometry(frame) }
                     }
                 }
-                navigation.installInitialOwner(batch)
+                ApplyProfile.time("nav.install") { navigation.installInitialOwner(batch) }
             }
             let id = op.id
             if kind == .children { touched(id, children: true) } else if kind != .roots && kind != .create { touched(id, textChanged: kind == .props || kind == .style || kind == .destroy) }
