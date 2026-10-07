@@ -302,11 +302,11 @@ extension Presenter {
             guard let window = node.window, !hasFocus(window) else { continue }
             autofocusProcessed.insert(ObjectIdentifier(node))
             let target: UIResponder = node.textArea ?? node.field ?? node
-            _ = target.becomeFirstResponder()
+            ApplyProfile.time("a11y.focus") { _ = target.becomeFirstResponder() }
             #endif
         }
         #if os(iOS) || os(tvOS)
-        syncModal()
+        ApplyProfile.time("a11y.modal") { syncModal() }
         #endif
     }
     #if os(iOS) || os(tvOS)

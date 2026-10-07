@@ -882,10 +882,10 @@ final class Presenter {
                 scrollPump.batchApplied()
                 ApplyProfile.time("pass.leaves") { leaves.batchApplied(moved: moved) }
                 #if os(iOS)
-                resolveStatusBar()
+                ApplyProfile.time("pass.statusbar") { resolveStatusBar() }
                 #endif
                 if moved { session?.natives.refreshWorldGeometry() }
-                flushPendingFocus()
+                ApplyProfile.time("pass.focus") { flushPendingFocus() }
             }
         }
         var beganGeometry = false
@@ -1109,10 +1109,10 @@ final class Presenter {
         glassGroups.reconcile()
         let changed = touchedAndAbove(touchedIDs)
         ApplyProfile.time("pass.buttons") { nativeButtons.sync(changed: changed) }
-        swipeActions.sync(changed: changed)
-        groupedLists.sync(changed: changed)
-        positionContexts()
-        syncAccessibility(changed: changed)
+        ApplyProfile.time("pass.swipe") { swipeActions.sync(changed: changed) }
+        ApplyProfile.time("pass.grouped") { groupedLists.sync(changed: changed) }
+        ApplyProfile.time("pass.contexts") { positionContexts() }
+        ApplyProfile.time("pass.accessibility") { syncAccessibility(changed: changed) }
     }
 
     /// Everything kept for `id` goes, the view out of the map (not out of
