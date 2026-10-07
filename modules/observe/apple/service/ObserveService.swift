@@ -113,6 +113,15 @@ final class ObserveService {
                 params["exact.tti.reason"] = e["tti"] ?? "settled"
                 // What was outstanding over time, ms from process start: shows what held TTI.
                 if let trace = e["trace"] as? [String], !trace.isEmpty { params["exact.tti.trace"] = trace.joined(separator: " → ") }
+                // Each item that held it, ms from process start, the latest to clear first.
+                if let items = e["items"] as? [[String: Any]], !items.isEmpty {
+                    let ordered = items.sorted { ($0["to"] as? Double ?? .infinity) > ($1["to"] as? Double ?? .infinity) }
+                    params["exact.tti.items"] = ordered.map { item -> String in
+                        let from = String(format: "%.0f", item["from"] as? Double ?? 0)
+                        let to = (item["to"] as? Double).map { String(format: "%.0f", $0) } ?? "…"
+                        return "\(item["item"] as? String ?? "?") \(from)–\(to)"
+                    }.joined(separator: "; ")
+                }
                 if let failed = e["failed"] as? [String] { params["exact.tti.failed"] = failed.count }
             }
             store.addMetric(session: session, time: wall, category: "appStartup", name: name, value: value, params: params)
