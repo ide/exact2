@@ -16,7 +16,7 @@
 //   1. **Bundle identity.** A bare Mach-O has no Info.plist, so it has no
 //      name, no document types, no Dock tile, and Launch Services cannot find
 //      it — `open -a` fails and Open With never lists it. `run` and `install`
-//      both launch `<Name>.app/Contents/MacOS/ExactMac`: the executable inside
+//      both launch `<Name>.app/Contents/MacOS/<Name>`: the executable inside
 //      a bundle, which *is* the app, with stdout still attached to the
 //      terminal that started it. @ref LLP 1033 D2
 //   2. **Where the file argument goes.** `exact run markdown README.md` and
@@ -39,7 +39,7 @@ import { fileURLToPath } from 'node:url';
 import { cargoEnvironment, HERMES_INSTALLER, hermesBundle, hermesTarget, resolveApp, WEB_TOOLCHAIN, webToolchainEnv } from './app.mjs';
 import { createApp, createGame } from '../game/new.mjs';
 import { sdkFetch } from '../game/app/shells.mjs';
-import { appleArtifacts, assertAppleIdentity, macReleaseEntitlements, stripForDistribution } from '../host/apple/build.mjs';
+import { appleArtifacts, appleExecutable, assertAppleIdentity, bundleExecutable, macReleaseEntitlements, stripForDistribution } from '../host/apple/build.mjs';
 import { closeFilesystemReader } from './filesystem.mjs';
 import { builtAppMatches, jsTargetBuild } from '../host/web/serve.mjs';
 import { chromium } from './agent-launch.mjs';
@@ -50,7 +50,7 @@ const APPLICATIONS = resolve(homedir(), 'Applications');
 /** The app's assembled bundle in this repo — `host/apple/build.mjs --bundle`'s one stable output. */
 export const bundleOf = (app) => appleArtifacts(app).bundle;
 /** The executable inside a bundle: what a terminal launches to keep stdio. */
-export const executableIn = (bundle) => resolve(bundle, 'Contents/MacOS/ExactMac');
+export const executableIn = (bundle) => bundleExecutable(bundle);
 /** The name this app answers to on the command line (`app.command`, else its directory's name). */
 export const commandOf = (app) => app.manifest.app?.command ?? app.name;
 /** Where `install` puts the app. */
@@ -263,7 +263,7 @@ function release(app) {
   const staged = resolve(out, `${app.displayName}.app`);
   sh('/usr/bin/ditto', [bundle, staged]);
   // What ships carries no local symbols; they stay here as a dSYM (before signing: stripping changes the bytes signed).
-  const symbols = stripForDistribution(resolve(staged, 'Contents/MacOS/ExactMac'), resolve(out, `${app.displayName}.dSYM`));
+  const symbols = stripForDistribution(resolve(staged, 'Contents/MacOS', appleExecutable(app)), resolve(out, `${app.displayName}.dSYM`));
   console.log(`symbols: ${symbols.dsym} (${(symbols.saved / 1048576).toFixed(1)} MB off the executable)`);
 
   // Sign inside out, with the hardened runtime and a timestamp. Both are

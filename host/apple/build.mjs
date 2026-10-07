@@ -153,6 +153,22 @@ export const iosTripleFor = (app, device, tv = false) =>
   tv ? `arm64-apple-tvos${deploymentTargets(app).ios}${device ? '' : '-simulator'}` : device ? `arm64-apple-ios${deploymentTargets(app).ios}` : `${process.arch === 'arm64' ? 'arm64' : 'x86_64'}-apple-ios${deploymentTargets(app).ios}-simulator`;
 export const macTriple = `${process.arch === 'arm64' ? 'arm64' : 'x86_64'}-apple-macosx`;
 
+/** The executable's name in an app's bundle: the app's own name, as Xcode
+ * names it after the product, so a crash report, the process list and
+ * Instruments say the app, not the shared host product it was linked as
+ * (`ExactIOS`, `ExactMac`). A path separator or colon is dropped. */
+export const appleExecutable = (app) => String(app.displayName ?? '').replace(/[/:\0]/g, '').trim() || 'App';
+/** The executable an assembled bundle runs, as its Info.plist names it
+ * (`Contents/MacOS/<name>` on macOS, `<name>` at an iOS bundle's top). */
+export const bundleExecutable = (bundle) => {
+  const mac = existsSync(resolve(bundle, 'Contents/Info.plist'));
+  const text = readFileSync(resolve(bundle, mac ? 'Contents/Info.plist' : 'Info.plist'), 'utf8');
+  const name = text.match(/<key>CFBundleExecutable<\/key>\s*<string>([^<]*)<\/string>/)?.[1];
+  if (!name) throw new Error(`${bundle}: its Info.plist names no CFBundleExecutable`);
+  const unescaped = name.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, '&');
+  return mac ? resolve(bundle, 'Contents/MacOS', unescaped) : resolve(bundle, unescaped);
+};
+
 /** App-owned Apple paths, shared by builder and launchers. @ref LLP 1036.000 §2 */
 export function appleArtifacts(app, { destination = 'macos', composition, trust = process.env.EXACT_UPDATE_TRUST ?? 'development', host = false } = {}) {
   if (!['macos', 'ios-simulator', 'ios', 'tvos-simulator', 'tvos'].includes(destination)) throw new Error(`unknown Apple destination ${destination}`);
@@ -250,7 +266,7 @@ export function copyAppleStaticTrees(source, target, trees = [['assets', 'assets
 /** Install the assembled bundle on the simulator. */
 export function install(dev, bundle, app, host = false) {
   if (!bundle || !existsSync(bundle)) throw new Error('build the selected app with --ios first');
-  assertAppleIdentity(app, resolve(bundle, host ? 'ExactHostIOS' : 'ExactIOS'));
+  assertAppleIdentity(app, resolve(bundle, host ? 'ExactHostIOS' : appleExecutable(app)));
   const r = read('xcrun', ['simctl', 'install', dev.udid, bundle]);
   if (r.status !== 0) throw new Error('simctl install: ' + r.stderr);
 }
@@ -403,7 +419,7 @@ const transportSecurity = (section, keys = {}) => {
 };
 
 /** The iOS `Info.plist` from the manifest (LLP 1030 D2: one declaration; `build.mjs` consumes what it generates). The dev client's local-networking permission is `host.ios.localNetworking` (a string: the prompt); the store-required version numbers are counters bake owns, not authored. */
-export const infoPlist = (app, device = false, { executable = 'ExactIOS', id = app.id, name = app.displayName, development = null, icon = {}, distribution = null, reach = null, tv = false } = {}) => {
+export const infoPlist = (app, device = false, { executable = appleExecutable(app), id = app.id, name = app.displayName, development = null, icon = {}, distribution = null, reach = null, tv = false } = {}) => {
   const ios = app.manifest.host?.ios ?? {};
   // tvOS reuses the manifest's iOS section; Apple TV is device family 3.
   const families = tv ? [3] : (ios.deviceFamily ?? ['iphone', 'ipad']).map((f) => (f === 'ipad' ? 2 : 1));
@@ -619,7 +635,7 @@ export function stripForDistribution(executable, dsym) {
 /** The macOS `Info.plist` for a bundled build, from the same manifest. */
 export const macInfoPlist = (app, { development = null, icon = {}, reach = null } = {}) => plistFile({
   ...icon, ...(app.manifest.moduleConfig ? { ExactModuleConfig: app.manifest.moduleConfig } : {}),
-  CFBundleExecutable: 'ExactMac',
+  CFBundleExecutable: appleExecutable(app),
   CFBundleIdentifier: app.id,
   CFBundleName: app.displayName,
   CFBundleDisplayName: app.displayName,
@@ -1306,7 +1322,8 @@ async function main(args) {
       const executables = resolve(contents, 'MacOS'), resources = resolve(contents, 'Resources');
       mkdirSync(executables, { recursive: true });
       mkdirSync(resources);
-      for (const file of ['ExactMac', ...loaded, ...(canvasGpuBuilt ? [canvasGpuLoadName] : []), ...(modulesBuilt ? [modulesLoadName] : []), ...serviceDylibs.map(svc => svc.load), ...(hasGpu ? [loadName] : []), ...moduleDylibs.map(m => m.load)]) copyFileSync(resolve(binDir, file), resolve(executables, file));
+      copyFileSync(resolve(binDir, 'ExactMac'), resolve(executables, appleExecutable(app)));
+      for (const file of [...loaded, ...(canvasGpuBuilt ? [canvasGpuLoadName] : []), ...(modulesBuilt ? [modulesLoadName] : []), ...serviceDylibs.map(svc => svc.load), ...(hasGpu ? [loadName] : []), ...moduleDylibs.map(m => m.load)]) copyFileSync(resolve(binDir, file), resolve(executables, file));
       writeFileSync(resolve(contents, 'Info.plist'), macInfoPlist(app, { development, reach: bakedCompat.reach }));
       copyAppleStaticTrees(paths.capture, resources);
       verifyBakeFiles(bakedCompat, bakedPlan, listAssets(resources, true));
@@ -1319,7 +1336,7 @@ async function main(args) {
       for (const file of [...loaded, ...(canvasGpuBuilt ? [canvasGpuLoadName] : []), ...(modulesBuilt ? [modulesLoadName] : []), ...serviceDylibs.map(svc => svc.load)]) run('codesign', ['--force', '--sign', sha1 ?? '-', '--timestamp=none', resolve(executables, file)], { stdio: 'ignore' });
       run('codesign', ['--force', '--sign', sha1 ?? '-', '--timestamp=none', bundle], { stdio: 'ignore' });
       const placed = bundleDestination;
-      assertAppleIdentity(app, resolve(executables, 'ExactMac'), bakedCompat.id);
+      assertAppleIdentity(app, resolve(executables, appleExecutable(app)), bakedCompat.id);
       placeAppleArtifact(bundle, placed);
       rmSync(stage, { recursive: true, force: true });
       bundlePath = placed;
@@ -1332,7 +1349,7 @@ async function main(args) {
     // A live source is explicit (--url or EXACT_DEV_PLAN). The shared web
     // output may belong to another app, and TypeScript edits publish complete
     // URL generations rather than rewriting its initial app.plan.
-    if (args.includes('--run')) spawnSync(bundlePath ? resolve(bundlePath, 'Contents/MacOS/ExactMac') : resolve(paths.products, product), [], { stdio: 'inherit', env: { ...env, ...launchEnv, EXACT_ASSETS: paths.capture } });
+    if (args.includes('--run')) spawnSync(bundlePath ? resolve(bundlePath, 'Contents/MacOS', appleExecutable(app)) : resolve(paths.products, product), [], { stdio: 'inherit', env: { ...env, ...launchEnv, EXACT_ASSETS: paths.capture } });
     return;
   }
 
@@ -1342,7 +1359,7 @@ async function main(args) {
   // entitlements for a phone.
   const bundle = resolve(binDir, 'ExactIOS.app');
   mkdirSync(resolve(bundle, 'Frameworks'), { recursive: true });
-  copyFileSync(bin, resolve(bundle, product));
+  copyFileSync(bin, resolve(bundle, appleExecutable(app)));
   writeFileSync(resolve(bundle, 'Info.plist'), infoPlist(app, device, { development, reach: appleReach, tv }));
   // The GPU crate's shaders (LLP 1030 D8): files the presenter registers
   // with the module before a surface is created, never strings in the dylib.
@@ -1386,7 +1403,7 @@ async function main(args) {
     // Unsigned, the re-signer's profile decides; ask for no debugger, as a distribution profile grants none.
     writeFileSync(ent, entitlements({ ...app, id }, signingProfile?.team, signingProfile?.dev ?? !unsigned, appleReach, { prefix: signingProfile?.prefix }));
     verifyBakeFiles(bakedCompat, bakedPlan, listAssets(assembled, true));
-    assertAppleIdentity(app, resolve(assembled, host ? 'ExactHostIOS' : 'ExactIOS'), bakedCompat.id);
+    assertAppleIdentity(app, resolve(assembled, host ? 'ExactHostIOS' : appleExecutable(app)), bakedCompat.id);
     const whole = receipt(app, { compatibilityId: bakedCompat.id, build: buildReceipt, composition,
       platform: destination, target, sdk, identity: signingIdentity,
       profile: signingProfile ? { name: signingProfile.name, team: signingProfile.team, expires: signingProfile.expires } : null,

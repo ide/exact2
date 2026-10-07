@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { spawn, spawnSync } from 'node:child_process';
 import { open as openSession, render } from '../scripts/agent.mjs';
 import { cdpFailureContext, gameNonInput } from '../scripts/agent-launch.mjs';
-import { appleArtifacts } from '../host/apple/build.mjs';
+import { appleArtifacts, bundleExecutable } from '../host/apple/build.mjs';
 import { buildBake, resolveApp } from '../scripts/app.mjs';
 import { closeFilesystemReader } from '../scripts/filesystem.mjs';
 
@@ -175,7 +175,7 @@ export function artifactDigest(host, dist, artifacts) {
     } else if (host === 'linux') {
       for (const path of [artifacts.binary, artifacts.module]) manifest.push([basename(path), createHash('sha256').update(readFileSync(path)).digest('hex')]);
     } else {
-      const executable = resolve(artifacts.bundle, host === 'macos' ? 'Contents/MacOS/ExactMac' : 'ExactIOS');
+      const executable = bundleExecutable(artifacts.bundle);
       readFileSync(executable);
       walk(artifacts.bundle, 'bundle');
       // The driver launches the standalone product on macOS, loading its adjacent dylibs/assets.

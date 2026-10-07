@@ -13,6 +13,8 @@ import {agreePins, nativeProofHost, webUnavailable, pinRecorder, proofStatus, fa
 import {proofCommand, worldObservations, pinRevision} from './proof.mjs';
 import {comparePlacement} from './games/placement-fixture/proof.mjs';
 import {typeArguments, typeFor, browserKey, nativeKey, render, worldView, tapRefusal, assertWebDistApp, clockSpan} from '../scripts/agent.mjs';
+// A bundle's executable is the one its Info.plist names (host/apple/build.mjs bundleExecutable).
+const namesExecutable=(bundle)=>writeFileSync(resolve(bundle,'Contents/Info.plist'),'<plist><dict><key>CFBundleExecutable</key><string>Game</string></dict></plist>');
 
 test('external app sources and assets include every extension while outputs stay excluded', () => {
   const directory = mkdtempSync(resolve(tmpdir(), 'external-proof-inputs-'));
@@ -91,7 +93,7 @@ test('proof receipts bind the web manifest and the actual app executable', () =>
     writeFileSync(resolve(dir,'built-macos'),'');
     expect(artifactDigest('macos',dir,{bundle})).toBe(null);
     mkdirSync(resolve(bundle,'Contents/MacOS'),{recursive:true});
-    const exe=resolve(bundle,'Contents/MacOS/ExactMac');
+    const exe=resolve(bundle,'Contents/MacOS/Game'); namesExecutable(bundle);
     writeFileSync(exe,'native one'); const mac=artifactDigest('macos',dir,{bundle});
     writeFileSync(exe,'native two'); expect(artifactDigest('macos',dir,{bundle})).not.toBe(mac);
     const binary=resolve(dir,'standalone');
@@ -148,7 +150,7 @@ test('native receipt changes with game dylibs and embedded plan/assets', () => {
   try {
     mkdirSync(resolve(bundle,'Contents/MacOS'),{recursive:true});
     mkdirSync(resolve(bundle,'Contents/Resources'),{recursive:true});
-    writeFileSync(resolve(bundle,'Contents/MacOS/ExactMac'),'executable');
+    writeFileSync(resolve(bundle,'Contents/MacOS/Game'),'executable'); namesExecutable(bundle);
     for (const file of ['Contents/MacOS/libexact_gpu.dylib','Contents/MacOS/libexact_web.dylib','Contents/Resources/app.plan','Contents/Resources/texture.bin']) {
       writeFileSync(resolve(bundle,file),'before'); const before=artifactDigest('macos',dir,{bundle});
       writeFileSync(resolve(bundle,file),'after'); expect(artifactDigest('macos',dir,{bundle})).not.toBe(before);
@@ -229,7 +231,7 @@ test('native receipt cache misses when only the standalone game dylib changes', 
   try {
     mkdirSync(resolve(bundle,'Contents/MacOS'),{recursive:true});
     mkdirSync(products);
-    writeFileSync(resolve(bundle,'Contents/MacOS/ExactMac'),'bundled executable');
+    writeFileSync(resolve(bundle,'Contents/MacOS/Game'),'bundled executable'); namesExecutable(bundle);
     const binary=resolve(products,'ExactMac'), dylib=resolve(products,'libgreybox_gpu.dylib');
     writeFileSync(binary,'standalone executable');
     writeFileSync(dylib,'game before');
@@ -1289,9 +1291,9 @@ test('phone carrier copies before launch, saves over the socket and owns its pro
     const root = process.env.EXACT_PHONE_TEST_ROOT, dir = mkdtempSync(resolve(tmpdir(), 'phone-carrier-'));
     const bundle = resolve(dir, 'Phone.app'), input = resolve(dir, 'input.world'), output = resolve(dir, 'output.world');
     const bytes = Buffer.from([0, 1, 127, 255]), calls = [], children = [];
-    const app = {id:'com.exact.phone-fixture',dir,target:dir,crate:kind=>`phone-fixture-${kind}`};
+    const app = {id:'com.exact.phone-fixture',displayName:'Phone',dir,target:dir,crate:kind=>`phone-fixture-${kind}`};
     mkdirSync(bundle); writeFileSync(input, bytes);
-    writeFileSync(resolve(bundle, 'ExactIOS'), JSON.stringify({id:'0'.repeat(32),inputs:{app:app.id}}));
+    writeFileSync(resolve(bundle, 'Phone'), JSON.stringify({id:'0'.repeat(32),inputs:{app:app.id}}));
     const apps = await import(resolve(root, 'scripts/app.mjs'));
     const apple = await import(resolve(root, 'host/apple/build.mjs'));
     const devices = await import(resolve(root, 'host/apple/devices.mjs'));
