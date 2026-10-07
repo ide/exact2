@@ -1057,10 +1057,16 @@ package final class Presenter {
                 if let gone, !modals.retainsRemovedView(gone) { gone.removeFromSuperview() }
             case .roots:
                 root.subviews.forEach { $0.removeFromSuperview() }
-                ApplyProfile.time("roots.attach") { for r in op.ids.compactMap({ views[UInt32($0)] }) { root.addSubview(r) } }
-                // A new root says its own accent, or none.
-                ApplyProfile.time("roots.accent") { for r in op.ids.compactMap({ views[UInt32($0)] }) { r.accentTint = nil; r.syncAccentTint() } }
-                if op.ids.compactMap({ views[UInt32($0)] }).allSatisfy({ $0.accentTint == nil }) { appAccent = nil }
+                let roots = op.ids.compactMap { views[UInt32($0)] }
+                // A new root says its own accent, or none, and the window
+                // takes it before the tree joins it: set after, UIKit tells
+                // every view in the tree its tint changed (the launch's first
+                // batch spent most of its time there).
+                ApplyProfile.time("roots.accent") {
+                    for r in roots { r.accentTint = nil; r.syncAccentTint(asRoot: true) }
+                    if roots.allSatisfy({ $0.accentTint == nil }) { appAccent = nil }
+                }
+                ApplyProfile.time("roots.attach") { for r in roots { root.addSubview(r) } }
             case .frame, .content:
                 if flats.isFlat(id) {
                     if kind == .frame { flats.frame(id, CGRect(x: op.x, y: op.y, width: op.w, height: op.h)) }
