@@ -619,9 +619,9 @@ test('page facts: the platform off the agent, the drive\'s values under it (LLP 
   const platform = { document: { visibilityState: 'hidden', addEventListener: name => listened.push(name) }, navigator: { onLine: false, share() {} }, addEventListener: name => listened.push(name) };
   const real = pageReporter(false, platform);
   // No navigation entry is a page the browser navigated to (bits 5–6: 1).
-  expect(real.bits()).toBe(1 | 2 | 4 | 16);
+  expect(real.bits()).toBe(1 | 2 | 4 | 32);
   platform.document.visibilityState = 'visible'; platform.navigator = { onLine: true };
-  expect(real.bits()).toBe(16);
+  expect(real.bits()).toBe(32);
   const reloaded = pageReporter(false, { ...platform, performance: { getEntriesByType: t => t === 'navigation' ? [{ type: 'reload' }] : [] } });
   expect(reloaded.bits()).toBe(2 << 5);
   // The document pickers (studio diary R31): bit 3 where the browser has them.
