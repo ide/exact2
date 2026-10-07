@@ -882,6 +882,8 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
 
     func navigationController(_ navigationController: UINavigationController, willShow viewController: UIViewController, animated: Bool) {
         guard owns(navigationController) else { return }
+        // UIKit's own (its Back button, a swipe): Observe's render mark is now.
+        if !syncing { NavigationMarks.shared.platformBeganShowing() }
         let transition = navigationController.transitionCoordinator
         // The route coming into view was out of the window while it was
         // covered, so no scroll asked for its text; paint what shows of it
