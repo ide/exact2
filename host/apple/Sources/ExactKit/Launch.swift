@@ -147,6 +147,14 @@ public final class ExactLaunch: NSObject {
     /// Re-reads outstanding work after this run-loop turn and its commit finish.
     func applied(_ session: ExactSession, changed: Bool) {
         guard session === launchSession, ttiOutcome == nil else { return }
+        // Nothing outstanding, but the screen still changing: TTI waits for
+        // a frame with no change, so this is what holds it then (a fresh
+        // answer replacing a kept one, a fade). Its span: first to last.
+        if changed, lastOutstanding.isEmpty, marks[.present] != nil {
+            let now = CACurrentMediaTime(), item = "screen:changing"
+            if spans[item] == nil { spanOrder.append(item) }
+            spans[item] = (spans[item]?.from ?? now, now)
+        }
         if changed { contentDirty = true; candidate = nil }
         scheduleEvaluate()
     }
