@@ -1397,7 +1397,10 @@ package final class TextEngine {
     /// The kernel's text measurer; `ctx` is the session's engine.
     static let measureText: ExactMeasureFn = { ctx, request in
         guard let ctx, let request = request?.pointee else { return ExactMetrics(width: 0, height: 0, baseline: -1) }
-        return Unmanaged<TextEngine>.fromOpaque(ctx).takeUnretainedValue().measure(request)
+        guard ApplyProfile.on else { return Unmanaged<TextEngine>.fromOpaque(ctx).takeUnretainedValue().measure(request) }
+        // The boot's paragraphs, counted and timed (the launch report's `text`).
+        ApplyProfile.count("text.measures")
+        return ApplyProfile.time("text.measure") { Unmanaged<TextEngine>.fromOpaque(ctx).takeUnretainedValue().measure(request) }
     }
 }
 
