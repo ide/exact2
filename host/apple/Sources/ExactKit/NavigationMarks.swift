@@ -38,6 +38,8 @@ final class NavigationMarks: NSObject {
         let cold: Bool
         var turnEnded: Double?
         var presented: Double?
+        /// The route change's batch, by part (`batchParts`).
+        var parts: String?
         init(session: ExactSession, start: Double, committed: Double, fields: [String: Any], cold: Bool) {
             self.session = session
             self.start = start
@@ -158,6 +160,14 @@ final class NavigationMarks: NSObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + ExactLaunch.ttiTimeout, execute: item)
     }
 
+    /// What applying the route change's batch cost, by part (ms): its
+    /// largest, on the screen's render metric.
+    func batchParts(_ session: ExactSession, _ parts: [String: Double]) {
+        guard let p = pending, p.session === session, p.presented == nil else { return }
+        let top = parts.filter { $0.value >= 0.5 }.sorted { $0.value > $1.value }.prefix(6)
+        if !top.isEmpty { p.parts = top.map { "\($0.key) \(Int($0.value.rounded()))" }.joined(separator: ", ") }
+    }
+
     /// Re-checks outstanding work after a batch, once the change is shown.
     func applied(_ session: ExactSession) {
         guard let p = pending, p.session === session, p.presented != nil else { return }
@@ -179,6 +189,7 @@ final class NavigationMarks: NSObject {
         // change reached the host, then its batch was committed.
         f["exact.nav.route_change"] = p.committed - p.start
         f["exact.nav.commit"] = ended - p.start
+        if let parts = p.parts { f["exact.nav.parts"] = parts }
         ExactJournal.shared.record("navigation", f)
         note("\(f["name"] ?? "") \(f["route"] ?? "") \(String(format: "%.1f", (g - p.start) * 1000)) ms")
         guard p.cold else {

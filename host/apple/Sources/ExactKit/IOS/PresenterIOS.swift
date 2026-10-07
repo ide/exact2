@@ -1105,8 +1105,8 @@ final class Presenter {
         ApplyProfile.time("pass.controls") { controls.sync(contents: batch.controls, touched: touchedIDs) }
         ApplyProfile.time("pass.menus") { menus.sync() }
         glassGroups.reconcile()
-        ApplyProfile.time("pass.buttons") { nativeButtons.sync() }
         let changed = touchedAndAbove(touchedIDs)
+        ApplyProfile.time("pass.buttons") { nativeButtons.sync(changed: changed) }
         swipeActions.sync(changed: changed)
         groupedLists.sync(changed: changed)
         positionContexts()
