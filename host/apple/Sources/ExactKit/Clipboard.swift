@@ -112,7 +112,9 @@ extension NodeView {
     // chain, as UIKit asks `canPerformAction` before it sends.
     override func copy(_ sender: Any?) {
         if clipboard(#selector(copy(_:))) { return }
+        #if os(iOS)
         if let box = textCopyBox { UIPasteboard.general.string = TextCopy.text(of: box) }
+        #endif
     }
     override func cut(_ sender: Any?) { clipboard(#selector(cut(_:))) }
     override func paste(_ sender: Any?) { clipboard(#selector(paste(_:))) }

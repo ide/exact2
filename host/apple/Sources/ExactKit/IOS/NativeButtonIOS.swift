@@ -345,4 +345,15 @@ final class NativeButton: UIButton {
         case ..<550: .medium; case ..<650: .semibold; case ..<750: .bold; case ..<850: .heavy; default: .black }
     }
 }
+#elseif os(tvOS)
+import UIKit
+
+// tvOS keeps its buttons as the author's boxes, focused by the focus
+// engine: the names the shared presenter reads stand for nothing here.
+final class NativeButtonHost {
+    init(presenter: Presenter) {}
+    func sync(changed: Set<UInt32>? = nil) {}
+    func reset() {}
+}
+final class NativeButton: UIButton {}
 #endif
