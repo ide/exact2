@@ -25,6 +25,7 @@ func processStart() -> Double? {
     let t = info.kp_proc.p_starttime
     return Double(t.tv_sec) + Double(t.tv_usec) / 1e6
 }
+ExactLaunch.shared.main()
 let mainAt = Date().timeIntervalSince1970
 let execToMainMs = processStart().map { (mainAt - $0) * 1000 }
 
