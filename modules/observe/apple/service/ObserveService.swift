@@ -107,6 +107,7 @@ final class ObserveService {
         // data module (and how many polls), its ready call, its first batch.
         if let b = e["boot"] as? [String: Any] {
             for key in ["runner", "apply"] { if let v = b[key] as? Double { phases["exact.boot.\(key)"] = Self.seconds(v) } }
+            if let parts = b["parts"] as? String { phases["exact.boot.apply_parts"] = parts }
         }
         if let d = e["data"] as? [String: Any] {
             for (key, name) in [("receipt", "draw_receipt"), ("appModule", "app_module"), ("waited", "wait"), ("ready", "ready"), ("apply", "apply")] {
