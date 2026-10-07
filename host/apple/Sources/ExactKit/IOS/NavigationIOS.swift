@@ -571,7 +571,7 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
                 // A press that pushed may hand its control's focus to the arriving route's first autofocus (PressHandoffIOS).
                 if pushOrPop || arrives { presenter.pressShows((stack.last as? RouteController)?.node) }
             }
-            nav.view.layoutIfNeeded()
+            ApplyProfile.time("nav.layout") { nav.view.layoutIfNeeded() }
         }
         unanimated = false
         if mounted.count > common {
