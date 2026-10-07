@@ -292,13 +292,19 @@ final class NativeButton: UIButton {
             let same = style == "plain" && (config.baseForegroundColor.map { $0.resolvedColor(with: traits) == tint.resolvedColor(with: traits) } ?? false)
             config.image = same ? glyph : glyph?.withTintColor(tint, renderingMode: .alwaysOriginal)
         }
-        // Layout rows stay in the kernel: the boxes' frames say how the
-        // symbol and the title stand, and how far apart.
+        // The author's flex-direction says how the symbol and the title
+        // stand (the frames are not laid out yet on a first configuration,
+        // and two empty boxes read as one above the other); the boxes'
+        // frames, once they are, say how far apart, else the authored gap.
         if symbol != nil, text != nil {
-            let stacked = b.minY >= a.maxY - 1
+            let stacked = (owner.style["flex_direction"]?.string ?? "row").hasPrefix("column")
             config.imagePlacement = stacked ? .top : .leading
-            let glyph = config.image?.size ?? a.size
-            config.imagePadding = max(0, stacked ? b.minY - a.maxY + (a.height - glyph.height) / 2 : b.minX - a.maxX + (a.width - glyph.width) / 2)
+            if a.isEmpty || b.isEmpty {
+                config.imagePadding = owner.number(stacked ? "row_gap" : "column_gap", 0)
+            } else {
+                let glyph = config.image?.size ?? a.size
+                config.imagePadding = max(0, stacked ? b.minY - a.maxY + (a.height - glyph.height) / 2 : b.minX - a.maxX + (a.width - glyph.width) / 2)
+            }
         }
         // The kernel sized the box for its content; the configuration adds
         // no padding of its own that would make a fitted title truncate.
