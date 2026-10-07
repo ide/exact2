@@ -109,7 +109,7 @@ final class ObserveService {
             for key in ["runner", "apply"] { if let v = b[key] as? Double { phases["exact.boot.\(key)"] = Self.seconds(v) } }
         }
         if let d = e["data"] as? [String: Any] {
-            for (key, name) in [("appModule", "app_module"), ("waited", "wait"), ("ready", "ready"), ("apply", "apply")] {
+            for (key, name) in [("receipt", "draw_receipt"), ("appModule", "app_module"), ("waited", "wait"), ("ready", "ready"), ("apply", "apply")] {
                 if let v = d[key] as? Double { phases["exact.data.\(name)"] = Self.seconds(v) }
             }
             if let polls = d["polls"] as? Int { phases["exact.data.polls"] = polls }
