@@ -3,6 +3,9 @@
 // otherwise at the commit. It is cold if its entry was not shown before in the session.
 // Render time is the first vsync after the committing run-loop turn ends.
 // TTI is when outstanding work clears, never before render. A newer change cancels it.
+// A change UIKit made itself (its Back button, a back swipe, LLP 1035.001.000)
+// reaches the app once its transition has ended, but the screen it shows was
+// drawn from the transition's first frame: render is when UIKit began to show it.
 import Foundation
 import QuartzCore
 
@@ -42,6 +45,11 @@ final class NavigationMarks: NSObject {
 
     func input(at timestamp: TimeInterval) { lastInput = timestamp }
 
+    /// When UIKit last began showing a screen on its own (`willShow` outside
+    /// Exact's projection), in seconds on the `CACurrentMediaTime` clock.
+    private var platformShowing: Double?
+    func platformBeganShowing() { platformShowing = CACurrentMediaTime() }
+
     func routerChanged(_ session: ExactSession, payload: [String: Any]) {
         guard let top = (payload["top"] as? NSNumber)?.uint64Value else { return }
         let key = ObjectIdentifier(session)
@@ -68,6 +76,33 @@ final class NavigationMarks: NSObject {
         lastInput = nil
         if pending != nil { ExactJournal.shared.record("navigation.superseded", ["route": fields["route"] ?? ""]) }
         note("change \(fields["route"] ?? "") \(cold ? "cold" : "warm") \(fields["exact.nav.cause"] ?? "")")
+        // The platform's own change: its screen showed when UIKit began to
+        // show it, not now, after the transition (a Back tap's pop is ~0.5 s).
+        if let shown = platformShowing, now - shown <= 2.0 {
+            platformShowing = nil
+            fields["exact.nav.platform"] = true
+            let p = Pending(session: session, start: min(start, shown), committed: now, fields: fields, cold: cold)
+            pending = p
+            p.presented = shown
+            var f = fields
+            f["name"] = cold ? "cold_ttr" : "warm_ttr"
+            f["value"] = shown - p.start
+            ExactJournal.shared.record("navigation", f)
+            note("\(f["name"] ?? "") \(f["route"] ?? "") \(String(format: "%.1f", (shown - p.start) * 1000)) ms (UIKit's)")
+            deadline?.cancel()
+            let item = DispatchWorkItem { [weak self, weak p] in
+                guard let self, let p, pending === p else { return }
+                pending = nil
+                stop()
+            }
+            deadline = item
+            DispatchQueue.main.asyncAfter(deadline: .now() + ExactLaunch.ttiTimeout, execute: item)
+            // Nothing outstanding now: nothing was while UIKit animated
+            // either (the screen was there), so it was interactive as shown.
+            evaluate(at: shown)
+            return
+        }
+        platformShowing = nil
         let p = Pending(session: session, start: start, committed: now, fields: fields, cold: cold)
         pending = p
         // Core Animation commits at the end of this turn, so the next turn is after it.
@@ -109,7 +144,7 @@ final class NavigationMarks: NSObject {
     }
 
     /// Records TTI once nothing is outstanding after the change was shown.
-    private func evaluate() {
+    private func evaluate(at clear: Double? = nil) {
         guard let p = pending, let presented = p.presented, let session = p.session,
               let ledger = ExactLaunch.ledger(session) else { return }
         guard ledger.items.isEmpty, !ledger.poisoned else { return }
@@ -118,7 +153,7 @@ final class NavigationMarks: NSObject {
         stop()
         var f = p.fields
         f["name"] = "tti"
-        f["value"] = max(CACurrentMediaTime(), presented) - p.start
+        f["value"] = max(clear ?? CACurrentMediaTime(), presented) - p.start
         if !ledger.failed.isEmpty { f["exact.tti.failed"] = ledger.failed.count }
         ExactJournal.shared.record("navigation", f)
         note("tti \(f["route"] ?? "") \(String(format: "%.1f", (f["value"] as? Double ?? 0) * 1000)) ms")

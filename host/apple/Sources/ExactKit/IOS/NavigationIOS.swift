@@ -1030,6 +1030,8 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
         // @ref LLP 1038 D6/D11; LLP 1035.001 D2 — a cancelled swipe calls
         // willShow again for its source, in the transition already begun.
         guard let transition = pushOrPop(on: navigationController), transition.viewController(forKey: .to) === viewController else { return }
+        // UIKit's own (its Back button, a swipe): Observe's render mark is now.
+        if !syncing { NavigationMarks.shared.platformBeganShowing() }
         // As the swipe begins: an update may remove its source's node while
         // the finger is down
         let swipe: Swipe? = transition.initiallyInteractive
