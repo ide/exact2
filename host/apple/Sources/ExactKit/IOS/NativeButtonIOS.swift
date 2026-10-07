@@ -22,8 +22,12 @@ final class NativeButtonHost {
     private var buttons: [UInt32: NativeButton] = [:]
     init(presenter: Presenter) { self.presenter = presenter }
 
-    /// After a batch: every button's UIButton made or brought up to date.
-    func sync() {
+    /// After a batch: each button the batch touched (itself or anything in
+    /// it: its face, its boxes' frames, its style) made or brought up to
+    /// date, and every new one; `changed` nil is every button. A button the
+    /// batch left alone looks as it did, and asking each one again cost every
+    /// batch, a back navigation's included, a pass over the whole app.
+    func sync(changed: Set<UInt32>? = nil) {
         guard let presenter else { return }
         for id in presenter.buttonNodes {
             guard let v = presenter.views[id], v.kind == "button" else {
@@ -31,7 +35,9 @@ final class NativeButtonHost {
                 presenter.buttonNodes.remove(id)
                 continue
             }
-            let b = buttons[id].flatMap { $0.owner === v ? $0 : nil } ?? NativeButton(owner: v)
+            let known = buttons[id].flatMap { $0.owner === v ? $0 : nil }
+            if known != nil, let changed, !changed.contains(id) { continue }
+            let b = known ?? NativeButton(owner: v)
             buttons[id] = b
             b.update()
         }
