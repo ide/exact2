@@ -536,6 +536,17 @@ final class ModalHost: NSObject, UIAdaptivePresentationControllerDelegate {
         presenter.session?.log("modal dismissal refused: the active route does not permit leaving (no enabled navigationBack control)")
     }
 
+    /// A sheet the person swipes down: what is beneath shows from the
+    /// dismissal's first frame, not when the app hears of it after (Observe's
+    /// render mark); a swipe let go cancels it.
+    func presentationControllerWillDismiss(_ presentationController: UIPresentationController) {
+        guard let layer = layers.last, layer.controller === presentationController.presentedViewController else { return }
+        NavigationMarks.shared.platformBeganShowing()
+        presentationController.presentedViewController.transitionCoordinator?.animate(alongsideTransition: nil) { context in
+            if context.isCancelled { NavigationMarks.shared.platformCancelled() }
+        }
+    }
+
     func presentationControllerDidDismiss(_ presentationController: UIPresentationController) {
         guard let layer = layers.last, layer.controller === presentationController.presentedViewController else { return }
         closing = true
