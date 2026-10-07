@@ -981,6 +981,17 @@ pub fn style_json_presented(
             head + "," + &json[1..]
         };
     }
+    // A flex button's content axis and gap ride the same string, so a
+    // change to either reaches its native face (LLP 1069.011).
+    if let Some((direction, gap)) = button_content(node) {
+        let gap = gap.map_or(String::new(), |g| format!(",\"button_content_gap\":{}", num(g)));
+        let head = format!("{{\"button_content_direction\":\"{direction}\"{gap}");
+        json = if json == "{}" {
+            head + "}"
+        } else {
+            head + "," + &json[1..]
+        };
+    }
     // @ref LLP 1053.000.000.000 D2 — an auto glass group's spacing rides the
     // string the host compares, so a gap, direction or display change sends it.
     if let Some(points) = glass_auto_spacing(node) {
@@ -1013,6 +1024,28 @@ pub fn glass_auto_spacing(node: &NodeRef<'_>) -> Option<f32> {
         _ => 0.0,
     };
     Some(gap.clamp(0.0, 10_000.0))
+}
+
+/// A flex button's content axis and its authored gap along it, for a native
+/// button's face (LLP 1069.011): UIKit's own symbol-and-title pairing takes
+/// the `flex-direction` as its placement and the gap as its padding. With
+/// no gap written the padding is the platform's, as `gap: normal` leaves it
+/// to the user agent. `None` for a button laid out otherwise, whose host
+/// reads its laid-out boxes.
+pub fn button_content(node: &NodeRef<'_>) -> Option<(&'static str, Option<f32>)> {
+    use exact_kernel::{Display, FlexDirection, StyleId};
+    let s = node.style;
+    if node.node_type != NodeType::Pressable || s.display != Display::Flex {
+        return None;
+    }
+    let (direction, row, id) = match s.flex_direction {
+        FlexDirection::Row => ("row", true, StyleId::ColumnGap),
+        FlexDirection::RowReverse => ("row-reverse", true, StyleId::ColumnGap),
+        FlexDirection::Column => ("column", false, StyleId::RowGap),
+        FlexDirection::ColumnReverse => ("column-reverse", false, StyleId::RowGap),
+    };
+    let gap = if row { s.column_gap } else { s.row_gap };
+    Some((direction, s.mask.has(id).then(|| gap.clamp(0.0, 10_000.0))))
 }
 
 /// [`glass_auto_spacing`] in a node's props: the points as `glassGroup` and

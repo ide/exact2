@@ -175,6 +175,10 @@ final class NavigationMarks: NSObject {
         var f = p.fields
         f["name"] = p.cold ? "cold_ttr" : "warm_ttr"
         f["value"] = g - p.start
+        // Where the time went, in seconds from the start: the router's
+        // change reached the host, then its batch was committed.
+        f["exact.nav.route_change"] = p.committed - p.start
+        f["exact.nav.commit"] = ended - p.start
         ExactJournal.shared.record("navigation", f)
         note("\(f["name"] ?? "") \(f["route"] ?? "") \(String(format: "%.1f", (g - p.start) * 1000)) ms")
         guard p.cold else {
