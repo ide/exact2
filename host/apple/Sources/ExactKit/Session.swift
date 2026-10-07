@@ -1064,6 +1064,7 @@ public final class ExactSession {
                 let (name, json) = pendingSurfaceRecords.removeFirst()
                 apply(runtime.surfaceRecord(name, json))
             }
+            if colorsOwed, !holdingReports { colorsOwed = false; sendColors() }
             while !holdingReports, !pendingViewDark.isEmpty {
                 let (id, dark) = pendingViewDark.removeFirst()
                 apply(runtime.viewScheme(id, dark: dark))
@@ -1374,9 +1375,18 @@ public final class ExactSession {
         // before its scheme, so nothing eases from a stand-in blue.
         guard view?.window != nil else { return }
         #endif
+        // A tint the batch being applied set (its root's accent) is reported
+        // once the batch is in: reported inside it, the runner re-resolves
+        // and re-presents mid-batch, styling the batch's own views twice.
+        if applying { colorsOwed = true; return }
+        sendColors()
+    }
+    private func sendColors() {
         // No app tint: `@tint` is left out, and the kernel keeps the last.
         apply(runtime.reportColors(tint: SystemColor.appTint.flatMap { SystemColor.tintPair($0) }))
     }
+    /// A colour report asked for while a batch applied (`reportColors`).
+    private var colorsOwed = false
     private var pageHidden = false // the page's hidden bit at the last report (`tellPage`)
     /// The appearance last reported for the session, and each node view
     /// found painting motion in another (a sheet's override, say), by id.
