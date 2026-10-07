@@ -1266,6 +1266,9 @@ public final class ExactSession {
             restoreKeptDocuments() // before any answer reads a kept document (LLP 1069.010.000 D4)
             let batch = runtime.dataReady()
             if batch.pending {
+                // Still starting the data module: the launch tracker samples
+                // now, so what waits on it shows from the first frame on.
+                ExactLaunch.shared.waitingForData(self)
                 pendingActivation = (drawnGeneration, token) // the generation stays activated: only the source's wake retries
                 return
             }
