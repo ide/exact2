@@ -1058,7 +1058,20 @@ public final class ExactSession {
             transformInputHold?.cancelIfInputIneligible()
             presenter.transformGeometry.changed()
             applying = false
-            ExactLaunch.shared.applied(self, changed: !batch.ops.isEmpty)
+            ExactLaunch.shared.applied(self, changed: !batch.ops.isEmpty) { [presenter] in
+                // What the batch changed, for TTI's tail: op kinds and the
+                // nodes' testIds (or kinds), a few of each.
+                var kinds: [String: Int] = [:], names: [String] = []
+                for op in batch.ops {
+                    kinds[op.op.rawValue, default: 0] += 1
+                    guard op.nodeID != nil, names.count < 4 else { continue }
+                    let view = presenter.views[op.id]
+                    let name = view?.props["testId"] ?? view?.kind ?? op.kind
+                    if !names.contains(name) { names.append(name) }
+                }
+                let ops = kinds.sorted { $0.value > $1.value }.prefix(3).map { "\($0.key)×\($0.value)" }.joined(separator: " ")
+                return names.isEmpty ? ops : "\(ops) (\(names.joined(separator: ", ")))"
+            }
             NavigationMarks.shared.applied(self)
             #if os(macOS)
             regions.flush()
