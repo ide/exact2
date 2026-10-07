@@ -58,6 +58,9 @@ final class NativeButton: UIButton {
     /// Boxes the configuration draws instead.
     private var drawn: [NodeView] = []
     private var configured = false
+    /// The look a finger is holding: a press's own new look waits for the
+    /// release, which UIKit animates, fill and title together.
+    private var heldLook: UIButton.Configuration?
     private var signature = ""
 
     init(owner: NodeView) {
@@ -212,8 +215,9 @@ final class NativeButton: UIButton {
             //
             // Disabled with no colours of the author's, it is UIKit's own
             // disabled look, fill and label together (`applyEnabled`).
-            configurationUpdateHandler = { button in
-                var config = rest
+            configurationUpdateHandler = { [unowned self] button in
+                if !button.isHighlighted { heldLook = nil }
+                var config = heldLook ?? rest
                 if !button.isEnabled {
                     // The authored colours go back to UIKit, which draws its
                     // disabled look from its own: a template symbol, no base
@@ -224,7 +228,11 @@ final class NativeButton: UIButton {
                 }
                 button.configuration = config
             }
-            ApplyProfile.time("btn.assign") { configuration = rest }
+            // Held, it keeps the look it has; the new handler runs at the
+            // release (a handler's own installing asks for an update).
+            ApplyProfile.time("btn.assign") {
+                if isHighlighted { heldLook = heldLook ?? configuration } else { configuration = rest }
+            }
             // Behind an alert UIKit dims the tint (the accent) to grey, as the
             // platform should; every other colour here is authored (a title's
             // `color`, a symbol's `tint-color`, an `accent-color` fill) and
