@@ -9,9 +9,11 @@
 // is glass, and one naming a configuration with `-exact-apple-button-style`
 // (Exact's vendor property for Apple's own button styles, which only the
 // Apple hosts read: `glass`, `prominent-glass`, `filled`, `gray`, `tinted`,
-// `plain`; another platform's would be its own property). Its one text is the title (its font
-// and colour) and its one symbol image the image (size, weight, tint),
-// placed as the boxes stand; `accent-color` is a filled style's background.
+// `plain`; another platform's would be its own property). Its one text is
+// the title (its font and colour) and its one symbol the image (size,
+// weight, colour), placed as its `flex-direction` and `gap` say, UIKit's
+// system spacing apart when it names none; `accent-color` is a filled
+// style's background.
 // Those boxes then paint nowhere else. A button whose content is richer
 // keeps the author's look.
 #if os(iOS)
@@ -75,13 +77,8 @@ final class NativeButton: UIButton {
             if presenter.contextRetainsFocus(owner) != true { presenter.viewport.endEditing(true) }
             presenter.press(owner.id)
         }, for: .primaryActionTriggered)
-        // Light, dark or increased contrast: the configuration holds colours
-        // and a symbol image resolved for the traits it was made under, and
-        // no batch touches the button for a change of appearance.
         registerForTraitChanges([UITraitUserInterfaceStyle.self, UITraitAccessibilityContrast.self]) { (b: NativeButton, _: UITraitCollection) in
-            guard b.configured else { return }
-            b.signature = ""
-            b.update()
+            b.restyle()
         }
     }
     required init?(coder: NSCoder) { nil }
@@ -157,7 +154,16 @@ final class NativeButton: UIButton {
     /// in `AccentColor` is drawn again in the tint as it now is.
     override func tintColorDidChange() {
         super.tintColorDidChange()
-        if configured { update() }
+        restyle()
+    }
+
+    /// The configuration holds colours resolved for the tint and traits it
+    /// was made under (light, dark, increased contrast), and no batch
+    /// touches the button when those change: it is made again.
+    private func restyle() {
+        guard configured else { return }
+        signature = ""
+        update()
     }
 
     func update() {
@@ -199,7 +205,7 @@ final class NativeButton: UIButton {
         let key = ApplyProfile.time("btn.key") { [style, title ?? "", symbol?.props["symbolName"] ?? "", "\(symbol?.number("font_size") ?? 0)",
                    "\(symbol?.color("tint_color", .label) ?? .clear)", "\(text?.color("text_color", .label) ?? .clear)",
                    "\(text?.number("font_size") ?? 0)", "\(text?.number("font_weight") ?? 0)", "\(radius)", "\(owner.bounds.size)",
-                   "\(a)", "\(b)", owner.style["button_content_direction"]?.string ?? "", "\(owner.style["button_content_gap"]?.number ?? -1)", "\(owner.color("accent_color", .clear))", "\(tintColor.resolvedColor(with: traitCollection))"].joined(separator: "|") }
+                   "\(a)", "\(b)", owner.style["button_content_direction"]?.string ?? "", "\(owner.style["button_content_gap"]?.number ?? -1)", "\(owner.color("accent_color", .clear))"].joined(separator: "|") }
         if key != signature {
             signature = key
             var rest = ApplyProfile.time("btn.config") { NativeButton.configuration(style, owner: owner, text: text, symbol: symbol, title: title, radius: radius, symbolBox: a, textBox: b, accent: tintColor) }
