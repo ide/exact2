@@ -58,6 +58,8 @@ final class NativeButton: UIButton {
     /// Boxes the configuration draws instead.
     private var drawn: [NodeView] = []
     private var configured = false
+    /// Its look changed while a finger held it (`configurationUpdateHandler`).
+    var restyledWhileHeld = false
     private var signature = ""
 
     init(owner: NodeView) {
@@ -232,14 +234,27 @@ final class NativeButton: UIButton {
                         return out
                     }
                 }
-                button.configuration = config
+                // Released after its look changed (the press's own batch
+                // landing while it was held): the new look stands at once,
+                // its title not fading in over a background already there.
+                if let b = button as? NativeButton, b.restyledWhileHeld, !button.isHighlighted {
+                    b.restyledWhileHeld = false
+                    UIView.performWithoutAnimation { button.configuration = config; button.layoutIfNeeded() }
+                } else { button.configuration = config }
             }
-            // A button already showing changes its look in one step: UIKit
-            // animates a new configuration's title and symbol on its own
-            // while the background is set at once (a defrost chip turning
-            // on faded its text over a background that had already jumped).
+            if configured, isHighlighted || isTracking { restyledWhileHeld = true }
+            // A button already showing changes its look in one step. UIKit
+            // animates a configuration's title and symbol on its own: the
+            // release of a press fades them back from their held dimming
+            // while the new background is set at once (a defrost chip
+            // turning on faded its text over a background that had already
+            // jumped). What is still animating in it stops at the new look.
             ApplyProfile.time("btn.assign") {
-                if configured, window != nil { UIView.performWithoutAnimation { configuration = rest; layoutIfNeeded() } } else { configuration = rest }
+                if configured, window != nil {
+                    UIView.performWithoutAnimation { configuration = rest; layoutIfNeeded() }
+                    func settle(_ v: UIView) { v.layer.removeAllAnimations(); v.subviews.forEach(settle) }
+                    for v in subviews where !(v is NodeView) { settle(v) }
+                } else { configuration = rest }
             }
             // Behind an alert UIKit dims the tint (the accent) to grey, as the
             // platform should; every other colour here is authored (a title's
