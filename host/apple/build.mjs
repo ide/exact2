@@ -1048,7 +1048,9 @@ async function main(args) {
     return async () => {
       await compile.done();
       renameSync(making, cached);
-      for (const old of readdirSync(dir)) if (old.endsWith(`-${basename(built)}`) && resolve(dir, old) !== cached) rmSync(resolve(dir, old), { force: true });
+      // Its own older copies only: a key and this name, not another arm's
+      // name ending in it (`probe-libexact_modules.dylib`).
+      for (const old of readdirSync(dir)) if (/^[0-9a-f]{16}-/.test(old) && old.slice(17) === basename(built) && resolve(dir, old) !== cached) rmSync(resolve(dir, old), { force: true });
       copyFileSync(cached, built);
     };
   };
