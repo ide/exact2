@@ -835,10 +835,10 @@ package final class Presenter {
                 // content geometry lets UIKit settle its scroll relationship.
                 if let first = root.subviews.first as? NodeView {
                     for frame in batch.ops where frame.op == .frame && frame.id == first.id {
-                        applyGeometry(frame)
+                        ApplyProfile.time("geom.first") { applyGeometry(frame) }
                     }
                 }
-                navigation.installInitialOwner(batch)
+                ApplyProfile.time("nav.install") { navigation.installInitialOwner(batch) }
             }
             let id = op.id
             if kind == .children { touched(id, children: true) } else if ![.roots, .create, .fieldContent].contains(kind) { touched(id, textChanged: kind == .props || kind == .style || kind == .destroy) }
