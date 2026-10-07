@@ -38,8 +38,9 @@ final class NavigationMarks: NSObject {
         let cold: Bool
         var turnEnded: Double?
         var presented: Double?
-        /// The route change's batch, by part (`batchParts`).
+        /// The route change's batch, by part (`batchParts`), and when its apply ended.
         var parts: String?
+        var applied: Double?
         init(session: ExactSession, start: Double, committed: Double, fields: [String: Any], cold: Bool) {
             self.session = session
             self.start = start
@@ -164,6 +165,7 @@ final class NavigationMarks: NSObject {
     /// largest, on the screen's render metric.
     func batchParts(_ session: ExactSession, _ parts: [String: Double]) {
         guard let p = pending, p.session === session, p.presented == nil else { return }
+        p.applied = CACurrentMediaTime()
         let top = parts.filter { $0.value >= 0.5 }.sorted { $0.value > $1.value }.prefix(6)
         if !top.isEmpty { p.parts = top.map { "\($0.key) \(Int($0.value.rounded()))" }.joined(separator: ", ") }
     }
@@ -190,6 +192,8 @@ final class NavigationMarks: NSObject {
         f["exact.nav.route_change"] = p.committed - p.start
         f["exact.nav.commit"] = ended - p.start
         if let parts = p.parts { f["exact.nav.parts"] = parts }
+        // Applying ended here; the rest of the commit is UIKit's layout and render.
+        if let applied = p.applied { f["exact.nav.applied"] = applied - p.start }
         ExactJournal.shared.record("navigation", f)
         note("\(f["name"] ?? "") \(f["route"] ?? "") \(String(format: "%.1f", (g - p.start) * 1000)) ms")
         guard p.cold else {
