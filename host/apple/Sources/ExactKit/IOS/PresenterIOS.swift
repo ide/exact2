@@ -962,7 +962,7 @@ package final class Presenter {
                 if let gone, !modals.retainsRemovedView(gone) { gone.removeFromSuperview() }
             case .roots:
                 root.subviews.forEach { $0.removeFromSuperview() }
-                accent.attach(op.ids.compactMap { views[UInt32($0)] }) { for r in $0 { root.addSubview(r); regrid(r) } }
+                ApplyProfile.time("roots.attach") { accent.attach(op.ids.compactMap { views[UInt32($0)] }) { for r in $0 { root.addSubview(r); regrid(r) } } }
             case .frame, .content, .fieldContent:
                 if flats.isFlat(id) {
                     if kind == .frame { flats.frame(id, CGRect(x: op.x, y: op.y, width: op.w, height: op.h)) }
