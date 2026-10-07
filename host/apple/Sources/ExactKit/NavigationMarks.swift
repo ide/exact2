@@ -64,6 +64,14 @@ final class NavigationMarks: NSObject {
         }
     }
 
+    /// That transition was cancelled (a swipe let go): it showed nothing.
+    func platformCancelled() {
+        platformShowing = nil
+        platformTurnEnded = nil
+        platformLink?.invalidate()
+        platformLink = nil
+    }
+
     @objc private func platformTick(_ link: CADisplayLink) {
         defer { platformLink?.invalidate(); platformLink = nil }
         guard let ended = platformTurnEnded, let g = Vsync(link).next(after: ended) else { return }
