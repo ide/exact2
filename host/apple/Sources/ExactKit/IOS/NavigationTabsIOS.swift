@@ -165,10 +165,12 @@ extension NavigationHost {
 
     private func mount(_ holder: UIViewController, in parent: UIViewController, at root: NodeView) {
         parent.addChild(holder)
-        root.addSubview(holder.view)
-        holder.view.setPaintForeground(aboveAuthored: false)
+        // Framed before it enters the window, so UIKit lays the container
+        // out there once, at its size.
         holder.view.frame = root.bounds
         holder.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        root.addSubview(holder.view)
+        holder.view.setPaintForeground(aboveAuthored: false)
         holder.didMove(toParent: parent)
     }
 
