@@ -510,6 +510,7 @@ final class NativeViews {
         let path = NativeViews.modulePath(session: session)
         guard FileManager.default.fileExists(atPath: path) else { return }
         hasAppModule = true
+        NativeViews.readAhead(path)
         let rt = session.runtime.rt
         session.runtime.on { exact_set_app_module(rt, nativeLaterCallback, nativeCallCallback, UnsafeMutableRawPointer(bitPattern: UInt(rt))) }
         // The build writes this file when the roster has `beforeFirstPaint`
@@ -518,6 +519,40 @@ final class NativeViews {
     }
 
     private var listsEarly = false
+
+    /// Reads the artifact's pages into memory off the main thread, once per
+    /// process, so the paint gate's `dlopen` maps pages already in memory
+    /// rather than reading them from storage. Nothing is opened or run: a
+    /// plain read, no dyld. What share of the file was in memory before says
+    /// whether this launch read it cold (the launch report's `readAhead`).
+    private static var readingAhead = false
+    static func readAhead(_ path: String) {
+        guard !readingAhead else { return }
+        readingAhead = true
+        DispatchQueue.global(qos: .userInitiated).async {
+            let started = CACurrentMediaTime()
+            let fd = open(path, O_RDONLY)
+            guard fd >= 0 else { return }
+            defer { close(fd) }
+            var info = stat()
+            guard fstat(fd, &info) == 0, info.st_size > 0 else { return }
+            let size = Int(info.st_size), page = Int(getpagesize())
+            var resident = -1.0
+            if let map = mmap(nil, size, PROT_READ, MAP_SHARED, fd, 0), map != MAP_FAILED {
+                var pages = [CChar](repeating: 0, count: (size + page - 1) / page)
+                if mincore(map, size, &pages) == 0 { resident = Double(pages.filter { $0 & 1 != 0 }.count) / Double(pages.count) }
+                munmap(map, size)
+            }
+            var buffer = [UInt8](repeating: 0, count: 1 << 16), offset = 0
+            while offset < size {
+                let n = pread(fd, &buffer, buffer.count, off_t(offset))
+                guard n > 0 else { break }
+                offset += n
+            }
+            let ms = (CACurrentMediaTime() - started) * 1000
+            DispatchQueue.main.async { ExactLaunch.shared.readAhead = ["ms": (ms * 10).rounded() / 10, "resident": (resident * 100).rounded() / 100, "bytes": size] }
+        }
+    }
 
     /// Whether `name` is made in the commit that mounts it, before the paint
     /// gate opens. The loaded roster decides, not the build's list.
