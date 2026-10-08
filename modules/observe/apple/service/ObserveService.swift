@@ -123,13 +123,8 @@ final class ObserveService {
             if let polls = d["polls"] as? Int { phases["exact.data.polls"] = polls }
         }
         if let path = e["bootPath"] { phases["exact.boot.path"] = path }
-        // Cold or warm, by Observe's heuristic (a reboot since the last
-        // launch); and the app module file's own state before its read-ahead.
+        // Cold or warm, by Observe's heuristic (a reboot since the last launch).
         if let type = e["launchType"] { phases["exact.launch.type"] = type }
-        if let r = e["readAhead"] as? [String: Any] {
-            if let ms = r["ms"] as? Double { phases["exact.read_ahead.module_ms"] = ms }
-            if let resident = r["resident"] as? Double { phases["exact.read_ahead.module_resident"] = resident }
-        }
         if e["debugger"] as? Bool == true { phases["exact.launch.debugger"] = true }
         for (name, value) in metrics {
             var params = globals
