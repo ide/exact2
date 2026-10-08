@@ -35,6 +35,9 @@ public final class ExactLaunch: NSObject {
     private(set) var suppressed: String?
     private(set) var activation = "pending"
     private(set) var bootPath: String?
+    /// The app module's read-ahead (`NativeViews.readAhead`): how long, and
+    /// what share of the file was already in memory (0 a cold read).
+    var readAhead: [String: Any]?
     private weak var launchSession: ExactSession?
     private var commitPending = false
     private var link: CADisplayLink?
@@ -373,6 +376,7 @@ public final class ExactLaunch: NSObject {
         if let launchType { out["launchType"] = launchType }
         if let suppressed { out["suppressed"] = suppressed }
         if let bootPath { out["bootPath"] = bootPath }
+        if let readAhead { out["readAhead"] = readAhead }
         if let ttiOutcome { out["tti"] = ttiOutcome }
         if !lastOutstanding.isEmpty { out["outstanding"] = lastOutstanding }
         if !failedResources.isEmpty { out["failed"] = failedResources }
