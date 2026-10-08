@@ -548,7 +548,6 @@ final class NativeViews {
         let path = NativeViews.modulePath(session: session)
         guard FileManager.default.fileExists(atPath: path) else { return }
         hasAppModule = true
-        NativeViews.readAhead(path)
         let rt = session.runtime.rt
         session.runtime.on { exact_set_app_module(rt, nativeLaterCallback, nativeCallCallback, UnsafeMutableRawPointer(bitPattern: UInt(rt))) }
     }
