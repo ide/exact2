@@ -899,7 +899,7 @@ final class Presenter {
         for op in batch.ops {
             let kind = op.op
             let opBegan = ApplyProfile.on ? CACurrentMediaTime() : 0
-            defer { if ApplyProfile.on { ApplyProfile.add("op.\(kind)", since: opBegan) } }
+            defer { if ApplyProfile.on { ApplyProfile.add("op." + kind.rawValue, since: opBegan) } }
             switch kind {
             case .create, .props, .style, .children, .paragraph, .flow, .frame: touchedIDs.append(op.id)
             default: break
