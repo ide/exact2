@@ -371,10 +371,11 @@ final class NativeButton: UIButton {
     /// Layout's `equalToSystemSpacing` gives it (what a stack view's system
     /// spacing is): laid out once per font, image size and direction, and
     /// read back, never stored as a number.
-    private static var spacings: [String: CGFloat] = [:]
+    private struct SpacingKey: Hashable { let stacked: Bool, font: String, points, width, height: CGFloat }
+    private static var spacings: [SpacingKey: CGFloat] = [:]
     static func systemSpacing(stacked: Bool, image: UIImage?, font: UIFont) -> CGFloat {
         let size = image?.size ?? .zero
-        let key = "\(stacked)|\(font.fontName)|\(font.pointSize)|\(size)"
+        let key = SpacingKey(stacked: stacked, font: font.fontName, points: font.pointSize, width: size.width, height: size.height)
         if let known = spacings[key] { return known }
         let box = UIView(frame: CGRect(x: 0, y: 0, width: 400, height: 400))
         let icon = UIImageView(image: image), label = UILabel()
