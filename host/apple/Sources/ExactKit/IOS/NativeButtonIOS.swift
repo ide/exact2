@@ -63,7 +63,19 @@ final class NativeButton: UIButton {
     /// The look a finger is holding: a press's own new look waits for the
     /// release, which UIKit animates, fill and title together.
     private var heldLook: UIButton.Configuration?
-    private var signature = ""
+    /// What the look was made from: a change makes it again.
+    private struct Look: Equatable {
+        var style, title, symbol: String
+        var symbolSize: CGFloat
+        var symbolTint, textColor: UIColor
+        var fontSize, fontWeight, radius: CGFloat
+        var size: CGSize
+        var symbolBox, textBox: CGRect
+        var direction: String
+        var gap: Double
+        var accent: UIColor
+    }
+    private var signature: Look?
 
     init(owner: NodeView) {
         self.owner = owner
@@ -162,7 +174,7 @@ final class NativeButton: UIButton {
     /// touches the button when those change: it is made again.
     private func restyle() {
         guard configured else { return }
-        signature = ""
+        signature = nil
         update()
     }
 
@@ -192,7 +204,7 @@ final class NativeButton: UIButton {
                 drawn = []
                 owner.materialView?.isHidden = false
                 configured = false
-                signature = ""
+                signature = nil
             }
             applyEnabled(ownLook: false)
             return
@@ -202,10 +214,13 @@ final class NativeButton: UIButton {
         let title = text.map { $0.paragraphSpec().runs.map(\.text).joined() }
         let radius = owner.number("border_radius", owner.number("border_radius_top_left"))
         let a = symbol.map { $0.convert($0.bounds, to: owner) } ?? .zero, b = text.map { $0.convert($0.bounds, to: owner) } ?? .zero
-        let key = ApplyProfile.time("btn.key") { [style, title ?? "", symbol?.props["symbolName"] ?? "", "\(symbol?.number("font_size") ?? 0)",
-                   "\(symbol?.color("tint_color", .label) ?? .clear)", "\(text?.color("text_color", .label) ?? .clear)",
-                   "\(text?.number("font_size") ?? 0)", "\(text?.number("font_weight") ?? 0)", "\(radius)", "\(owner.bounds.size)",
-                   "\(a)", "\(b)", owner.style["button_content_direction"]?.string ?? "", "\(owner.style["button_content_gap"]?.number ?? -1)", "\(owner.color("accent_color", .clear))"].joined(separator: "|") }
+        let key = ApplyProfile.time("btn.key") {
+            Look(style: style, title: title ?? "", symbol: symbol?.props["symbolName"] ?? "", symbolSize: symbol?.number("font_size") ?? 0,
+                 symbolTint: symbol?.color("tint_color", .label) ?? .clear, textColor: text?.color("text_color", .label) ?? .clear,
+                 fontSize: text?.number("font_size") ?? 0, fontWeight: text?.number("font_weight") ?? 0, radius: radius, size: owner.bounds.size,
+                 symbolBox: a, textBox: b, direction: owner.style["button_content_direction"]?.string ?? "",
+                 gap: owner.style["button_content_gap"]?.number ?? -1, accent: owner.color("accent_color", .clear))
+        }
         if key != signature {
             signature = key
             var rest = ApplyProfile.time("btn.config") { NativeButton.configuration(style, owner: owner, text: text, symbol: symbol, title: title, radius: radius, symbolBox: a, textBox: b, accent: tintColor) }
