@@ -260,6 +260,7 @@ pub const STYLE_NAMES: &[(&str, &str, AttrTarget)] = &[
     ("-exact-press-scale", "exact LLP 1061", AttrTarget::Styles(&[StyleId::PressScale])),
     // The Apple hosts' system button style for a `button` (our integration).
     ("-exact-apple-button-style", "exact LLP 1069.011.001", AttrTarget::Styles(&[StyleId::ExactAppleButtonStyle])),
+    ("-exact-apple-button-size", "exact LLP 1069.011.001", AttrTarget::Styles(&[StyleId::ExactAppleButtonSize])),
     // CSS Animations (LLP 1055 D5): the shorthand is the row; the
     // longhands compose into it before lowering (`svg::compose_animation`).
     ("animation", "css CSS Animations 1", AttrTarget::Styles(&[StyleId::Animation])),

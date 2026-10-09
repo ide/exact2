@@ -71,7 +71,7 @@ final class NativeButton: UIButton {
         var fontSize, fontWeight, radius: CGFloat
         var size: CGSize
         var symbolBox, textBox: CGRect
-        var direction: String
+        var direction, buttonSize: String
         var gap: Double
         var accent: UIColor
     }
@@ -219,6 +219,7 @@ final class NativeButton: UIButton {
                  symbolTint: symbol?.color("tint_color", .label) ?? .clear, textColor: text?.color("text_color", .label) ?? .clear,
                  fontSize: text?.number("font_size") ?? 0, fontWeight: text?.number("font_weight") ?? 0, radius: radius, size: owner.bounds.size,
                  symbolBox: a, textBox: b, direction: owner.style["button_content_direction"]?.string ?? "",
+                 buttonSize: owner.style["exact_apple_button_size"]?.string ?? "",
                  gap: owner.style["button_content_gap"]?.number ?? -1, accent: owner.color("accent_color", .clear))
         }
         if key != signature {
@@ -292,13 +293,22 @@ final class NativeButton: UIButton {
         // An `AccentColor` fill is left to the configuration, which takes it
         // from the tint and so dims it with the tint.
         if accent != .clear, !owner.followsTint("accent_color") { config.baseBackgroundColor = accent }
-        // The title's font is UIKit's own unless the button or its title
-        // writes a size or weight (LLP 1069.011.001 D4)
+        switch owner.style["exact_apple_button_size"]?.string {
+        case "mini": config.buttonSize = .mini
+        case "small": config.buttonSize = .small
+        case "medium": config.buttonSize = .medium
+        case "large": config.buttonSize = .large
+        default: break
+        }
+        // The title's font and the symbol's size are UIKit's own for the
+        // button's size unless the button or its title writes a font size
+        // or weight (LLP 1069.011.001 D4)
+        let systemFont = NativeButton.titleFont(config.buttonSize, traits: owner.traitCollection)
         let size = text?.style["font_size"]?.number ?? owner.style["font_size"]?.number
         let fontWeight = text?.style["font_weight"]?.number ?? owner.style["font_weight"]?.number
         let authored = size != nil || fontWeight != nil
-            ? UIFont.systemFont(ofSize: size.map { CGFloat($0) } ?? NativeButton.titleFont.pointSize, weight: weight(CGFloat(fontWeight ?? 400))) : nil
-        let font = text.map { _ in authored ?? NativeButton.titleFont }
+            ? UIFont.systemFont(ofSize: size.map { CGFloat($0) } ?? systemFont.pointSize, weight: weight(CGFloat(fontWeight ?? 400))) : nil
+        let font = text.map { _ in authored ?? systemFont }
         if let text, let title {
             config.title = title
             // `AccentColor` is the tint as UIKit draws it now: grey behind an
@@ -315,11 +325,14 @@ final class NativeButton: UIButton {
             config.baseForegroundColor = color
         }
         if let symbol {
-            // A symbol beside a title takes the title font's small scale, as
-            // SwiftUI draws a label's icon; alone, the font's default scale
+            // A symbol beside a title is the small scale of the title's font,
+            // or of a regular button's when the system chose a smaller one,
+            // as SwiftUI draws a label's icon in a regular button
             let sized = symbol.style["font_size"]?.number.map {
                 UIImage.SymbolConfiguration(pointSize: CGFloat($0), weight: symbolWeight(symbol.number("font_weight", 400)))
-            } ?? font.map { UIImage.SymbolConfiguration(font: $0, scale: .small) } ?? UIImage.SymbolConfiguration(font: NativeButton.titleFont)
+            } ?? font.map { _ in
+                UIImage.SymbolConfiguration(font: authored ?? NativeButton.titleFont(.medium, traits: owner.traitCollection), scale: .small)
+            }
             config.preferredSymbolConfigurationForImage = sized
             config.image = UIImage(systemName: symbol.props["symbolName"] ?? "", withConfiguration: sized)
             let tint = symbol.followsTint("tint_color") ? tintNow : symbol.color("tint_color", .label)
@@ -406,8 +419,24 @@ final class NativeButton: UIButton {
         return spacing
     }
 
-    /// UIKit's title font for a configuration of the default size
-    static var titleFont: UIFont { UIFont.preferredFont(forTextStyle: .body) }
+    /// The title font UIKit gives a configuration of `size`, read from a
+    /// button it styles, at the traits' content size
+    static func titleFont(_ size: UIButton.Configuration.Size, traits: UITraitCollection) -> UIFont {
+        let key = TitleFontKey(size: size, category: traits.preferredContentSizeCategory)
+        if let known = titleFonts[key] { return known }
+        var config = UIButton.Configuration.plain()
+        config.buttonSize = size
+        config.title = "M"
+        let probe = UIButton(configuration: config)
+        probe.traitOverrides.preferredContentSizeCategory = traits.preferredContentSizeCategory
+        probe.updateConfiguration()
+        probe.layoutIfNeeded()
+        let font = probe.titleLabel?.font ?? .preferredFont(forTextStyle: .body, compatibleWith: traits)
+        titleFonts[key] = font
+        return font
+    }
+    private struct TitleFontKey: Hashable { let size: UIButton.Configuration.Size, category: UIContentSizeCategory }
+    private static var titleFonts: [TitleFontKey: UIFont] = [:]
     static func weight(_ w: CGFloat) -> UIFont.Weight {
         switch w { case ..<150: .ultraLight; case ..<250: .thin; case ..<350: .light; case ..<450: .regular
         case ..<550: .medium; case ..<650: .semibold; case ..<750: .bold; case ..<850: .heavy; default: .black }
