@@ -997,6 +997,11 @@ pub fn style_json_presented(
             }
         }
     }
+    // A native button's title and symbol keep UIKit's sizes unless they write a font row (LLP 1069.011.001 D4)
+    if let Some(row) = crate::button::font_written(node).filter(|_| rows == StyleMask::INHERITED) {
+        json.pop();
+        let _ = write!(json, "{}{row}}}", if json == "{" { "" } else { "," });
+    }
     let (x, y) = effective_overflow(node);
     let name = |o: Overflow| match o {
         Overflow::Visible => "visible",
