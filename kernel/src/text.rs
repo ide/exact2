@@ -204,6 +204,7 @@ pub struct Paragraph {
     /// edge to these font metrics, so its height and first baseline are the
     /// trimmed box's, and the host paints the lines where it measured them.
     pub text_box_trim: crate::TextBoxTrim,
+    /// The edges `text_box_trim` cuts to.
     pub text_box_edge: crate::TextBoxEdge,
 }
 
@@ -363,26 +364,37 @@ pub struct TextEdges {
 impl crate::TextBoxTrim {
     /// Whether the first line's over edge is cut.
     pub fn start(self) -> bool {
-        matches!(self, crate::TextBoxTrim::TrimStart | crate::TextBoxTrim::TrimBoth)
+        matches!(
+            self,
+            crate::TextBoxTrim::TrimStart | crate::TextBoxTrim::TrimBoth
+        )
     }
     /// Whether the last line's under edge is cut.
     pub fn end(self) -> bool {
-        matches!(self, crate::TextBoxTrim::TrimEnd | crate::TextBoxTrim::TrimBoth)
+        matches!(
+            self,
+            crate::TextBoxTrim::TrimEnd | crate::TextBoxTrim::TrimBoth
+        )
     }
 }
 
 /// `text-box-edge`'s over edge.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OverEdge {
+    /// The font's ascent.
     Text = 0,
+    /// The cap height.
     Cap = 1,
+    /// The x-height.
     Ex = 2,
 }
 
 /// `text-box-edge`'s under edge.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UnderEdge {
+    /// The font's descent.
     Text = 0,
+    /// The alphabetic baseline.
     Alphabetic = 1,
 }
 
@@ -426,13 +438,24 @@ impl Paragraph {
             UnderEdge::Alphabetic => edges.alphabetic_under,
             UnderEdge::Text => edges.text_under,
         };
-        let bottom = if trim.end() { metrics.height - under } else { 0.0 };
+        let bottom = if trim.end() {
+            metrics.height - under
+        } else {
+            0.0
+        };
         if !(top.is_finite() && bottom.is_finite()) {
             return (0.0, metrics);
         }
         let height = (metrics.height - top - bottom).max(0.0);
         let first_baseline = metrics.first_baseline.map(|b| (b - top).max(0.0));
-        (top, TextMetrics { height, first_baseline, ..metrics })
+        (
+            top,
+            TextMetrics {
+                height,
+                first_baseline,
+                ..metrics
+            },
+        )
     }
 }
 
@@ -1030,18 +1053,39 @@ mod tests {
     /// line, so 10 pt text keeps 7 pt, its baseline at the bottom.
     #[test]
     fn text_box_trim_cuts_to_the_cap_height_and_baseline() {
-        let runs = [TextRun { text: "Ab".into(), style: style(10.0) }];
+        let runs = [TextRun {
+            text: "Ab".into(),
+            style: style(10.0),
+        }];
         let mut p = paragraph();
         let mut m = MonospaceMeasurer::default();
-        let plain = m.measure(&TextMeasureRequest { runs: &runs, paragraph: p, width: AxisOffer::MaxContent, height: AxisOffer::MaxContent, exclusions: &[] });
+        let plain = m.measure(&TextMeasureRequest {
+            runs: &runs,
+            paragraph: p,
+            width: AxisOffer::MaxContent,
+            height: AxisOffer::MaxContent,
+            exclusions: &[],
+        });
         assert_eq!((plain.height, plain.first_baseline), (12.0, Some(9.6)));
         p.text_box_trim = crate::TextBoxTrim::TrimBoth;
         p.text_box_edge = crate::TextBoxEdge::CapAlphabetic;
-        let cut = m.measure(&TextMeasureRequest { runs: &runs, paragraph: p, width: AxisOffer::MaxContent, height: AxisOffer::MaxContent, exclusions: &[] });
+        let cut = m.measure(&TextMeasureRequest {
+            runs: &runs,
+            paragraph: p,
+            width: AxisOffer::MaxContent,
+            height: AxisOffer::MaxContent,
+            exclusions: &[],
+        });
         assert!((cut.height - 7.0).abs() < 1e-4, "{cut:?}");
         assert!((cut.first_baseline.unwrap() - 7.0).abs() < 1e-4, "{cut:?}");
         p.text_box_trim = crate::TextBoxTrim::TrimStart;
-        let start = m.measure(&TextMeasureRequest { runs: &runs, paragraph: p, width: AxisOffer::MaxContent, height: AxisOffer::MaxContent, exclusions: &[] });
+        let start = m.measure(&TextMeasureRequest {
+            runs: &runs,
+            paragraph: p,
+            width: AxisOffer::MaxContent,
+            height: AxisOffer::MaxContent,
+            exclusions: &[],
+        });
         assert!((start.height - 9.4).abs() < 1e-4, "only the top: {start:?}");
     }
 

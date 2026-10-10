@@ -1019,7 +1019,9 @@ pub fn style_json_presented(
     // A flex button's content axis and gap ride the same string, so a
     // change to either reaches its native face (LLP 1069.011).
     if let Some((direction, gap)) = button_content(node) {
-        let gap = gap.map_or(String::new(), |g| format!(",\"button_content_gap\":{}", num(g)));
+        let gap = gap.map_or(String::new(), |g| {
+            format!(",\"button_content_gap\":{}", num(g))
+        });
         let head = format!("{{\"button_content_direction\":\"{direction}\"{gap}");
         json = if json == "{}" {
             head + "}"
