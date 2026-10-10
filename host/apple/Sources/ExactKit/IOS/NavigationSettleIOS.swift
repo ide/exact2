@@ -22,9 +22,11 @@ extension NavigationHost {
     /// or the More list's transition coordinator, a presentation's — never a
     /// flag a callback that did not come could leave set.
     var inFlight: Bool {
-        presenter.modals.inTransition || tabController?.transitionCoordinator != nil
-            || moreNavigation?.transitionCoordinator != nil
-            || allNavigations.contains { $0.transitionCoordinator != nil }
+        presenter.modals.inTransition || tabController?.transitionCoordinator != nil || stackMoving
+    }
+    /// A push or pop in flight
+    var stackMoving: Bool {
+        moreNavigation?.transitionCoordinator != nil || allNavigations.contains { $0.transitionCoordinator != nil }
     }
 
     /// A navigation controller whose transitions are the host's to settle:

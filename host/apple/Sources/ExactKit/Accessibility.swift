@@ -317,11 +317,12 @@ extension Presenter {
             let target = keyView(of: node)
             if target.acceptsFirstResponder { _ = window.makeFirstResponder(target) }
             #else
-            // A focus a batch brings (a pushed screen's field, a sheet's)
-            // is taken the turn after, once the batch's frame commits, as
-            // UIKit apps focus in `viewDidAppear`: bringing the keyboard up
-            // inside the batch held that frame for the keyboard's load.
-            if applying {
+            // Focus a pushed screen's field in the batch that starts the push, as UIKit apps focus in
+            // `viewWillAppear`, so the keyboard rises with the screen; a turn later it starts mid-push and
+            // its setup stalls the push's frames. Another focus a batch brings (a sheet's) is taken the turn
+            // after, once the batch's frame commits: bringing the keyboard up inside the batch held that
+            // frame for the keyboard's load.
+            if applying && !navigation.stackMoving {
                 if !autofocusTurnOwed {
                     autofocusTurnOwed = true
                     DispatchQueue.main.async { [weak self] in
