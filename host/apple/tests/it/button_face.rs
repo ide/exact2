@@ -47,13 +47,13 @@ fn a_flex_button_sends_its_content_axis_and_gap() {
     down = not down
   view
     column
-      button testId="stacked" press=turn display="flex" flex-direction=(down ? "column" : "row") row-gap=4 column-gap=6
+      button appearance="none" testId="stacked" press=turn display="flex" flex-direction=(down ? "column" : "row") row-gap=4 column-gap=6
         image "symbol:sf/lock.fill"
         text "Lock"
-      button testId="auto" press=turn display="flex" flex-direction="row"
+      button appearance="none" testId="auto" press=turn display="flex" flex-direction="row"
         image "symbol:sf/map.fill"
         text "Last Parked"
-      button testId="plain" press=turn
+      button appearance="none" testId="plain" press=turn
         text "Plain"
 "#,
     );

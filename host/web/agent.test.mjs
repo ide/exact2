@@ -733,8 +733,10 @@ function inputFixture() {
     // The window's capture listeners: they hear a contact's events wherever they land.
     addEventListener(kind, fn) { const list = windowListeners.get(kind) ?? []; list.push(fn); windowListeners.set(kind, list); },
     removeEventListener(kind, fn) { windowListeners.set(kind, (windowListeners.get(kind) ?? []).filter(g => g !== fn)); },
+    // touch.js's held presses: no touch screen here
+    installTouch() {}, watchHeld() {}, cancelHeld() {},
   });
-  const module = readFileSync(new URL('./input-glue.js', import.meta.url), 'utf8');
+  const module = readFileSync(new URL('./input-glue.js', import.meta.url), 'utf8').replace(/^import .*\n/m, '');
   vm.runInContext(module.replace('export function', 'function') + '\n' + declaration('attach'), f);
   f.attach(el, 7, ['pan']);
   function event(extra = {}) {

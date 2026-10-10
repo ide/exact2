@@ -6,10 +6,14 @@ import { test, expect } from 'bun:test';
 import { copyFileSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
+import { sfModule } from '../sf-material.mjs';
 
 // symbols.js beside stand-ins for the runtime and the picker glue it loads.
 const dir = mkdtempSync(resolve(tmpdir(), 'exact-js-symbols-'));
 copyFileSync(resolve(new URL('../../web-js/symbols.js', import.meta.url).pathname), resolve(dir, 'symbols.js'));
+// The SF Symbols table a build writes per app (sf-material.mjs), here with no names.
+copyFileSync(resolve(new URL('../sf-symbols.js', import.meta.url).pathname), resolve(dir, 'sf-symbols.js'));
+writeFileSync(resolve(dir, 'sf.js'), sfModule(null));
 writeFileSync(resolve(dir, 'rt.js'), 'export const { After, PropHooks, inflight, journal, clock, data } = globalThis.rtStandIn;\n');
 writeFileSync(resolve(dir, 'picker-glue.js'), '');
 const After = [], PropHooks = {}, inflight = { n: 0 };
