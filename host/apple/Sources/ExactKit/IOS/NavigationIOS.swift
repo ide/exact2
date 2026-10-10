@@ -402,6 +402,21 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
         let animatedChange = top >= 0 && top <= common && mounted.count == boundaries.count && !unanimated
             && owners[top].view.window != nil
             && !owners[top].viewControllers.elementsEqual(wanted[parts[top]], by: { $0 === $1 })
+        // A push into a route whose field autofocuses waits for the keyboard
+        // raised for it (KeyboardLead), and starts as it shows.
+        if keyboardLead.leading {
+            dirty = true
+            return
+        }
+        if animatedChange, !ExactEnv.agentFreezes, presenter.keyboardTop == nil, !presenter.hasKeyboardEditor,
+           let arriving = wanted[parts[top]].last, !owners[top].viewControllers.contains(where: { $0 === arriving }),
+           keyboardLead.lead(arriving, in: owners[top].view, resume: { [weak self] in
+               guard let self, dirty, !inFlight, !presenter.modals.inTransition else { return }
+               sync(Batch(ops: [], timers: false, motion: false, clock: nil, error: nil))
+           }) {
+            dirty = true
+            return
+        }
         // A presentation opening or closing meanwhile supersedes a wait
         // already begun: its cleanup and focus handoff go now.
         if (awaitingKeyboardViewport && mounted.count == boundaries.count) || NavigationRules.waitsForKeyboardViewport(
@@ -639,6 +654,8 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
     private weak var droppedEditor: UIView?
     /// Autofocus to retry when the transition a keyboard waited for ends.
     private var autofocusOwed = false
+    /// The keyboard raised ahead of a push into a route whose field autofocuses
+    private let keyboardLead = KeyboardLead()
 
     /// For `state.navigation` (LLP 1035.002 D2; LLP 1035.001.000 D9): the
     /// route the root names, UIKit's stack by key, what UIKit shows, what the

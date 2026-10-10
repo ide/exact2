@@ -298,7 +298,9 @@ final class NavigationBarIOSTests: XCTestCase {
     }
 
     /// A pushed route's autofocus is taken in the batch that starts the
-    /// push, so the keyboard rises with the screen rather than mid-push.
+    /// push, so the keyboard rises with the screen rather than mid-push. The
+    /// keyboard is raised for it first (KeyboardLead), and its stand-in is
+    /// gone once the field holds the focus.
     func testAPushedRoutesAutofocusIsTakenAsThePushStarts() throws {
         let session = try fixture("bar-autofocus-push", module: false)
         XCTAssertNil(Agent(session: session).tap(["id": Int(try node(session, "open-plain").id)])["error"])
@@ -308,6 +310,8 @@ final class NavigationBarIOSTests: XCTestCase {
         XCTAssertEqual(try node(session, "plain-field").field?.isFirstResponder, true, "focused as the push starts")
         until("the plain route is pushed") { nav.viewControllers.count == 2 && nav.transitionCoordinator == nil }
         XCTAssertEqual(try node(session, "plain-field").field?.isFirstResponder, true, "still focused once it lands")
+        func standIns(_ view: UIView) -> Int { (view is KeyboardStandIn ? 1 : 0) + view.subviews.map(standIns).reduce(0, +) }
+        XCTAssertEqual(standIns(try XCTUnwrap(nav.view.window)), 0, "the stand-in is gone")
     }
 
     /// A pop UIKit finishes with no enabled Back control to press (here,

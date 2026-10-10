@@ -338,7 +338,7 @@ extension Presenter {
             // opened a sheet must not keep the sheet's field from its autofocus. A button reached by Tab or
             // `focus(id)` keeps it.
             func touchFocused(_ view: UIView) -> Bool { (view as? NodeView).map { $0.isButton && $0.focusedByTouch } == true }
-            func hasFocus(_ view: UIView) -> Bool { (view.isFirstResponder && (view as? NodeView)?.canvasInput == nil && !touchFocused(view) && !(view is ExactView)) || view.subviews.contains(where: hasFocus) }
+            func hasFocus(_ view: UIView) -> Bool { (view.isFirstResponder && (view as? NodeView)?.canvasInput == nil && !touchFocused(view) && !(view is ExactView) && !(view is KeyboardStandIn)) || view.subviews.contains(where: hasFocus) }
             autofocusProcessed.insert(ObjectIdentifier(node))
             guard let window = node.window, !hasFocus(window) else { continue }
             let target: UIResponder = node.textArea ?? node.field ?? node
