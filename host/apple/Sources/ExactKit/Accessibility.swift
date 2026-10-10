@@ -338,7 +338,7 @@ extension Presenter {
             // opened a sheet must not keep the sheet's field from its autofocus. A button reached by Tab or
             // `focus(id)` keeps it, and a canvas HUD button's hand-back to the canvas still holds it pending.
             func touchFocused(_ view: UIView) -> Bool { (view as? NodeView).map { $0.isButton && $0.focusedByTouch && !$0.returnsPointerFocusToCanvas } == true }
-            func hasFocus(_ view: UIView) -> Bool { (view.isFirstResponder && (view as? NodeView)?.canvasInput == nil && !touchFocused(view) && !(view is ExactView)) || view.subviews.contains(where: hasFocus) }
+            func hasFocus(_ view: UIView) -> Bool { (view.isFirstResponder && (view as? NodeView)?.canvasInput == nil && !touchFocused(view) && !(view is ExactView) && !(view is KeyboardStandIn)) || view.subviews.contains(where: hasFocus) }
             if !views.values.contains(where: { $0.isFirstResponder && $0.returnsPointerFocusToCanvas }) { autofocusProcessed.insert(ObjectIdentifier(node)) }
             guard let window = node.window, !hasFocus(window) else { continue }
             autofocusProcessed.insert(ObjectIdentifier(node))
