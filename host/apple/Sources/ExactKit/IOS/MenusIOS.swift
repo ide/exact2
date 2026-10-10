@@ -636,14 +636,15 @@ final class MenuHost {
         guard live(node), let name = target(of: node),
               let pop = presenter?.views.values.first(where: { $0.props["id"] == name }),
               let command = command(node, pop) else { return }
-        guard (isConfirmation(pop) && (pop.props["popover"] != nil || isDialog(pop))) || isContent(pop) else {
-            // D13: a native invoker, or a hide-only control inside a lifted
-            // content popover, shows or hides the popover in the tree.
-            if node.isNativeButton || closesPresentedContent(node), eligible(node), pop.props["popover"] != nil {
-                if command == .close || command == .toggle && agentOpen[name] != nil { drop(name) }
-                else if agentOpen[name] == nil { agentShow(pop, named: name, from: node.id) }
-                return
-            }
+        let confirms = isConfirmation(pop) && (pop.props["popover"] != nil || isDialog(pop))
+        // D13: a native invoker, or a hide-only control inside a lifted
+        // popover, shows or hides any other popover in the tree.
+        if !confirms, pop.props["popover"] != nil, node.isNativeButton || closesPresentedContent(node), eligible(node) {
+            if command == .close || command == .toggle && agentOpen[name] != nil { drop(name) }
+            else if agentOpen[name] == nil { agentShow(pop, named: name, from: node.id) }
+            return
+        }
+        guard confirms || isContent(pop) else {
             if !providing, command != .close { presenter?.session?.log("menu #\(pop.id) opens from its button; activating #\(node.id) ran its action only") }
             return
         }
