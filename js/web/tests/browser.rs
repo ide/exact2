@@ -175,6 +175,7 @@ fn grant_sets() -> String {
 const PROBE: &str = r#"
 import { Cdp } from './scripts/agent.mjs';
 import { webHostFiles } from './scripts/app.mjs';
+import { sfModule } from './host/web/sf-material.mjs';
 import { spawn, execFileSync } from 'node:child_process';
 import { createServer } from 'node:http';
 import { readFileSync, mkdtempSync, rmSync } from 'node:fs';
@@ -235,6 +236,8 @@ const server = createServer((req,res)=>{
     res.setHeader('content-type','text/javascript');
     res.end(`startup.storageBeforePaint=!document.getElementById('exact-root').dataset.frameCallbackMs;globalThis.exact.createStorageRequests=(app,grants)=>({run:async()=>{startup.storageRuns++;return new Uint8Array();},dispose(){}});`);return;
   }
+  // The SF Symbols table a build writes per app (host/web/sf-material.mjs), here with no names.
+  if(path==='/sf.js'||path==='/startup/sf.js'){res.setHeader('content-type','text/javascript');res.end(sfModule(null));return;}
   if(path==='/startup/module-glue.js'){
     res.setHeader('content-type','text/javascript');
     res.end(`globalThis.exact.moduleRuntime={baked:async()=>{await globalThis.startupGate;if(location.search.includes('fail'))throw new Error('controlled loader failure');return {};},prepare:async()=>({id:0,dispose(){}})};`);return;
@@ -256,7 +259,7 @@ if(process.env.EXACT_MODULE_ROUTES_ONLY==='1'){
       const response=await fetch(`http://127.0.0.1:${server.address().port}${path}`);
       const body=Buffer.from(await response.arrayBuffer());
       if(response.status!==200||response.headers.get('content-type')!==(name.endsWith('.wasm')?'application/wasm':'text/javascript'))problems.push(`${path}: ${response.status} ${response.headers.get('content-type')}`);
-      else if(!['/startup/module-glue.js','/startup/storage-request.js'].includes(path)&&!body.equals(readFileSync(webHostFiles()[name]??'host/web/'+name)))problems.push(`${path}: wrong module bytes`);
+      else if(!['/startup/module-glue.js','/startup/storage-request.js','/sf.js','/startup/sf.js'].includes(path)&&!body.equals(readFileSync(webHostFiles()[name]??'host/web/'+name)))problems.push(`${path}: wrong module bytes`);
     }
     assert.deepEqual(problems,[],'every on-demand host module is served as JavaScript');
     assert.equal((await fetch(`http://127.0.0.1:${server.address().port}/startup/missing-glue.js`)).status,404,'missing modules never masquerade as HTML');
