@@ -71,9 +71,9 @@ final class PressFocusIOSTests: XCTestCase {
         button.touchesBegan([touch], with: nil)
         XCTAssertTrue(button.pressed)
         button.touchesEnded([touch], with: nil)
-        XCTAssertTrue(moved, "the field resigned as the button took the focus, moving the button")
+        XCTAssertTrue(moved, "the field resigned as the button was pressed, moving the button")
         XCTAssertFalse(button.pressInside(touch), "the finger is outside the button where it now stands")
-        XCTAssertTrue(button.isFirstResponder, "the button took the focus")
+        XCTAssertFalse(button.isFirstResponder, "a button takes no focus from a touch, as UIKit's")
         XCTAssertFalse(field.isFirstResponder)
         XCTAssertEqual(pressed, [3], "the press is resolved where the finger went down and came up, before the focus moved")
         XCTAssertFalse(button.pressed)
@@ -94,7 +94,7 @@ final class PressFocusIOSTests: XCTestCase {
         XCTAssertFalse(button.pressed)
     }
 
-    // MARK: A button holding the focus its touch gave it does not stop a later autofocus
+    // MARK: A tapped button does not stop a later autofocus
 
     /// A tap on the button, as a finger's: down and up at its centre.
     private func tap(_ button: NodeView) {
@@ -103,14 +103,14 @@ final class PressFocusIOSTests: XCTestCase {
         button.touchesEnded([touch], with: nil)
     }
 
-    /// The FAB took the focus on its touch and opened a sheet whose
-    /// textarea autofocuses: the textarea gets the focus.
+    /// The FAB, tapped, opened a sheet whose textarea autofocuses: the
+    /// textarea gets the focus.
     func testAButtonHoldingTheFocusDoesNotStopALaterTextareasAutofocus() throws {
         let p = presenter(node(1, "view", w: 400, h: 400) + node(2, "button", handlers: ["press"])
                           + [["op": "children", "id": 1, "ids": [2]], ["op": "roots", "ids": [1]]])
         let fab = try XCTUnwrap(p.views[2])
         tap(fab)
-        XCTAssertTrue(fab.isFirstResponder && fab.focusedByTouch, "the FAB took the focus on its touch")
+        XCTAssertFalse(fab.isFirstResponder, "a button takes no focus from a touch, as UIKit's")
         p.apply(wireBatch(node(3, "textarea", ["autofocus": "true"], y: 100, w: 300, h: 120)
                           + [["op": "children", "id": 1, "ids": [2, 3]]]))
         p.syncAccessibility()
@@ -125,7 +125,7 @@ final class PressFocusIOSTests: XCTestCase {
                           + [["op": "children", "id": 1, "ids": [2]], ["op": "roots", "ids": [1]]])
         let fab = try XCTUnwrap(p.views[2])
         tap(fab)
-        XCTAssertTrue(fab.isFirstResponder && fab.focusedByTouch, "the FAB took the focus on its touch")
+        XCTAssertFalse(fab.isFirstResponder, "a button takes no focus from a touch, as UIKit's")
         p.apply(wireBatch(node(3, "view", ["tabIndex": "0", "autofocus": "true"], y: 100)
                           + [["op": "children", "id": 1, "ids": [2, 3]]]))
         p.syncAccessibility()
@@ -134,15 +134,15 @@ final class PressFocusIOSTests: XCTestCase {
         XCTAssertFalse(fab.isFirstResponder)
     }
 
-    /// A button focused any other way (`focus(id)`, Tab) keeps the focus
-    /// against a later autofocus, as before, even after a touch focused it.
+    /// A button focused another way (`focus(id)`, Tab) keeps the focus
+    /// against a later autofocus, whatever a touch did before.
     func testAButtonFocusedWithoutATouchKeepsIt() throws {
         let p = presenter(node(1, "view", w: 400, h: 400) + node(2, "button", ["id": "go"], handlers: ["press"])
                           + node(4, "button", handlers: ["press"], y: 300)
                           + [["op": "children", "id": 1, "ids": [2, 4]], ["op": "roots", "ids": [1]]])
         let button = try XCTUnwrap(p.views[2]), other = try XCTUnwrap(p.views[4])
         tap(button)
-        XCTAssertTrue(button.focusedByTouch)
+        XCTAssertFalse(button.isFirstResponder)
         p.focusElement(["go"])
         XCTAssertTrue(button.isFirstResponder)
         XCTAssertFalse(button.focusedByTouch, "focus(id) makes it the app's focus")
@@ -153,7 +153,6 @@ final class PressFocusIOSTests: XCTestCase {
         XCTAssertFalse(try XCTUnwrap(p.views[3]?.textArea).isFirstResponder)
 
         tap(other)
-        XCTAssertTrue(other.focusedByTouch)
         button.focusedByTouch = true // Tab's destination, as if a touch had focused it once
         p.moveFocus(backward: false)
         let tabbed = try XCTUnwrap([button, other].first { $0.isFirstResponder })
@@ -164,10 +163,11 @@ final class PressFocusIOSTests: XCTestCase {
         XCTAssertTrue(tabbed.isFirstResponder, "the button keeps the focus Tab gave it")
     }
 
-    /// UIKit hands the focus back to the button when its view moves (the
-    /// viewport into a presented sheet): still the touch's focus.
+    /// UIKit hands the focus back to a button that asked for focus (a
+    /// tabindex) when its view moves (the viewport into a presented sheet):
+    /// still the touch's focus.
     func testATouchFocusSurvivesUIKitHandingItBack() throws {
-        let p = presenter(node(1, "view", w: 400, h: 400) + node(2, "button", handlers: ["press"])
+        let p = presenter(node(1, "view", w: 400, h: 400) + node(2, "button", ["tabIndex": "0"], handlers: ["press"])
                           + [["op": "children", "id": 1, "ids": [2]], ["op": "roots", "ids": [1]]])
         let fab = try XCTUnwrap(p.views[2])
         tap(fab)
