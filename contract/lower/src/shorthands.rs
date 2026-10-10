@@ -328,7 +328,13 @@ fn text_box(name: &str, text: &str, span: Span) -> Result<[String; 2], LowerErro
     };
     // `text-box: cap alphabetic` trims both ends, as its trim's initial
     // `trim-both` in the shorthand (Inline Layout 3 §4.3).
-    let trim = trim.unwrap_or_else(|| if over.is_some() { "trim-both".into() } else { "none".into() });
+    let trim = trim.unwrap_or_else(|| {
+        if over.is_some() {
+            "trim-both".into()
+        } else {
+            "none".into()
+        }
+    });
     Ok([trim, edge])
 }
 

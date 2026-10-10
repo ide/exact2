@@ -15,7 +15,14 @@ impl DataSource for NoData {
 
 fn boot(src: &str) -> (Host<NoData>, String) {
     let plan = contract::bake(contract::compile(src).unwrap(), NoData).unwrap();
-    Host::boot(&plan.encode(), NoData, Box::new(MonospaceMeasurer::default()), 402.0, 874.0).unwrap()
+    Host::boot(
+        &plan.encode(),
+        NoData,
+        Box::new(MonospaceMeasurer::default()),
+        402.0,
+        874.0,
+    )
+    .unwrap()
 }
 
 fn view(host: &Host<NoData>, test_id: &str) -> u32 {
@@ -50,18 +57,34 @@ fn a_flex_button_sends_its_content_axis_and_gap() {
         text "Plain"
 "#,
     );
-    let (stacked, auto, plain) = (view(&host, "stacked"), view(&host, "auto"), view(&host, "plain"));
+    let (stacked, auto, plain) = (
+        view(&host, "stacked"),
+        view(&host, "auto"),
+        view(&host, "plain"),
+    );
     let create = last_op(&first, "create", stacked).unwrap();
-    assert!(create.contains("\"button_content_direction\":\"column\""), "{create}");
+    assert!(
+        create.contains("\"button_content_direction\":\"column\""),
+        "{create}"
+    );
     assert!(create.contains("\"button_content_gap\":4"), "{create}");
     // No gap written: the padding is the platform's, so none is sent.
     let create = last_op(&first, "create", auto).unwrap();
-    assert!(create.contains("\"button_content_direction\":\"row\""), "{create}");
+    assert!(
+        create.contains("\"button_content_direction\":\"row\""),
+        "{create}"
+    );
     assert!(!create.contains("button_content_gap"), "{create}");
     let create = last_op(&first, "create", plain).unwrap();
-    assert!(!create.contains("button_content"), "not a flex box: {create}");
+    assert!(
+        !create.contains("button_content"),
+        "not a flex box: {create}"
+    );
     let after = host.dispatch_at(stacked, Event::Press, 0.0);
     let style = last_op(&after, "style", stacked).unwrap();
-    assert!(style.contains("\"button_content_direction\":\"row\""), "{style}");
+    assert!(
+        style.contains("\"button_content_direction\":\"row\""),
+        "{style}"
+    );
     assert!(style.contains("\"button_content_gap\":6"), "{style}");
 }

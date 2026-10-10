@@ -29,11 +29,19 @@ fn main() {
     std::fs::write(out_dir.join("compat.json"), compat.to_json()).unwrap();
     // A fixture takes no updates.
     let host = "exact_apple";
+    // What the archive links, as its compatibility inputs name it (LLP 1047.001 D2).
+    let linked = exact_bake::apple_link(&compat, host);
     std::fs::write(
         out_dir.join("entry.rs"),
         format!(
-            "{}\n{host}::host!(AppData, PLAN, COMPAT);\n",
-            contract::rust_entry("()", "()", compat.inputs["rustMode"].as_str().unwrap()).unwrap()
+            "{}\n{}{host}::host!(AppData, PLAN, COMPAT; linked = EXACT_LINKED);\n",
+            contract::rust_entry(
+                "()",
+                "Default::default()",
+                compat.inputs["rustMode"].as_str().unwrap()
+            )
+            .unwrap(),
+            linked
         ),
     )
     .unwrap();
