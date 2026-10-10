@@ -109,6 +109,16 @@ fn resolved_rows(style: &exact_kernel::StyleProps) -> String {
     json
 }
 
+/// The `font_written` row of a node whose inherited rows are resolved for it: which font rows it writes
+/// itself, bit 0 the size and bit 1 the weight. A size it inherits, the root's included, reads the same as
+/// one it writes once resolved, so the host is told which is which.
+pub(crate) fn font_written(node: &exact_kernel::NodeRef<'_>) -> Option<String> {
+    use exact_kernel::StyleId;
+    let written = u8::from(node.style.mask.has(StyleId::FontSize))
+        | (u8::from(node.style.mask.has(StyleId::FontWeight)) << 1);
+    (written != 0).then(|| format!("\"font_written\":{written}"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -147,6 +157,52 @@ mod tests {
         assert_eq!(json["rows"]["button"]["control_size"], "large");
         assert_eq!(json["rows"]["button"]["padding_left"], 9);
         assert_eq!(json["rows"]["button"]["border_radius_top_left"], 18);
+    }
+    #[test]
+    fn only_font_rows_a_text_or_symbol_writes_itself_are_marked_written() {
+        let plan = contract::compile(
+            r#"component Buttons
+  view
+    column font-size=17
+      button -exact-apple-button-style="gray" -exact-apple-button-size="small"
+        image "symbol:sf/horn.blast.fill" font-size=17
+        text "Inherited"
+        text "Weighted" font-weight=600
+"#,
+        )
+        .unwrap();
+        let (host, _) = crate::Host::boot(
+            &plan.encode(),
+            NoData,
+            Box::new(exact_kernel::MonospaceMeasurer::default()),
+            400.0,
+            800.0,
+        )
+        .unwrap();
+        let kernel = host.runner().kernel();
+        let button = kernel.node(kernel.roots()[0]).unwrap().children()[0];
+        let style = |id: u32| -> serde_json::Value {
+            let node = kernel.node(id).unwrap();
+            serde_json::from_str(&crate::style::style_json_for(&node, &kernel.env()).0).unwrap()
+        };
+        let [symbol, inherited, weighted] = kernel.node(button).unwrap().children()[..] else {
+            panic!()
+        };
+        assert_eq!(
+            style(symbol)["font_written"],
+            1,
+            "its own 17, the inherited size's equal"
+        );
+        assert_eq!(style(inherited)["font_size"], 17);
+        assert!(
+            style(inherited).get("font_written").is_none(),
+            "an inherited size is not written"
+        );
+        assert_eq!(style(weighted)["font_written"], 2);
+        assert!(
+            style(button).get("font_written").is_none(),
+            "a box resolves no inherited font rows"
+        );
     }
     #[test]
     #[ignore = "QUEUE: a native button title in `em` under an authored absolute button font is marked already scaled, so it misses Dynamic Type; the kernel face record must carry the font basis (LLP 1104 step 3 review)"]

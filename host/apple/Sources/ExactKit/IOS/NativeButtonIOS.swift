@@ -304,8 +304,8 @@ final class NativeButton: UIButton {
         // button's size unless the button or its title writes a font size
         // or weight (LLP 1069.011.001 D4)
         let systemFont = NativeButton.titleFont(config.buttonSize, traits: owner.traitCollection)
-        let size = text?.style["font_size"]?.number ?? owner.style["font_size"]?.number
-        let fontWeight = text?.style["font_weight"]?.number ?? owner.style["font_weight"]?.number
+        let size = text?.written("font_size") ?? owner.style["font_size"]?.number
+        let fontWeight = text?.written("font_weight") ?? owner.style["font_weight"]?.number
         let authored = size != nil || fontWeight != nil
             ? UIFont.systemFont(ofSize: size.map { CGFloat($0) } ?? systemFont.pointSize, weight: weight(CGFloat(fontWeight ?? 400))) : nil
         let font = text.map { _ in authored ?? systemFont }
@@ -328,7 +328,7 @@ final class NativeButton: UIButton {
             // A symbol beside a title is the small scale of the title's font,
             // or of a regular button's when the system chose a smaller one,
             // as SwiftUI draws a label's icon in a regular button
-            let sized = symbol.style["font_size"]?.number.map {
+            let sized = symbol.written("font_size").map {
                 UIImage.SymbolConfiguration(pointSize: CGFloat($0), weight: symbolWeight(symbol.number("font_weight", 400)))
             } ?? font.map { _ in
                 UIImage.SymbolConfiguration(font: authored ?? NativeButton.titleFont(.medium, traits: owner.traitCollection), scale: .small)
@@ -444,6 +444,15 @@ final class NativeButton: UIButton {
     static func symbolWeight(_ w: CGFloat) -> UIImage.SymbolWeight {
         switch w { case ..<150: .ultraLight; case ..<250: .thin; case ..<350: .light; case ..<450: .regular
         case ..<550: .medium; case ..<650: .semibold; case ..<750: .bold; case ..<850: .heavy; default: .black }
+    }
+}
+
+private extension NodeView {
+    /// A text's or symbol's font row when it writes the row itself, not when it inherits it (the root's size
+    /// reaches every text): the host's style says which in `font_written`, bit 0 the size and bit 1 the weight
+    func written(_ key: String) -> Double? {
+        let bit = key == "font_size" ? 1 : 2
+        return Int(number("font_written")) & bit != 0 ? style[key]?.number : nil
     }
 }
 #elseif os(tvOS)

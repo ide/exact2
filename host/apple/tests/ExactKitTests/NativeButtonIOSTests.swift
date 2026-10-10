@@ -49,6 +49,35 @@ final class NativeButtonIOSTests: XCTestCase {
         XCTAssertTrue(try XCTUnwrap(p.views[2]).isHidden, "the configuration draws the title")
     }
 
+    /// A small button's title and symbol are UIKit's small ones under the
+    /// document root's font size, which reaches every text that inherits it
+    /// and is no size the author wrote; a size of their own wins, the root's
+    /// included (`font_written`).
+    func testASmallButtonsTitleKeepsUIKitsFontUnderTheRootsSize() throws {
+        let root = PageFacts.rootFontSize
+        let p = presenter([
+            ["op": "create", "id": 1, "kind": "button", "handlers": ["press"], "style": ["exact_apple_button_style": "gray", "exact_apple_button_size": "small"]],
+            ["op": "create", "id": 2, "kind": "image", "props": ["imageSource": "symbol:sf/lock.fill", "symbolName": "lock.fill"], "style": ["font_size": root]],
+            ["op": "create", "id": 3, "kind": "text", "props": ["text": "Defrost"], "style": ["font_size": root]],
+            ["op": "children", "id": 1, "ids": [2, 3]],
+            ["op": "roots", "ids": [1]],
+            ["op": "frame", "id": 1, "x": 0.0, "y": 0.0, "w": 160.0, "h": 36.0],
+        ])
+        let b = try XCTUnwrap(button(try XCTUnwrap(p.views[1])))
+        let small = NativeButton.titleFont(.small, traits: b.traitCollection)
+        XCTAssertNil(b.configuration?.titleTextAttributesTransformer, "UIKit's small title font, not the root's \(root) pt")
+        XCTAssertEqual(b.configuration?.preferredSymbolConfigurationForImage, UIImage.SymbolConfiguration(font: NativeButton.titleFont(.medium, traits: b.traitCollection), scale: .small))
+        XCTAssertLessThan(small.pointSize, root)
+        p.apply(wireBatch([
+            ["op": "style", "id": 3, "style": ["font_size": 13.0, "font_written": 1.0]],
+            ["op": "style", "id": 2, "style": ["font_size": root, "font_written": 1.0]],
+        ]))
+        let written = b.configuration?.titleTextAttributesTransformer?(AttributeContainer())
+        XCTAssertEqual(written?.uiKit.font?.pointSize, 13, "a size of its own wins")
+        XCTAssertEqual(b.configuration?.preferredSymbolConfigurationForImage, UIImage.SymbolConfiguration(pointSize: root, weight: .regular),
+                       "a symbol's own size wins, the root's too")
+    }
+
     func testAStyledButtonKeepsItsContentWhereTheBoxesStand() throws {
         let p = presenter([
             ["op": "create", "id": 1, "kind": "button", "handlers": ["press"], "style": ["exact_apple_button_style": "plain"]],
