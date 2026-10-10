@@ -509,6 +509,16 @@ fn the_kept_budget_counts_identity_and_value_but_not_context() {
         1,
         "large answer exceeds the entry budget"
     );
+    let said: Vec<&str> = r
+        .journal()
+        .filter(|l| l.contains("too big to keep:"))
+        .collect();
+    assert_eq!(
+        said.len(),
+        1,
+        "an answer too big to keep is said once: {said:?}"
+    );
+    assert!(said[0].contains("over the 8192-byte budget"), "{}", said[0]);
 }
 
 #[test]
