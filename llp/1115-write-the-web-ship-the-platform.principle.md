@@ -58,7 +58,9 @@ result is the author's. Names stay CSS because names are what the author writes.
 user can see or feel that the author did not write is the platform's.
 
 **Inherited is unsaid.** A `color` the author set on the page and a button only inherits is not
-the button's colour: the bar item keeps UIKit's tint (d33eb49dd). The host's rule is: a value
+the button's colour: the bar item keeps UIKit's tint (d33eb49dd). The tint itself is the
+exception, because the platform's tint is inherited too: an `accent-color` above a control is
+its tint, as a `tintColor` set on a superview is in UIKit (D4). The host's rule is: a value
 counts as written on a node when its row carries the bit that says its author wrote it there
 (LLP 1115.000 D2): an attribute of the node or a row of its class, a platform colour and a
 value equal to its parent's included. An inherited value has no row on the child and so no
@@ -120,8 +122,11 @@ the schema changes (LLP 1030 D3a). Agreed in advance: "it's ok if things break a
 - **D3. Type is the platform's.** The root font size is the platform body size (§3). Headings
   (`role="heading"`/`h1`–`h6`) get the platform's text styles by level, overridable by any
   authored `font-size`/`font-weight`. Bold Text is honoured.
-- **D4. Inherited colours never tint controls.** Alerts, spinners, tab selection, swipe
-  actions, bar items: the platform tint unless the control's own `color`/`accent-color` is set.
+- **D4. A control's colour is the tint, never an inherited `color`.** Alerts, spinners, tab
+  selection, swipe actions, bar items: a page's text colour does not reach them. The tint is
+  `accent-color`, which cascades as UIKit's `tintColor` does: the nearest `accent-color` above
+  the control, else the app's accent (the root's, else the platform's; LLP 1095.000). A control
+  takes a `color` only when it is written on the control itself.
 - **D5. Back is always there.** A pushed route without an authored back control still gets the
   system back button, edge swipe and sheet swipe-down; the host pops and reports it as
   `history.back()` would. An authored control is still what the button presses.
