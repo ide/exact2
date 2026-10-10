@@ -297,6 +297,19 @@ final class NavigationBarIOSTests: XCTestCase {
         XCTAssertEqual(backs(session), 0)
     }
 
+    /// A pushed route's autofocus is taken in the batch that starts the
+    /// push, so the keyboard rises with the screen rather than mid-push.
+    func testAPushedRoutesAutofocusIsTakenAsThePushStarts() throws {
+        let session = try fixture("bar-autofocus-push", module: false)
+        XCTAssertNil(Agent(session: session).tap(["id": Int(try node(session, "open-plain").id)])["error"])
+        let nav = try XCTUnwrap(session.presenter.navigation.primaryNavigation)
+        until("the push starts") { nav.transitionCoordinator != nil || nav.viewControllers.count == 2 }
+        XCTAssertNotNil(nav.transitionCoordinator, "the push animates")
+        XCTAssertEqual(try node(session, "plain-field").field?.isFirstResponder, true, "focused as the push starts")
+        until("the plain route is pushed") { nav.viewControllers.count == 2 && nav.transitionCoordinator == nil }
+        XCTAssertEqual(try node(session, "plain-field").field?.isFirstResponder, true, "still focused once it lands")
+    }
+
     /// A pop UIKit finishes with no enabled Back control to press (here,
     /// disabled just before the bar's pop, as a tap racing that batch does)
     /// presses nothing, and the native stack goes back to the one the router
