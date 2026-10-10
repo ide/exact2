@@ -813,12 +813,10 @@ fn traverse_delivers_the_destination_key_and_back_to_pops_to_it() {
             "action returnTo(entry: string)",
             "action returnTo(entry: number)",
         ),
-        source
-            .replace("traverse=returnTo", "")
-            .replace(
-                "button appearance=\"none\" id=\"back\"",
-                "button appearance=\"none\" traverse=returnTo id=\"back\"",
-            ),
+        source.replace("traverse=returnTo", "").replace(
+            "button appearance=\"none\" id=\"back\"",
+            "button appearance=\"none\" traverse=returnTo id=\"back\"",
+        ),
     ] {
         assert!(contract::compile(&bad).is_err());
     }
