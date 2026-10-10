@@ -17,6 +17,13 @@ use exact_plan::Value;
 /// The largest kept answer, encoded: a session, a list of names — never a feed.
 pub(super) const MAX_KEPT_BYTES: usize = 8 * 1024;
 
+/// Whether answers are kept, and the resources whose answer was too big to keep, said once each.
+#[derive(Debug, Default)]
+pub(super) struct Keeping {
+    pub(super) on: bool,
+    pub(super) too_big: Vec<usize>,
+}
+
 /// The store name a resource's kept answer lives under.
 /// The kept entries in `snapshot` no declared reader of `plan` seeds. A
 /// cold boot seeds a first frame only from declared readers' kept answers,
@@ -145,7 +152,7 @@ impl<D: DataSource> Runner<D> {
     /// Keep a store-reading resource's fresh answer for the next boot's
     /// first frame (LLP 1027 D4), when this source may not be ready then.
     pub(super) fn keep_answer(&mut self, i: usize, args: &[Value], value: &Value) {
-        if !self.keeps_answers || !self.store_readers[i] {
+        if !self.keeping.on || !self.store_readers[i] {
             return;
         }
         // @ref LLP 1039 D3 / LLP 1030 D7 — runner facts are never kept answers.
@@ -163,11 +170,20 @@ impl<D: DataSource> Runner<D> {
         // are the exact same arguments and encoding as before.
         let row = &self.plan.resources[i];
         let args = &args[..row.args.len as usize - usize::from(row.context)];
+        let resource = self.plan.str(row.name).to_owned();
         if !fits(args, value) {
+            // Say so once: no launch shows this resource until it answers
+            if !self.keeping.too_big.contains(&i) {
+                self.keeping.too_big.push(i);
+                let bytes = encode(args, value).len();
+                self.log(format!(
+                    "too big to keep: {resource} is {bytes} bytes encoded, over the {MAX_KEPT_BYTES}-byte budget, so a launch shows its placeholder until it answers; keep what the first frame needs in a smaller resource (LLP 1027 D4)"
+                ));
+            }
             return;
         }
         let encoded = encode(args, value);
-        let name = kept_name(self.plan.str(self.plan.resources[i].name));
+        let name = kept_name(&resource);
         self.store.keep(&name, &encoded);
     }
 
