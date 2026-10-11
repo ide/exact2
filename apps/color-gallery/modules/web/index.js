@@ -17,7 +17,7 @@ const KEYFRAMES = `
 }`;
 
 // The scroll at which the card sticks; app.contract docks it at the same.
-const DOCKED = 128;
+const DOCKED = 24;
 
 export function element(e) {
   if (e.hatch !== 'sticky-limit' || !e.isNew) return;
@@ -32,6 +32,6 @@ export function element(e) {
   s.animationName = 'exact-gallery-dock';
   s.animationTimingFunction = 'linear';
   s.animationFillMode = 'both';
-  s.animationTimeline = 'scroll(root block)';
+  s.animationTimeline = 'scroll(nearest block)';
   s.animationRange = `${DOCKED - 24}px ${DOCKED}px`;
 }
