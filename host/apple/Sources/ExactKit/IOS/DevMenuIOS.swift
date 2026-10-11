@@ -6,6 +6,7 @@
 // `AppDelegate`, the responder every chain ends at, so they fire whatever
 // has focus (the Simulator's own File menu claims plain ⌘R for Record
 // Screen; ⇧⌘R gets through). EXACT_DEV_MENU=0 removes all of it. The
+// Two fingers tapped once open the trace controls directly. The
 // standalone adapter installs it (LLP 1031 D11); an embedder installs
 // nothing.
 #if os(iOS) || os(tvOS)
@@ -22,6 +23,7 @@ final class FourFingerGate {
     /// The moment after a touch the rest of the four may still land in, and
     /// how far a touch may travel before they have.
     static let landing: TimeInterval = 0.1, slop: CGFloat = 8
+    var required = 4
     private var starts: [ObjectIdentifier: CGPoint] = [:]
     /// The most touches down at once this attempt (the event's: a recognizer
     /// waiting for four counts none as its own): four, and it is a landing,
@@ -35,16 +37,16 @@ final class FourFingerGate {
     func began(_ r: UIGestureRecognizer, _ points: [ObjectIdentifier: CGPoint], down: Int) {
         for (key, p) in points { starts[key] = p }
         peak = max(peak, down)
-        guard r.state == .possible, peak < 4 else { return }
+        guard r.state == .possible, peak < required else { return }
         let this = attempt
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.landing) { [weak self, weak r] in
-            guard let self, let r, attempt == this, r.state == .possible, peak < 4 else { return }
+            guard let self, let r, attempt == this, r.state == .possible, peak < required else { return }
             r.state = .failed
         }
     }
     func moved(_ r: UIGestureRecognizer, _ points: [ObjectIdentifier: CGPoint], down: Int) {
         peak = max(peak, down)
-        guard r.state == .possible, peak < 4 else { return }
+        guard r.state == .possible, peak < required else { return }
         for (key, p) in points {
             guard let start = starts[key] else { starts[key] = p; continue }
             if hypot(p.x - start.x, p.y - start.y) > Self.slop { r.state = .failed; return }
@@ -59,6 +61,9 @@ final class FourFingerTap: UITapGestureRecognizer {
     private let gate = FourFingerGate()
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
         super.touchesBegan(touches, with: event)
+        #if !os(tvOS)
+        gate.required = numberOfTouchesRequired
+        #endif
         gate.began(self, points(touches), down: FourFingerGate.down(event))
     }
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent) {
@@ -71,6 +76,9 @@ final class FourFingerHold: UILongPressGestureRecognizer {
     private let gate = FourFingerGate()
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
         super.touchesBegan(touches, with: event)
+        #if !os(tvOS)
+        gate.required = numberOfTouchesRequired
+        #endif
         gate.began(self, points(touches), down: FourFingerGate.down(event))
     }
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent) {
@@ -81,6 +89,8 @@ final class FourFingerHold: UILongPressGestureRecognizer {
 }
 
 final class DevMenuTarget: NSObject, UIGestureRecognizerDelegate {
+    @objc func traceTap(_ g: UIGestureRecognizer) { DevMenu.showTrace() }
+
     @objc func menuTap(_ g: UIGestureRecognizer) {
         DevMenu.note("dev menu: four-finger tap")
         DevMenu.toggle()
@@ -155,11 +165,17 @@ public enum DevMenu {
         press.cancelsTouchesInView = true
         menu.require(toFail: press)
         reload.require(toFail: press)
-        for recognizer in [reload, menu, press] {
+        let trace = FourFingerTap(target: target, action: #selector(DevMenuTarget.traceTap(_:)))
+        #if !os(tvOS)
+        trace.numberOfTouchesRequired = 2
+        #endif
+        trace.delaysTouchesEnded = false
+        for recognizer in [reload, menu, press, trace] {
             recognizer.delegate = target
             recognizer.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.direct.rawValue)]
             recognizer.allowedPressTypes = []
         }
+        window.addGestureRecognizer(trace)
         window.addGestureRecognizer(reload)
         window.addGestureRecognizer(menu)
         window.addGestureRecognizer(press)
@@ -229,6 +245,30 @@ public enum DevMenu {
         #endif
         // LLP 1079 D5: the session's journal, frames and work, for the agent (`agent.mjs trace <file>`).
         if session?.sampler != nil { a.addAction(UIAlertAction(title: "Save Trace", style: .default) { _ in saveTrace() }) }
+        a.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        sheet = a
+        present(a)
+    }
+
+    /// Capture before presenting UI so the menu's keyboard/layout work
+    /// doesn't enter the trace the person is copying.
+    static func showTrace() {
+        guard controller != nil, let session, session.sampler != nil else { return }
+        if let sheet, sheet.presentingViewController != nil { return }
+        let capture = Result { try session.traceData(minimal: true) }
+        let a = UIAlertController(title: "Trace", message: "Copy the trace so far, or clear it before reproducing the hitch. Recording continues automatically.", preferredStyle: .actionSheet)
+        #if !os(tvOS)
+        a.addAction(UIAlertAction(title: "Copy Trace", style: .default) { _ in
+            switch capture {
+            case .success(let data): UIPasteboard.general.string = String(decoding: data, as: UTF8.self)
+            case .failure(let error):
+                let alert = UIAlertController(title: "Trace could not be copied", message: error.localizedDescription, preferredStyle: .alert)
+                alert.addAction(UIAlertAction(title: "OK", style: .cancel))
+                present(alert)
+            }
+        })
+        #endif
+        a.addAction(UIAlertAction(title: "Clear Trace", style: .destructive) { _ in session.clearTrace() })
         a.addAction(UIAlertAction(title: "Cancel", style: .cancel))
         sheet = a
         present(a)

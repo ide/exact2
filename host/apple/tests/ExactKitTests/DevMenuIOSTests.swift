@@ -30,8 +30,8 @@ final class DevMenuIOSTests: XCTestCase {
         defer { session.destroy() }
         let ours = (window.gestureRecognizers ?? []).filter { $0.delegate === DevMenu.target }
         let taps = ours.compactMap { $0 as? UITapGestureRecognizer }
-        XCTAssertEqual(taps.map(\.numberOfTouchesRequired).sorted(), [4, 4])
-        XCTAssertEqual(taps.map(\.numberOfTapsRequired).sorted(), [1, 2])
+        XCTAssertEqual(taps.map(\.numberOfTouchesRequired).sorted(), [2, 4, 4])
+        XCTAssertEqual(taps.map(\.numberOfTapsRequired).sorted(), [1, 1, 2])
         let press = try XCTUnwrap(ours.compactMap { $0 as? UILongPressGestureRecognizer }.first)
         XCTAssertEqual(press.numberOfTouchesRequired, 4)
         XCTAssertEqual(press.minimumPressDuration, 0.6, accuracy: 1e-9)
@@ -47,6 +47,22 @@ final class DevMenuIOSTests: XCTestCase {
                 XCTAssertFalse(DevMenu.target.gestureRecognizer(r, shouldRecognizeSimultaneouslyWith: other))
             }
         }
+    }
+
+    func testTwoFingerTraceMenuOffersCopyAndClear() throws {
+        let session = try install()
+        defer { session.destroy() }
+        let root = Presenting()
+        DevMenu.controller = root
+        DevMenu.showTrace()
+        let menu = try XCTUnwrap(root.asked.last as? UIAlertController)
+        XCTAssertEqual(menu.title, "Trace")
+        XCTAssertEqual(menu.actions.map(\.title), ["Copy Trace", "Clear Trace", "Cancel"])
+        let gate = FourFingerGate(), r = Stub(), touch = Touch()
+        gate.required = 2
+        gate.began(r, [ObjectIdentifier(touch): .zero], down: 2)
+        gate.moved(r, [ObjectIdentifier(touch): CGPoint(x: 9, y: 0)], down: 2)
+        XCTAssertEqual(r.state, .possible, "the landing gate accepts two fingers")
     }
 
     /// A hold whose state the test sets (one with no view keeps `.possible`).
@@ -112,7 +128,7 @@ final class DevMenuIOSTests: XCTestCase {
         let session = try install()
         defer { session.destroy() }
         let ours = (window.gestureRecognizers ?? []).filter { $0.delegate === DevMenu.target }
-        XCTAssertEqual(ours.count, 3)
+        XCTAssertEqual(ours.count, 4)
         XCTAssertTrue(ours.allSatisfy { $0 is FourFingerTap || $0 is FourFingerHold })
         XCTAssertTrue(ours.allSatisfy { !$0.delaysTouchesBegan })
     }

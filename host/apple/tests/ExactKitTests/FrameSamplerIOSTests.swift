@@ -29,6 +29,31 @@ final class FrameSamplerIOSTests: XCTestCase {
         XCTAssertNotNil(identity["process"])
     }
 
+    func testClearTraceRemovesEarlierHistoryAndKeepsRecording() throws {
+        let session = ExactApp.shared.makeSession()
+        defer { session.destroy() }
+        XCTAssertNil(session.boot(size: CGSize(width: 390, height: 844)).error)
+        let sampler = try XCTUnwrap(session.sampler)
+        session.log("before-clear-marker")
+        sampler.record("before-clear-marker", since: CACurrentMediaTime() - 0.05)
+        sampler.observe(now: 1, target: 1.01)
+        sampler.observe(now: 1.03, target: 1.04)
+        session.clearTrace()
+        session.log("after-clear-marker")
+        sampler.record("after-clear-marker")
+        let data = try session.traceData(minimal: true)
+        let text = String(decoding: data, as: UTF8.self)
+        XCTAssertFalse(text.contains("before-clear-marker"))
+        XCTAssertTrue(text.contains("after-clear-marker"))
+        let trace = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        XCTAssertNil(trace["perf"], "clipboard captures omit cumulative work predating Clear")
+        let frames = try XCTUnwrap(trace["frames"] as? [String: Any])
+        XCTAssertEqual((frames["records"] as? [Any])?.count, 0)
+        let timeline = try XCTUnwrap(trace["timeline"] as? [String: Any])
+        XCTAssertEqual((timeline["slow"] as? [Any])?.count, 0)
+        XCTAssertEqual(timeline["dropped"] as? Int, 0)
+    }
+
     /// The turns are watched while the sampler's link runs, in the common
     /// modes (a scroll's tracking turns too), and no longer once it stops.
     func testTheTurnsAreWatchedWhileTheLinkRuns() throws {

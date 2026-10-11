@@ -24,6 +24,7 @@ final class FrameSampler: NSObject {
     static let eventLimit = 1024
     private var events: [[String: Any]] = [], slowEvents: [[String: Any]] = []
     private var eventsDropped = 0
+    var journalSince = 0
 
     struct Record {
         let t: Double, interval: Double, missed: Int, seq: (UInt64, UInt64)?, batches: Int, apply: Double
@@ -139,12 +140,20 @@ final class FrameSampler: NSObject {
     /// Forget every sample, and the link's baseline: a replaced runner
     /// numbers its transactions afresh. The next activity opens a segment.
     func reset() {
+        journalSince = 0
         record("session.reset")
         stop()
         records = []; late = []
         dropped = 0; presented = 0; lateCount = 0; missed = 0; segments = 0; overruns = 0; overrun = 0
         pending = (nil, nil, 0, 0)
         period = nil
+    }
+
+    func clearTrace() {
+        reset()
+        events = []; slowEvents = []; eventsDropped = 0
+        record("trace.cleared")
+        activity()
     }
 
     func stop() {
@@ -268,17 +277,26 @@ extension ExactSession {
     /// `perf` over every root and its hatches, with who made them and each timing's
     /// proxy, as `trace-<wallclock>.json` in the app's temporary directory;
     /// `agent.mjs trace <file>` reads it back. The path, or why not.
-    public func saveTrace() -> Result<URL, Error> {
-        guard let sampler else { return .failure(TraceError.production) }
+    public func clearTrace() {
+        guard let sampler else { return }
+        sampler.clearTrace()
+        let logs = try? JSONSerialization.jsonObject(with: Data(agent(#"{"op":"logs","since":0}"#).utf8)) as? [String: Any]
+        sampler.journalSince = logs?["next"] as? Int ?? 0
+    }
+
+    /// Clipboard captures omit cumulative performance tables to keep the
+    /// capture focused on the recorded interval. File exports keep them.
+    public func traceData(minimal: Bool = false) throws -> Data {
+        guard let sampler else { throw TraceError.production }
         let raw = { (json: String) in (try? JSONSerialization.jsonObject(with: Data(json.utf8))) ?? ["error": "unreadable"] }
-        let perf = raw(agent("{\"op\":\"perf\"}"))
+        let perf: Any = minimal ? NSNull() : raw(agent("{\"op\":\"perf\"}"))
         #if canImport(UIKit)
         let host = "ios", device = ProcessInfo.processInfo.environment["SIMULATOR_MODEL_IDENTIFIER"].map { "\($0) (simulator)" } ?? UIDevice.current.model
         #else
         let host = "macos", device = Host.current().localizedName ?? "Mac"
         #endif
         let bundle = Bundle.main.bundleIdentifier ?? ProcessInfo.processInfo.processName
-        let trace: [String: Any] = [
+        var trace: [String: Any] = [
             "identity": ["host": host, "app": bundle.split(separator: ".").last.map(String.init) ?? bundle, "bundle": bundle, "trust": "development",
                          "os": ProcessInfo.processInfo.operatingSystemVersionString, "device": device,
                          "version": Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown",
@@ -290,17 +308,22 @@ extension ExactSession {
                         "overrun": "a main run-loop turn that began before the frame's targetTimestamp and went to sleep after it (after Core Animation's commit)",
                         "loaf": "none on this host"],
             "plan": (perf as? [String: Any])?["plan"] ?? NSNull(),
-            "journal": raw(agent("{\"op\":\"logs\",\"since\":0}")),
+            "journal": raw(agent("{\"op\":\"logs\",\"since\":\(sampler.journalSince)}")),
             "frames": sampler.reply(late: FrameSampler.lateKept, all: true),
             "timeline": sampler.timeline(),
-            "perf": perf,
-            // The hatches (LLP 1075.003.000.001 §3.3), read in this same turn, so the sections agree.
-            "hatches": ["state": presenter.elements.observation(hatchDiagnostics), "perf": hatchPerf()],
         ]
+        if !minimal {
+            trace["perf"] = perf
+            trace["hatches"] = ["state": presenter.elements.observation(hatchDiagnostics), "perf": hatchPerf()]
+        }
+        return try JSONSerialization.data(withJSONObject: trace)
+    }
+
+    public func saveTrace() -> Result<URL, Error> {
         do {
             let stamp = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "-")
             let url = FileManager.default.temporaryDirectory.appendingPathComponent("trace-\(stamp).json")
-            let data = try JSONSerialization.data(withJSONObject: trace)
+            let data = try traceData()
             try data.write(to: url)
             // The last one under a name the driver knows, so a phone's is
             // copied off by name (`agent.mjs trace --phone`), as its
