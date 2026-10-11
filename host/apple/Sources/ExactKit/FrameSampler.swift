@@ -43,6 +43,7 @@ final class FrameSampler: NSObject {
 
     weak var session: ExactSession?
     private var link: CADisplayLink?
+    private var segmentBegan: CFTimeInterval?
     private var last: CFTimeInterval?
     private var active = -Double.infinity
     private var period: Double?
@@ -129,6 +130,7 @@ final class FrameSampler: NSObject {
         #endif
         l.add(to: .main, forMode: .common)
         link = l
+        segmentBegan = active
         last = nil
         segments += 1
         watchTurns()
@@ -148,6 +150,7 @@ final class FrameSampler: NSObject {
     func stop() {
         link?.invalidate()
         link = nil
+        segmentBegan = nil
         last = nil
         for o in turnObservers { CFRunLoopRemoveObserver(CFRunLoopGetMain(), o, .commonModes) }
         turnObservers = []
@@ -202,6 +205,12 @@ final class FrameSampler: NSObject {
     func observe(now: CFTimeInterval, target: CFTimeInterval, at wall: CFTimeInterval? = nil) {
         if let wall, let old = self.target, let began = turnBegan, began < old, wall > old {
             overrun = max(overrun, (wall - old) * 1000)
+        }
+        if last == nil, let segmentBegan {
+            // The first callback is not a missed-frame sample. Keep its
+            // latency separately: a cold keyboard can block before the
+            // sampler has established any frame deadline.
+            record("frames.firstCallback", since: segmentBegan)
         }
         self.target = target
         period = (target - now) * 1000

@@ -243,13 +243,13 @@ extension Presenter {
     /// subtree — plus every live region and pending autofocus; nil reads
     /// every view.
     func syncAccessibility(changed: Set<UInt32>? = nil) {
-        let began = session?.sampler == nil ? 0 : CACurrentMediaTime()
-        defer { session?.sampler?.record("accessibility.sync", since: began, minimumMS: 0.5,
-            fields: ["full": changed == nil, "nodes": changed?.count ?? views.count]) }
         guard Thread.isMainThread else {
             DispatchQueue.main.async { [weak self] in self?.syncAccessibility() }
             return
         }
+        let began = session?.sampler == nil ? 0 : CACurrentMediaTime()
+        defer { session?.sampler?.record("accessibility.sync", since: began, minimumMS: 0.5,
+            fields: ["full": changed == nil, "nodes": changed?.count ?? views.count]) }
         let nodes: [NodeView]
         if let changed {
             let indexed = chrome.ids("accessibilityLive").union(chrome.ids("autofocus"))

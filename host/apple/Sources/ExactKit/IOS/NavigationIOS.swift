@@ -44,13 +44,13 @@ final class RouteController: UIViewController {
     }
     override func viewIsAppearing(_ animated: Bool) {
         super.viewIsAppearing(animated)
-        let began = host?.presenter.session?.sampler == nil ? 0 : CACurrentMediaTime()
-        defer { host?.presenter.session?.sampler?.record("navigation.appearing", since: began,
-            fields: ["node": node.id, "animated": animated]) }
         // UIKit has attached and sized the real destination. Finish its
         // content and focus here, before the transition's first frame.
         host?.presenter.afterBatch { [weak self] in
-            guard let host = self?.host else { return }
+            guard let self, let host else { return }
+            let began = host.presenter.session?.sampler == nil ? 0 : CACurrentMediaTime()
+            defer { host.presenter.session?.sampler?.record("navigation.appearing", since: began,
+                fields: ["node": node.id, "animated": animated]) }
             host.coversChanged()
             host.presenter.syncAccessibility()
             host.presenter.paintVisibleText()
