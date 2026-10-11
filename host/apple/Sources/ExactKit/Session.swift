@@ -1041,7 +1041,11 @@ public final class ExactSession {
         let profiled = !ApplyProfile.on && batch.ops.contains { $0.op == .router }
         if profiled { ApplyProfile.begin() }
         presenter.apply(batch)
-        if profiled { NavigationMarks.shared.batchParts(self, ApplyProfile.end()) }
+        if profiled {
+            let parts = ApplyProfile.end()
+            NavigationMarks.shared.batchParts(self, parts)
+            sampler?.record("navigation.batchParts", fields: parts)
+        }
         if !batch.canvasImages.isEmpty { presenter.canvas2d.load(batch.canvasImages) }
         AnimatedRasters.shared.poke()
         for op in batch.ops where op.op == .reorder { presenter.reorder?.observe(ReorderState(op.payload)); presenter.reorderGroup?.observe(ReorderGroupState(op.payload)) }

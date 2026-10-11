@@ -44,6 +44,9 @@ final class RouteController: UIViewController {
     }
     override func viewIsAppearing(_ animated: Bool) {
         super.viewIsAppearing(animated)
+        let began = host?.presenter.session?.sampler == nil ? 0 : CACurrentMediaTime()
+        defer { host?.presenter.session?.sampler?.record("navigation.appearing", since: began,
+            fields: ["node": node.id, "animated": animated]) }
         // UIKit has attached and sized the real destination. Finish its
         // content and focus here, before the transition's first frame.
         host?.presenter.afterBatch { [weak self] in
@@ -87,7 +90,9 @@ final class RouteController: UIViewController {
     }
     // A button can remove a route before UIKit starts its pop. Preserve its
     // outgoing pixels for that transition; an interactive pop uses live views.
+    private(set) var retiring = false
     func freeze() {
+        retiring = true
         guard isViewLoaded, let snapshot = view.snapshotView(afterScreenUpdates: false) else { return }
         snapshot.frame = view.bounds
         // Pinned to the top, never stretched: the viewport can grow under it
@@ -222,6 +227,15 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
         guard let top = navigation?.topViewController as? RouteController else { return }
         if batch.ops.contains(where: { $0.op == .destroy && $0.id == top.node.id }) {
             top.freeze()
+        }
+    }
+
+    /// An authored pop retires its nodes before UIKit starts the transition.
+    /// Keep the existing hierarchy (and its real first responder) in its
+    /// controller, as UIKit does for a native pop. UIKit releases it at the end.
+    func retainsRemovedView(_ node: NodeView) -> Bool {
+        controllers.values.contains { route in
+            route.retiring && (node === route.node || node.isDescendant(of: route.node))
         }
     }
 
@@ -603,12 +617,6 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
     /// model nothing is begun that UIKit does not report.
     var transitioning: Bool { inFlight }
     var started: Bool { inFlight }
-    /// A back swipe began with the keyboard up and put it away (see
-    /// dropKeyboard): its hide is real, and the viewport follows it.
-    private var keyboardDropped = false
-    /// The editor a back swipe put away, focused again if the swipe cancels.
-    private weak var droppedEditor: UIView?
-
     /// For `state.navigation` (LLP 1035.002 D2; LLP 1035.001.000 D9): the
     /// route the root names, UIKit's stack by key, what UIKit shows, what the
     /// host last applied, what the app's tree asks, a change not yet told,
@@ -674,7 +682,7 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
     }
 
     var preservesKeyboardViewport: Bool {
-        !keyboardDropped && NavigationRules.freezesViewport(modalActive: presenter.modals.active, inFlight: inFlight,
+        NavigationRules.freezesViewport(modalActive: presenter.modals.active, inFlight: inFlight,
                                         initiallyInteractive: navigation?.transitionCoordinator?.initiallyInteractive == true)
     }
 
@@ -792,7 +800,7 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
             }
             return false
         }
-        guard let start, let view else { dropKeyboard(); return popStillMayBegin }
+        guard let start, let view else { return true }
         var overSwipeRight = false
         var hit = view.hitTest(start, with: nil)
         if CanvasInputs.owns(hit) { return false }
@@ -801,58 +809,14 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
             if current === view { break }
             hit = current.superview
         }
-        let begins = NavigationRules.panMayBegin(startX: start.x, overSwipeRight: overSwipeRight, velocity: velocity)
-        guard begins else { return false }
-        dropKeyboard()
-        return popStillMayBegin
-    }
-
-    /// One viewport holds both routes, and with the keyboard up it ends at
-    /// the keyboard's top: the route a back swipe revealed showed only what
-    /// was above the keys (a list's top half; its bottom half once the swipe
-    /// ended). The keyboard goes as the swipe is recognized, before UIKit
-    /// fixes the routes' frames for the transition, and the viewport grows
-    /// to the screen first.
-    private func dropKeyboard() {
-        guard presenter.hasKeyboardEditor || presenter.keyboardTop != nil,
-              navigation?.view.window != nil else { return }
-        keyboardDropped = true
-        // This session's editor only: another session's in the same window
-        // keeps its focus (LLP 1035.001 D5).
-        droppedEditor = (FirstResponder.current as? UIView).flatMap { $0.isDescendant(of: presenter.viewport) ? $0 : nil }
-        presenter.viewport.endEditing(true)
-        presenter.flushKeyboardResize()
-        presenter.session?.view?.fit()
-        navigation?.view.layoutIfNeeded()
-    }
-
-    /// Whether a pop may still begin after dropKeyboard: the blur it caused
-    /// was delivered at once and may have changed the route or its Back.
-    private var popStillMayBegin: Bool {
-        let may = !inFlight && owed == nil && !presenter.modals.inTransition
-            && (navigation?.viewControllers.count ?? 0) > 1 && backPermittedNow
-        // Refused with no transition begun: nothing will settle, so
-        // the editor the swipe put away comes back here.
-        if !may, !inFlight, keyboardDropped {
-            keyboardDropped = false
-            restoreDroppedEditor()
-        }
-        return may
-    }
-
-    /// The editor a back swipe put away, focused again when the swipe does
-    /// not leave its route — only if it is still this session's, on screen,
-    /// and nothing has taken or been given the focus since.
-    private func restoreDroppedEditor() {
-        defer { droppedEditor = nil }
-        guard let editor = droppedEditor, editor.window != nil, editor.isDescendant(of: presenter.viewport),
-              FirstResponder.current == nil || FirstResponder.current === presenter.session?.view,
-              !dirty, presenter.pendingFocusNode == nil else { return }
-        _ = editor.becomeFirstResponder()
+        return NavigationRules.panMayBegin(startX: start.x, overSwipeRight: overSwipeRight, velocity: velocity)
     }
 
     func navigationController(_ navigationController: UINavigationController, willShow viewController: UIViewController, animated: Bool) {
         guard owns(navigationController) else { return }
+        presenter.session?.sampler?.record("navigation.willShow", fields: ["animated": animated,
+            "node": (viewController as? RouteController)?.node.id as Any? ?? NSNull(), "hostDriven": syncing])
+        presenter.session?.sampler?.activity()
         let transition = navigationController.transitionCoordinator
         // UIKit's own (its Back button, its menu, a swipe): Observe's render
         // mark is this transition's first frame, unless it is cancelled.
@@ -869,12 +833,11 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
         // The route coming into view was out of the window while it was
         // covered, so no scroll asked for its text; paint what shows of it
         // as the transition starts, not when the reader next scrolls.
-        // Completed or cancelled, the transition's end is a settle point
-        // (LLP 1035.001.000 D3). A cancelled swipe returns to the route it
-        // began on: so does the editor it put away, after the owed sync.
+        // UIKit owns the departing editor and its keyboard throughout the
+        // pop, including restoring them when an interactive pop is cancelled.
+        // Completed or cancelled, its end is a settle point (D3).
         transition?.animate(alongsideTransition: { [weak self] _ in self?.presenter.paintVisibleText() }) { [weak self] context in
             self?.settle()
-            if context.isCancelled { self?.restoreDroppedEditor() } else { self?.droppedEditor = nil }
         }
         // That paints what shows as it starts. A swipe reveals the route a
         // strip at a time, and painting stopped there until the swipe ended
@@ -899,8 +862,9 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
 
     func navigationController(_ navigationController: UINavigationController, didShow viewController: UIViewController, animated: Bool) {
         guard owns(navigationController) else { return }
+        presenter.session?.sampler?.record("navigation.didShow", fields: ["animated": animated,
+            "node": (viewController as? RouteController)?.node.id as Any? ?? NSNull()])
         nativeMoved = true
-        keyboardDropped = false
         stopRevealing()
         presenter.session?.view?.fit()
         presenter.syncModal()
@@ -957,8 +921,6 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
         owed = nil
         dirty = false
         reported = nil
-        keyboardDropped = false
-        droppedEditor = nil
         if clearFocus { presenter.cancelPendingFocus() }
     }
 }

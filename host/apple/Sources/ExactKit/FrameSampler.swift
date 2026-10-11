@@ -21,6 +21,9 @@ final class FrameSampler: NSObject {
     /// Whether this binary measures at all: not a production bake.
     static let measured = !ExactEnv.productionBake
     static let ring = 600, lateKept = 100, quiet = 0.5
+    static let eventLimit = 1024
+    private var events: [[String: Any]] = [], slowEvents: [[String: Any]] = []
+    private var eventsDropped = 0
 
     struct Record {
         let t: Double, interval: Double, missed: Int, seq: (UInt64, UInt64)?, batches: Int, apply: Double
@@ -61,7 +64,17 @@ final class FrameSampler: NSObject {
         super.init()
         let center = NotificationCenter.default
         #if canImport(UIKit)
-        observers.append(center.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in self?.stop() })
+        for (name, label) in [(UIApplication.willEnterForegroundNotification, "app.foreground"),
+                              (UIApplication.didBecomeActiveNotification, "app.active"),
+                              (UIApplication.willResignActiveNotification, "app.inactive"),
+                              (UIApplication.didEnterBackgroundNotification, "app.background")] {
+            observers.append(center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                self?.record(label, fields: ["thermal": ProcessInfo.processInfo.thermalState.rawValue,
+                                             "lowPower": ProcessInfo.processInfo.isLowPowerModeEnabled])
+                if name == UIApplication.didEnterBackgroundNotification { self?.stop() }
+            })
+        }
+        record("session.created")
         #else
         observers.append(center.addObserver(forName: NSWindow.didChangeOcclusionStateNotification, object: nil, queue: .main) { [weak self] note in
             if let window = note.object as? NSWindow, window === self?.session?.presenter.viewport.window, !window.occlusionState.contains(.visible) { self?.stop() }
@@ -70,6 +83,27 @@ final class FrameSampler: NSObject {
     }
 
     deinit { for o in observers { NotificationCenter.default.removeObserver(o) } }
+
+    /// Bounded, on-device timings on the same monotonic clock as the frame
+    /// samples. No input text or field values. Slow spans survive ordinary
+    /// activity while the person opens the menu to share the trace.
+    func record(_ name: String, since began: CFTimeInterval? = nil, minimumMS: Double = 0, fields: [String: Any] = [:]) {
+        let now = CACurrentMediaTime(), start = began ?? now
+        let ms = (now - start) * 1000
+        guard ms >= minimumMS else { return }
+        let entry: [String: Any] = ["name": name, "t": (start - ExactEnv.t0) * 1000, "duration": ms, "data": fields]
+        events.append(entry)
+        if events.count > Self.eventLimit { events.removeFirst(); eventsDropped += 1 }
+        if began != nil, ms >= (period ?? 8.33) {
+            slowEvents.append(entry)
+            if slowEvents.count > Self.lateKept { slowEvents.removeFirst() }
+        }
+    }
+
+    func timeline() -> [String: Any] {
+        ["events": events, "slow": slowEvents, "dropped": eventsDropped,
+         "clock": "milliseconds since process startup; same clock as frames; nested spans overlap"]
+    }
 
     /// A batch the session applied: its transactions (the trailer's `seq`)
     /// and the time applying it took, joined to the next sample.
@@ -103,6 +137,7 @@ final class FrameSampler: NSObject {
     /// Forget every sample, and the link's baseline: a replaced runner
     /// numbers its transactions afresh. The next activity opens a segment.
     func reset() {
+        record("session.reset")
         stop()
         records = []; late = []
         dropped = 0; presented = 0; lateCount = 0; missed = 0; segments = 0; overruns = 0; overrun = 0
@@ -237,6 +272,9 @@ extension ExactSession {
         let trace: [String: Any] = [
             "identity": ["host": host, "app": bundle.split(separator: ".").last.map(String.init) ?? bundle, "bundle": bundle, "trust": "development",
                          "os": ProcessInfo.processInfo.operatingSystemVersionString, "device": device,
+                         "version": Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown",
+                         "build": Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown",
+                         "process": ProcessInfo.processInfo.processIdentifier,
                          "bootWall": ((Date().timeIntervalSince1970 - (CACurrentMediaTime() - ExactEnv.t0)) * 1000).rounded()],
             "proxies": ["period": "target: the sampler's own display link, targetTimestamp − timestamp",
                         "interval": "the sampler's display-link callback gap", "covers": ["batches", "frame-source", "turns"],
@@ -245,6 +283,7 @@ extension ExactSession {
             "plan": (perf as? [String: Any])?["plan"] ?? NSNull(),
             "journal": raw(agent("{\"op\":\"logs\",\"since\":0}")),
             "frames": sampler.reply(late: FrameSampler.lateKept, all: true),
+            "timeline": sampler.timeline(),
             "perf": perf,
             // The hatches (LLP 1075.003.000.001 §3.3), read in this same turn, so the sections agree.
             "hatches": ["state": presenter.elements.observation(hatchDiagnostics), "perf": hatchPerf()],

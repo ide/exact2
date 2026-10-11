@@ -237,6 +237,10 @@ package final class Presenter {
         let top: CGFloat? = shown ? keyboard.minY : nil
         let duration = info[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double ?? 0.25
         let curve = info[UIResponder.keyboardAnimationCurveUserInfoKey] as? UInt ?? 7
+        session?.sampler?.record("keyboard.notification", fields: ["hide": hiding, "duration": duration,
+            "curve": curve, "end": [keyboard.minX, keyboard.minY, keyboard.width, keyboard.height],
+            "editing": ownEditor, "applying": applying])
+        session?.sampler?.activity()
         // A focus moving from one field to another comes as a burst of
         // notifications with no duration, over a few turns — the height
         // jittering between the two keyboards (335, 308, 335 on the
@@ -282,6 +286,9 @@ package final class Presenter {
     /// own duration and curve, so the frames the batch sets are Core
     /// Animation moves in the keyboard's transaction, never a frame behind.
     func applyKeyboard(top: CGFloat?, duration: Double, curve: UInt) {
+        let began = session?.sampler == nil ? 0 : CACurrentMediaTime()
+        defer { session?.sampler?.record("keyboard.apply", since: began,
+            fields: ["top": top as Any? ?? NSNull(), "duration": duration, "deferredByBatch": applying]) }
         // Removing a focused view can synchronously announce keyboard hiding.
         // Finish its batch before resizing; otherwise that older batch can
         // overwrite the new viewport's frames after this call returns.
@@ -1056,7 +1063,7 @@ package final class Presenter {
                 // Out of the map before out of the window: the editing-ended
                 // notification removal fires finds no view to send for.
                 let gone = release(id) { $0.forget() }
-                if let gone, !modals.retainsRemovedView(gone) { gone.removeFromSuperview() }
+                if let gone, !modals.retainsRemovedView(gone) && !navigation.retainsRemovedView(gone) { gone.removeFromSuperview() }
             case .roots:
                 root.subviews.forEach { $0.removeFromSuperview() }
                 let roots = op.ids.compactMap { views[UInt32($0)] }
@@ -1192,7 +1199,7 @@ package final class Presenter {
         let wanted = Set(want.map(ObjectIdentifier.init))
         var current = container.subviews
         for case let child as NodeView in current where !wanted.contains(ObjectIdentifier(child)) && !pool.isParked(child) && !isLeaving(child) {
-            if !modals.retainsRemovedView(child) { child.removeFromSuperview() }
+            if !modals.retainsRemovedView(child) && !navigation.retainsRemovedView(child) { child.removeFromSuperview() }
         }
         // In order, below anything else in the container (a scroll
         // view's indicators): inserting a subview at an index moves

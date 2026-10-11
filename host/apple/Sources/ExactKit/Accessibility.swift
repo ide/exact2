@@ -243,6 +243,9 @@ extension Presenter {
     /// subtree — plus every live region and pending autofocus; nil reads
     /// every view.
     func syncAccessibility(changed: Set<UInt32>? = nil) {
+        let began = session?.sampler == nil ? 0 : CACurrentMediaTime()
+        defer { session?.sampler?.record("accessibility.sync", since: began, minimumMS: 0.5,
+            fields: ["full": changed == nil, "nodes": changed?.count ?? views.count]) }
         guard Thread.isMainThread else {
             DispatchQueue.main.async { [weak self] in self?.syncAccessibility() }
             return
@@ -329,7 +332,10 @@ extension Presenter {
             autofocusProcessed.insert(ObjectIdentifier(node))
             let target: UIResponder = node.textArea ?? node.field ?? node
             node.focusedByTouch = false // the app's focus now, as Tab's and focus(id)'s
-            ApplyProfile.time("a11y.focus") { _ = target.becomeFirstResponder() }
+            let focusBegan = session?.sampler == nil ? 0 : CACurrentMediaTime()
+            let focused = ApplyProfile.time("a11y.focus") { target.becomeFirstResponder() }
+            session?.sampler?.record("focus.autofocus", since: focusBegan,
+                                     fields: ["node": node.id, "accepted": focused, "inWindow": node.window != nil])
             #endif
         }
         #if os(iOS) || os(tvOS)

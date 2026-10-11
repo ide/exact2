@@ -6,6 +6,29 @@ import XCTest
 /// The frame sampler's run-loop watch (LLP 1079, the overrun amendment)
 /// on a real display link.
 final class FrameSamplerIOSTests: XCTestCase {
+    func testSharedTraceKeepsBoundedEventsAndSlowSpansAcrossResets() throws {
+        let session = ExactApp.shared.makeSession()
+        defer { session.destroy() }
+        XCTAssertNil(session.boot(size: CGSize(width: 390, height: 844)).error)
+        let sampler = try XCTUnwrap(session.sampler)
+        sampler.record("keyboard.installGuideProbe", since: CACurrentMediaTime() - 0.05)
+        for n in 0...FrameSampler.eventLimit { sampler.record("keyboard.notification", fields: ["index": n]) }
+        sampler.reset()
+        let url = try session.saveTrace().get()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let trace = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any])
+        let timeline = try XCTUnwrap(trace["timeline"] as? [String: Any])
+        let events = try XCTUnwrap(timeline["events"] as? [[String: Any]])
+        XCTAssertEqual(events.count, FrameSampler.eventLimit)
+        XCTAssertEqual(events.last?["name"] as? String, "session.reset")
+        XCTAssertGreaterThan(try XCTUnwrap(timeline["dropped"] as? Int), 0)
+        let slow = try XCTUnwrap(timeline["slow"] as? [[String: Any]])
+        XCTAssertTrue(slow.contains { $0["name"] as? String == "keyboard.installGuideProbe" })
+        let identity = try XCTUnwrap(trace["identity"] as? [String: Any])
+        XCTAssertNotNil(identity["build"])
+        XCTAssertNotNil(identity["process"])
+    }
+
     /// The turns are watched while the sampler's link runs, in the common
     /// modes (a scroll's tracking turns too), and no longer once it stops.
     func testTheTurnsAreWatchedWhileTheLinkRuns() throws {

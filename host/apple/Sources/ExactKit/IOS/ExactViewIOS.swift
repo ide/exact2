@@ -131,6 +131,8 @@ public final class ExactView: UIView {
     #if !os(tvOS)
     private func installKeyboardProbe() {
         guard keyboardProbe == nil else { return }
+        let began = session.sampler == nil ? 0 : CACurrentMediaTime()
+        defer { session.sampler?.record("keyboard.installGuideProbe", since: began) }
         keyboardObserver.map(NotificationCenter.default.removeObserver)
         keyboardObserver = nil
         let probe = UIView()
@@ -215,6 +217,8 @@ public final class ExactView: UIView {
     /// new size. Called inside the keyboard's animation block, so the frames
     /// the batch sets animate with the keyboard (LLP 1008 §9).
     func fit() {
+        let began = session.sampler == nil ? 0 : CACurrentMediaTime()
+        defer { session.sampler?.record("layout.viewport", since: began, minimumMS: 0.5) }
         let presenter = session.presenter
         // Containment may synchronously lay us out during a partial batch.
         // Finish that batch, then resize synchronously before returning to UIKit.

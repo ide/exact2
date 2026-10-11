@@ -376,6 +376,8 @@ extension Presenter {
     /// some paragraph lacks pixels: the pump's refresh has work then.
     @discardableResult
     func paintVisibleText() -> Bool {
+        let began = session?.sampler == nil ? 0 : CACurrentMediaTime()
+        defer { session?.sampler?.record("text.paintVisible", since: began, minimumMS: 0.5) }
         guard !applying else { return true }
         let port = viewport.bounds
         let culls = viewport.clipsToBounds

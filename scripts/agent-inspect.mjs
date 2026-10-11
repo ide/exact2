@@ -470,6 +470,16 @@ export function renderTrace(t) {
       for (const l of near) out.push(`    ${l}`);
     }
   } else if (t.frames) out.push('', renderPerf(t.frames));
+  if (t.timeline) {
+    out.push('', `timeline · build ${id.version ?? '?'} (${id.build ?? '?'}) · pid ${id.process ?? '?'} · ${t.timeline.events?.length ?? 0} events · ${t.timeline.dropped ?? 0} evicted`);
+    out.push(`  ${t.timeline.clock ?? ''}`);
+    for (const e of [...(t.timeline.slow ?? [])].sort((a, b) => b.duration - a.duration).slice(0, 20)) {
+      out.push(`  slow ${e.name} at ${e.t.toFixed(2)}: ${e.duration.toFixed(2)} ms ${JSON.stringify(e.data ?? {})}`);
+    }
+    for (const e of (t.timeline.events ?? []).slice(-60)) {
+      out.push(`  ${e.t.toFixed(2)} ${e.name} ${e.duration.toFixed(2)} ms ${JSON.stringify(e.data ?? {})}`);
+    }
+  }
   if (t.perf) out.push('', renderPerf(t.perf));
   if (t.hatches?.perf?.calls) out.push('', renderHatchPerf(t.hatches.perf));
   return out.join('\n');
