@@ -82,6 +82,37 @@ final class NavigationBarIOSTests: XCTestCase {
         _ = target.perform(try XCTUnwrap(item.action), with: item)
     }
 
+    func testAPushAfterKeyboardDismissalInstallsTheDestinationBeforeReturning() throws {
+        let session = try fixture("synchronous-push", module: false)
+        let presenter = session.presenter
+        let nav = try XCTUnwrap(presenter.navigation.primaryNavigation)
+        // The hide notification can follow the press that ended editing. A
+        // remaining keyboard inset must not postpone UIKit's stack change.
+        presenter.applyKeyboard(top: 540, duration: 0, curve: 0)
+        let button = try node(session, "open-plain")
+        presenter.press(button.id)
+        XCTAssertTrue((nav.topViewController as? RouteController)?.node === (try node(session, "route-plain")),
+                       "the real destination is installed without pumping the run loop")
+        let route = try XCTUnwrap(nav.topViewController as? RouteController)
+        XCTAssertNotNil(route.node.window)
+        XCTAssertGreaterThan(route.node.bounds.height, 0)
+        until("push finished") { nav.transitionCoordinator == nil }
+    }
+
+    func testAPushFocusesTheRealFirstAutofocusField() throws {
+        let session = try fixture("synchronous-autofocus", module: false)
+        let presenter = session.presenter
+        let nav = try XCTUnwrap(presenter.navigation.primaryNavigation)
+        presenter.press(try node(session, "open-focused-plain").id)
+        let first = try XCTUnwrap(try node(session, "plain-first").field)
+        let second = try XCTUnwrap(try node(session, "plain-second").field)
+        XCTAssertTrue(first.isFirstResponder, "normal autofocus chooses the first real field before returning")
+        XCTAssertFalse(second.isFirstResponder)
+        XCTAssertTrue(first.isDescendant(of: try XCTUnwrap(nav.topViewController).view))
+        until("push finished") { nav.transitionCoordinator == nil }
+        XCTAssertTrue(first.isFirstResponder, "there is no delayed focus handoff")
+    }
+
     func testAHeaderShapedRouteIsTheBarOnFrameOneWithNoAppCode() throws {
         let session = try fixture("bar-frame-one", module: false)
         let navigation = session.presenter.navigation
@@ -295,23 +326,6 @@ final class NavigationBarIOSTests: XCTestCase {
         XCTAssertEqual(lines.components(separatedBy: "host back").count - 1, 1, "the runner's own back, once: \(lines)")
         XCTAssertEqual(lines.components(separatedBy: "(follow)").count - 1, 0, "no navigate")
         XCTAssertEqual(backs(session), 0)
-    }
-
-    /// A pushed route's autofocus is taken in the batch that starts the
-    /// push, so the keyboard rises with the screen rather than mid-push. The
-    /// keyboard is raised for it first (KeyboardLead), and its stand-in is
-    /// gone once the field holds the focus.
-    func testAPushedRoutesAutofocusIsTakenAsThePushStarts() throws {
-        let session = try fixture("bar-autofocus-push", module: false)
-        XCTAssertNil(Agent(session: session).tap(["id": Int(try node(session, "open-plain").id)])["error"])
-        let nav = try XCTUnwrap(session.presenter.navigation.primaryNavigation)
-        until("the push starts") { nav.transitionCoordinator != nil || nav.viewControllers.count == 2 }
-        XCTAssertNotNil(nav.transitionCoordinator, "the push animates")
-        XCTAssertEqual(try node(session, "plain-field").field?.isFirstResponder, true, "focused as the push starts")
-        until("the plain route is pushed") { nav.viewControllers.count == 2 && nav.transitionCoordinator == nil }
-        XCTAssertEqual(try node(session, "plain-field").field?.isFirstResponder, true, "still focused once it lands")
-        func standIns(_ view: UIView) -> Int { (view is KeyboardStandIn ? 1 : 0) + view.subviews.map(standIns).reduce(0, +) }
-        XCTAssertEqual(standIns(try XCTUnwrap(nav.view.window)), 0, "the stand-in is gone")
     }
 
     /// A pop UIKit finishes with no enabled Back control to press (here,

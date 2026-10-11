@@ -42,6 +42,18 @@ final class RouteController: UIViewController {
         super.viewSafeAreaInsetsDidChange()
         host?.coversChanged()
     }
+    override func viewIsAppearing(_ animated: Bool) {
+        super.viewIsAppearing(animated)
+        // UIKit has attached and sized the real destination. Finish its
+        // content and focus here, before the transition's first frame.
+        host?.presenter.afterBatch { [weak self] in
+            guard let host = self?.host else { return }
+            host.coversChanged()
+            host.presenter.syncAccessibility()
+            host.presenter.paintVisibleText()
+        }
+    }
+
     override func loadView() {
         view = UIView()
         // The sheet supplies its surface behind transparent authored corners.
@@ -387,61 +399,6 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
         // Mount the destination under a departing presentation before starting
         // dismissal, so its editor can accept the batch's focus handoff.
         let owners = [primaryNavigation].compactMap { $0 } + presentedNavigations
-        // A press that changes a stack with the keyboard up resigns the editor
-        // inside this batch, and the viewport grows only once the batch ends
-        // (Presenter.applyKeyboard), in a resize batch of its own. UIKit fixes
-        // the routes' frames as its transition starts, so the route a pop
-        // revealed was laid out only down to the keyboard's top until the
-        // transition ended: a list's top half, then the rest. The change
-        // waits one turn, for that growth (a swipe drops the keyboard first:
-        // dropKeyboard).
-        // Only the change UIKit animates (the top stack's, with no
-        // presentation opening or closing in the same batch) waits: a
-        // closing sheet's cleanup and the focus it hands over stay in order.
-        let top = owners.count - 1
-        let animatedChange = top >= 0 && top <= common && mounted.count == boundaries.count && !unanimated
-            && owners[top].view.window != nil
-            && !owners[top].viewControllers.elementsEqual(wanted[parts[top]], by: { $0 === $1 })
-        // A push into a route whose field autofocuses waits for the keyboard
-        // raised for it (KeyboardLead), and starts as it shows.
-        if keyboardLead.leading {
-            dirty = true
-            return
-        }
-        if animatedChange, !ExactEnv.agentFreezes, presenter.keyboardTop == nil, !presenter.hasKeyboardEditor,
-           let arriving = wanted[parts[top]].last, !owners[top].viewControllers.contains(where: { $0 === arriving }),
-           keyboardLead.lead(arriving, in: owners[top].view, resume: { [weak self] in
-               guard let self, dirty, !inFlight, !presenter.modals.inTransition else { return }
-               sync(Batch(ops: [], timers: false, motion: false, clock: nil, error: nil))
-           }) {
-            dirty = true
-            return
-        }
-        // A presentation opening or closing meanwhile supersedes a wait
-        // already begun: its cleanup and focus handoff go now.
-        if (awaitingKeyboardViewport && mounted.count == boundaries.count) || NavigationRules.waitsForKeyboardViewport(
-            applying: presenter.applying, keyboardShown: presenter.keyboardTop != nil,
-            editing: presenter.hasKeyboardEditor, agentFreezes: ExactEnv.agentFreezes, stackChanges: animatedChange) {
-            dirty = true
-            if !awaitingKeyboardViewport {
-                awaitingKeyboardViewport = true
-                DispatchQueue.main.async { [weak self] in
-                    guard let self else { return }
-                    // A no-duration hide waits 80 ms to be applied; apply it
-                    // now, while the resize batch's own sync still waits.
-                    presenter.flushKeyboardResize()
-                    awaitingKeyboardViewport = false
-                    guard dirty, !inFlight, !presenter.modals.inTransition else { return }
-                    sync(Batch(ops: [], timers: false, motion: false, clock: nil, error: nil))
-                    // The batches that ran meanwhile reconciled autofocus
-                    // with the destination still out of the window. Retry it
-                    // once the transition is over: a keyboard rising as it
-                    // starts would shrink the viewport under frozen frames.
-                    if inFlight { autofocusOwed = true } else { presenter.syncAccessibility() }
-                }
-            }
-            return
-        }
         for index in 0...common where index < owners.count {
             let nav = owners[index]
             // The More list open at its root over the tab the app selects is
@@ -561,11 +518,13 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
         refitForBars()
     }
 
-    /// A route's safe area moved: report its cover once this turn is done.
+    /// UIKit changed a route's safe area: lay out its content in this call.
     func coversChanged() {
-        guard !coversPending else { return }
+        // sync reports the final containment below; intermediate safe areas
+        // belong to the controller the route is leaving.
+        guard !syncing, !coversPending else { return }
         coversPending = true
-        DispatchQueue.main.async { [weak self] in
+        presenter.afterBatch { [weak self] in
             guard let self else { return }
             coversPending = false
             reportCovers()
@@ -637,7 +596,7 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
 
     /// Focus waits through controller installation as well as UIKit's push/pop.
     /// `clock settle` observes the asynchronous part under platform timing.
-    var defersFocus: Bool { syncing || mounting || delivering || (holdsScreens && inFlight) || awaitingKeyboardViewport }
+    var defersFocus: Bool { syncing || mounting || delivering || (holdsScreens && inFlight) }
     var inTransition: Bool { defersFocus || dirty || settling || owed != nil }
     /// A stack moving, as UIKit's coordinators say (D1); the status bar
     /// resolves once none is (LLP 1105). `started` is the same: in this
@@ -647,15 +606,8 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
     /// A back swipe began with the keyboard up and put it away (see
     /// dropKeyboard): its hide is real, and the viewport follows it.
     private var keyboardDropped = false
-    /// A stack change waits a turn for the viewport a leaving keyboard
-    /// frees (see sync).
-    private var awaitingKeyboardViewport = false
     /// The editor a back swipe put away, focused again if the swipe cancels.
     private weak var droppedEditor: UIView?
-    /// Autofocus to retry when the transition a keyboard waited for ends.
-    private var autofocusOwed = false
-    /// The keyboard raised ahead of a push into a route whose field autofocuses
-    private let keyboardLead = KeyboardLead()
 
     /// For `state.navigation` (LLP 1035.002 D2; LLP 1035.001.000 D9): the
     /// route the root names, UIKit's stack by key, what UIKit shows, what the
@@ -877,7 +829,7 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
     /// Whether a pop may still begin after dropKeyboard: the blur it caused
     /// was delivered at once and may have changed the route or its Back.
     private var popStillMayBegin: Bool {
-        let may = !inFlight && owed == nil && !presenter.modals.inTransition && !awaitingKeyboardViewport
+        let may = !inFlight && owed == nil && !presenter.modals.inTransition
             && (navigation?.viewControllers.count ?? 0) > 1 && backPermittedNow
         // Refused with no transition begun: nothing will settle, so
         // the editor the swipe put away comes back here.
@@ -963,7 +915,6 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
         // At rest: a large title's insets are sampled now (§9.10).
         coversChanged()
         settle()
-        if autofocusOwed { autofocusOwed = false; presenter.syncAccessibility() }
         #if os(iOS)
         presenter.syncScrollsToTop() // the route now on top owns the status-bar tap
         #endif
@@ -1004,7 +955,6 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
         reported = nil
         keyboardDropped = false
         droppedEditor = nil
-        autofocusOwed = false
         if clearFocus { presenter.cancelPendingFocus() }
     }
 }

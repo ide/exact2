@@ -317,30 +317,15 @@ extension Presenter {
             let target = keyView(of: node)
             if target.acceptsFirstResponder { _ = window.makeFirstResponder(target) }
             #else
-            // Focus a pushed screen's field in the batch that starts the push, as UIKit apps focus in
-            // `viewWillAppear`, so the keyboard rises with the screen; a turn later it starts mid-push and
-            // its setup stalls the push's frames. Another focus a batch brings (a sheet's) is taken the turn
-            // after, once the batch's frame commits: bringing the keyboard up inside the batch held that
-            // frame for the keyboard's load.
-            if applying && !navigation.stackMoving {
-                if !autofocusTurnOwed {
-                    autofocusTurnOwed = true
-                    DispatchQueue.main.async { [weak self] in
-                        guard let self else { return }
-                        autofocusTurnOwed = false
-                        if session?.state != .destroyed { syncAccessibility() }
-                    }
-                }
-                continue
-            }
             // The session's own view holding the focus for its shortcuts (ShortcutsIOS) is no focus a node took,
             // nor is a button's that came from a touch (Safari's buttons take none from a tap): the button that
             // opened a sheet must not keep the sheet's field from its autofocus. A button reached by Tab or
             // `focus(id)` keeps it, and a canvas HUD button's hand-back to the canvas still holds it pending.
             func touchFocused(_ view: UIView) -> Bool { (view as? NodeView).map { $0.isButton && $0.focusedByTouch && !$0.returnsPointerFocusToCanvas } == true }
-            func hasFocus(_ view: UIView) -> Bool { (view.isFirstResponder && (view as? NodeView)?.canvasInput == nil && !touchFocused(view) && !(view is ExactView) && !(view is KeyboardStandIn)) || view.subviews.contains(where: hasFocus) }
+            func hasFocus(_ view: UIView) -> Bool { (view.isFirstResponder && (view as? NodeView)?.canvasInput == nil && !touchFocused(view) && !(view is ExactView)) || view.subviews.contains(where: hasFocus) }
+            guard let window = node.window else { continue }
             if !views.values.contains(where: { $0.isFirstResponder && $0.returnsPointerFocusToCanvas }) { autofocusProcessed.insert(ObjectIdentifier(node)) }
-            guard let window = node.window, !hasFocus(window) else { continue }
+            guard !hasFocus(window) else { continue }
             autofocusProcessed.insert(ObjectIdentifier(node))
             let target: UIResponder = node.textArea ?? node.field ?? node
             node.focusedByTouch = false // the app's focus now, as Tab's and focus(id)'s
