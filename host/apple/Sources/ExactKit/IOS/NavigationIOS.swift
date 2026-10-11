@@ -857,6 +857,10 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
         // UIKit's own (its Back button, its menu, a swipe): Observe's render
         // mark is this transition's first frame, unless it is cancelled.
         if !syncing {
+            // Appearance can synchronously lay out the revealed screen. Keep
+            // that layout from projecting the old route over UIKit's pop
+            // before didShow reports the platform's new stack.
+            settle()
             NavigationMarks.shared.platformBeganShowing()
             transition?.animate(alongsideTransition: nil) { context in
                 if context.isCancelled { NavigationMarks.shared.platformCancelled() }
