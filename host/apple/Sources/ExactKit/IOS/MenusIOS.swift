@@ -149,9 +149,14 @@ final class MenuHost {
     private func isConfirmation(_ node: NodeView) -> Bool {
         isDialog(node) || node.props["accessibilityRole"] == "alertdialog"
     }
+    /// The element a button's `commandfor` names: none when it is empty,
+    /// and then its `popovertarget` acts, as HTML runs the popover target's
+    /// steps for a button whose `commandfor` finds no element.
+    private func commandFor(_ source: NodeView) -> String? {
+        source.props["commandfor"].flatMap { $0.isEmpty ? nil : $0 }
+    }
     private func target(of source: NodeView) -> String? {
-        if source.props["commandfor"] != nil { return source.props["commandfor"] }
-        return source.props["popovertarget"]
+        commandFor(source) ?? source.props["popovertarget"]
     }
     private func closes(_ source: NodeView, _ target: NodeView) -> Bool {
         if isDialog(target) {
@@ -161,7 +166,7 @@ final class MenuHost {
     }
     private func opens(_ source: NodeView, _ target: NodeView) -> Bool {
         self.target(of: source) == target.props["id"] && (isDialog(target)
-            ? source.props["command"] == "show-modal" : (source.props["commandfor"] == nil ? source.props["popovertargetaction"] != "hide" : ["show-popover", "toggle-popover"].contains(source.props["command"] ?? "")))
+            ? source.props["command"] == "show-modal" : (commandFor(source) == nil ? source.props["popovertargetaction"] != "hide" : ["show-popover", "toggle-popover"].contains(source.props["command"] ?? "")))
     }
 
     /// After a batch: hide every popover, and lay a transparent button
@@ -320,7 +325,7 @@ final class MenuHost {
             else if opens(source, pop) { _ = openConfirmation(from: source, popover: pop, dispatchPress: false) }
         } else {
             let toggle = source.props["command"] == "toggle-popover" ||
-                (source.props["commandfor"] == nil && (source.props["popovertargetaction"] ?? "toggle") == "toggle")
+                (commandFor(source) == nil && (source.props["popovertargetaction"] ?? "toggle") == "toggle")
             if closes(source, pop) || toggle && agentOpen[name] != nil { drop(name) }
             else if agentOpen[name] == nil { agentShow(pop, named: name, from: source.id) }
         }
