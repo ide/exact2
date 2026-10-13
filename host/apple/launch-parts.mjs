@@ -25,7 +25,7 @@ export function writeLaunchParts(pkg, app) {
 /** Each launch module's `apple/service/*.swift`, built as its own dylib.
  * ExactKit loads it when the launch part's policy says, never during launch. */
 export const launchServices = (modules, buildDir) => modules.filter(m => m.service.length)
-  .map(m => ({ name: m.name, load: `lib${m.name}_service.dylib`, built: resolve(buildDir, `lib${m.name}_service.dylib`), sources: m.service }));
+  .map(m => ({ name: m.name, load: `lib${m.name}_service.dylib`, framework: serviceFramework(m.name), built: resolve(buildDir, `lib${m.name}_service.dylib`), sources: m.service }));
 
 /** swiftc's arguments for a service dylib, before its target. */
 export const serviceArgs = svc => ['-parse-as-library', '-emit-library', '-O', '-swift-version', '5', '-module-name', `ExactService_${svc.name}`, ...svc.sources, '-lsqlite3', '-o', svc.built];
@@ -44,4 +44,9 @@ export function auditLaunchParts(object, modules, read) {
   if (/sectname __objc_nl(cls|cat)list/.test(sections)) problems.push('an Objective-C +load');
   if (problems.length) throw new Error(`host/apple: module launch parts (app.json launch): ${problems.join('; ')}`);
   console.log(`host/apple: launch parts ${modules.map(m => m.name).join(', ')}: ${text + data} B, no initializers`);
+}
+
+/** A launch service's framework in an archive, which takes no loose dylibs: `observe` is `ExactObserveService`. */
+export function serviceFramework(name) {
+  return `Exact${name.replace(/(^|[^A-Za-z0-9]+)([A-Za-z0-9])/g, (_, _sep, c) => c.toUpperCase())}Service`;
 }
