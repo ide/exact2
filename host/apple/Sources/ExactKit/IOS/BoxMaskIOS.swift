@@ -20,8 +20,9 @@ extension NodeView {
     /// The layer's mask, rebuilt where the box's size is known (`display`).
     func applyBoxMask() {
         // A layout transition's surface clips with a mask of its own
-        // (`Surface.swift`) until it ends.
-        guard surface == nil else { return }
+        // (`Surface.swift`) until it ends; a dimmed control is masked to
+        // nothing under its picture (`ControlDim`).
+        guard surface == nil, controlDim == nil else { return }
         let outline = shapedOutline(), effect = materialView, image = style["mask_image"]
         // A material's mask view replaces the elliptical outline its radius
         // put on (`BorderPaint.clip`), so it carries that outline too.
