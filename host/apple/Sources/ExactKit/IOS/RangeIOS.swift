@@ -16,11 +16,12 @@ extension ControlHost {
         return slider
     }
 
-    func configureRange(_ slider: UISlider, _ owner: NodeView, accent: UIColor?) {
+    func configureRange(_ slider: UISlider, _ owner: NodeView, accent: UIColor?, keepsTint: Bool = false) {
         let range = RangeSpec(owner.props)
         assign(slider, \.minimumValue, Float(range.min))
         assign(slider, \.maximumValue, Float(range.max))
-        assign(slider, \.minimumTrackTintColor, accent)
+        // The accent is the slider's tint, which draws its filled track as a default slider's: grey behind a modal
+        if !keepsTint { assign(slider, \.tintColor, accent) }
         // The bound value is written when it changes, as the web build writes
         // an input's `value` (LLP 1069.001 D4, amended 2026-10-04).
         let bound = owner.props["value"] ?? ""
@@ -54,7 +55,7 @@ extension ControlHost {
         lastRange[UInt32(slider.tag)] = nil
         guard let (id, value) = reported(slider) else { return }
         presenter.controlValue(id, value, input: false, change: true)
-        if let owner = presenter.views[id] { configureRange(slider, owner, accent: slider.minimumTrackTintColor) }
+        if let owner = presenter.views[id] { configureRange(slider, owner, accent: nil, keepsTint: true) }
     }
 
     /// The agent's `type <range> <n>` (D9): the value a drag released
@@ -64,7 +65,7 @@ extension ControlHost {
         let value = RangeSpec.format(RangeSpec(node.props).sanitize(n))
         slider.setValue(Float(value) ?? slider.value, animated: false)
         presenter.controlValue(node.id, value, input: true, change: true)
-        if let owner = presenter.views[node.id] { configureRange(slider, owner, accent: slider.minimumTrackTintColor) }
+        if let owner = presenter.views[node.id] { configureRange(slider, owner, accent: nil, keepsTint: true) }
         return ["typed": Int(node.id), "value": RangeSpec.format(RangeSpec(node.props).sanitize(Double(slider.value))), "delivery": "host-activation", "native": "control"]
     }
 }

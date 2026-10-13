@@ -44,6 +44,23 @@ final class NativeButtonIOS: UIButton {
     }
     /// Whether it draws glass: a glass row on iOS 26 and later.
     var isGlass = false
+    /// A glass button's coloured symbol: a template and its own colour, or the accent's when it has none
+    struct Ink {
+        let template: UIImage
+        let color: UIColor?
+        /// Drawn in its colour, grey while the tint is dimmed behind a modal, as UIKit greys a button
+        func drawn(in button: UIButton) -> UIImage {
+            let dimmed = button.tintAdjustmentMode == .dimmed
+            return template.withTintColor(dimmed ? button.tintColor : color ?? button.tintColor, renderingMode: .alwaysOriginal)
+        }
+    }
+    var symbolInk: Ink?
+    override func tintColorDidChange() {
+        super.tintColorDidChange()
+        guard let symbolInk, var config = configuration else { return }
+        config.image = symbolInk.drawn(in: self)
+        configuration = config
+    }
     /// The configuration drawn, its name in the table's iOS column.
     var drawn = ButtonFace.unsaid
     override var canBecomeFocused: Bool {

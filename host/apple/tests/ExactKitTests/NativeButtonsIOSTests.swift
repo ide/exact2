@@ -270,12 +270,35 @@ final class NativeButtonsIOSTests: XCTestCase {
         // What the author wrote wins: an accent on the button itself, a colour on its title.
         XCTAssertNil(try ink(8), "a written accent keeps UIKit's ink")
         XCTAssertEqual(try button(p, 8).tintColor.resolvedColor(with: light), UIColor(red: 255 / 255, green: 141 / 255, blue: 40 / 255, alpha: 1))
+        // Enabled, the author's colour is the configuration's foreground, which UIKit greys with the tint behind a
+        // modal; the title's attributes carry it only while disabled (D16).
         let title = try XCTUnwrap(try button(p, 9).configuration?.titleTextAttributesTransformer)
-        XCTAssertEqual(title(AttributeContainer()).uiKit.foregroundColor?.cgColor.components, [0, 128 / 255, 0, 1])
+        XCTAssertNil(title(AttributeContainer()).uiKit.foregroundColor)
         XCTAssertEqual(try ink(9)?.cgColor.components, [0, 128 / 255, 0, 1], "the author's colour, not the red ink")
         // Dark and increased contrast keep systemRed's own.
         let dark = UITraitCollection(userInterfaceStyle: .dark)
         XCTAssertEqual(try XCTUnwrap(try button(p, 2).configuration?.baseForegroundColor).resolvedColor(with: dark), UIColor.systemRed.resolvedColor(with: dark))
+    }
+
+    /// Behind a modal UIKit greys a tint (`tintAdjustmentMode`): the title's authored colour, the configuration's
+    /// foreground, greys with it, and a symbol that follows the accent is drawn in the greyed tint.
+    func testATintDimmedBehindAModalGreysTheTitleAndTheAccentSymbol() throws {
+        var f = face("Last Parked", symbol: "map.fill", style: "plain", ios: "plain")
+        f.rows.title["text_color"] = .array([.number(0), .number(0), .number(0), .number(255)])
+        f.rows.symbol["tint_color"] = .object(["sys": .string("@tint")])
+        let p = presenter(native(2) + [["op": "roots", "ids": [2]]], faces: [2: f])
+        window.overrideUserInterfaceStyle = .light; window.updateTraitsIfNeeded()
+        window.tintColor = .systemRed
+        let b = try button(p, 2); p.controls.sync(); b.layoutIfNeeded()
+        let light = UITraitCollection(userInterfaceStyle: .light)
+        let before = b.titleLabel?.textColor?.resolvedColor(with: light)
+        XCTAssertEqual(b.tintColor.resolvedColor(with: light), UIColor.systemRed.resolvedColor(with: light))
+        XCTAssertNotNil(b.configuration?.imageColorTransformer, "the symbol is the configuration's colour, which UIKit greys")
+        p.viewport.tintAdjustmentMode = .dimmed
+        b.layoutIfNeeded()
+        XCTAssertNotEqual(b.tintColor.resolvedColor(with: light), UIColor.systemRed.resolvedColor(with: light), "the tint greys")
+        XCTAssertNotEqual(b.titleLabel?.textColor?.resolvedColor(with: light), before, "the title greys with it")
+        p.viewport.tintAdjustmentMode = .automatic
     }
 
     func testAuthoredColoursFollowALightToDarkSwitch() throws {
@@ -289,9 +312,9 @@ final class NativeButtonsIOSTests: XCTestCase {
         let old = b.written
         XCTAssertEqual(b.configuration?.baseForegroundColor?.cgColor.components, [0, 0, 0, 1])
         window.overrideUserInterfaceStyle = .dark; window.updateTraitsIfNeeded(); b.updateTraitsIfNeeded(); p.controls.sync()
-        XCTAssertNotEqual(b.written, old, "appearance invalidates the title and baked symbol tint")
+        XCTAssertNotEqual(b.written, old, "appearance invalidates the title and symbol tint")
         XCTAssertEqual(b.configuration?.baseForegroundColor?.cgColor.components, [1, 1, 1, 1])
-        XCTAssertEqual(b.configuration?.image?.renderingMode, .alwaysOriginal)
+        XCTAssertNotNil(b.configuration?.imageColorTransformer, "the symbol's colour is the configuration's")
     }
     private final class LocatedTouch: UITouch {
         let target: UIView
