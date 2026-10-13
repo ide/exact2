@@ -1,14 +1,14 @@
-// A back swipe that takes the keyboard away with the screen it leaves. UIKit
-// never resizes a view controller's view for the keyboard: during its pop the
-// screen being revealed is whole, and the keys leave with the departing card.
-// Exact lays every route out in one viewport that ends at the keyboard's top,
-// so for the swipe the session is laid out as if no keyboard were up, and the
-// departing route shows as the picture it showed when the swipe began. Its
-// live view stays underneath, transparent, with its field first responder, so
-// UIKit carries the keyboard off with the card and brings it back if the swipe
-// is cancelled. This is `RouteController.freeze()`'s trade, made for the
-// interactive pop: a video or an animation in the departing route holds its
-// frame until the swipe ends.
+// A pop that takes the keyboard away with the screen it leaves: a back swipe,
+// UIKit's Back button or its menu, or the app's own pop. UIKit never resizes a
+// view controller's view for the keyboard: during its pop the screen being
+// revealed is whole, and the keys leave with the departing card. Exact lays
+// every route out in one viewport that ends at the keyboard's top, so for the
+// pop the session is laid out as if no keyboard were up, and the departing
+// route shows as the picture it showed when the pop began. Its live view stays
+// underneath, transparent, with its field first responder, so UIKit carries
+// the keyboard off with the card and brings it back if a swipe is cancelled.
+// This is `RouteController.freeze()`'s trade, made for the pop: a video or an
+// animation in the departing route holds its frame until the pop ends.
 #if os(iOS) || os(tvOS)
 import UIKit
 
@@ -22,7 +22,7 @@ final class KeyboardReveal {
     /// Whether the session is laid out without the keyboard: until the
     /// destination takes the keyboard for itself
     var leaving = true
-    /// The interactive pop it was prepared for, once UIKit began it
+    /// The pop it was prepared for, once UIKit began it
     var transition: ObjectIdentifier?
 
     init(source: RouteController, picture: UIView) {
@@ -50,21 +50,8 @@ extension NavigationHost {
     func beginKeyboardReveal() -> Bool {
         // tvOS has no on-screen keyboard that leaves with a screen
         #if os(iOS)
-        guard keyboardReveal == nil, !changing, let nav = primaryNavigation, modalNavigation == nil, !presenter.modals.active,
-              presenter.keyboardPolicy == "resizes-content", presenter.keyboardInset > 0,
-              let source = nav.topViewController as? RouteController, nav.viewControllers.count > 1,
-              keyboardRoute() === source, source.isViewLoaded,
-              let picture = source.view.snapshotView(afterScreenUpdates: false) else { return true }
-        picture.frame = source.view.bounds
-        // Pinned to the top, never stretched, as `freeze()` pins its picture
-        picture.autoresizingMask = [.flexibleWidth, .flexibleBottomMargin]
-        picture.isAccessibilityElement = false
-        let reveal = KeyboardReveal(source: source, picture: picture)
-        source.view.addSubview(picture)
-        source.view.accessibilityElementsHidden = true
-        source.node.alpha = 0
-        source.node.renderFilter()
-        keyboardReveal = reveal
+        guard !changing, let nav = primaryNavigation, let source = nav.topViewController as? RouteController,
+              nav.viewControllers.count > 1, let reveal = revealKeyboard(leaving: source, in: nav) else { return true }
         // Held while preparing: owed work drained here must not move the stack under the gesture
         settlingReveal = true
         presenter.session?.drainFill()
@@ -75,26 +62,84 @@ extension NavigationHost {
         }
         var ready = stands()
         if ready {
-            presenter.session?.view?.fit()
-            // UIKit sizes the transition from the containers' laid-out views, now
-            primaryOwner?.view.layoutIfNeeded()
-            nav.view.layoutIfNeeded()
+            fitWithoutKeyboard(nav)
             // The refit applies a batch too
             ready = stands()
         }
         settlingReveal = false
         guard ready else {
-            abortKeyboardReveal()
+            settleKeyboardReveal()
             return false
         }
         // UIKit begins the pop in the turn that recognized it; a gesture that
         // fails or is cancelled first begins none, and the reveal ends
         DispatchQueue.main.async { [weak self, weak reveal] in
             guard let self, let reveal, keyboardReveal === reveal, reveal.transition == nil else { return }
-            abortKeyboardReveal()
+            settleKeyboardReveal()
         }
         #endif
         return true
+    }
+
+    /// UIKit is about to animate a pop it was not asked for by a gesture (its
+    /// Back button or menu, the app's own pop): when the route leaving holds
+    /// this session's keyboard, the reveal is made for this transition, in
+    /// `willShow`, before UIKit lays out the cards it animates.
+    func beginKeyboardReveal(for transition: UIViewControllerTransitionCoordinator, in nav: UINavigationController) {
+        #if os(iOS)
+        // A pop: back to a route UIKit has shown before (a push shows one it has not)
+        guard !transition.initiallyInteractive, let source = transition.viewController(forKey: .from) as? RouteController,
+              (transition.viewController(forKey: .to) as? RouteController)?.appeared == true,
+              let reveal = revealKeyboard(leaving: source, in: nav) else { return }
+        reveal.transition = ObjectIdentifier(transition)
+        settlingReveal = true
+        fitWithoutKeyboard(nav)
+        settlingReveal = false
+        #endif
+    }
+
+    /// UIKit is about to animate a push: the session keeps its viewport for
+    /// the push. The arriving route's field takes the keyboard as the push
+    /// starts (`viewIsAppearing`), and the session's one viewport, UIKit's
+    /// containers in it, would end at the keyboard's top as the keys rose,
+    /// cutting both routes off below it while they slid. UIKit never resizes
+    /// its containers for the keyboard; the session is fitted to it once the
+    /// push settles (`didShow`).
+    func holdViewportForPush(_ transition: UIViewControllerTransitionCoordinator, in nav: UINavigationController) {
+        #if os(iOS)
+        guard primaryNavigation === nav, presenter.keyboardPolicy == "resizes-content",
+              let source = transition.viewController(forKey: .from) as? RouteController, source.appeared,
+              let destination = transition.viewController(forKey: .to) as? RouteController, !destination.appeared else { return }
+        pushHoldsViewport = true
+        #endif
+    }
+
+    /// The departing route pictured and hidden under its picture, when it is
+    /// the primary stack's route that holds this session's keyboard.
+    private func revealKeyboard(leaving source: RouteController, in nav: UINavigationController) -> KeyboardReveal? {
+        guard keyboardReveal == nil, primaryNavigation === nav, modalNavigation == nil, !presenter.modals.active,
+              presenter.keyboardPolicy == "resizes-content", presenter.keyboardInset > 0,
+              keyboardRoute() === source, source.isViewLoaded,
+              let picture = source.view.snapshotView(afterScreenUpdates: false) else { return nil }
+        picture.frame = source.view.bounds
+        // Pinned to the top, never stretched, as `freeze()` pins its picture
+        picture.autoresizingMask = [.flexibleWidth, .flexibleBottomMargin]
+        picture.isAccessibilityElement = false
+        let reveal = KeyboardReveal(source: source, picture: picture)
+        source.view.addSubview(picture)
+        source.view.accessibilityElementsHidden = true
+        source.node.alpha = 0
+        source.node.renderFilter()
+        keyboardReveal = reveal
+        return reveal
+    }
+
+    /// The session laid out without the keyboard, and the containers with
+    /// it: UIKit sizes a transition from their laid-out views.
+    private func fitWithoutKeyboard(_ nav: UINavigationController) {
+        presenter.session?.view?.fit()
+        primaryOwner?.view.layoutIfNeeded()
+        nav.view.layoutIfNeeded()
     }
 
     /// The route whose field holds this session's keyboard: an Exact field, a
@@ -117,27 +162,21 @@ extension NavigationHost {
         presenter.session?.view?.fit()
     }
 
-    /// UIKit began a transition: the reveal belongs to it when it is the
+    /// UIKit began a transition: a swipe's reveal belongs to it when it is the
     /// interactive pop of the route the reveal pictures, and ends otherwise.
     func bindKeyboardReveal(to transition: UIViewControllerTransitionCoordinator?) {
         guard let reveal = keyboardReveal, reveal.transition == nil else { return }
         if let transition, interactiveTransition, transition.viewController(forKey: .from) === reveal.source {
             reveal.transition = ObjectIdentifier(transition)
         } else {
-            abortKeyboardReveal()
+            settleKeyboardReveal()
         }
     }
 
-    /// The swipe ended (`didShow`), completed or cancelled: the viewport is
-    /// fitted to the keyboard as it is now, then the live route is shown again.
-    func settleKeyboardReveal() {
-        guard keyboardReveal != nil else { return }
-        abortKeyboardReveal()
-    }
-
-    /// Navigation sync held, the session fitted to the keyboard UIKit shows
+    /// The pop ended (`didShow`, completed or cancelled) or never began:
+    /// navigation sync held, the session fitted to the keyboard UIKit shows
     /// now while the picture still covers the source, then the source given back.
-    func abortKeyboardReveal() {
+    func settleKeyboardReveal() {
         guard let reveal = keyboardReveal else { return }
         settlingReveal = true
         reveal.leaving = false

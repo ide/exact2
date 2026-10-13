@@ -54,6 +54,12 @@ final class RouteController: UIViewController {
         host?.presenter.groupedLists?.appearing(node, alongside: animated ? transitionCoordinator : nil)
         host?.presenter.rowCells.appearing(node, alongside: animated ? transitionCoordinator : nil)
     }
+    /// Whether UIKit has shown it: a transition to a route it has not is a push, to one it has a pop
+    private(set) var appeared = false
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        appeared = true
+    }
     override func viewIsAppearing(_ animated: Bool) {
         super.viewIsAppearing(animated)
         // UIKit has attached and sized the real destination. Finish its
@@ -194,6 +200,8 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
     var keyboardReveal: KeyboardReveal?
     /// The swipe's end is being settled: navigation sync waits for it
     var settlingReveal = false
+    /// A push in flight keeps the session's viewport until it settles (KeyboardRevealIOS.swift)
+    var pushHoldsViewport = false
     /// A context menu's commit pushes without the stack's animation: UIKit
     /// animates it (`.pop`, LLP 1021 §5.1). The selected route's key tells
     /// whether its press navigated.
@@ -733,7 +741,7 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
     }
 
     var preservesKeyboardViewport: Bool {
-        keyboardReveal == nil && NavigationRules.freezesViewport(modalActive: presenter.modals.active, changing: changing,
+        pushHoldsViewport || keyboardReveal == nil && NavigationRules.freezesViewport(modalActive: presenter.modals.active, changing: changing,
                                         initiallyInteractive: navigation?.transitionCoordinator?.initiallyInteractive == true)
     }
 
@@ -894,6 +902,10 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
             interactiveDepth = navigationController.viewControllers.count + 1
         }
         bindKeyboardReveal(to: transition)
+        if changing, !interactiveTransition, let transition {
+            beginKeyboardReveal(for: transition, in: navigationController)
+            holdViewportForPush(transition, in: navigationController)
+        }
         // UIKit's own (its Back button, its menu, a swipe): Observe's render
         // mark is this transition's first frame, unless it is cancelled.
         if !syncing {
@@ -940,6 +952,7 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
         stopRevealing()
         defer {
             settleKeyboardReveal()
+            pushHoldsViewport = false
             // Tree updates during UIKit's transition retain their latest
             // intent. Apply it once the native stack is available again.
             if pendingSync {
@@ -1015,7 +1028,8 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
     }
 
     func reset(clearFocus: Bool = true) {
-        if keyboardReveal != nil { presenter.afterBatch { [weak self] in self?.abortKeyboardReveal() } }
+        if keyboardReveal != nil { presenter.afterBatch { [weak self] in self?.settleKeyboardReveal() } }
+        pushHoldsViewport = false
         begunTransition = nil
         unanimated = false
         presenter.modals.reset()
