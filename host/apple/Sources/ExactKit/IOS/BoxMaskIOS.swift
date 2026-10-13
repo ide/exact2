@@ -20,8 +20,9 @@ extension NodeView {
     /// The layer's mask, rebuilt where the box's size is known (`display`).
     func applyBoxMask() {
         // A layout transition's surface clips with a mask of its own
-        // (`Surface.swift`) until it ends.
-        guard surface == nil else { return }
+        // (`Surface.swift`) until it ends; a dimmed control is masked to
+        // nothing under its picture (`ControlDim`).
+        guard surface == nil, controlDim == nil else { return }
         let outline = shapedOutline(), effect = materialView, image = style["mask_image"]
         // Most boxes are masked by nothing and never were: they keep no state
         // (an associated object, about 0.5 KB a view) to learn so.

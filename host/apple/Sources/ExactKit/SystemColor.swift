@@ -276,6 +276,8 @@ extension NodeView {
     /// A window or ancestor tint changed: the rows naming it apply again.
     package override func tintColorDidChange() {
         super.tintColorDidChange()
+        // A button Exact draws greys as a whole behind a modal (ControlDimIOS.swift)
+        syncControlDim()
         tintPadBar()
         // An `svg`'s paints are resolved into its scene's layers.
         if kind == "svg" { presenter?.svg.reappear(id, dark: drawsDark, clock: presenter?.session?.clock, tint: viewTint) }
