@@ -189,7 +189,7 @@ export function assembleIOS({shared, serviceDylibs, triple, app, paths, binDir, 
       entitlements: readFileSync(ent, 'utf8'), gpu: hasGpu ? dylib : null, development: host ? null : development });
     writeFileSync(resolve(assembled, 'receipt.json'), ipa ? shippedReceipt(whole) : whole);
     if (ipa) { mkdirSync(dirname(ipa), { recursive: true }); writeFileSync(`${ipa.replace(/\.ipa$/, '')}.receipt.json`, whole); }
-    if (ipa) for (const [loose, name] of [...looseArms.map(([, , load, framework]) => [load, framework]), [modulesLoadName, 'ExactModules'], [svgLoadName, 'ExactSvg'], [canvasGpuLoadName, 'ExactCanvasGpu']]) wrapFramework(resolve(assembled, 'Frameworks'), loose, name, app, tv ? 'AppleTVOS' : 'iPhoneOS');
+    if (ipa) for (const [loose, name] of [...looseArms.map(([, , load, framework]) => [load, framework]), [modulesLoadName, 'ExactModules'], [svgLoadName, 'ExactSvg'], [canvasGpuLoadName, 'ExactCanvasGpu'], ...serviceDylibs.map(svc => [svc.load, svc.framework])]) wrapFramework(resolve(assembled, 'Frameworks'), loose, name, app, tv ? 'AppleTVOS' : 'iPhoneOS');
     if (shared && !host && activityEntries(app).length) packageActivityArm({ app, bundle: assembled, shared, directory: linkRoot, sdk, triple, device, runApple });
     if (shared && !host) packageWidgets({ app, bundle: assembled, shared, directory: linkRoot, sdk, triple, device,
       runApple, production: production || distribution, profile: provisioned?.extension ?? null,

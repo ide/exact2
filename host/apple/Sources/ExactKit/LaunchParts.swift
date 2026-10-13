@@ -183,13 +183,14 @@ final class ExactService {
     private let backgroundFn: Background
     private let queryFn: Query?
 
-    /// Loads from beside the executable on macOS, or from Frameworks on iOS.
+    /// Loads from beside the executable on macOS, or from Frameworks on iOS
+    /// (wrapped as a framework in an archive: `serviceFramework` in launch-parts.mjs).
     static func load(module: String, config: Data, handoff: Data) -> ExactService? {
         let name = "lib\(module)_service.dylib"
         #if os(macOS)
         let path = Bundle.main.executableURL!.deletingLastPathComponent().appendingPathComponent(name).path
         #else
-        let path = (Bundle.main.privateFrameworksPath ?? Bundle.main.bundlePath) + "/" + name
+        let path = embeddedModule(framework: serviceFramework(module), dylib: name)
         #endif
         guard let h = dlopen(path, RTLD_NOW | RTLD_LOCAL) else {
             fputs("exact: \(name): \(String(cString: dlerror()))\n", stderr)
@@ -327,4 +328,10 @@ public enum ExactEvents {
         if let stack { f["stack"] = stack }
         ExactJournal.shared.record("app.error", f)
     }
+}
+
+/// A launch service's framework name in an archive (`serviceFramework` in launch-parts.mjs): `observe` is `ExactObserveService`.
+func serviceFramework(_ module: String) -> String {
+    let words = module.split(whereSeparator: { !$0.isLetter && !$0.isNumber })
+    return "Exact" + words.map { $0.prefix(1).uppercased() + $0.dropFirst() }.joined() + "Service"
 }
