@@ -423,8 +423,22 @@ export const infoPlist = (app, device = false, { executable = executableName(app
   Object.assign(dict, usageKeys(reach));
   Object.assign(dict, icon);
   if (distribution) Object.assign(dict, distribution);
+  const locked = phoneOrientations(app.manifest.orientation);
+  if (locked) dict.UISupportedInterfaceOrientations = locked;
   return plistFile(dict);
 };
+
+/** The iPhone orientations the manifest's `orientation` allows, or null for `any` or none, which leaves iOS's own
+ * (portrait and both landscapes). A `-primary` is the device's own way up, as the Screen Orientation API has it:
+ * `landscape-primary` is turned left, the home indicator on the right, which UIKit calls LandscapeRight. Every
+ * portrait is upright, the only portrait an iPhone with Face ID offers. iPad keeps all four, as its multitasking
+ * requires. */
+export function phoneOrientations(orientation) {
+  const up = 'UIInterfaceOrientationPortrait';
+  const right = 'UIInterfaceOrientationLandscapeRight', left = 'UIInterfaceOrientationLandscapeLeft';
+  return { natural: [up], portrait: [up], 'portrait-primary': [up], 'portrait-secondary': [up], landscape: [left, right],
+    'landscape-primary': [right], 'landscape-secondary': [left] }[orientation] ?? null;
+}
 
 /** What App Store Connect reads from a distributed bundle and Xcode would
  * have written (`--archive`): the build's toolchain (DT* keys) and the store's
