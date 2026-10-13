@@ -556,6 +556,8 @@ package final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, U
             presenter?.queueIntrinsicSize(self, generation: generation, SymbolMeasure.size(name, points: points, weight: weight))
         }
         symbolView?.tintColor = symbolTint // `nil` inherits UIKit's live tint
+        // Content keeps its colours behind a modal, as a label's do; a control greys as a whole (`ControlDim`)
+        if tintAdjustmentMode != .normal { tintAdjustmentMode = .normal }
         if let leaf = symbolView { applySymbolEffect(leaf) }
         layoutSymbol()
     }
@@ -1107,6 +1109,8 @@ package final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, U
     /// CSS `filter` (LLP 1055.000 D14): the box shows through a filtered
     /// picture (`BoxFilter`), drawn again after each batch.
     private(set) var boxFilter: BoxFilter?
+    /// A button Exact draws, greyed as a whole behind a modal (ControlDimIOS.swift)
+    var controlDim: ControlDim?
     var hasBoxFilter: Bool { boxFilter != nil }
     func applyFilter() {
         // A node with no `filter` and none before makes no `BoxFilter` (three
