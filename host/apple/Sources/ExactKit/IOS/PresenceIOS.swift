@@ -44,6 +44,12 @@ extension Presenter {
 
     func isLeaving(_ view: NodeView) -> Bool { leaving[view.id]?.view === view }
 
+    /// A removed view that a dismissing sheet or a popped screen still shows,
+    /// until UIKit's transition ends
+    func retainsRemovedView(_ view: NodeView) -> Bool {
+        modals.retainsRemovedView(view) || navigation.retainsRemovedView(view)
+    }
+
     /// Presented surface boxes and opacity, including ghosts absent from `tree`.
     func presenceObservation() -> [[String: Any]] {
         let live = views.values

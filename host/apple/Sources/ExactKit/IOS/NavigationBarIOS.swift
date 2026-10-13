@@ -246,6 +246,9 @@ final class NavigationDelegateProxy: NSObject, UINavigationControllerDelegate {
     func navigationController(_ nav: UINavigationController, willShow controller: UIViewController, animated: Bool) {
         // The bar as the route coming into view wants it, alongside UIKit's
         // transition: a cancelled pop calls this again for the source (§9.10).
+        // The transition first, so a batch the bar's change applies does not
+        // sync navigation mid-transition
+        host?.beginTransition(nav, to: controller, animated: animated)
         host?.showBar(nav, for: controller as? RouteController, animated: animated)
         host?.navigationController(nav, willShow: controller, animated: animated)
         app?.navigationController?(nav, willShow: controller, animated: animated)

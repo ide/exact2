@@ -375,6 +375,7 @@ extension NodeView {
     package func textViewDidBeginEditing(_ textView: UITextView) {
         presenter?.collections.pinsChanged()
         presenter?.editing = self
+        presenter?.navigation.keyboardOwnerChanged()
         presenter?.fieldSelections.focused(self)
         presenter?.focus(id)
         presenter?.reveal(self)
