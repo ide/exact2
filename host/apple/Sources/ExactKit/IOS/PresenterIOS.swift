@@ -318,7 +318,7 @@ package final class Presenter {
                 let overlap = top.map { min(max(0, frame.maxY - max($0, frame.minY)), frame.height) } ?? 0
                 self.setKeyboardInset(overlap)
             }
-            if top == nil { self.pinnedRoom.release() }
+            if top == nil, self.navigation.keyboardReveal == nil { self.pinnedRoom.release() } // else when the reveal settles
             self.reveal(self.editing ?? self.views.values.first { $0.field?.isFirstResponder == true })
         }
         // Under the agent (LLP 1012) the change applies at once, as the
@@ -944,7 +944,7 @@ package final class Presenter {
                 // Out of the map before out of the window: the editing-ended
                 // notification removal fires finds no view to send for.
                 let gone = release(id) { $0.forget() }
-                if let gone, !modals.retainsRemovedView(gone) { gone.removeFromSuperview() }
+                if let gone, !retainsRemovedView(gone) { gone.removeFromSuperview() }
             case .roots:
                 root.subviews.forEach { $0.removeFromSuperview() }
                 accent.attach(op.ids.compactMap { views[UInt32($0)] }) { for r in $0 { root.addSubview(r) } }
@@ -970,7 +970,7 @@ package final class Presenter {
                 case "layout": v.layoutOffset = CGPoint(x: x, y: CGFloat(op.y)); v.layoutScale = CGPoint(x: CGFloat(op.w), y: CGFloat(op.h)); v.applyTransform(); v.applySurface()
                 case "scale": v.scale = x; v.applyTransform()
                 case "rotate": v.rotate = x; v.applyTransform()
-                case "opacity": v.alpha = x
+                case "opacity": if let reveal = navigation.keyboardReveal, reveal.conceals(v) { reveal.opacity = x } else { v.alpha = x } // hidden under a reveal's picture
                 case "flight": presentFlight(id, x)
                 default: break
                 }
@@ -1073,7 +1073,7 @@ package final class Presenter {
         let wanted = Set(want.map(ObjectIdentifier.init))
         var current = container.subviews
         for case let child as NodeView in current where !wanted.contains(ObjectIdentifier(child)) && !pool.isParked(child) && !isLeaving(child) {
-            if !modals.retainsRemovedView(child) { child.removeFromSuperview() }
+            if !retainsRemovedView(child) { child.removeFromSuperview() }
         }
         // In order, below anything else in the container (a scroll
         // view's indicators): inserting a subview at an index moves

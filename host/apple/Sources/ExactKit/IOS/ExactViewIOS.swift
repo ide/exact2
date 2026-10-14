@@ -273,7 +273,10 @@ public final class ExactView: UIView {
             // notification can include margin above the keys; after a cancelled
             // pop it can still announce hiding. Neither replaces the guide's
             // occupied geometry while this session retains its editor.
-            if presenter.interactiveKeyboardDrag || presenter.modals.active ||
+            // A pop taking the keyboard away with its route lays the session out without it (KeyboardRevealIOS.swift)
+            if presenter.navigation.keyboardReveal?.leaving == true {
+                top = .infinity
+            } else if presenter.interactiveKeyboardDrag || presenter.modals.active ||
                 presenter.hasKeyboardEditor {
                 #if os(tvOS)
                 // tvOS has no keyboard layout guide.

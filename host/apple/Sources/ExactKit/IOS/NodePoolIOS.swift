@@ -254,7 +254,7 @@ final class NodePool {
     func retire(_ root: NodeView) -> Bool {
         guard depth == 1, presenter.reorder == nil, !presenter.swipeActions.assistive,
               !Self.leaves.contains(root.kind), list(holding: root) != nil,
-              root.canvasAbove == nil, !presenter.modals.retainsRemovedView(root) else { return false }
+              root.canvasAbove == nil, !presenter.retainsRemovedView(root) else { return false }
         return park(root, under: nil)
     }
     /// Park `root`'s tree: a collection's row (`under` nil), or an inner

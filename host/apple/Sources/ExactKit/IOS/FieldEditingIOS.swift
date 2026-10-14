@@ -73,6 +73,7 @@ extension NodeView {
     @objc package func textFieldDidBeginEditing(_ textField: UITextField) {
         presenter?.collections.pinsChanged()
         presenter?.editing = self
+        presenter?.navigation.keyboardOwnerChanged()
         // The keyboard is already up (another field had it): it will not
         // move, so this field is revealed here, as a browser scrolls a
         // newly focused field into view.

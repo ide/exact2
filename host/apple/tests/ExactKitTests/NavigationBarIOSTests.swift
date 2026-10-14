@@ -287,6 +287,46 @@ final class NavigationBarIOSTests: XCTestCase {
         XCTAssertFalse(nav.isNavigationBarHidden)
     }
 
+    /// A push holds the session's viewport while it moves, so the keyboard
+    /// the arriving field raises does not cut both routes off at its top;
+    /// the session is fitted to the keyboard once the push settles.
+    func testAPushHoldsTheViewportUntilItSettles() throws {
+        let session = try fixture("keyboard-pop", module: false)
+        let navigation = session.presenter.navigation
+        let nav = try XCTUnwrap(navigation.primaryNavigation)
+        session.presenter.press(try node(session, "open-focused-plain").id)
+        until("the push starts") { nav.transitionCoordinator != nil }
+        XCTAssertTrue(navigation.pushHoldsViewport)
+        XCTAssertTrue(navigation.preservesKeyboardViewport, "the keyboard's rise does not resize the session mid-push")
+        until("push settled") { !navigation.inTransition && nav.transitionCoordinator == nil }
+        XCTAssertFalse(navigation.pushHoldsViewport)
+    }
+
+    /// Back, swiped or authored, leaves the keyboard with the screen it is
+    /// leaving, as UIKit does: recognizing the swipe keeps the field
+    /// focused, and an authored pop keeps the real field in its departing
+    /// controller until UIKit's transition ends.
+    func testBackLeavesTheKeyboardWithItsDepartingScreen() throws {
+        let session = try fixture("keyboard-pop", module: false)
+        let presenter = session.presenter
+        let navigation = presenter.navigation
+        let nav = try XCTUnwrap(navigation.primaryNavigation)
+        presenter.press(try node(session, "open-focused-plain").id)
+        until("push settled") { !navigation.inTransition && nav.transitionCoordinator == nil }
+        let source = try XCTUnwrap(nav.topViewController as? RouteController)
+        let field = try XCTUnwrap(try node(session, "plain-first").field)
+        XCTAssertTrue(field.isFirstResponder)
+        let pop = try XCTUnwrap(nav.interactivePopGestureRecognizer)
+        XCTAssertTrue(navigation.popMayBegin(pop, from: CGPoint(x: 4, y: 400), in: nav.view, velocity: CGPoint(x: 600, y: 20)))
+        XCTAssertTrue(field.isFirstResponder, "recognizing Back leaves the focus to UIKit's interactive transition")
+        XCTAssertEqual(navigation.agentBack(), "")
+        XCTAssertFalse(nav.viewControllers.contains(source))
+        XCTAssertTrue(field.isDescendant(of: source.view), "an authored pop keeps the real field in its departing controller")
+        XCTAssertNotNil(field.window, "UIKit owns the departing field until its transition completes")
+        until("pop settled") { !navigation.inTransition && nav.transitionCoordinator == nil }
+        XCTAssertFalse(field.isFirstResponder)
+    }
+
     func testAHeaderShapedRouteIsTheBarOnFrameOneWithNoAppCode() throws {
         let session = try fixture("bar-frame-one", module: false)
         let navigation = session.presenter.navigation

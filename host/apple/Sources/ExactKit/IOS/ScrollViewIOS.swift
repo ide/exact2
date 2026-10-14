@@ -301,7 +301,9 @@ extension NodeView {
         }
         let y = Self.followedTop(current: sv.contentOffset.y, minimum: minimum, maximum: maximum, end: prior.end, top: top,
                                  moving: sv.isTracking || sv.isDragging || sv.isDecelerating)
+        // A route a pop is leaving keeps its reading position through the pop's resize, as a covered route does
         let inactive = window == nil || presenter?.navigation.isInactiveRoute(containing: self) == true
+            || presenter?.navigation.keyboardReveal?.contains(self) == true
         retainedScrollTop = !prior.end && top > maximum && (inactive || retainedScrollTop != nil) ? top : nil
         // While the reader's finger is down or the fling is running, an
         // absolute write would cut the pan, the deceleration or the rubber
