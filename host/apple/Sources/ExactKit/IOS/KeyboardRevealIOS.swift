@@ -78,10 +78,10 @@ extension NavigationHost {
     /// UIKit is about to animate a push or a pop it was not asked for by a
     /// gesture (its Back button or menu, the app's own change), in `willShow`,
     /// before it lays out the cards it animates. A leaving route that holds
-    /// the keyboard is revealed, as for a swipe. A push holds the session's
-    /// keyboard edge until it settles: the arriving field takes the keyboard
-    /// as the push starts (`viewIsAppearing`), and the viewport ending at the
-    /// rising keys would cut both routes off while they slide.
+    /// the keyboard is revealed, as for a swipe. A push is laid out without
+    /// the keyboard until it settles: the arriving field takes the keyboard as
+    /// the push starts (`viewIsAppearing`), and a viewport ending at the
+    /// rising keys, or at keys still leaving, would cut both routes off.
     func beginKeyboardTransition(_ transition: UIViewControllerTransitionCoordinator, in nav: UINavigationController) {
         #if os(iOS)
         guard primaryNavigation === nav, let source = transition.viewController(forKey: .from) as? RouteController,
@@ -93,7 +93,10 @@ extension NavigationHost {
             fitWithoutKeyboard(nav)
             settlingReveal = false
         }
-        if !pops(from: source, to: destination, in: nav) { pushHold = id }
+        if !pops(from: source, to: destination, in: nav) {
+            pushHold = id
+            fitWithoutKeyboard(nav)
+        }
         // Ended here too when `didShow` is not this stack's (a tab switched meanwhile)
         transition.animate(alongsideTransition: nil) { [weak self] _ in self?.transitionEnded(id) }
         #endif

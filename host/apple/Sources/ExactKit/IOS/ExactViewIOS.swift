@@ -281,7 +281,8 @@ public final class ExactView: UIView {
             if presenter.navigation.keyboardReveal?.leaving == true {
                 top = .infinity
             } else if holdsKeyboard {
-                top = heldKeyboardTop
+                // A push is laid out without the keyboard, as UIKit lays out a pushed screen
+                top = presenter.navigation.pushHold != nil ? .infinity : heldKeyboardTop
             } else if presenter.interactiveKeyboardDrag || presenter.modals.active ||
                 presenter.hasKeyboardEditor {
                 #if os(tvOS)

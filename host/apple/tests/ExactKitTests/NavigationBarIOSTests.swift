@@ -96,6 +96,8 @@ final class NavigationBarIOSTests: XCTestCase {
         let route = try XCTUnwrap(nav.topViewController as? RouteController)
         XCTAssertNotNil(route.node.window)
         XCTAssertGreaterThan(route.node.bounds.height, 0)
+        // The keyboard still leaving: the push is laid out without it, as UIKit lays out a pushed screen
+        XCTAssertGreaterThan(presenter.viewport.frame.maxY, 540, "the viewport does not end at the leaving keyboard during the push")
         until("push finished") { nav.transitionCoordinator == nil }
     }
 
