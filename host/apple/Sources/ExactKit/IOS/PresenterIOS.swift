@@ -943,8 +943,10 @@ package final class Presenter {
                 if let view = views[id], pool.retire(view) { continue }
                 // Out of the map before out of the window: the editing-ended
                 // notification removal fires finds no view to send for.
-                let gone = release(id) { $0.forget() }
-                if let gone, !retainsRemovedView(gone) { gone.removeFromSuperview() }
+                // A route UIKit is still taking away shows it until its transition ends
+                let shown = views[id].map(navigation.retainsRemovedView) ?? false
+                let gone = release(id) { shown ? navigation.forgetAfterTransition($0) : $0.forget() }
+                if let gone, !shown, !modals.retainsRemovedView(gone) { gone.removeFromSuperview() }
             case .roots:
                 root.subviews.forEach { $0.removeFromSuperview() }
                 accent.attach(op.ids.compactMap { views[UInt32($0)] }) { for r in $0 { root.addSubview(r) } }

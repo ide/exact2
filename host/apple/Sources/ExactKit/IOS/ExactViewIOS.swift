@@ -15,6 +15,8 @@ import UIKit
 public final class ExactView: UIView {
     public let session: ExactSession
     private var fitPending = false
+    /// The keyboard's top in the container when last fitted, kept while a transition holds it
+    private var heldKeyboardTop = CGFloat.infinity
     /// The canvas's colour, which this view shows wherever the viewport does
     /// not reach (`paintUnderKeys`).
     private var canvas: UIColor?
@@ -251,10 +253,12 @@ public final class ExactView: UIView {
             }
             return
         }
-        // UIKit moves the keyboard sideways with an interactive pop. Its
-        // hide notification is not a request to drop the composer below
-        // those moving keys; keep the current viewport until it settles.
-        guard !presenter.navigation.preservesKeyboardViewport else { return }
+        // UIKit moves the keyboard sideways with an interactive pop, and up
+        // with a push whose field takes it. Its notifications are not a
+        // request to move the viewport's bottom under those moving keys; the
+        // keyboard edge is held until the transition settles, while window
+        // and safe-area changes still apply.
+        let holdsKeyboard = presenter.navigation.preservesKeyboardViewport
         let container = presenter.modals.coordinateView ?? self
         let safe = container.safeAreaInsets
         let cover = presenter.viewportFit == "cover"
@@ -276,6 +280,8 @@ public final class ExactView: UIView {
             // A pop taking the keyboard away with its route lays the session out without it (KeyboardRevealIOS.swift)
             if presenter.navigation.keyboardReveal?.leaving == true {
                 top = .infinity
+            } else if holdsKeyboard {
+                top = heldKeyboardTop
             } else if presenter.interactiveKeyboardDrag || presenter.modals.active ||
                 presenter.hasKeyboardEditor {
                 #if os(tvOS)
@@ -288,6 +294,7 @@ public final class ExactView: UIView {
             } else if let edge = presenter.keyboardTop, let window {
                 top = container.convert(CGPoint(x: 0, y: edge), from: window).y
             } else { top = .infinity }
+            heldKeyboardTop = top
             presenter.keyboardInset = min(max(0, frame.maxY - max(top, frame.minY)), frame.height)
             if top < frame.maxY {
                 frame.size.height = max(0, top - frame.minY)

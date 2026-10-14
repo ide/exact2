@@ -287,19 +287,34 @@ final class NavigationBarIOSTests: XCTestCase {
         XCTAssertFalse(nav.isNavigationBarHidden)
     }
 
-    /// A push holds the session's viewport while it moves, so the keyboard
-    /// the arriving field raises does not cut both routes off at its top;
-    /// the session is fitted to the keyboard once the push settles.
-    func testAPushHoldsTheViewportUntilItSettles() throws {
+    /// A push holds the session's keyboard edge while it moves, so the
+    /// keyboard the arriving field raises does not cut both routes off at its
+    /// top; the session is fitted to the keyboard once the push settles.
+    func testAPushHoldsTheKeyboardEdgeUntilItSettles() throws {
         let session = try fixture("keyboard-pop", module: false)
         let navigation = session.presenter.navigation
         let nav = try XCTUnwrap(navigation.primaryNavigation)
         session.presenter.press(try node(session, "open-focused-plain").id)
         until("the push starts") { nav.transitionCoordinator != nil }
-        XCTAssertTrue(navigation.pushHoldsViewport)
+        XCTAssertNotNil(navigation.pushHold)
         XCTAssertTrue(navigation.preservesKeyboardViewport, "the keyboard's rise does not resize the session mid-push")
         until("push settled") { !navigation.inTransition && nav.transitionCoordinator == nil }
-        XCTAssertFalse(navigation.pushHoldsViewport)
+        XCTAssertNil(navigation.pushHold)
+    }
+
+    /// A transition's direction is the stack UIKit last settled: a stack
+    /// restored at once pops to a route it never showed, and a controller
+    /// pushed again after a pop is a push.
+    func testATransitionsDirectionIsTheStackUIKitLastSettled() throws {
+        let session = try fixture("keyboard-pop", module: false)
+        let navigation = session.presenter.navigation
+        let nav = UINavigationController()
+        let a = UIViewController(), b = UIViewController(), c = UIViewController()
+        navigation.settledStacks[ObjectIdentifier(nav)] = [a, b, c].map(ObjectIdentifier.init)
+        XCTAssertTrue(navigation.pops(from: c, to: b, in: nav), "back to a route below, shown or not")
+        XCTAssertTrue(navigation.pops(from: c, to: a, in: nav), "back to the root")
+        navigation.settledStacks[ObjectIdentifier(nav)] = [a].map(ObjectIdentifier.init)
+        XCTAssertFalse(navigation.pops(from: a, to: b, in: nav), "a controller pushed again")
     }
 
     /// Back, swiped or authored, leaves the keyboard with the screen it is

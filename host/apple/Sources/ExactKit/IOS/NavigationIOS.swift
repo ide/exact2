@@ -54,12 +54,6 @@ final class RouteController: UIViewController {
         host?.presenter.groupedLists?.appearing(node, alongside: animated ? transitionCoordinator : nil)
         host?.presenter.rowCells.appearing(node, alongside: animated ? transitionCoordinator : nil)
     }
-    /// Whether UIKit has shown it: a transition to a route it has not is a push, to one it has a pop
-    private(set) var appeared = false
-    override func viewDidAppear(_ animated: Bool) {
-        super.viewDidAppear(animated)
-        appeared = true
-    }
     override func viewIsAppearing(_ animated: Bool) {
         super.viewIsAppearing(animated)
         // UIKit has attached and sized the real destination. Finish its
@@ -152,9 +146,19 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
     /// stays in the departing controller, as UIKit keeps it for its own pop;
     /// UIKit releases it at the end.
     func retainsRemovedView(_ node: NodeView) -> Bool {
-        controllers.values.contains { route in
+        keyboardReveal?.contains(node) == true || controllers.values.contains { route in
             route.retiring && (node === route.node || node.isDescendant(of: route.node))
         }
+    }
+    /// Removed nodes a departing route still shows: forgotten (their native
+    /// views destroyed) once UIKit's transition ends, so a native editor
+    /// keeps its keyboard through the pop
+    private var retainedForgets: [NodeView] = []
+    func forgetAfterTransition(_ node: NodeView) { retainedForgets.append(node) }
+    func forgetRetained() {
+        let nodes = retainedForgets
+        retainedForgets = []
+        nodes.forEach { $0.forget() }
     }
     var primaryNavigation: UINavigationController?
     private(set) var presentedNavigations: [UINavigationController] = []
@@ -200,8 +204,10 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
     var keyboardReveal: KeyboardReveal?
     /// The reveal is being prepared or settled: navigation sync waits for it
     var settlingReveal = false
-    /// A push in flight keeps the session's viewport until it settles (KeyboardRevealIOS.swift)
-    var pushHoldsViewport = false
+    /// A push in flight, by its coordinator: the session's keyboard edge is held until it settles (KeyboardRevealIOS.swift)
+    var pushHold: ObjectIdentifier?
+    /// Each stack as UIKit last settled it (`didShow`): a transition to a route below the leaving one is a pop
+    var settledStacks: [ObjectIdentifier: [ObjectIdentifier]] = [:]
     /// A context menu's commit pushes without the stack's animation: UIKit
     /// animates it (`.pop`, LLP 1021 §5.1). The selected route's key tells
     /// whether its press navigated.
@@ -741,7 +747,7 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
     }
 
     var preservesKeyboardViewport: Bool {
-        pushHoldsViewport || keyboardReveal == nil && NavigationRules.freezesViewport(modalActive: presenter.modals.active, changing: changing,
+        pushHold != nil || keyboardReveal == nil && NavigationRules.freezesViewport(modalActive: presenter.modals.active, changing: changing,
                                         initiallyInteractive: navigation?.transitionCoordinator?.initiallyInteractive == true)
     }
 
@@ -902,10 +908,7 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
             interactiveDepth = navigationController.viewControllers.count + 1
         }
         bindKeyboardReveal(to: transition)
-        if changing, !interactiveTransition, let transition {
-            beginKeyboardReveal(for: transition, in: navigationController)
-            holdViewportForPush(transition, in: navigationController)
-        }
+        if changing, !interactiveTransition, let transition { beginKeyboardTransition(transition, in: navigationController) }
         // The route coming into view was out of the window while it was
         // covered, so no scroll asked for its text; paint what shows of it
         // as the transition starts, not when the reader next scrolls.
@@ -936,6 +939,9 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
     func navigationController(_ navigationController: UINavigationController, didShow viewController: UIViewController, animated: Bool) {
         guard navigationController === navigation,
               navigationController.topViewController === viewController else { return }
+        settledStacks[ObjectIdentifier(navigationController)] = navigationController.viewControllers.map(ObjectIdentifier.init)
+        // Before the owed sync below, which may begin the next push and its hold
+        pushHold = nil
         // Held from here, so a Back dispatched below syncs only after the reveal settles
         if keyboardReveal != nil { settlingReveal = true }
         changing = false
@@ -944,7 +950,7 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
         stopRevealing()
         defer {
             settleKeyboardReveal()
-            pushHoldsViewport = false
+            forgetRetained()
             // Tree updates during UIKit's transition retain their latest
             // intent. Apply it once the native stack is available again.
             if pendingSync {
@@ -1021,7 +1027,8 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
 
     func reset(clearFocus: Bool = true) {
         if keyboardReveal != nil { presenter.afterBatch { [weak self] in self?.settleKeyboardReveal() } }
-        pushHoldsViewport = false
+        pushHold = nil
+        forgetRetained()
         begunTransition = nil
         unanimated = false
         presenter.modals.reset()
