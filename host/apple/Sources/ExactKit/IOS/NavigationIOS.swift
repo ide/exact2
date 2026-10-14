@@ -146,19 +146,9 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
     /// stays in the departing controller, as UIKit keeps it for its own pop;
     /// UIKit releases it at the end.
     func retainsRemovedView(_ node: NodeView) -> Bool {
-        keyboardReveal?.contains(node) == true || controllers.values.contains { route in
+        controllers.values.contains { route in
             route.retiring && (node === route.node || node.isDescendant(of: route.node))
         }
-    }
-    /// Removed nodes a departing route still shows: forgotten (their native
-    /// views destroyed) once UIKit's transition ends, so a native editor
-    /// keeps its keyboard through the pop
-    private var retainedForgets: [NodeView] = []
-    func forgetAfterTransition(_ node: NodeView) { retainedForgets.append(node) }
-    func forgetRetained() {
-        let nodes = retainedForgets
-        retainedForgets = []
-        nodes.forEach { $0.forget() }
     }
     var primaryNavigation: UINavigationController?
     private(set) var presentedNavigations: [UINavigationController] = []
@@ -206,8 +196,13 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
     var settlingReveal = false
     /// A push in flight, by its coordinator: the session's keyboard edge is held until it settles (KeyboardRevealIOS.swift)
     var pushHold: ObjectIdentifier?
-    /// Each stack as UIKit last settled it (`didShow`): a transition to a route below the leaving one is a pop
+    /// Each stack as it last stood still (`didShow`, a sync, the moment before a change Exact animates): a transition to a route below the leaving one is a pop
     var settledStacks: [ObjectIdentifier: [ObjectIdentifier]] = [:]
+    func noteSettledStacks() {
+        for nav in allNavigations where nav.transitionCoordinator == nil {
+            settledStacks[ObjectIdentifier(nav)] = nav.viewControllers.map(ObjectIdentifier.init)
+        }
+    }
     /// A context menu's commit pushes without the stack's animation: UIKit
     /// animates it (`.pop`, LLP 1021 §5.1). The selected route's key tells
     /// whether its press navigated.
@@ -450,6 +445,8 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
     }
 
     func sync(_ batch: Batch) {
+        // A stack changed beneath its top moves no transition: noted for the next one's direction
+        defer { noteSettledStacks() }
         // Installing or moving a controller can synchronously cause layout.
         // That layout must not start another containment handoff inside this one.
         syncCalls += 1
@@ -494,6 +491,7 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
                 let pushOrPop = NavigationRules.isPushOrPop(from: nav.viewControllers.map(ObjectIdentifier.init), to: stack.map(ObjectIdentifier.init))
                 let arrives = stack.count > 1 && nav.viewControllers.first === stack.first
                     && !nav.viewControllers.contains { $0 === stack.last }
+                settledStacks[ObjectIdentifier(nav)] = nav.viewControllers.map(ObjectIdentifier.init)
                 nav.setViewControllers(stack, animated: (pushOrPop || arrives) && index == owners.count - 1 && mounted.count == boundaries.count && !ExactEnv.agentFreezes && !unanimated && nav.view.window != nil)
                 recordOwned(nav)
             }
@@ -950,7 +948,6 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
         stopRevealing()
         defer {
             settleKeyboardReveal()
-            forgetRetained()
             // Tree updates during UIKit's transition retain their latest
             // intent. Apply it once the native stack is available again.
             if pendingSync {
@@ -1028,7 +1025,6 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
     func reset(clearFocus: Bool = true) {
         if keyboardReveal != nil { presenter.afterBatch { [weak self] in self?.settleKeyboardReveal() } }
         pushHold = nil
-        forgetRetained()
         begunTransition = nil
         unanimated = false
         presenter.modals.reset()

@@ -99,9 +99,9 @@ extension NavigationHost {
         #endif
     }
 
-    /// A pop: the destination stood below the leaving route when UIKit last
-    /// settled the stack (a route it did not hold is pushed). With no settled
-    /// stack yet, the leaving route has left the stack.
+    /// A pop: the destination stood below the leaving route when the stack
+    /// last stood still (a route it did not hold is pushed). With no record
+    /// yet, the leaving route has left the stack.
     func pops(from source: UIViewController, to destination: UIViewController, in nav: UINavigationController) -> Bool {
         if let settled = settledStacks[ObjectIdentifier(nav)], let above = settled.firstIndex(of: ObjectIdentifier(source)) {
             return settled.firstIndex(of: ObjectIdentifier(destination)).map { $0 < above } ?? false
@@ -116,7 +116,6 @@ extension NavigationHost {
             presenter.session?.view?.fit()
         }
         if keyboardReveal?.transition == id { settleKeyboardReveal() }
-        forgetRetained()
     }
 
     /// The departing route pictured and hidden under its picture, when it is
