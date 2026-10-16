@@ -386,6 +386,8 @@ public final class ExactSession {
     var clockTimer: Timer?
     /// The runner deadline `clockTimer` fires for.
     private(set) var clockDue: Double?
+    /// The observer that advances a deadline already due before the turn's commit (`advanceBeforeCommit`)
+    private var dueObserver: CFRunLoopObserver?
     /// The agent's clock (milliseconds) when the driver owns time; nil runs
     /// on the wall clock. Taking it over ends the first-frame rule (LLP
     /// 1003.001 D7): what waits for a frame starts there.
@@ -1314,6 +1316,24 @@ public final class ExactSession {
             }
         }
         frames.run(frames.motion || frames.timerSoon || canvases.wantsFrames)
+        // A deadline already due (a `then`, armed at its answer's time, LLP
+        // 1016.001 D3) advances before this turn's frame is committed: no
+        // frame shows an answer without what its `then` did
+        if !agent, let due, due <= now() { advanceBeforeCommit() }
+    }
+
+    /// Core Animation commits a turn's changes as the run loop goes to sleep
+    /// (`beforeWaiting`, order 2,000,000); this runs once just before that.
+    private func advanceBeforeCommit() {
+        guard dueObserver == nil else { return }
+        let observer = CFRunLoopObserverCreateWithHandler(nil, CFRunLoopActivity.beforeWaiting.rawValue, false, 1_999_000) { [weak self] _, _ in
+            guard let self else { return }
+            dueObserver = nil
+            guard state != .destroyed, let due = timerDue, due <= now() else { return }
+            whenIdle { [weak self] in guard let self, state != .destroyed else { return }; followOffset(); applyUnlessEmpty(runtime.advance(now: now())) }
+        }
+        CFRunLoopAddObserver(CFRunLoopGetMain(), observer, .commonModes)
+        dueObserver = observer
     }
 
     /// Drawn once per launch; the same across a dev reload's new runner.
