@@ -934,6 +934,23 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
         FrameClock.shared.drop(self)
     }
 
+    /// A transition whose `didShow` this host never heard (its stack stopped
+    /// being the one shown before it ended: a tab switched meanwhile) is
+    /// finished here, on the turn after it ended, so navigation does not wait
+    /// for it forever.
+    func finishUnshownTransition(_ id: ObjectIdentifier) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self, begunTransition == id else { return }
+            begunTransition = nil
+            changing = false
+            stopRevealing()
+            if pendingSync {
+                pendingSync = false
+                sync(Batch(ops: [], timers: false, motion: false, clock: nil, error: nil))
+            }
+        }
+    }
+
     func navigationController(_ navigationController: UINavigationController, didShow viewController: UIViewController, animated: Bool) {
         guard navigationController === navigation,
               navigationController.topViewController === viewController else { return }

@@ -119,6 +119,7 @@ extension NavigationHost {
             presenter.session?.view?.fit()
         }
         if keyboardReveal?.transition == id { settleKeyboardReveal() }
+        finishUnshownTransition(id)
     }
 
     /// The departing route pictured and hidden under its picture, when it is
