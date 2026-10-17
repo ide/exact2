@@ -99,3 +99,22 @@ fn the_grabber_words_lower_and_others_are_refused() {
         );
     }
 }
+
+#[test]
+fn the_initial_detent_names_a_system_detent() {
+    let compile = |value: &str| {
+        contract::compile(&format!(
+            "component App\n  view\n    column navigationKey=\"a\" navigationPresentation=\"modal\" navigationDetent=\"medium large\" navigationInitialDetent=\"{value}\"\n"
+        ))
+    };
+    for value in ["", "medium", "large"] {
+        compile(value).unwrap_or_else(|e| panic!("{value:?}: {e}"));
+    }
+    for value in ["first", "300"] {
+        let error = compile(value).unwrap_err().to_string();
+        assert!(
+            error.contains("lower-attr-value") && error.contains("`navigationInitialDetent` takes"),
+            "{value}: {error}"
+        );
+    }
+}

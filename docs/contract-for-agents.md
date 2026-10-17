@@ -1948,6 +1948,10 @@ main navigationKey=`${top(nav).id}` navigationBack="back" navigate=follow displa
   `flex-shrink: 0`. The route does
   not pad `env(safe-area-inset-bottom)`: UIKit adds that band below the detent.
   iOS alone sizes a sheet (LLP 1075.003 §9.11).
+- To open at a named height other than the first, write
+  `navigationInitialDetent="large"` or `"medium"` on the sheet route. The
+  height must also appear in `navigationDetent`. This selects the initial
+  height only; dragging to another detent keeps the person's choice.
 - A sheet's grabber is the platform's unless the route says `navigationGrabber`:
   iOS draws one on a sheet with several detents, which it resizes, and none on a
   sheet of one height; `"visible"` or `"hidden"` says otherwise (UIKit's

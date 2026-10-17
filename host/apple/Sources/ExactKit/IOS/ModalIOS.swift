@@ -17,7 +17,7 @@ private final class ModalController: UIViewController, UIGestureRecognizerDelega
     private(set) var pixels: UIView?
     /// What the presentation's navigation is mounted in.
     let mount = PresentationMount()
-    init(host: ModalHost, route: NodeView, fullscreen: Bool, detent: String?, grabber: String?) {
+    init(host: ModalHost, route: NodeView, fullscreen: Bool, detent: String?, initialDetent: String?, grabber: String?) {
         self.host = host
         routeID = route.id
         self.route = route
@@ -27,7 +27,7 @@ private final class ModalController: UIViewController, UIGestureRecognizerDelega
         modalPresentationStyle = .overFullScreen
         #else
         modalPresentationStyle = fullscreen ? .overFullScreen : .pageSheet
-        if !fullscreen { updateSheet(detent: detent, cornerRadius: ModalController.cornerRadius(of: route), grabber: grabber) }
+        if !fullscreen { updateSheet(detent: detent, initialDetent: initialDetent, cornerRadius: ModalController.cornerRadius(of: route), grabber: grabber) }
         #endif
     }
     /// A sheet route's authored `border-radius`, its top-left corner's: the
@@ -38,17 +38,20 @@ private final class ModalController: UIViewController, UIGestureRecognizerDelega
         return BorderPaint.radii(route.style, in: route.bounds)[0].width
     }
     private var detentValue: String?, cornerRadius: CGFloat?, grabberValue: String?
-    func updateSheet(detent value: String?, cornerRadius radius: CGFloat?, grabber: String?) {
+    private var sheetConfigured = false
+    func updateSheet(detent value: String?, initialDetent: String? = nil, cornerRadius radius: CGFloat?, grabber: String?) {
         #if !os(tvOS)
         guard modalPresentationStyle == .pageSheet,
               let sheet = sheetPresentationController,
-              detentValue != value || cornerRadius != radius || grabberValue != grabber || sheet.detents.isEmpty else { return }
+              detentValue != value || cornerRadius != radius || grabberValue != grabber || !sheetConfigured else { return }
         // A grabber or radius alone changes only itself: the detents and the
         // one the person dragged the sheet to stay.
-        let newDetents = detentValue != value || sheet.detents.isEmpty
+        let firstConfiguration = !sheetConfigured
+        let newDetents = detentValue != value || firstConfiguration
         detentValue = value
         cornerRadius = radius
         grabberValue = grabber
+        sheetConfigured = true
         let content = { [weak self] () -> CGFloat? in
             guard let route = self?.route else { return nil }
             // A scroller's extent counts its padding, and a container's
@@ -69,7 +72,10 @@ private final class ModalController: UIViewController, UIGestureRecognizerDelega
                 let detents = ModalHost.detents(value, refused: { refused.append(($0, $1)) }, content: content)
                 sheet.detents = detents.isEmpty ? [.large()] : detents
                 if !refused.isEmpty, let route = self.route { self.host?.presenter.session?.log(ModalHost.refusal(detent: value ?? "", words: refused, route: route.props["navigationKey"] ?? "", kept: !detents.isEmpty)) }
-                sheet.selectedDetentIdentifier = sheet.detents.first?.identifier
+                let wanted: UISheetPresentationController.Detent.Identifier? = firstConfiguration
+                    ? initialDetent.flatMap { $0 == "medium" ? .medium : $0 == "large" ? .large : nil }
+                    : nil
+                sheet.selectedDetentIdentifier = sheet.detents.first { $0.identifier == wanted }?.identifier ?? sheet.detents.first?.identifier
             }
             // `navigationGrabber` says; unsaid, a sheet that resizes has
             // one, as the HIG puts it on a resizable sheet.
@@ -194,7 +200,7 @@ private final class Presentation {
          background: UIViewController) {
         self.route = route
         kind = route.props["navigationPresentation"] ?? "modal"
-        controller = ModalController(host: host, route: route, fullscreen: kind == "fullscreen", detent: route.props["navigationDetent"], grabber: route.props["navigationGrabber"])
+        controller = ModalController(host: host, route: route, fullscreen: kind == "fullscreen", detent: route.props["navigationDetent"], initialDetent: route.props["navigationInitialDetent"], grabber: route.props["navigationGrabber"])
         self.navigation = navigation
         self.background = background
         backgroundInteraction = background.view.isUserInteractionEnabled

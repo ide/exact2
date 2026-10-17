@@ -284,6 +284,18 @@ final class ModalDetentIOSTests: XCTestCase {
         XCTAssertEqual(controller.selectedDetentIdentifier, .large, "still large")
     }
 
+    func testASheetCanOpenAtLargeAndKeepItsSmallerDetent() throws {
+        let session = try fixture("detent-initial-large")
+        try tap(session, "sheet")
+        until("the sheet is presented") { sheet()?.sheetPresentationController != nil }
+        let controller = try XCTUnwrap(sheet()?.sheetPresentationController)
+        XCTAssertEqual(controller.detents.map(\.identifier), [.init("authored-0"), .large])
+        XCTAssertEqual(controller.selectedDetentIdentifier, .large)
+        controller.selectedDetentIdentifier = .init("authored-0")
+        session.presenter.modals.updatePermissions()
+        XCTAssertEqual(controller.selectedDetentIdentifier, .init("authored-0"), "updates preserve the person's selected detent")
+    }
+
     /// Mounted, its route in its block (LLP 1123 D2), the sheet still
     /// follows its rows: its content is measured at the block's width,
     /// whatever height the block has.
