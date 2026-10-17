@@ -462,29 +462,19 @@ final class ModalHost: NSObject, UIAdaptivePresentationControllerDelegate {
     }
 
     func fit() {
-        guard !closing else { return }
+        guard !closing, !isDismissing else { return }
         presenter.session?.view?.fit()
         presenter.flushPendingFocus()
     }
 
-    func closeTop(animated: Bool = !ExactEnv.agentFreezes, refit: Bool = true) {
+    func closeTop(animated: Bool = !ExactEnv.agentFreezes) {
         guard let layer = layers.last else { return }
         closing = true
         if !layer.alreadyDismissed { presenter.cancelPendingFocus() }
-        let controller = layer.controller
-        if let owner = layer.owner, let home = layer.home {
-            if controller.retiringNavigation != nil {
-                home.addSubview(presenter.viewport)
-            } else {
-                presenter.navigation.move(to: owner) { home.addSubview(presenter.viewport) }
-            }
-        }
-        presenter.navigation.retireNavigation(layer.navigation, preserving: controller.retiringNavigation != nil)
+        presenter.navigation.retireNavigation(layer.navigation, preserving: layer.controller.retiringNavigation != nil)
         layers.removeLast()
-        releaseBackground(layer)
         layer.animated = animated
         retiring.append(layer)
-        if refit { presenter.session?.view?.fit() }
         closing = false
         // Post-batch focus transfers before dismissal releases the old editor.
         DispatchQueue.main.async { [weak self] in self?.drainRetired() }
@@ -496,6 +486,17 @@ final class ModalHost: NSObject, UIAdaptivePresentationControllerDelegate {
         let completion = { [weak self, layer] in
             guard let self, dismissing === layer else { return }
             dismissing = nil
+            // Keep the presenting controller at its original screen coordinates
+            // throughout UIKit's dismissal. Reparenting its tab bar mid-animation
+            // gives UIKit a new safe area, then makes the bar jump when it settles.
+            if let owner = layer.owner, let home = layer.home {
+                if layer.controller.retiringNavigation != nil {
+                    home.addSubview(self.presenter.viewport)
+                } else {
+                    self.presenter.navigation.move(to: owner) { home.addSubview(self.presenter.viewport) }
+                }
+            }
+            releaseBackground(layer)
             retiring.removeAll { $0 === layer }
             #if os(iOS)
             // Gone: what the bar sits over now (LLP 1105 D5).
@@ -560,7 +561,7 @@ final class ModalHost: NSObject, UIAdaptivePresentationControllerDelegate {
         // sheet's own stack was and whatever dismissed it.
         DispatchQueue.main.async { [weak self, layer] in
             guard let self, layers.last === layer else { return }
-            closeTop(animated: false, refit: false)
+            closeTop(animated: false)
             presenter.navigation.modalDidDismiss()
             fit()
         }
@@ -575,7 +576,7 @@ final class ModalHost: NSObject, UIAdaptivePresentationControllerDelegate {
             layer.controller.freeze()
             layer.controller.retiringRoot = layer.route
             layer.controller.retiringNavigation = presenter.navigation.preserveModalContent(in: layer.controller)
-            closeTop(animated: false, refit: false)
+            closeTop(animated: false)
         }
     }
 }

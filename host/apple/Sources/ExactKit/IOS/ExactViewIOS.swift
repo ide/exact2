@@ -224,6 +224,8 @@ public final class ExactView: UIView {
             }
             return
         }
+        // Keep the viewport in the outgoing sheet until UIKit finishes dismissal
+        guard !presenter.modals.isDismissing else { return }
         // UIKit moves the keyboard sideways with an interactive pop. Its
         // hide notification is not a request to drop the composer below
         // those moving keys; keep the current viewport until it settles.
