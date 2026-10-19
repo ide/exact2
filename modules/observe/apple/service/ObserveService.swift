@@ -95,6 +95,13 @@ final class ObserveService {
             return Self.seconds(x - y)
         }
         var phases: [String: Any] = [:]
+        // Before the app has control: dyld and this image's constructor, the
+        // other images' initializers up to `main`, UIKit up to the app
+        // delegate's init, and the delegate's launch up to didFinishLaunching.
+        phases["exact.phase.exec"] = ms("constructor", "process")
+        phases["exact.phase.initializers"] = ms("main", "constructor")
+        phases["exact.phase.uikit"] = ms("delegateInit", "main")
+        phases["exact.phase.launching"] = ms("didFinishLaunching", "delegateInit")
         phases["exact.phase.scene"] = ms("scene", "didFinishLaunching")
         phases["exact.phase.boot_wait"] = ms("boot", "scene")
         phases["exact.phase.boot"] = ms("commit", "boot")
@@ -103,7 +110,21 @@ final class ObserveService {
         phases["exact.since_process_start.ttr"] = marks["present"].map { Self.seconds($0) }
         phases["exact.since_process_start.tti"] = marks["interactive"].map { Self.seconds($0) }
         phases["exact.present.method"] = "next_vsync"
+        // Activation's parts (ms): the app module's load, the wait for the
+        // data module (and how many polls), its ready call, its first batch.
+        if let b = e["boot"] as? [String: Any] {
+            for key in ["runner", "apply"] { if let v = b[key] as? Double { phases["exact.boot.\(key)"] = Self.seconds(v) } }
+            if let parts = b["parts"] as? String { phases["exact.boot.apply_parts"] = parts }
+        }
+        if let d = e["data"] as? [String: Any] {
+            for (key, name) in [("receipt", "draw_receipt"), ("appModule", "app_module"), ("waited", "wait"), ("ready", "ready"), ("apply", "apply")] {
+                if let v = d[key] as? Double { phases["exact.data.\(name)"] = Self.seconds(v) }
+            }
+            if let polls = d["polls"] as? Int { phases["exact.data.polls"] = polls }
+        }
         if let path = e["bootPath"] { phases["exact.boot.path"] = path }
+        // Cold or warm, by Observe's heuristic (a reboot since the last launch).
+        if let type = e["launchType"] { phases["exact.launch.type"] = type }
         if e["debugger"] as? Bool == true { phases["exact.launch.debugger"] = true }
         for (name, value) in metrics {
             var params = globals
@@ -111,6 +132,19 @@ final class ObserveService {
             if name == "timeToInteractive" {
                 for (k, v) in device { params[k] = v }
                 params["exact.tti.reason"] = e["tti"] ?? "settled"
+                // What was outstanding over time, ms from process start: shows what held TTI.
+                if let trace = e["trace"] as? [String], !trace.isEmpty { params["exact.tti.trace"] = trace.joined(separator: " → ") }
+                // Batches that still changed the screen once nothing was outstanding.
+                if let changes = e["changes"] as? [String], !changes.isEmpty { params["exact.tti.changes"] = changes.joined(separator: "; ") }
+                // Each item that held it, ms from process start, the latest to clear first.
+                if let items = e["items"] as? [[String: Any]], !items.isEmpty {
+                    let ordered = items.sorted { ($0["to"] as? Double ?? .infinity) > ($1["to"] as? Double ?? .infinity) }
+                    params["exact.tti.items"] = ordered.map { item -> String in
+                        let from = String(format: "%.0f", item["from"] as? Double ?? 0)
+                        let to = (item["to"] as? Double).map { String(format: "%.0f", $0) } ?? "…"
+                        return "\(item["item"] as? String ?? "?") \(from)–\(to)"
+                    }.joined(separator: "; ")
+                }
                 if let failed = e["failed"] as? [String] { params["exact.tti.failed"] = failed.count }
             }
             store.addMetric(session: session, time: wall, category: "appStartup", name: name, value: value, params: params)
@@ -324,6 +358,30 @@ final class ObserveService {
     }
 }
 
+// MARK: Queries from the app's own module
+
+extension ObserveService {
+    /// What this device recorded, newest first, for an app's own screens
+    /// (`ExactServices.query("observe", …)`). `{"op": "recent", "limit": n}`
+    /// (1–500, default 50) answers `{"session", "metrics": [{session, time,
+    /// category, name, value, route, sent, params}]}`: `time` in seconds since
+    /// 1970, `value` in seconds as sent, `sent` whether it has gone to Observe.
+    func query(_ request: [String: Any]) -> [String: Any] {
+        guard request["op"] as? String == "recent" else { return ["error": "observe answers {\"op\": \"recent\"}"] }
+        guard let store else { return ["session": session, "metrics": []] }
+        let limit = max(1, min(500, (request["limit"] as? Int) ?? 50))
+        let sent = store.cursor("metrics")
+        let rows = store.rows("SELECT id, session, time, category, name, value, route, params FROM metrics ORDER BY id DESC LIMIT ?", [limit])
+        let metrics = rows.map { r -> [String: Any] in
+            var m: [String: Any] = ["session": r[1] ?? "", "time": r[2] ?? 0.0, "category": r[3] ?? "", "name": r[4] ?? "",
+                                    "value": r[5] ?? 0.0, "route": r[6] ?? "", "sent": ((r[0] as? Int64) ?? .max) <= sent]
+            if let p = r[7] as? String, let o = try? JSONSerialization.jsonObject(with: Data(p.utf8)) { m["params"] = o }
+            return m
+        }
+        return ["session": session, "metrics": metrics]
+    }
+}
+
 // MARK: C entry points bound by ExactKit's service loader
 
 @_cdecl("exact_service_start")
@@ -345,4 +403,16 @@ public func exactServiceBackground(_ state: UnsafeMutableRawPointer?) {
     guard let state else { return }
     let service = Unmanaged<ObserveService>.fromOpaque(state).takeUnretainedValue()
     service.queue.async { service.dispatch() }
+}
+
+@_cdecl("exact_service_query")
+public func exactServiceQuery(_ state: UnsafeMutableRawPointer?, _ json: UnsafePointer<UInt8>?, _ length: UInt32, _ context: UnsafeMutableRawPointer?,
+                              _ reply: @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<UInt8>?, UInt32) -> Void) {
+    guard let state else { return reply(context, nil, 0) }
+    let service = Unmanaged<ObserveService>.fromOpaque(state).takeUnretainedValue()
+    let request = json.flatMap { (try? JSONSerialization.jsonObject(with: Data(bytes: $0, count: Int(length)))) as? [String: Any] } ?? [:]
+    service.queue.async {
+        let data = (try? JSONSerialization.data(withJSONObject: service.query(request))) ?? Data("{}".utf8)
+        data.withUnsafeBytes { reply(context, $0.bindMemory(to: UInt8.self).baseAddress, UInt32(data.count)) }
+    }
 }

@@ -3,6 +3,13 @@
 // otherwise at the commit. It is cold if its entry was not shown before in the session.
 // Render time is the first vsync after the committing run-loop turn ends.
 // TTI is when outstanding work clears, never before render. A newer change cancels it.
+// Only a cold navigation has a TTI: a screen already shown (back, a tab seen
+// before) was interactive before, as Observe's markInteractive on mount is
+// never called again for it. A warm one ends at its warm_ttr.
+// A change UIKit made itself (its Back button, a back swipe, LLP 1035.001.000)
+// reaches the app once its transition has ended, but the screen it shows was
+// drawn from the transition's first frame: render is that frame, the first vsync
+// after the turn in which UIKit began to show it (`willShow` comes before it).
 import Foundation
 import QuartzCore
 
@@ -42,6 +49,39 @@ final class NavigationMarks: NSObject {
 
     func input(at timestamp: TimeInterval) { lastInput = timestamp }
 
+    /// The first frame of UIKit's last transition of its own (its Back
+    /// button, a back swipe), in seconds on the `CACurrentMediaTime` clock.
+    private var platformShowing: Double?
+    private var platformTurnEnded: Double?
+    private var platformLink: CADisplayLink?
+
+    /// UIKit begins showing a screen itself (`willShow` outside Exact's
+    /// projection): its first frame is the next vsync after this turn, as
+    /// Core Animation commits the transition at the turn's end.
+    func platformBeganShowing() {
+        platformShowing = nil
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            platformTurnEnded = CACurrentMediaTime()
+            if platformLink == nil { platformLink = mainDisplayLink(self, #selector(platformTick(_:))) }
+        }
+    }
+
+    /// That transition was cancelled (a swipe let go): it showed nothing.
+    func platformCancelled() {
+        platformShowing = nil
+        platformTurnEnded = nil
+        platformLink?.invalidate()
+        platformLink = nil
+    }
+
+    @objc private func platformTick(_ link: CADisplayLink) {
+        defer { platformLink?.invalidate(); platformLink = nil }
+        guard let ended = platformTurnEnded, let g = Vsync(link).next(after: ended) else { return }
+        platformShowing = g
+        platformTurnEnded = nil
+    }
+
     func routerChanged(_ session: ExactSession, payload: [String: Any]) {
         guard let top = (payload["top"] as? NSNumber)?.uint64Value else { return }
         let key = ObjectIdentifier(session)
@@ -68,6 +108,38 @@ final class NavigationMarks: NSObject {
         lastInput = nil
         if pending != nil { ExactJournal.shared.record("navigation.superseded", ["route": fields["route"] ?? ""]) }
         note("change \(fields["route"] ?? "") \(cold ? "cold" : "warm") \(fields["exact.nav.cause"] ?? "")")
+        // The platform's own change: its screen showed when UIKit began to
+        // show it, not now, after the transition (a Back tap's pop is ~0.5 s).
+        if let shown = platformShowing, now - shown <= 2.0 {
+            platformShowing = nil
+            fields["exact.nav.platform"] = true
+            let p = Pending(session: session, start: min(start, shown), committed: now, fields: fields, cold: cold)
+            pending = p
+            p.presented = shown
+            var f = fields
+            f["name"] = cold ? "cold_ttr" : "warm_ttr"
+            f["value"] = shown - p.start
+            ExactJournal.shared.record("navigation", f)
+            note("\(f["name"] ?? "") \(f["route"] ?? "") \(String(format: "%.1f", (shown - p.start) * 1000)) ms (UIKit's)")
+            guard cold else {
+                pending = nil
+                deadline?.cancel()
+                return
+            }
+            deadline?.cancel()
+            let item = DispatchWorkItem { [weak self, weak p] in
+                guard let self, let p, pending === p else { return }
+                pending = nil
+                stop()
+            }
+            deadline = item
+            DispatchQueue.main.asyncAfter(deadline: .now() + ExactLaunch.ttiTimeout, execute: item)
+            // Nothing outstanding now: nothing was while UIKit animated
+            // either (the screen was there), so it was interactive as shown.
+            evaluate(at: shown)
+            return
+        }
+        platformShowing = nil
         let p = Pending(session: session, start: start, committed: now, fields: fields, cold: cold)
         pending = p
         // Core Animation commits at the end of this turn, so the next turn is after it.
@@ -105,11 +177,17 @@ final class NavigationMarks: NSObject {
         f["value"] = g - p.start
         ExactJournal.shared.record("navigation", f)
         note("\(f["name"] ?? "") \(f["route"] ?? "") \(String(format: "%.1f", (g - p.start) * 1000)) ms")
+        guard p.cold else {
+            pending = nil
+            deadline?.cancel()
+            stop()
+            return
+        }
         evaluate()
     }
 
     /// Records TTI once nothing is outstanding after the change was shown.
-    private func evaluate() {
+    private func evaluate(at clear: Double? = nil) {
         guard let p = pending, let presented = p.presented, let session = p.session,
               let ledger = ExactLaunch.ledger(session) else { return }
         guard ledger.items.isEmpty, !ledger.poisoned else { return }
@@ -118,7 +196,7 @@ final class NavigationMarks: NSObject {
         stop()
         var f = p.fields
         f["name"] = "tti"
-        f["value"] = max(CACurrentMediaTime(), presented) - p.start
+        f["value"] = max(clear ?? CACurrentMediaTime(), presented) - p.start
         if !ledger.failed.isEmpty { f["exact.tti.failed"] = ledger.failed.count }
         ExactJournal.shared.record("navigation", f)
         note("tti \(f["route"] ?? "") \(String(format: "%.1f", (f["value"] as? Double ?? 0) * 1000)) ms")

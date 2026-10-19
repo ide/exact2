@@ -419,6 +419,8 @@ public final class ExactSession {
     public private(set) var bootMs = 0.0
     public private(set) var rustMs = 0.0
     public private(set) var applyMs = 0.0
+    /// The first batch's apply, part by part, in ms (`ApplyProfile`).
+    public private(set) var applyParts: [String: Double] = [:]
     /// Commands from the batch being applied, delivered after it (D2).
     private var pendingCommands: [(String, [Any], UInt32?)] = []
     private(set) var applying = false
@@ -817,6 +819,7 @@ public final class ExactSession {
     @discardableResult
     public func boot(size: CGSize) -> Batch {
         let t = CACurrentMediaTime()
+        ApplyProfile.begin()
         ExactLaunch.shared.bootEntered(self)
         primePreferences()
         primeTime()  // `prepare` primes again; the fallback boot reads this
@@ -827,6 +830,7 @@ public final class ExactSession {
             if let candidate = prepare(bytes, resolver: app.resolver, token: app.selectedToken, module: app.lastModule, size: size) {
                 let batch = commit(candidate)
                 presentCommitted(batch, label: "selected")
+                _ = ApplyProfile.end() // only the baked boot's first batch is profiled
                 return batch
             }
             let reason = app.resolver.refusal ?? "initial plan refused"
@@ -845,6 +849,7 @@ public final class ExactSession {
     @discardableResult
     public func boot(plan bytes: Data, size: CGSize) -> Batch {
         let t = CACurrentMediaTime()
+        ApplyProfile.begin()
         ExactLaunch.shared.bootEntered(self)
         primePreferences()
         primeTime()
@@ -869,7 +874,10 @@ public final class ExactSession {
             text.commitFonts()
             appFileRoots = AppFiles.learn(runtime) // before the first frame's `app:/` images load (LLP 1069.002 D7)
         }
+        if !ApplyProfile.on { ApplyProfile.begin() }
+        ApplyProfile.add("runner", since: started)
         apply(batch)
+        applyParts = ApplyProfile.end()
         treeIsIn()
         if batch.error == nil { tellTime(); refuseUnheardLaunch(); ExactLaunch.shared.treeApplied(self, path: "baked") }
         // A fresh runner must receive the view's current viewport and insets.
@@ -1117,7 +1125,20 @@ public final class ExactSession {
             transformInputHold?.cancelIfInputIneligible()
             presenter.transformGeometry.changed()
             applying = false
-            ExactLaunch.shared.applied(self, changed: !batch.ops.isEmpty)
+            ExactLaunch.shared.applied(self, changed: !batch.ops.isEmpty) { [presenter] in
+                // What the batch changed, for TTI's tail: op kinds and the
+                // nodes' testIds (or kinds), a few of each.
+                var kinds: [String: Int] = [:], names: [String] = []
+                for op in batch.ops {
+                    kinds[op.op.rawValue, default: 0] += 1
+                    guard op.nodeID != nil, names.count < 4 else { continue }
+                    let view = presenter.views[op.id]
+                    let name = view?.props["testId"] ?? view?.kind ?? op.kind
+                    if !names.contains(name) { names.append(name) }
+                }
+                let ops = kinds.sorted { $0.value > $1.value }.prefix(3).map { "\($0.key)×\($0.value)" }.joined(separator: " ")
+                return names.isEmpty ? ops : "\(ops) (\(names.joined(separator: ", ")))"
+            }
             NavigationMarks.shared.applied(self)
             #if os(macOS)
             regions.flush()
@@ -1261,14 +1282,23 @@ public final class ExactSession {
         DispatchQueue.main.async { [weak self] in
             guard let self, state != .destroyed, generation == drawnGeneration else { return }
             // Prepare before any source calls the module (LLP 1067.000 D8).
-            natives.prepareAppModule(); presenter.releaseLaunchAutofocus() // the next turn, never waiting on a loading source
+            let started = CACurrentMediaTime()
+            natives.prepareAppModule()
+            let loaded = CACurrentMediaTime()
+            presenter.releaseLaunchAutofocus() // the next turn, never waiting on a loading source
             let batch = runtime.dataReady()
+            ExactLaunch.shared.dataStep(self, appModule: loaded - started, ready: CACurrentMediaTime() - loaded, pending: batch.pending)
             if batch.pending {
+                // Still starting the data module: the launch tracker samples
+                // now, so what waits on it shows from the first frame on.
+                ExactLaunch.shared.waitingForData(self)
                 pendingActivation = (drawnGeneration, token) // the generation stays activated: only the source's wake retries
                 return
             }
             appFileRoots = AppFiles.learn(runtime) // the roots storage configured
+            let applying = CACurrentMediaTime()
             apply(batch)
+            ExactLaunch.shared.dataApplied(self, CACurrentMediaTime() - applying)
             dataGeneration = drawnGeneration
             activityOutput?.drain()
             if batch.error != nil { ExactLaunch.shared.activated(self, ok: false) }

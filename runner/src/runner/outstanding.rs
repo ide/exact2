@@ -1,7 +1,10 @@
 //! The runner's outstanding work: time-to-interactive (TTI) is reached when it
 //! is clear. It has no clock; the host timestamps the moment it clears.
-//! Device holds don't count because they wait on a person. A resource whose
-//! current arguments failed counts as done, not outstanding.
+//! Only what the screen still lacks counts: a request for a resource already
+//! showing an answer (kept, baked or settled) is a background refresh, and a
+//! mutation the app sent is a write, so neither holds TTI. Device holds don't
+//! count because they wait on a person. A resource whose current arguments
+//! failed counts as done.
 
 use super::{Runner, Target};
 
@@ -13,18 +16,14 @@ pub const STARTUP_TIMER_WINDOW_MS: f64 = 1000.0;
 /// The runner's outstanding work, by kind.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Outstanding {
-    /// Requests in flight, by resource or mutation name.
+    /// Requests in flight for resources showing no answer yet.
     pub requests: Vec<String>,
-    /// Streams that have not delivered their first message.
+    /// Streams for resources showing no answer, before their first message.
     pub streams: Vec<String>,
     /// Resources showing a placeholder until their source can answer.
     pub awaiting: Vec<String>,
-    /// Compiled answers shown until the source is asked again.
-    pub deferred: Vec<String>,
     /// Armed one-shot tasks due within the startup window, by action name.
     pub one_shots: Vec<String>,
-    /// Mutations whose `then` action is armed.
-    pub thens: Vec<String>,
     /// Resources whose current arguments failed: settled, but in error.
     pub failed: Vec<String>,
     /// Mounted elements marked `aria-busy`, by test id, else view id.
@@ -48,9 +47,7 @@ impl Outstanding {
             ("requests", &self.requests),
             ("streams", &self.streams),
             ("awaiting", &self.awaiting),
-            ("deferred", &self.deferred),
             ("oneShots", &self.one_shots),
-            ("thens", &self.thens),
             ("failed", &self.failed),
             ("busy", &self.busy),
         ] {
@@ -72,9 +69,7 @@ impl Outstanding {
         self.requests.is_empty()
             && self.streams.is_empty()
             && self.awaiting.is_empty()
-            && self.deferred.is_empty()
             && self.one_shots.is_empty()
-            && self.thens.is_empty()
             && self.busy.is_empty()
     }
 }
@@ -91,6 +86,12 @@ impl<D: DataSource> Runner<D> {
             if !p.in_flight() || self.device_holds.iter().any(|h| h.ticket == p.ticket) {
                 continue;
             }
+            let Target::Resource(i) = p.target else {
+                continue;
+            };
+            if matches!(&self.resources[i], Some(s) if !s.placeholder) {
+                continue;
+            }
             let name = self.target_name(p.target);
             if p.stream.is_some() {
                 out.streams.push(name);
@@ -98,7 +99,6 @@ impl<D: DataSource> Runner<D> {
                 out.requests.push(name);
             }
         }
-        let asked = |i: usize| self.pending.iter().any(|p| p.target == Target::Resource(i));
         for i in 0..self.plan.resources.len() {
             let name = || self.plan.str(self.plan.resources[i].name).to_string();
             if matches!((&self.failed_args[i], &self.resources[i]), (Some(f), Some(s)) if f == &s.args)
@@ -106,8 +106,6 @@ impl<D: DataSource> Runner<D> {
                 out.failed.push(name());
             } else if self.awaiting[i] {
                 out.awaiting.push(name());
-            } else if self.stale[i] && !asked(i) {
-                out.deferred.push(name());
             }
         }
         for (t, row) in self.timers.iter().zip(&self.plan.timers) {
@@ -132,12 +130,6 @@ impl<D: DataSource> Runner<D> {
                 out.busy.push(name);
             }
             stack.extend(node.children().into_iter().rev());
-        }
-        for (m, due) in self.then_due.iter().enumerate() {
-            if due.is_finite() {
-                out.thens
-                    .push(self.plan.str(self.plan.mutations[m].name).to_string());
-            }
         }
         out
     }

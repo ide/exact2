@@ -16,7 +16,7 @@ public final class ExactLaunch: NSObject {
     public static let shared = ExactLaunch()
 
     public enum Mark: String, CaseIterable {
-        case process, constructor, delegateInit, didFinishLaunching, scene, boot, commit, present, activated, interactive
+        case process, constructor, main, delegateInit, didFinishLaunching, scene, boot, commit, present, activated, interactive
     }
 
     let facts = exact_launch_constructor_facts()
@@ -42,6 +42,14 @@ public final class ExactLaunch: NSObject {
     /// How time to interactive ended: settled, declared, failed, timeout, or a failure.
     private(set) var ttiOutcome: String?
     private(set) var lastOutstanding: [String] = []
+    /// Each outstanding item's span, seconds on the `CACurrentMediaTime`
+    /// clock: first seen at an evaluation, cleared at a later one (what held
+    /// TTI, by item, not only the set at each change the trace keeps).
+    private var spans: [String: (from: Double, to: Double?)] = [:]
+    private var spanOrder: [String] = []
+    /// Each batch that changed the screen after nothing was outstanding: ms
+    /// from process start and what it changed.
+    private var changes: [String] = []
     /// Each distinct set of outstanding work, with ms from process start, for
     /// debugging how time to interactive was reached.
     private(set) var trace: [String] = []
@@ -65,6 +73,12 @@ public final class ExactLaunch: NSObject {
     }
 
     // MARK: Host hooks (the adapter's app delegate)
+
+    /// Called first thing in the adapter's `main`: what ran between the
+    /// constructor and here is every other image's initializers.
+    public func main() {
+        if marks[.main] == nil { marks[.main] = CACurrentMediaTime() }
+    }
 
     /// Called from the app delegate's init, inside `UIApplicationMain` and after
     /// any prewarm pause. Observe calls this mark "main".
@@ -132,9 +146,50 @@ public final class ExactLaunch: NSObject {
         scheduleEvaluate()
     }
 
-    /// Re-reads outstanding work after this run-loop turn and its commit finish.
-    func applied(_ session: ExactSession, changed: Bool) {
+    /// What activation spent, seconds: the app's Swift module load, each
+    /// `dataReady` call (the last one runs the data module's start), how
+    /// long and how often it said pending, and applying its first batch.
+    private var data: (module: Double, waited: Double, polls: Int, ready: Double, apply: Double, first: Double?) = (0, 0, 0, 0, 0, nil)
+
+    func dataStep(_ session: ExactSession, appModule: Double, ready: Double, pending: Bool) {
         guard session === launchSession, ttiOutcome == nil else { return }
+        let now = CACurrentMediaTime()
+        if data.first == nil { data.first = now - appModule - ready }
+        data.module += appModule
+        if pending {
+            data.polls += 1
+        } else {
+            data.ready = ready
+            data.waited = now - ready - appModule - (data.first ?? now)
+        }
+    }
+
+    func dataApplied(_ session: ExactSession, _ seconds: Double) {
+        guard session === launchSession, ttiOutcome == nil else { return }
+        data.apply = seconds
+    }
+
+    /// The data module is still starting (activation pending): sample what
+    /// is outstanding, so its span starts when it does, not at the next apply.
+    func waitingForData(_ session: ExactSession) {
+        guard session === launchSession, ttiOutcome == nil else { return }
+        scheduleEvaluate()
+    }
+
+    /// Re-reads outstanding work after this run-loop turn and its commit finish.
+    func applied(_ session: ExactSession, changed: Bool, what: () -> String = { "" }) {
+        guard session === launchSession, ttiOutcome == nil else { return }
+        // Nothing outstanding, but the screen still changing: TTI waits for
+        // a frame with no change, so this is what holds it then (a fresh
+        // answer replacing a kept one, a fade). Its span: first to last.
+        if changed, lastOutstanding.isEmpty, marks[.present] != nil {
+            let now = CACurrentMediaTime(), item = "screen:changing"
+            if spans[item] == nil { spanOrder.append(item) }
+            spans[item] = (spans[item]?.from ?? now, now)
+            if changes.count < 12, let p = marks[.process] {
+                changes.append("\(String(format: "%.0f", (now - p) * 1000)) \(what())")
+            }
+        }
         if changed { contentDirty = true; candidate = nil }
         scheduleEvaluate()
     }
@@ -193,7 +248,7 @@ public final class ExactLaunch: NSObject {
         guard let data = session.agent("{\"op\":\"outstanding\"}").data(using: .utf8),
               let o = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
         var out: [String] = []
-        for key in ["requests", "streams", "awaiting", "deferred", "oneShots", "thens", "busy"] {
+        for key in ["requests", "streams", "awaiting", "oneShots", "busy"] {
             out += (o[key] as? [String] ?? []).map { "\(key):\($0)" }
         }
         out += session.hostOutstanding.map { "host:\($0)" }
@@ -209,6 +264,12 @@ public final class ExactLaunch: NSObject {
         if outstanding != lastOutstanding || trace.isEmpty, trace.count < 32, let p = marks[.process] {
             trace.append("\(String(format: "%.1f", (CACurrentMediaTime() - p) * 1000)) [\(outstanding.joined(separator: ", "))]")
         }
+        let seen = CACurrentMediaTime()
+        for item in outstanding where spans[item]?.to != nil || spans[item] == nil {
+            if spans[item] == nil { spanOrder.append(item) }
+            spans[item] = (spans[item]?.from ?? seen, nil)
+        }
+        for item in lastOutstanding where !outstanding.contains(item) { spans[item]?.to = seen }
         lastOutstanding = outstanding
         guard outstanding.isEmpty, marks[.present] != nil else { candidate = nil; return }
         let now = CACurrentMediaTime()
@@ -316,6 +377,33 @@ public final class ExactLaunch: NSObject {
         if !lastOutstanding.isEmpty { out["outstanding"] = lastOutstanding }
         if !failedResources.isEmpty { out["failed"] = failedResources }
         if !trace.isEmpty { out["trace"] = trace }
+        if !changes.isEmpty { out["changes"] = changes }
+        // Boot's two parts (ms): the runner's boot with the first layout, and
+        // applying its batch to the views.
+        if let s = launchSession, s.rustMs > 0 {
+            var boot: [String: Any] = ["runner": (s.rustMs * 10).rounded() / 10, "apply": (s.applyMs * 10).rounded() / 10]
+            // The apply's largest parts, so a slow first batch says which part.
+            let parts = s.applyParts.filter { $0.value >= 0.5 }.sorted { $0.value > $1.value }
+            if !parts.isEmpty { boot["parts"] = parts.filter { $0.key != "runner" }.prefix(16).map { $0.key.hasPrefix("#") ? "\($0.key.dropFirst()) ×\(Int($0.value))" : "\($0.key) \(Int($0.value.rounded()))" }.joined(separator: ", ") }
+            out["boot"] = boot
+        }
+        if data.first != nil {
+            let ms = { (s: Double) in (s * 1000 * 10).rounded() / 10 }
+            // From the first commit to the first node's draw receipt, which
+            // starts activation (the render server's first draw).
+            let receipt = marks[.commit].flatMap { c in data.first.map { ms(max(0, $0 - c)) } }
+            out["data"] = ["appModule": ms(data.module), "waited": ms(max(0, data.waited)), "polls": data.polls,
+                           "ready": ms(data.ready), "apply": ms(data.apply), "receipt": receipt as Any]
+        }
+        if let p = marks[.process], !spans.isEmpty {
+            let ms = { (t: Double) in ((t - p) * 1000 * 10).rounded() / 10 }
+            out["items"] = spanOrder.compactMap { item -> [String: Any]? in
+                guard let span = spans[item] else { return nil }
+                var o: [String: Any] = ["item": item, "from": ms(span.from)]
+                if let to = span.to { o["to"] = ms(to) }
+                return o
+            }
+        }
         if !NavigationMarks.shared.recent.isEmpty { out["navigation"] = NavigationMarks.shared.recent }
         if let session { out["launchSession"] = session === launchSession }
         if facts.traced != 0 { out["debugger"] = true }

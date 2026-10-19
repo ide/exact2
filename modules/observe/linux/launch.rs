@@ -609,6 +609,11 @@ impl Service {
             if name == "timeToInteractive" {
                 params.extend(device.clone());
                 params.insert("exact.tti.reason".into(), e["tti"].clone());
+                // What was outstanding over time, ms from process start: shows what held TTI.
+                if let Some(trace) = e["trace"].as_array().filter(|t| !t.is_empty()) {
+                    let steps: Vec<&str> = trace.iter().filter_map(Value::as_str).collect();
+                    params.insert("exact.tti.trace".into(), steps.join(" → ").into());
+                }
             }
             self.metric("appStartup", name, value, wall, None, params);
         }
