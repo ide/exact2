@@ -4,8 +4,7 @@ use crate::content_region::ContentRegionRegistration;
 use exact_runner::Value;
 use std::time::Instant;
 
-#[path = "fail_backend.rs"]
-mod fail_backend;
+use crate::presenter::fail_backend;
 #[path = "projection_discriminator_tests.rs"]
 mod projection_discriminator;
 const APP: &str = r#"component App

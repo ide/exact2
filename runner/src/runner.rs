@@ -534,6 +534,9 @@ pub struct Runner<D: DataSource> {
     /// What the host links of the runner's own answers (LLP 1047 D3).
     links: RunnerLinks,
     router: Option<Box<dyn router::Routing>>,
+    /// An event's own commit is running ([`Runner::dispatch`], or the platform's Back or
+    /// link, `host_commit`), not a timer's before it.
+    dispatching_event: bool,
     /// What happened, one line each, for the agent API's `logs`: the last
     /// [`JOURNAL_RING`] lines, and how many were dropped before them.
     journal: std::collections::VecDeque<String>,
@@ -928,6 +931,7 @@ impl<D: DataSource> Runner<D> {
             surface_refusals: Default::default(),
             links,
             router,
+            dispatching_event: false,
             poisoned: false,
             full: false,
             row_writes: Default::default(),

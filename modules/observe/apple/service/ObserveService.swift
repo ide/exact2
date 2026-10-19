@@ -14,11 +14,14 @@ final class ObserveService {
     let clientId: UUID
     let metadata: [String: Any]
     var device: [String: Any] = [:]
-    /// The route shown at launch. If the user navigates before startup ends, it gets no `tti`.
+    /// The route shown at launch. It gets startup's `tti` when the startup report says it stayed on top (`launchScreen`).
     var launchRoute: [String: Any]?
-    var navigatedBeforeStartup = false
     var globals: [String: Any] = [:]
-    var gate: (after: Date?, failures: Int) = (nil, 0)
+    /// Each signal's retry gate, as expo-observe keeps one per endpoint.
+    var gates: [String: (after: Date?, failures: Int)] = [:]
+    /// The earliest dispatch a closed gate scheduled, and its token: a newer, earlier one replaces it.
+    var retryAt: Date?
+    var retryToken = 0
     var sending = false
     var scheduled = false
 
@@ -56,6 +59,12 @@ final class ObserveService {
         for record in Self.records(handoff) {
             if record["kind"] as? String == "device" { device = record["params"] as? [String: Any] ?? [:] }
         }
+        // Remove a disconnected path's cost flags, which the launch part kept from the connection
+        // before it, as Observe omits them without one (`MetricParamsBuilder.swift`).
+        if device["expo.network.connected"] as? Bool == false {
+            device["expo.network.isExpensive"] = nil
+            device["expo.network.isConstrained"] = nil
+        }
         if Self.logEnabled { fputs("observe: service started, session \(session)\n", stderr) }
         queue.async { [self] in
             store?.saveSession(session, start: config["sessionStart"] as? Double ?? Date().timeIntervalSince1970, metadata: metadata)
@@ -72,24 +81,41 @@ final class ObserveService {
             let wall = e["wall"] as? Double ?? Date().timeIntervalSince1970
             switch kind {
             case "startup": startup(e, wall: wall)
+            case "startup.tti": startup(e, wall: wall)
+            case "memory.warning": memoryWarning(e, wall: wall)
             case "navigation.launch": launchRoute = e
             case "navigation": navigation(e, wall: wall)
             case "update.download": updateDownload(e, wall: wall)
+            // The update that runs from now (empty: the embedded app): Observe's `expo.app.update_id` on the rows after it.
+            case "update.launched":
+                store?.running = (e["entry"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+                store?.setSessionRunning(session, store?.running)
             case "app.attributes": globals = ObserveRules.attributes(e["attributes"] as? [String: Any] ?? [:]).kept
             case "app.event": log(e, wall: wall, error: false)
             case "app.error": log(e, wall: wall, error: true)
-            case "background": dispatch()
+            case "background": DispatchQueue.main.async { [self] in dispatchInBackground() }
             default: return
             }
             if kind != "background" { scheduleDispatch() }
         }
     }
 
-    /// Stores the launch metrics from ExactLaunch's startup report under Observe's names.
+    /// The startup metrics stored, by name (`launch.` for the launch route's): a report after
+    /// the timeout's (`startup.tti`) stores only what that one lacked, such as a first frame
+    /// that came after it.
+    var stored: Set<String> = []
+
+    /// Stores the launch metrics from ExactLaunch's startup report under Observe's names,
+    /// each at the time of its own mark, and each once.
     func startup(_ e: [String: Any], wall: Double) {
+        // The rows carry the update startup's marks are of, not one a live activation started since.
+        let current = store?.running
+        if let u = e["update"] as? String { store?.running = u.isEmpty ? nil : u }
+        defer { store?.running = current }
         launchNavigation(e, wall: wall)
         guard let store, let metrics = e["metrics"] as? [String: Double], !metrics.isEmpty else { return }
         let marks = e["marks"] as? [String: Double] ?? [:]
+        let walls = e["walls"] as? [String: Double] ?? [:]
         let ms = { (a: String, b: String) -> NSDecimalNumber? in
             guard let x = marks[a], let y = marks[b] else { return nil }
             return Self.seconds(x - y)
@@ -109,7 +135,7 @@ final class ObserveService {
         phases["exact.phase.activate"] = ms("activated", "commit")
         phases["exact.since_process_start.ttr"] = marks["present"].map { Self.seconds($0) }
         phases["exact.since_process_start.tti"] = marks["interactive"].map { Self.seconds($0) }
-        phases["exact.present.method"] = "next_vsync"
+        phases["exact.present.method"] = e["presentMethod"] as? String ?? "next_vsync"
         // Activation's parts (ms): the app module's load, the wait for the
         // data module (and how many polls), its ready call, its first batch.
         if let b = e["boot"] as? [String: Any] {
@@ -126,11 +152,21 @@ final class ObserveService {
         // Cold or warm, by Observe's heuristic (a reboot since the last launch).
         if let type = e["launchType"] { phases["exact.launch.type"] = type }
         if e["debugger"] as? Bool == true { phases["exact.launch.debugger"] = true }
-        for (name, value) in metrics {
+        if e["interrupted"] as? Bool == true { phases["exact.launch.interrupted"] = true }
+        for (name, value) in metrics where stored.insert(name).inserted {
             var params = globals
             for (k, v) in phases { params[k] = v }
+            var route: String?
             if name == "timeToInteractive" {
                 for (k, v) in device { params[k] = v }
+                // The screen shown at TTI, with Observe's navigation params.
+                if let r = e["route"] as? [String: Any] {
+                    route = r["route"] as? String
+                    params["routeParams"] = r["routeParams"] ?? [:]
+                    if let url = r["url"] { params["url"] = url }
+                }
+                if let frames = e["frames"] as? [String: Any] { for (k, v) in frames { params[k] = v } }
+                if e["late"] as? Bool == true { params["exact.tti.late"] = true }
                 params["exact.tti.reason"] = e["tti"] ?? "settled"
                 // What was outstanding over time, ms from process start: shows what held TTI.
                 if let trace = e["trace"] as? [String], !trace.isEmpty { params["exact.tti.trace"] = trace.joined(separator: " → ") }
@@ -147,14 +183,13 @@ final class ObserveService {
                 }
                 if let failed = e["failed"] as? [String] { params["exact.tti.failed"] = failed.count }
             }
-            store.addMetric(session: session, time: wall, category: "appStartup", name: name, value: value, params: params)
+            store.addMetric(session: session, time: walls[name] ?? wall, category: "appStartup", name: name, value: value, route: route, params: params)
         }
     }
 
     /// Observe's `expo.navigation.*` metrics. The route is the pattern, not the concrete path.
     func navigation(_ e: [String: Any], wall: Double) {
         guard let store, let name = e["name"] as? String, let value = e["value"] as? Double else { return }
-        navigatedBeforeStartup = true
         var params = navigationParams(e, launch: false)
         for (k, v) in e where k.hasPrefix("exact.") { params[k] = v }
         store.addMetric(session: session, time: wall, category: "navigation", name: name, value: value, route: e["route"] as? String, params: params)
@@ -162,16 +197,30 @@ final class ObserveService {
 
     /// The launch route's `cold_ttr` and `tti`, measured from boot. Observe measures from
     /// its integration start, which Exact has no equivalent of; boot is the closest mark.
+    /// They exist when the startup metrics they end with do.
     func launchNavigation(_ e: [String: Any], wall: Double) {
         guard let store, let route = launchRoute, let marks = e["marks"] as? [String: Double], let boot = marks["boot"] else { return }
+        let metrics = e["metrics"] as? [String: Any] ?? [:]
+        let walls = e["walls"] as? [String: Double] ?? [:]
         var params = navigationParams(route, launch: true)
         params["exact.nav.anchor"] = "boot"
-        if let present = marks["present"] {
-            store.addMetric(session: session, time: wall, category: "navigation", name: "cold_ttr", value: (present - boot) / 1000, route: route["route"] as? String, params: params)
+        if metrics["timeToFirstRender"] != nil, let present = marks["present"], stored.insert("launch.cold_ttr").inserted {
+            store.addMetric(session: session, time: walls["timeToFirstRender"] ?? wall, category: "navigation", name: "cold_ttr", value: (present - boot) / 1000, route: route["route"] as? String, params: params)
         }
-        if let interactive = marks["interactive"], !navigatedBeforeStartup, (e["metrics"] as? [String: Any])?["timeToInteractive"] != nil {
-            store.addMetric(session: session, time: wall, category: "navigation", name: "tti", value: (interactive - boot) / 1000, route: route["route"] as? String, params: params)
+        // Startup's TTI is the launch screen's when that screen stayed on top until it (the host says so in the session).
+        if metrics["timeToInteractive"] != nil, let interactive = marks["interactive"], e["launchScreen"] as? Bool == true, stored.insert("launch.tti").inserted {
+            store.addMetric(session: session, time: walls["timeToInteractive"] ?? wall, category: "navigation", name: "tti", value: (interactive - boot) / 1000, route: route["route"] as? String, params: params)
         }
+    }
+
+    /// Observe's `expo.memory.warning` log, with the memory in use when the system warned.
+    func memoryWarning(_ e: [String: Any], wall: Double) {
+        guard let store else { return }
+        var attrs = globals
+        for key in ["expo.memory.allocated", "expo.memory.physical", "expo.memory.available", "expo.memory.warningsCount"] {
+            if let v = e[key] { attrs[key] = v }
+        }
+        store.addLog(session: session, time: wall, severity: "warn", name: "expo.memory.warning", body: nil, attributes: attrs, dropped: 0)
     }
 
     /// Observe's navigation params, on top of the global attributes.
@@ -185,16 +234,18 @@ final class ObserveService {
     /// The update id is Exact's envelope digest, not an EAS update id.
     func updateDownload(_ e: [String: Any], wall: Double) {
         guard let store, let seconds = e["seconds"] as? Double else { return }
-        store.run("INSERT INTO metrics (session, time, category, name, value, updateId, params) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                  [session, wall, "updates", "updateDownloadTime", seconds, e["entry"] as? String,
-                   String(decoding: (try? JSONSerialization.data(withJSONObject: ["exact.update.files_fetched": e["files"] ?? 0, "exact.update.seq": e["seq"] ?? 0, "exact.update.id_kind": "digest"], options: [.sortedKeys])) ?? Data(), as: UTF8.self)])
+        let params = globals.merging(["exact.update.files_fetched": e["files"] ?? 0, "exact.update.seq": e["seq"] ?? 0, "exact.update.id_kind": "digest"]) { $1 }
+        store.run("INSERT INTO metrics (session, time, category, name, value, updateId, running, params) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                  [session, wall, "updates", "updateDownloadTime", seconds, e["entry"] as? String, store.running,
+                   String(decoding: (try? JSONSerialization.data(withJSONObject: params, options: [.sortedKeys])) ?? Data(), as: UTF8.self)])
     }
 
     func log(_ e: [String: Any], wall: Double, error: Bool) {
         guard let store else { return }
         if error {
-            var attrs: [String: Any] = ["expo.error.source": e["source"] as? String ?? "reportedByUser", "expo.error.is_fatal": false,
-                                        "exception.type": e["type"] as? String ?? "Error", "exception.message": e["message"] as? String ?? ""]
+            var attrs = globals
+            for (k, v) in ["expo.error.source": e["source"] as? String ?? "reportedByUser", "expo.error.is_fatal": false,
+                           "exception.type": e["type"] as? String ?? "Error", "exception.message": e["message"] as? String ?? ""] as [String: Any] { attrs[k] = v }
             if let stack = e["stack"] as? String { attrs["exception.stacktrace"] = stack }
             store.addLog(session: session, time: wall, severity: "error", name: "js.exception", body: nil, attributes: attrs, dropped: 0)
             return
@@ -213,19 +264,44 @@ final class ObserveService {
     func ingestCrashes() {
         guard let store, let dir = crashDirectory,
               let files = try? FileManager.default.contentsOfDirectory(atPath: dir) else { return }
-        for f in files where f.hasPrefix("exact-observe-pending-") && !f.contains(session) {
+        let app = config["app.CFBundleIdentifier"] as? String ?? "app"
+        // `exact-observe-pending-<session>-<app>.json` (ObserveCrash.swift): this app's, from another session.
+        let ours = { (f: String) -> Bool in
+            let head = "exact-observe-pending-", tail = ".json"
+            guard f.hasPrefix(head), f.hasSuffix(tail) else { return false }
+            let middle = f.dropFirst(head.count).dropLast(tail.count), id = String(middle.prefix(36))
+            return UUID(uuidString: id) != nil && id != self.session && middle.dropFirst(36).first == "-" && middle.dropFirst(37) == app
+        }
+        for f in files where ours(f) {
             let path = "\(dir)/\(f)"
             defer { try? FileManager.default.removeItem(atPath: path) }
             guard let data = FileManager.default.contents(atPath: path),
                   let o = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
-                  let crashed = o["session"] as? String, let signal = o["signal"] as? Int else { continue }
+                  let crashed = o["session"] as? String, let signal = o["signal"] as? Int, o["app"] as? String ?? app == app else { continue }
             let start = o["sessionStart"] as? Double ?? 0
-            store.saveSession(crashed, start: start, metadata: metadata)
+            // The crashed build's version and OS, which can differ from this launch's.
+            store.saveSession(crashed, start: start, metadata: metadata.merging(o["metadata"] as? [String: Any] ?? [:]) { $1 })
             let names = [6: "SIGABRT", 11: "SIGSEGV", 10: "SIGBUS", 4: "SIGILL", 8: "SIGFPE", 5: "SIGTRAP"]
             let attrs: [String: Any] = ["exception.type": names[signal] ?? "SIG\(signal)", "exception.message": "fatal signal \(signal)",
                                         "expo.error.source": "nativeCrash", "expo.error.is_fatal": true, "expo.crash.signal_number": signal]
             let modified = (try? FileManager.default.attributesOfItem(atPath: path)[.modificationDate] as? Date)?.timeIntervalSince1970 ?? start
+            // The update the crashed process ran: its record's, else the one its service stored last, not this launch's.
+            let current = store.running
+            store.running = o["updateId"] as? String ?? store.sessionRunning(crashed)
             store.addLog(session: crashed, time: modified, severity: "fatal", name: "native.exception", body: nil, attributes: attrs, dropped: 0)
+            // The startup metrics the crashed process measured, each its service did not store (a timeout's
+            // report can have stored launch time, not the first frame after it).
+            if let s = o["startup"] as? [String: Any], let metrics = s["metrics"] as? [String: Double] {
+                let stored = Set(store.rows("SELECT name FROM metrics WHERE session = ? AND category = 'appStartup'", [crashed]).compactMap { $0.first as? String })
+                let walls = s["walls"] as? [String: Double] ?? [:]
+                // The update those marks are of, if the snapshot names it; else the crash's.
+                if s["update"] != nil { store.running = (s["update"] as? String).flatMap { $0.isEmpty ? nil : $0 } }
+                for (name, value) in metrics where !stored.contains(name) {
+                    store.addMetric(session: crashed, time: walls[name] ?? modified, category: "appStartup", name: name, value: value,
+                                    params: ["exact.launch.interrupted": true, "exact.launch.crashed": true])
+                }
+            }
+            store.running = current
         }
     }
 
@@ -240,18 +316,85 @@ final class ObserveService {
         return enabled && ObserveWire.uniform(clientId) < rate && (!development || config["dispatchInDebug"] as? Bool == true)
     }
 
-    func dispatch() {
-        guard let store, !sending else { return }
-        if let after = gate.after, after > Date() { return }
+    /// Called when a send in progress finishes.
+    var waiting: [() -> Void] = []
+    /// A dispatch was asked for during a send (a retry that came due): it runs after it.
+    var again = false
+
+    /// Sends what is stored. `done` runs on the service queue once nothing is being sent.
+    func dispatch(done: (() -> Void)? = nil) {
+        guard let store else { done?(); return }
+        if sending {
+            if let done { waiting.append(done) }
+            again = true
+            return
+        }
         guard shouldDispatch, let project = config["projectId"] as? String else {
             store.setCursor("metrics", store.maxId("metrics"))
             store.setCursor("logs", store.maxId("logs"))
+            done?()
             return
         }
         let base = (config["endpoint"] as? String ?? "https://o.expo.dev").trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         sending = true
-        send("metrics", url: "\(base)/\(project)/v1/metrics", limit: ObserveWire.chunk) { [self] in
-            send("logs", url: "\(base)/\(project)/v1/logs", limit: ObserveWire.chunk) { [self] in sending = false }
+        sendSignal("metrics", url: "\(base)/\(project)/v1/metrics") { [self] in
+            sendSignal("logs", url: "\(base)/\(project)/v1/logs") { [self] in
+                sending = false
+                if again {
+                    again = false
+                    return dispatch { [self] in
+                        let finished = waiting
+                        waiting = []
+                        for f in finished { f() }
+                        done?()
+                    }
+                }
+                let finished = waiting
+                waiting = []
+                for f in finished { f() }
+                done?()
+            }
+        }
+    }
+
+    /// Sends when the app goes to the background, as Observe does when it resigns
+    /// active. On iOS a background task keeps the app running until the send ends.
+    func dispatchInBackground() {
+        #if os(iOS)
+        var task = UIBackgroundTaskIdentifier.invalid
+        let end = {
+            DispatchQueue.main.async {
+                guard task != .invalid else { return }
+                UIApplication.shared.endBackgroundTask(task)
+                task = .invalid
+            }
+        }
+        task = UIApplication.shared.beginBackgroundTask(withName: "exact.observe", expirationHandler: end)
+        queue.async { [self] in dispatch(done: end) }
+        #else
+        queue.async { [self] in dispatch() }
+        #endif
+    }
+
+    /// Sends one signal unless its gate is closed, in which case the attempt waits for the gate's deadline.
+    func sendSignal(_ signal: String, url: String, done: @escaping () -> Void) {
+        if let after = gates[signal]?.after, after > Date() {
+            retry(at: after)
+            return done()
+        }
+        send(signal, url: url, limit: ObserveWire.chunk, done: done)
+    }
+
+    /// Dispatches again at `date`, so rows a closed gate kept wait for no new event.
+    func retry(at date: Date) {
+        if let at = retryAt, at <= date { return }
+        retryAt = date
+        retryToken += 1
+        let token = retryToken
+        queue.asyncAfter(deadline: .now() + max(0, date.timeIntervalSinceNow)) { [weak self] in
+            guard let self, token == retryToken else { return }
+            retryAt = nil
+            dispatch()
         }
     }
 
@@ -275,16 +418,18 @@ final class ObserveService {
                 if Self.logEnabled { fputs("observe: \(signal) \(rows.count) rows → \(status.map(String.init) ?? "transport error")\n", stderr) }
                 switch result {
                 case .payloadTooLarge where rows.count > 1:
-                    gate.failures = 0
+                    gates[signal]?.failures = 0
                     send(signal, url: url, limit: rows.count / 2, done: done)
                 // Success, a lone 413 row, or a status Observe does not retry: skip the chunk.
                 case .success, .nonRetryable, .payloadTooLarge:
-                    gate.failures = 0
+                    gates[signal]?.failures = 0
                     store.setCursor(signal, highest)
                     send(signal, url: url, limit: ObserveWire.chunk, done: done)
                 case .retryable(let after):
-                    gate.failures += 1
-                    gate.after = Date().addingTimeInterval(after ?? ObserveWire.backoff(attempt: gate.failures))
+                    let failures = (gates[signal]?.failures ?? 0) + 1
+                    let deadline = Date().addingTimeInterval(after ?? ObserveWire.backoff(attempt: failures))
+                    gates[signal] = (deadline, failures)
+                    retry(at: deadline)
                     done()
                 }
             }
@@ -296,8 +441,8 @@ final class ObserveService {
         guard let store else { return nil }
         let cursor = store.cursor(signal)
         let rows = signal == "metrics"
-            ? store.rows("SELECT id, session, time, category, name, value, route, updateId, params FROM metrics WHERE id > ? ORDER BY id LIMIT ?", [cursor, limit])
-            : store.rows("SELECT id, session, time, severity, name, body, attributes, dropped FROM logs WHERE id > ? ORDER BY id LIMIT ?", [cursor, limit])
+            ? store.rows("SELECT id, session, time, category, name, value, route, updateId, params, running FROM metrics WHERE id > ? ORDER BY id LIMIT ?", [cursor, limit])
+            : store.rows("SELECT id, session, time, severity, name, body, attributes, dropped, running FROM logs WHERE id > ? ORDER BY id LIMIT ?", [cursor, limit])
         guard !rows.isEmpty else { return nil }
         var sessions: [String: [String: Any]] = [:]
         for r in rows { if let s = r[1] as? String, sessions[s] == nil { sessions[s] = store.metadata(s) } }
@@ -401,8 +546,13 @@ public func exactServiceEvent(_ state: UnsafeMutableRawPointer?, _ json: UnsafeP
 @_cdecl("exact_service_background")
 public func exactServiceBackground(_ state: UnsafeMutableRawPointer?) {
     guard let state else { return }
-    let service = Unmanaged<ObserveService>.fromOpaque(state).takeUnretainedValue()
-    service.queue.async { service.dispatch() }
+    Unmanaged<ObserveService>.fromOpaque(state).takeUnretainedValue().dispatchInBackground()
+}
+
+@_cdecl("exact_service_flush")
+public func exactServiceFlush(_ state: UnsafeMutableRawPointer?) {
+    guard let state else { return }
+    Unmanaged<ObserveService>.fromOpaque(state).takeUnretainedValue().queue.sync {}
 }
 
 @_cdecl("exact_service_query")

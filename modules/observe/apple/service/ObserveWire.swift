@@ -70,19 +70,28 @@ enum ObserveWire {
         return ["attributes": a]
     }
 
-    /// `{outer: [{resource, inner: [{scope, list: items}], schemaUrl}]}`, one resource per session.
-    static func envelope(_ bySession: [String: [[String: Any]]], _ outer: String, _ inner: String, _ list: String,
+    /// The resource a row goes in: its session, and the update that ran when it was recorded.
+    struct Origin: Hashable, Comparable {
+        let session: String
+        let running: String?
+        static func < (a: Origin, b: Origin) -> Bool { (a.session, a.running ?? "") < (b.session, b.running ?? "") }
+    }
+
+    /// `{outer: [{resource, inner: [{scope, list: items}], schemaUrl}]}`, one resource per session
+    /// and running update, whose `expo.app.update_id` it carries.
+    static func envelope(_ byOrigin: [Origin: [[String: Any]]], _ outer: String, _ inner: String, _ list: String,
                          sessions: [String: [String: Any]], clientId: String) -> [String: Any] {
-        [outer: bySession.keys.sorted().compactMap { s -> [String: Any]? in
-            guard let meta = sessions[s] else { return nil }
+        [outer: byOrigin.keys.sorted().compactMap { o -> [String: Any]? in
+            guard var meta = sessions[o.session] else { return nil }
+            if let running = o.running { meta["updateId"] = running }
             let scope = ["name": "expo-observe", "version": meta["clientVersion"] as? String ?? "0"]
-            return ["resource": resource(meta, clientId: clientId), inner: [["scope": scope, list: bySession[s]!]], "schemaUrl": schemaUrl]
+            return ["resource": resource(meta, clientId: clientId), inner: [["scope": scope, list: byOrigin[o]!]], "schemaUrl": schemaUrl]
         }]
     }
 
-    /// `{"resourceMetrics":[…]}`, one resource per session in the chunk.
+    /// `{"resourceMetrics":[…]}`, one resource per session and running update in the chunk.
     static func metricsBody(_ rows: [[Any?]], sessions: [String: [String: Any]], clientId: String) -> [String: Any] {
-        var bySession: [String: [[String: Any]]] = [:]
+        var byOrigin: [Origin: [[String: Any]]] = [:]
         for r in rows {
             guard let session = r[1] as? String, let time = r[2] as? Double, let category = r[3] as? String,
                   let name = r[4] as? String, let value = r[5] as? Double else { continue }
@@ -90,18 +99,18 @@ enum ObserveWire {
             for (i, key) in [(6, "expo.route_name"), (7, "expo.update_id"), (8, "expo.custom_params")] {
                 if let v = r[i] as? String { attrs.append(stringAttr(key, v)) }
             }
-            bySession[session, default: []].append([
+            byOrigin[Origin(session: session, running: r.count > 9 ? r[9] as? String : nil), default: []].append([
                 "unit": "s",
                 "name": names["\(category)/\(name)"] ?? "expo.unknown.\(name)",
                 "gauge": ["dataPoints": [["timeUnixNano": nanos(time), "asDouble": value, "attributes": attrs]]],
             ])
         }
-        return envelope(bySession, "resourceMetrics", "scopeMetrics", "metrics", sessions: sessions, clientId: clientId)
+        return envelope(byOrigin, "resourceMetrics", "scopeMetrics", "metrics", sessions: sessions, clientId: clientId)
     }
 
-    /// `{"resourceLogs":[…]}`, one resource per session in the chunk.
+    /// `{"resourceLogs":[…]}`, one resource per session and running update in the chunk.
     static func logsBody(_ rows: [[Any?]], sessions: [String: [String: Any]], clientId: String) -> [String: Any] {
-        var bySession: [String: [[String: Any]]] = [:]
+        var byOrigin: [Origin: [[String: Any]]] = [:]
         for r in rows {
             guard let session = r[1] as? String, let time = r[2] as? Double, let severity = r[3] as? String, let name = r[4] as? String else { continue }
             var attrs = [stringAttr("session.id", session), stringAttr("event.name", name)]
@@ -117,9 +126,9 @@ enum ObserveWire {
                 "body": ["stringValue": r[5] as? String ?? ""], "attributes": attrs,
             ]
             if dropped > 0 { record["droppedAttributesCount"] = dropped }
-            bySession[session, default: []].append(record)
+            byOrigin[Origin(session: session, running: r.count > 8 ? r[8] as? String : nil), default: []].append(record)
         }
-        return envelope(bySession, "resourceLogs", "scopeLogs", "logRecords", sessions: sessions, clientId: clientId)
+        return envelope(byOrigin, "resourceLogs", "scopeLogs", "logRecords", sessions: sessions, clientId: clientId)
     }
 
     enum Result {
@@ -148,7 +157,9 @@ enum ObserveWire {
         min(backoffBase * pow(2, Double(attempt - 1)), backoffCap) * Double.random(in: 0..<1)
     }
 
-    /// Same as expo's `EASClientID.deterministicUniformValue`: a stable value in [0, 1) per install.
+    /// Expo main's `EASClientID.deterministicUniformValue`: a stable value in [0, 1) per install,
+    /// splitmix64 over both halves. expo-eas-client 57.0.x used the low half alone, whose top byte
+    /// is the UUID's fixed variant, so its values span only [0.5, 0.75).
     static func uniform(_ uuid: UUID) -> Double {
         let (high, low) = withUnsafeBytes(of: uuid.uuid) {
             ($0.load(fromByteOffset: 0, as: UInt64.self).bigEndian, $0.load(fromByteOffset: 8, as: UInt64.self).bigEndian)

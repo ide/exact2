@@ -70,6 +70,8 @@ public final class ExactJournal {
     }
 
     func background() { for s in services { s.background() } }
+    /// Waits for each service to finish handling the events it was given.
+    func flush() { for s in services { s.flush() } }
 
     /// The loaded service of `module`, if it is loaded (main thread).
     func service(_ module: String) -> ExactService? { services.first { $0.module == module } }
@@ -177,11 +179,14 @@ final class ExactService {
     /// the service calls `reply(context, json, length)` once, on any thread.
     typealias Reply = @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<UInt8>?, UInt32) -> Void
     typealias Query = @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<UInt8>?, UInt32, UnsafeMutableRawPointer?, Reply) -> Void
+    /// Optional: `exact_service_flush(state)` returns once the events given so far are handled.
+    typealias Flush = @convention(c) (UnsafeMutableRawPointer?) -> Void
     let module: String
     private let state: UnsafeMutableRawPointer?
     private let eventFn: Event
     private let backgroundFn: Background
     private let queryFn: Query?
+    private let flushFn: Flush?
 
     /// Loads from beside the executable on macOS, or from Frameworks on iOS
     /// (wrapped as a framework in an archive: `serviceFramework` in launch-parts.mjs).
@@ -207,16 +212,20 @@ final class ExactService {
             }
         }
         return ExactService(module: module, state: state, event: unsafeBitCast(e, to: Event.self), background: unsafeBitCast(b, to: Background.self),
-                            query: dlsym(h, "exact_service_query").map { unsafeBitCast($0, to: Query.self) })
+                            query: dlsym(h, "exact_service_query").map { unsafeBitCast($0, to: Query.self) },
+                            flush: dlsym(h, "exact_service_flush").map { unsafeBitCast($0, to: Flush.self) })
     }
 
-    private init(module: String, state: UnsafeMutableRawPointer?, event: Event, background: Background, query: Query?) {
+    private init(module: String, state: UnsafeMutableRawPointer?, event: Event, background: Background, query: Query?, flush: Flush?) {
         self.module = module
         self.state = state
         eventFn = event
         backgroundFn = background
         queryFn = query
+        flushFn = flush
     }
+
+    func flush() { flushFn?(state) }
 
     /// Asks the service; `reply` gets its JSON object, or nil when it answers
     /// no queries or its answer is not one.
@@ -279,54 +288,39 @@ extension ExactLaunch {
 
     static let launchBudget = 0.0005
 
-    /// An input's event timestamp, from which the next navigation is timed.
+    /// An input's event timestamp, just before its dispatch: a navigation its
+    /// dispatch commits is timed from it. `inputEnded` follows the dispatch.
     public func input(at timestamp: TimeInterval) { NavigationMarks.shared.input(at: timestamp) }
+
+    /// The update entry the app runs (Exact's envelope digest), nil for the embedded app.
+    /// The updating composition sets it as each generation starts; a crash handler may read
+    /// it at any time, so a replaced string is never freed.
+    nonisolated(unsafe) public static var runningUpdate: UnsafeMutablePointer<CChar>?
+    /// The startup metrics measured so far, `{"metrics":{…},"walls":{…}}` as in the startup
+    /// report (launch time once launch ends, TTR once its frame is past): a crash handler may
+    /// read it at any time, so a crash before the report keeps them. A replaced one is never freed.
+    nonisolated(unsafe) public static var startupSnapshot: UnsafeMutablePointer<CChar>?
+    /// The same with TTR, published when the first frame's vsync is found, for a crash once its
+    /// time (`startupSnapshotFrameAt`, `mach_absolute_time` ticks) has come: a main thread blocked
+    /// after that frame cannot publish it then.
+    nonisolated(unsafe) public static var startupSnapshotFramed: UnsafeMutablePointer<CChar>?
+    nonisolated(unsafe) public static var startupSnapshotFrameAt: UInt64 = .max
+
+    /// What a crash now keeps of startup, read by a signal handler: a clock read and two pointers.
+    public static func crashSnapshot() -> UnsafeMutablePointer<CChar>? {
+        if let framed = startupSnapshotFramed, mach_absolute_time() >= startupSnapshotFrameAt { return framed }
+        return startupSnapshot
+    }
+    public func inputEnded() { NavigationMarks.shared.inputEnded() }
 }
 
-/// App-reported events, errors and attributes, journaled for a module such as
-/// Observe. The module's service decides what to send.
+/// Framework events journaled for a module such as Observe. The module's
+/// service decides what to send.
 public enum ExactEvents {
-    /// Handles the contract's `observe`, `observeAttributes` and `observeError`
-    /// host commands. The compiler sends a record's fields as name, value pairs.
-    static func hostCommand(_ name: String, _ args: [Any]) {
-        let pairs = { (from: Int) -> [String: Any] in
-            var out: [String: Any] = [:]
-            var i = from
-            while i + 1 < args.count { if let k = args[i] as? String { out[k] = args[i + 1] }; i += 2 }
-            return out
-        }
-        let text = { (i: Int, or: String) in args.count > i ? args[i] as? String ?? or : or }
-        switch name {
-        case "observe": log(text(0, ""), attributes: pairs(2), severity: text(1, "info"))
-        case "observeAttributes": setGlobalAttributes(pairs(0))
-        default: reportError(type: text(1, "ContractError"), message: text(0, ""))
-        }
-    }
-
-    /// A custom event (Observe's `logEvent`): `severity` is trace, debug,
-    /// info (the default), warn, error or fatal.
-    public static func log(_ name: String, attributes: [String: Any] = [:], severity: String = "info", body: String? = nil, displayName: String? = nil) {
-        var f: [String: Any] = ["name": name, "attributes": attributes, "severity": severity]
-        if let body { f["body"] = body }
-        if let displayName { f["displayName"] = displayName }
-        ExactJournal.shared.record("app.event", f)
-    }
-
-    /// Attributes merged into every later metric and event; per-record keys win.
-    public static func setGlobalAttributes(_ attributes: [String: Any]) {
-        ExactJournal.shared.record("app.attributes", ["attributes": attributes])
-    }
-
-    /// A framework event for modules, such as an update's download.
-    public static func journal(_ kind: String, _ fields: [String: Any]) {
-        ExactJournal.shared.record(kind, fields)
-    }
-
-    /// A caught error (Observe's `reportError`).
-    public static func reportError(type: String, message: String, stack: String? = nil) {
-        var f: [String: Any] = ["type": type, "message": message]
-        if let stack { f["stack"] = stack }
-        ExactJournal.shared.record("app.error", f)
+    /// A framework event for modules, such as an update's download. `uptime`
+    /// (`ProcessInfo.systemUptime`) is when it happened, if not now.
+    public static func journal(_ kind: String, _ fields: [String: Any], uptime: Double? = nil) {
+        ExactJournal.shared.record(kind, fields, at: CACurrentMediaTime() - (uptime.map { ProcessInfo.processInfo.systemUptime - $0 } ?? 0))
     }
 }
 

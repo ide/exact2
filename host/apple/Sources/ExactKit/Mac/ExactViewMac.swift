@@ -266,6 +266,10 @@ public final class ExactView: NSView {
                 // Inspect mode's monitor has every event (InspectMac.swift): none is the app's.
                 if Inspect.on || InspectHost.draining { return event }
                 #endif
+                // The shortcuts and `key` handlers run here, before the window's `sendEvent`: what they
+                // navigate is this input's doing too.
+                NavigationMarks.shared.input(at: event.timestamp)
+                defer { NavigationMarks.shared.inputEnded() }
                 // A modifier pressed is a keydown on the web (`"Shift"`), and
                 // released a keyup (#140); to AppKit a flags change, which
                 // goes on to it either way.

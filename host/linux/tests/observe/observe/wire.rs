@@ -100,6 +100,7 @@ fn expected(signal: &str, platform: &str) -> Value {
         {
             for m in scope["metrics"].as_array_mut().unwrap() {
                 let startup = m["name"].as_str().unwrap().starts_with("expo.app_startup.");
+                let tti = m["name"] == "expo.app_startup.tti";
                 for a in m["gauge"]["dataPoints"][0]["attributes"]
                     .as_array_mut()
                     .unwrap()
@@ -119,6 +120,9 @@ fn expected(signal: &str, platform: &str) -> Value {
                         &Value::Null
                     };
                     params.extend(extra.as_object().cloned().unwrap_or_default());
+                    if tti {
+                        params.extend(p["ttiParams"].as_object().cloned().unwrap_or_default());
+                    }
                     a["value"]["stringValue"] = Value::String(Value::Object(params).to_string());
                 }
             }
@@ -149,9 +153,11 @@ fn the_linux_service_sends_wire_json_s_bodies() {
         s.event(e);
     }
     let _ = std::fs::remove_dir_all(&dir);
-    for (signal, rows) in [("metrics", &s.metrics), ("logs", &s.logs)] {
+    let out = s.sender();
+    let queue = lock(&s.queue);
+    for (signal, rows) in [("metrics", &queue.metrics), ("logs", &queue.logs)] {
         assert_eq!(
-            normalize(s.body(signal, rows), "linux"),
+            normalize(out.body(signal, rows, &queue.sessions), "linux"),
             expected(signal, "linux"),
             "{signal} differ from modules/observe/tests/wire.json"
         );

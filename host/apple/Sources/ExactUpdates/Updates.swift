@@ -93,7 +93,9 @@ enum Updates {
     private static let done: ExactUpdateDoneFn = { _, json, len in
         let data = json.map { Data(bytes: $0, count: len) } ?? Data()
         let obj = (try? JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:]
-        let line = obj["line"] as? String ?? "", download = obj["download"] as? [String: Any]
+        let line = obj["line"] as? String ?? ""
+        // When staging ended, on the library's thread: the main thread may run the callback later.
+        let download = (obj["download"] as? [String: Any]).map { $0.merging(["at": ProcessInfo.processInfo.systemUptime]) { $1 } }
         DispatchQueue.main.async { Updates.completed?(line, download) }
     }
 
@@ -129,6 +131,7 @@ public final class ExactUpdates: ExactAppLifecycle {
         self.app = app
         storeOpen = Updates.open(assets: app.assetRoot)
         if storeOpen, let selected = Updates.selection() {
+            entries[selected.token] = (selected.entry, selected.seq)
             do { app.installInitial(try generation(selected, app: app)) }
             catch { Updates.refuse(selected.token, reason: error.localizedDescription) }
         }
@@ -137,7 +140,7 @@ public final class ExactUpdates: ExactAppLifecycle {
             if let d = download {
                 ExactEvents.journal("update.download", ["seq": d["seq"] ?? 0, "files": d["files"] ?? 0,
                                                         "seconds": ((d["ms"] as? NSNumber)?.doubleValue ?? 0) / 1000,
-                                                        "entry": d["entry"] ?? ""])
+                                                        "entry": d["entry"] ?? ""], uptime: d["at"] as? Double)
             }
             // An `immediate` app checks every two seconds: say each outcome once.
             if !self.immediate || (line != self.status && line != "current") { FileHandle.standardError.write(Data("exact update: \(line)\n".utf8)) }
@@ -204,9 +207,23 @@ public final class ExactUpdates: ExactAppLifecycle {
         return ExactGeneration(plan: selection.plan, assets: assets, token: selection.token, module: module)
     }
 
-    public func generationStarted(_ app: ExactApp, token: UInt64) { if storeOpen { Updates.started(token) } }
+    /// Each selection's entry (empty for the embedded app) by token: journaled as
+    /// `update.launched` when its generation starts, so the rows recorded after carry
+    /// the update that runs (Observe's `expo.app.update_id`).
+    private var entries: [UInt64: (entry: String, seq: UInt64)] = [:]
+
+    public func generationStarted(_ app: ExactApp, token: UInt64) {
+        if storeOpen { Updates.started(token) }
+        if let e = entries[token] {
+            ExactLaunch.runningUpdate = e.entry.isEmpty ? nil : strdup(e.entry)
+            ExactEvents.journal("update.launched", ["entry": e.entry, "seq": e.seq])
+        }
+    }
     public func initialGenerationRefused(_ app: ExactApp, token: UInt64, reason: String) {
         if storeOpen { Updates.refuse(token, reason: reason) }
+        // The embedded app runs instead.
+        ExactLaunch.runningUpdate = nil
+        ExactEvents.journal("update.launched", ["entry": "", "seq": 0])
     }
     public func firstPixel(_ app: ExactApp, token: UInt64) {
         guard storeOpen else { return }
@@ -230,6 +247,7 @@ public final class ExactUpdates: ExactAppLifecycle {
         preparationRetry?.cancel()
         preparationRetry = nil
         guard storeOpen, let app, let selected = Updates.prepare() else { return false }
+        entries[selected.token] = (selected.entry, selected.seq)
         let accepted: Bool
         do { accepted = app.applyGeneration(try generation(selected, app: app), label: "update", commit: { Updates.commit(selected) }) }
         catch { status = error.localizedDescription; Updates.discard(selected); return false }

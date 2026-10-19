@@ -220,6 +220,11 @@ impl<D: DataSource> Presenter<D> {
         !self.activation_failed && self.host.data_pending()
     }
 
+    /// The data module failed to activate after first pixel.
+    pub fn activation_failed(&self) -> bool {
+        self.activation_failed
+    }
+
     /// A development generation or an update is being prepared: the display
     /// loop polls for it. A loading data source wakes the loop itself.
     pub fn delivery_pending(&self) -> bool {

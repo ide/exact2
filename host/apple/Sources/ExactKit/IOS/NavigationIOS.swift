@@ -63,8 +63,18 @@ final class RouteController: UIViewController {
         host?.presenter.groupedLists?.appearing(node, alongside: animated ? transitionCoordinator : nil)
         host?.presenter.rowCells.appearing(node, alongside: animated ? transitionCoordinator : nil)
     }
+    /// UIKit shows its view: from `viewIsAppearing` to `viewDidDisappear` (a sheet over it
+    /// leaves it shown; a fullscreen presentation, also a sheet UIKit adapts to one, does not).
+    private(set) var appeared = false
+    override func viewDidDisappear(_ animated: Bool) {
+        super.viewDidDisappear(animated)
+        appeared = false
+    }
     override func viewIsAppearing(_ animated: Bool) {
         super.viewIsAppearing(animated)
+        appeared = true
+        // A navigation to this screen renders at the first frame after it appears (NavigationMarks).
+        if let session = host?.presenter.session { NavigationMarks.shared.appearing(session, key: key) }
         // Its block, at the size UIKit gives it, before its first frame (LLP 1123 D2)
         host?.presenter.owners.publish()
         // UIKit has attached and sized the real destination. Finish its
@@ -247,6 +257,16 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
     private var pendingSync = false
     /// The press whose commit a deferred sync still owes (PressHandoffIOS).
     private weak var pendingPress: PressHandoff?
+    /// Whether UIKit shows the route whose `navigationKey` is `key` (the router's visit
+    /// id), or nil when no route of this host has that key yet.
+    func routeAppeared(_ key: String) -> Bool? {
+        routeControllers.first { $0.key == key }?.appeared
+    }
+    /// Whether this host's routes are keyed by visit id, as the router's are (`navigationKey`).
+    var keysByVisit: Bool { routeControllers.contains { UInt64($0.key) != nil } }
+    private var routeControllers: [RouteController] {
+        allNavigations.flatMap(\.viewControllers).compactMap { $0 as? RouteController }
+    }
     /// A sync was deferred (a transition ran, or there was no window yet)
     /// and is still owed, or UIKit moved a stack itself (its back button, a
     /// swipe) since the last one: the next batch syncs, whatever it holds.
@@ -1110,7 +1130,7 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
         } ?? false
         lastTransition = dispatches ? "completed" : (cancelled ? "cancelled" : "idle")
         guard dispatches else { return }
-        goBack()
+        NavigationMarks.shared.platformDispatch { goBack() }
     }
 
     /// A stack Exact retired: its handle goes.

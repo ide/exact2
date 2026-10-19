@@ -1,28 +1,6 @@
-//! `observe(…)`, `observeAttributes(…)` and `observeError(…)` reach the host as
-//! commands, in order, with their arguments. Malformed calls fail to compile.
+//! What the settle ledger (`Runner::outstanding`) counts as still loading, which
+//! time to interactive waits for.
 use exact_runner::{DataError, DataSource, Runner, Value};
-
-const APP: &str = r#"shape Checkout
-  items: number
-  total: number
-
-shape Tier
-  tier: string
-
-component App
-  state count = 0
-  action checkout(items: number)
-    count = count + 1
-    observeAttributes(Tier(tier="pro"))
-    observe("checkout.completed", Checkout(items=items, total=items * 3), "info")
-    observe("checkout.seen")
-  action fail
-    observeError("cart unavailable", "CartError")
-  view
-    column
-      button press=checkout(2) testId="buy"
-        text "Buy"
-"#;
 
 struct NoData;
 impl DataSource for NoData {
@@ -40,59 +18,6 @@ fn boot(source: &str) -> Runner<NoData> {
         "/",
     )
     .unwrap()
-}
-
-#[test]
-fn custom_events_are_commands_in_order() {
-    let mut r = boot(APP);
-    r.take_commands();
-    r.act("checkout", vec![Value::Number(2.)]).unwrap();
-    let commands = r.take_commands();
-    let names: Vec<_> = commands
-        .iter()
-        .map(|c| (c.name.as_str(), c.args.len()))
-        .collect();
-    assert_eq!(
-        names,
-        [("observeAttributes", 2), ("observe", 6), ("observe", 2)]
-    );
-    assert_eq!(
-        commands[1].args,
-        vec![
-            Value::str("checkout.completed"),
-            Value::str("info"),
-            Value::str("items"),
-            Value::Number(2.),
-            Value::str("total"),
-            Value::Number(6.)
-        ],
-        "the fields go by name"
-    );
-    r.act("fail", vec![]).unwrap();
-    let error = r.take_commands();
-    assert_eq!(
-        error[0].args,
-        vec![Value::str("cart unavailable"), Value::str("CartError")]
-    );
-}
-
-#[test]
-fn observe_arguments_are_checked() {
-    for statement in [
-        "observe()",
-        "observe(1)",
-        r#"observe("a", "b")"#,
-        r#"observe("a", Tier(tier="x"), 2)"#,
-        r#"observeAttributes("x")"#,
-        "observeError(3)",
-    ] {
-        let source = APP.replace(r#"observe("checkout.seen")"#, statement);
-        let refused = contract::compile(&source).expect_err(statement);
-        assert!(
-            format!("{refused:?}").contains("type-observe"),
-            "{statement}: {refused:?}"
-        );
-    }
 }
 
 const SCREEN: &str = r#"component App
@@ -214,5 +139,52 @@ fn only_a_placeholders_request_holds_the_ledger() {
     assert!(
         r.outstanding().is_clear(),
         "a mutation the app sent is not outstanding"
+    );
+}
+
+const STACK: &str = r#"routes nav
+  home "/"
+    item "/item/:id"
+
+component App
+  state loaded = false
+  action follow(url: string)
+    nav = go(nav, url)
+  action back
+    nav = back(nav)
+  view
+    main navigationKey=`${top(nav).id}` navigationBack="back" navigate=follow width="100%" height="100%"
+      for e in stack(nav) key=e.id
+        if e.name == "home"
+          column navigationKey=`${e.id}` testId="home" position="absolute" inset=0 aria-busy=(not loaded)
+            text "Home"
+        if e.name == "item"
+          column navigationKey=`${e.id}` testId=`item-${e.params.id}` position="absolute" inset=0
+            text e.params.id
+"#;
+
+/// A busy element under a route that is not shown (here the screen a pushed
+/// route covers) is not on screen, so it does not hold TTI.
+#[test]
+fn a_busy_element_on_a_covered_route_does_not_hold_the_ledger() {
+    let mut r = boot(STACK);
+    assert_eq!(
+        r.outstanding().busy,
+        vec!["home".to_string()],
+        "shown and busy"
+    );
+    let root = r.kernel().roots()[0];
+    r.dispatch(root, exact_runner::Event::Navigate("/item/b".into()))
+        .unwrap();
+    assert!(
+        r.outstanding().busy.is_empty(),
+        "covered by the pushed route"
+    );
+    r.dispatch(root, exact_runner::Event::Navigate("/".into()))
+        .unwrap();
+    assert_eq!(
+        r.outstanding().busy,
+        vec!["home".to_string()],
+        "shown again"
     );
 }

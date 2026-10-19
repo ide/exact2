@@ -42,12 +42,14 @@ impl Event {
 
 type Subscriber = Box<dyn Fn(&Event) + Send>;
 type Deferred = Box<dyn FnOnce() + Send>;
+type Flush = Arc<dyn Fn(std::time::Duration) + Send + Sync>;
 
 #[derive(Default)]
 struct Journal {
     events: VecDeque<Arc<Event>>,
     subscribers: Vec<Subscriber>,
     deferred: Vec<Deferred>,
+    flushes: Vec<Flush>,
     started: bool,
 }
 
@@ -67,10 +69,17 @@ pub fn wall() -> f64 {
 
 /// Records an event. The first `startup` event starts the [`after_startup`] work.
 pub fn record(kind: &str, fields: Map<String, Value>) {
+    record_at(kind, fields, crate::launch_marks::boottime());
+}
+
+/// Records an event that happened at `at`, seconds on `CLOCK_BOOTTIME`: its
+/// `wall` is that moment's, as a service stamps a metric at its mark.
+pub fn record_at(kind: &str, fields: Map<String, Value>, at: f64) {
+    let now = crate::launch_marks::boottime();
     let e = Arc::new(Event {
         kind: kind.into(),
-        at: crate::launch_marks::boottime(),
-        wall: wall(),
+        at,
+        wall: wall() - (now - at),
         fields,
     });
     let deferred = with(|j| {
@@ -101,6 +110,22 @@ pub fn subscribe(f: impl Fn(&Event) + Send + 'static) {
         }
         j.subscribers.push(Box::new(f));
     });
+}
+
+/// Registers `f`, which returns once its launch part has stored the events it was
+/// given so far, or once the bound it is passed has run out.
+pub fn on_flush(f: impl Fn(std::time::Duration) + Send + Sync + 'static) {
+    with(|j| j.flushes.push(Arc::new(f)));
+}
+
+/// Waits, `bound` at most in all, until each launch part that registered a flush has
+/// stored the events recorded so far. The process is about to end.
+pub fn flush(bound: std::time::Duration) {
+    let flushes = with(|j| j.flushes.clone());
+    let deadline = std::time::Instant::now() + bound;
+    for f in flushes {
+        f(deadline.saturating_duration_since(std::time::Instant::now()));
+    }
 }
 
 /// Runs `f` on its own thread once startup is recorded, or at once if it already was.
@@ -182,56 +207,6 @@ impl LaunchContext {
     }
 }
 
-/// A Contract value as JSON, for the `observe` commands' arguments.
-fn value_json(v: &exact_plan::Value) -> Value {
-    if let Some(s) = v.as_str() {
-        return s.into();
-    }
-    match v {
-        exact_plan::Value::Number(n) => {
-            serde_json::Number::from_f64(*n).map_or(Value::Null, Value::Number)
-        }
-        exact_plan::Value::Bool(b) => (*b).into(),
-        exact_plan::Value::Unit => Value::Null,
-        other => format!("{other:?}").into(),
-    }
-}
-
-/// Records Contract's `observe`, `observeAttributes` and `observeError`.
-/// Leading positional arguments are followed by alternating keys and values.
-pub fn host_command(name: &str, args: &[exact_plan::Value]) {
-    let pairs = |from: usize| {
-        let pairs = args.get(from..).unwrap_or_default().chunks_exact(2);
-        let o = pairs.filter_map(|kv| Some((kv[0].as_str()?.into(), value_json(&kv[1]))));
-        Value::Object(o.collect())
-    };
-    let text = |i: usize, or: &str| {
-        args.get(i)
-            .and_then(|v| v.as_str())
-            .unwrap_or(or)
-            .to_string()
-    };
-    let mut f = Map::new();
-    match name {
-        "observe" => {
-            f.insert("name".into(), text(0, "").into());
-            f.insert("severity".into(), text(1, "info").into());
-            f.insert("attributes".into(), pairs(2));
-            record("app.event", f);
-        }
-        "observeAttributes" => {
-            f.insert("attributes".into(), pairs(0));
-            record("app.attributes", f);
-        }
-        _ => {
-            f.insert("source".into(), "reportedByUser".into());
-            f.insert("message".into(), text(0, "").into());
-            f.insert("type".into(), text(1, "ContractError").into());
-            record("app.error", f);
-        }
-    }
-}
-
 /// POSTs `body` to `url` with the host's existing transport. Returns the
 /// status and the `Retry-After` header.
 pub fn post(
@@ -249,4 +224,37 @@ pub fn post(
     req.max_body = Some(64 * 1024);
     let r = transport.send(&req).map_err(|e| format!("{url}: {e}"))?;
     Ok((r.status, r.headers.get("retry-after").map(str::to_string)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_event_recorded_at_its_mark_carries_that_moments_wall() {
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let kept = seen.clone();
+        subscribe(move |e| {
+            if e.kind == "test.mark" {
+                kept.lock().unwrap().push((e.at, e.wall));
+            }
+        });
+        let at = crate::launch_marks::boottime() - 2.5;
+        record_at("test.mark", Map::new(), at);
+        let (marked, stamped) = seen.lock().unwrap()[0];
+        assert_eq!(marked, at);
+        assert!((stamped - (wall() - 2.5)).abs() < 0.1, "{stamped}");
+    }
+
+    #[test]
+    fn a_flush_asks_each_part_within_one_bound() {
+        let asked = Arc::new(Mutex::new(Vec::new()));
+        let kept = asked.clone();
+        on_flush(move |bound| kept.lock().unwrap().push(bound));
+        flush(std::time::Duration::from_secs(2));
+        let asked = asked.lock().unwrap();
+        assert_eq!(asked.len(), 1);
+        assert!(asked[0] <= std::time::Duration::from_secs(2));
+        assert!(asked[0] > std::time::Duration::from_millis(1900));
+    }
 }

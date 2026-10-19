@@ -10,7 +10,7 @@ import { createSecretFacade, hasGrant, inOverlay, overlaying, setAppGrantSet } f
 import { tsGrantSet } from './admission-data.js';
 import { answering, files as bodyFiles, SOCKET_AND_FETCH } from './ts-fetch.js';
 import { sourceTypes } from './names.js';
-import { checkpoint, clock, commit, inflight, journal, painted, R, Resources } from './rt.js';
+import { checkpoint, clock, commit, inflight, journal, painted, R, Resources, Undrawn } from './rt.js';
 import { Shaped } from './shape.js';
 __AUTH_IMPORT__
 // Values cross by the plan's types (`named` into the module's objects,
@@ -182,7 +182,7 @@ function landed(op, ok, value) {
   head = null;
   if (queue.length) issue(queue.shift());
   // What the settle waits for ends after the reactions it lands (hatches.js).
-  setTimeout(() => inflight.n--);
+  setTimeout(() => { Undrawn.storage--; inflight.n--; });
   if (ok) { counts.done++; op.resolve(value); return; }
   const error = codedError(value), line = `storage failed: ${op.what}: ${error.code} ${error.message}`;
   counts.failed++; counts.last = line;
@@ -195,7 +195,7 @@ function queued(what, run) {
     journal.push(`t=${clock.now} storage refused: full (${what})`);
     return Promise.reject(Object.assign(new Error(`storage queue full: ${MAX_QUEUED} operations wait`), { kind: 'Unavailable', code: 'full' }));
   }
-  inflight.n++;
+  Undrawn.storage++; inflight.n++;
   return new Promise((resolve, reject) => {
     const op = { what, run, resolve, reject };
     if (head) queue.push(op); else issue(op);

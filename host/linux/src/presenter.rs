@@ -73,6 +73,9 @@ mod content_region_tests;
 #[cfg(test)]
 #[path = "content_region/wide_tests.rs"]
 mod content_region_wide_tests;
+#[cfg(test)]
+#[path = "content_region/fail_backend.rs"]
+pub(crate) mod fail_backend;
 #[cfg(any(target_os = "android", test))]
 mod feed;
 mod height;
@@ -668,6 +671,11 @@ impl<D: DataSource> Presenter<D> {
     /// Whether the picture is stale.
     pub fn dirty(&self) -> bool {
         self.dirty
+    }
+
+    /// Whether the last paint succeeded: the picture is the tree's, not a failed paint's fallback.
+    pub fn paint_succeeded(&self) -> bool {
+        self.last_frame_succeeded
     }
 
     /// The last frame's (paint, readback) milliseconds; CPU readback is zero.

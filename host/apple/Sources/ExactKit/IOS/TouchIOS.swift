@@ -23,6 +23,12 @@ public final class ExactWindow: UIWindow {
             return
         }
         #endif
+        // A navigation is timed from the input whose dispatch changed the router: any touch,
+        // press, pointer hover or scroll, as each can run a handler (pointerdown, pointermove,
+        // pointerenter, wheel, press). Noted before dispatch, since a control's action can
+        // navigate within it.
+        let input = [.touches, .presses, .hover, .scroll].contains(event.type)
+        if input { ExactLaunch.shared.input(at: event.timestamp) }
         // A contact going down, a native control's included, ends the live
         // press's focus handoff of the session it lands in before anything
         // hears it (PressHandoffIOS); one landing in none, every session's.
@@ -33,11 +39,8 @@ public final class ExactWindow: UIWindow {
             HeldState.input(at: touch.view) // a contact on a held node, or in it, lets its hold go (HeldState.swift)
         }
         super.sendEvent(event)
+        if input { ExactLaunch.shared.inputEnded() }
         if ExactEnv.agentMode, event.type == .touches { TouchLog.record(event, in: self) }
-        // A navigation is timed from its input: a finger lifting or a press.
-        if event.type == .presses || (event.allTouches ?? []).contains(where: { $0.phase == .ended }) {
-            ExactLaunch.shared.input(at: event.timestamp)
-        }
     }
 }
 

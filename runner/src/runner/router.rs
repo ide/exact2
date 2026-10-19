@@ -31,6 +31,10 @@ pub struct RouterChange {
     pub pattern: String,
     /// The top's bound parameters, in the table's order.
     pub params: Vec<(String, String)>,
+    /// The latest top came from a dispatched event's commit (or the platform's Back or
+    /// link), not from a timer the clock fired before that event, an answer that landed
+    /// or a seek: a host times a navigation from the input such an event was.
+    pub from_event: bool,
 }
 
 /// The router seam (LLP 1047 D4): what the runner and its VM ask of a plan's
@@ -548,6 +552,7 @@ impl Routing for RouterContext {
                 .collect(),
             pattern,
             params,
+            from_event: false,
         }))
     }
 
@@ -674,7 +679,10 @@ impl<D: DataSource> Runner<D> {
         context.change(&self.slots[context.slot().0 as usize])
     }
 
-    pub(super) fn commit_router(&mut self, change: Option<RouterChange>) {
+    pub(super) fn commit_router(&mut self, mut change: Option<RouterChange>) {
+        if let Some(change) = &mut change {
+            change.from_event = self.dispatching_event;
+        }
         if let Some(context) = &mut self.router {
             let value = self.slots[context.slot().0 as usize].clone();
             context.commit(value, change);
@@ -783,6 +791,9 @@ impl<D: DataSource> Runner<D> {
         next: Value,
         what: &str,
     ) -> Result<Option<CommitReceipt>, RunnerError> {
+        // The platform's own navigation is an event's commit (its Back button, a link): a
+        // host times it from the input it is dispatching, if any (`RouterChange::from_event`).
+        let outer = std::mem::replace(&mut self.dispatching_event, true);
         let was_poisoned = self.poisoned;
         let checkpoint = self.checkpoint(false);
         let result = if self.poisoned {
@@ -798,6 +809,7 @@ impl<D: DataSource> Runner<D> {
         self.arm_then(result.is_ok());
         self.arm_next(result.is_ok());
         self.log_outcome(what, &result, was_poisoned);
+        self.dispatching_event = outer;
         result.map(Some)
     }
 

@@ -1,6 +1,6 @@
 export { liveTime } from "./live-time.js";
 import { inertAncestor, renderMarkup, reportPlace, onSelection, textField, editMenu, settleRadios, installFits, contextAt } from "./navigation.js"; export { animationClocks, launchLocation } from "./navigation.js"; export { fontFamily } from './font-family.js'; // synced animations (LLP 1055.002, emit.rs `clocks`)
-import { Docs, Head, head, markDocument, projectRoots, openTabs, unopened, tp } from "./document.js"; export { Head, unopened, tp }; import { conforms, eq, equal, failureCode, failureReason } from "./shape.js"; import { pointer, record } from "./pointer.js"; import { commands } from "./commands.js"; import { autofocus, press } from "./focus.js";
+import { Docs, Head, head, markDocument, projectRoots, openTabs, unopened, tp, busy, inactive } from "./document.js"; export { Head, unopened, tp, busy, inactive }; import { conforms, eq, equal, failureCode, failureReason } from "./shape.js"; import { pointer, record } from "./pointer.js"; import { commands } from "./commands.js"; import { autofocus, press } from "./focus.js";
 let Paint; export function usePaint(pass) { Paint = pass; } export { conforms, eq, equal }; // the compiler installs `Paint` only when a plan can layer boxes
 import * as Ov from "./overlay.js"; import { beatAfter } from "./beat.js"; // optimistic writes shown over answers (the runner's writes.rs)
 export const writeRecords = () => Ov.Writes.list.map(w => ({ id: w.id, mutation: w.m.name, landed: !!w.landed })); // the agent's `state.writes`
@@ -143,7 +143,7 @@ export const owner = () => Owner, rev = () => Rev, ticket = () => Ticket, nextTi
 export class Refusal extends Error {}
 /** A data or shape refusal (the runner's `RunnerError::Data` or `Shape`): one in a reply's commit lets its ticket go (`reply`). */
 class Failed extends Refusal { constructor(message, code = "error", reason = "") { super(message); this.code = code; this.reason = reason; } } // `code`, `reason`: failure(x)'s (shape.js `failureCode`, `failureReason`)
-let Writes = null, Commands = [], Out = [], Landed = [], Sends = [], Refresh = [], Poisoned = false, Refused = null, Why = "", Sched = null; // `Why`: the step the last commit was refused in and the exception's own words, cut (`why`): a boot refusal's reason (`mount`); the journal keeps them whole
+/** A tree update threw: no commit lands again (marks.js ends TTI). */ export const poisoned = () => Poisoned; /** An event's handler is running what came due before it (`on`): what that commits is not the input's (marks.js). */ export let Advancing = false; /** The input a deferred commit was asked for under (Enter's submit, a tree update a view transition defers), which marks.js times a navigation it makes from: it installs `capture` and `run`. Deferred updates coalesce, and the first to run publishes the latest router state, so it runs under the input of the latest commit that changed that state (`latest`; a commit that changed none, such as an answer's text, leaves it). */ export const InputScope = { capture: () => null, run: (at, f) => f(), latest: null, seen: undefined, wrap: f => { const r = routerValue(); if (r !== InputScope.seen) { InputScope.seen = r; InputScope.latest = InputScope.capture(); } return () => { const at = InputScope.latest; return at == null ? f() : InputScope.run(at, f); }; } }; let Writes = null, Commands = [], Out = [], Landed = [], Sends = [], Refresh = [], Poisoned = false, Refused = null, Why = "", Sched = null; // `Why`: the step the last commit was refused in and the exception's own words, cut (`why`): a boot refusal's reason (`mount`); the journal keeps them whole
 const why = (step, m, c = [...m]) => `while ${step}: ${c.length > WHY_MAX ? `${c.slice(0, WHY_MAX).join("")}… (${c.length - WHY_MAX} more characters in the journal)` : m}`, WHY_MAX = 300; // by code point; a write's value or a source's error may be long, or private
 /** Queued sends and gated tasks (schedule.js, LLP 1092), installed by a plan that declares them; the last commit's refusal. */
 export const useSchedule = s => { Sched = s; }, refused = () => Refused;
@@ -204,7 +204,7 @@ export function commit(f, what = "commit") {
   const tail = () => { // the tree update; inside a view transition when it may hand on a shared element's name (LLP 1013.000 D7)
     for (const f of Before) f();
     Pres?.before({ ops: [] }, Views); // presence measures what it tracks before the tree changes (LLP 1063)
-    try { flush(); openTabs(); } catch (e) { Poisoned = true; Why = why("updating the tree", String(e)); say(`poisoned: ${e.pc != null ? `Instance(${e.message})` : e.message}`); console.error(e); Sched?.forget(); return false; } // a trap as the runner's InstanceError (LLP 1090 D6)
+    try { flush(); openTabs(); } catch (e) { Poisoned = true; for (const f of InflightDrops) f(); /* marks.js ends TTI on it, as it re-reads loading that ended */ Why = why("updating the tree", String(e)); say(`poisoned: ${e.pc != null ? `Instance(${e.message})` : e.message}`); console.error(e); Sched?.forget(); return false; } // a trap as the runner's InstanceError (LLP 1090 D6)
     settled(true); if (!ok) return Sched?.scan(false), false;
     clock.epoch++; Store.persist();
     for (const go of out) go(); if (Open.size) closeLetGo(); for (const c of cmds) command(...c); Sounds.apply?.(cmds); Sounds.midiApply?.(cmds); Sounds.stood?.(); if (!Booting) { autofocus(); Input?.arrive(); } // after its focus commands, as the wasm host (focus.js); then the focus follows the route (input-glue.js; LLP 1115.000 D4.2)
@@ -213,7 +213,7 @@ export function commit(f, what = "commit") {
     Sched?.scan(true); // a free queue's waiting send is due (LLP 1092 D3)
     return true;
   };
-  return Sh && ok ? Sh.commit(tail, Queue, inflight, After) : tail();
+  return Sh && ok ? Sh.commit(InputScope.wrap(tail), Queue, inflight, After) : tail();
 }
 /** A commit made again after a write ended or the source became ready (the runner's `commit_again`). Refused while reads are
  * owed (a reconciling ask), they fail, keeping what they show, before a commit publishes it; a refusal of that leaves nothing owed. */
@@ -264,7 +264,7 @@ export const Hosts = {
   focus: id => document.getElementById(id)?.focus(),
   blur: id => { const a = document.activeElement; if (a && a !== document.body && (id == null || a.id === id)) a.blur(); }, ...commands(say), // commands.js's: selectText, openURL, postMessage, reload, delivery's; `blur()` drops whatever holds focus; `blur(id)` only when that node holds it (navigation.js runFocusCommands)
   setScheme: s => { document.documentElement.style.colorScheme = s === "system" ? "" : s; }, requestFullscreen: id => Media ? Media.requestFullscreen(id) : say(`requestFullscreen: refused: no video with id "${id}"`), // media.js's where a plan has media; without any, the same refusal
-  observe: n => say(`observe ${n}`), observeAttributes: () => {}, observeError: m => say(`observeError ${m}`), /* journal lines only; marks.js replaces these when the app has launch modules */ copyText: t => navigator.clipboard?.writeText(t), haptic: k => navigator.vibrate?.(k === "selection" ? 5 : 12), /* LLP 1077 D14: vibration where the browser has it */ scrollIntoView: (id, block, inline, behavior) => { const e = document.getElementById(id); if (e) e.scrollIntoView({ block: block ?? "start", inline: inline ?? "nearest", behavior: behavior ?? "auto" }); else say(`scrollIntoView "${id}" refused: no live node with that id`); }, /* an element's, by id (minesweeper F3); list.js takes a row's */ scrollBy: (id, x, y) => { const e = document.getElementById(id); if (e) e.scrollBy(x, y); else say(`scrollBy "${id}" refused: no live node with that id`); }, // LLP 1101.004 R3
+  copyText: t => navigator.clipboard?.writeText(t), haptic: k => navigator.vibrate?.(k === "selection" ? 5 : 12), /* LLP 1077 D14: vibration where the browser has it */ scrollIntoView: (id, block, inline, behavior) => { const e = document.getElementById(id); if (e) e.scrollIntoView({ block: block ?? "start", inline: inline ?? "nearest", behavior: behavior ?? "auto" }); else say(`scrollIntoView "${id}" refused: no live node with that id`); }, /* an element's, by id (minesweeper F3); list.js takes a row's */ scrollBy: (id, x, y) => { const e = document.getElementById(id); if (e) e.scrollBy(x, y); else say(`scrollBy "${id}" refused: no live node with that id`); }, // LLP 1101.004 R3
 };
 let KeyEvent = null, Propagating = null; Hosts.preventDefault = () => { KeyEvent?.preventDefault(); if (KeyEvent?.type === "beforeunload") KeyEvent.returnValue = ""; }; Hosts.stopPropagation = () => { const e = KeyEvent ?? Propagating; if (e) e.$stopped = true; }; // Propagating: the pointer's down or up a handler is running for, which only its `stopPropagation()` reaches (its default is the browser's); // the key, focus, wheel, beforeunload or clipboard event whose handler is running (`on`): commands run before its commit returns; a stopped key reaches no ancestor's `key` handler, its default still does (files diary F8); a prevented beforeunload is the browser's "Leave site?" (Safari reads `returnValue`)
 export const Sounds = { apply: null, own: new Set(["playSound", "playSounds", "stopSounds", "sendMIDI", "requestMIDIAccess"]), gate: null, stood: null, seq: null, midi: null, midiApply: null, beatAt: null }; // The voice table's and the MIDI queue's commands (LLP 1096 D5, LLP 1125 D7): the runtime's own, never a host's; sounds.js and midi.js apply a commit's once it stood, and transport.js reads the sequences in the gate step and plays them once it stood (LLP 1125 D2).
@@ -394,16 +394,16 @@ export const Store = {
 export const Resources = [];
 let Ticket = 0;
 const sameReq = (a, b) => a && b && a.storage === b.storage && a.method === b.method && a.url === b.url && a.body === b.body && JSON.stringify(a.headers) === JSON.stringify(b.headers) && a.http === b.http;
-/** Requests in flight, for the agent's `clock settle`. */
-export const inflight = { n: 0 }; /** Elements the app marks `aria-busy="true"` (still loading), by test id else id. */ export const busy = () => [...document.querySelectorAll('[aria-busy="true"]')].map(el => el.getAttribute('data-testid') ?? el.id);
+/** Requests in flight, for the agent's `clock settle`. Each decrease calls `InflightDrops`, as poisoning does, which marks.js adds to: loading can end with no commit after it. `Undrawn` is what of it draws nothing, which TTI leaves out (marks.js): requests not answered, current or let go (it counts a resource by its placeholder), and storage operations (ts-data.js). */
+export const InflightDrops = [], inflight = (() => { let n = 0; return { get n() { return n; }, set n(v) { const drop = v < n; n = v; if (drop) for (const f of InflightDrops) f(); } }; })(), Undrawn = { tickets: 0, storage: 0 };
 function send(t, land) {
   Out.push(() => {
-    inflight.n++; t.waiting = true;
+    Undrawn.tickets++; inflight.n++; t.waiting = true;
     const started = performance.now();
     // A stream's message (`more`) keeps its ticket; anything else ends it.
     const done = (o, more) => {
       if (t.closed) return;
-      if (t.waiting) { t.waiting = false; inflight.n--; }
+      if (t.waiting) { t.waiting = false; Undrawn.tickets--; inflight.n--; }
       t.elapsed = Math.max(0, Math.round(performance.now() - started));
       if (more) { t.messages++; t.coalesced += (o.streamed ?? o).coalesced ?? 0; o.more = true; } else Open.delete(t);
       say(`${more ? "message" : "reply"} ${t.id}; wall ${t.elapsed} ms`); land(o);
@@ -425,7 +425,7 @@ const Open = new Set();
 function closeLetGo() {
   for (const t of Open) if (!t.held() || t.r?.gone) {
     Open.delete(t); t.closed = true; t.ctl.abort();
-    if (t.waiting) { t.waiting = false; inflight.n--; }
+    if (t.waiting) { t.waiting = false; Undrawn.tickets--; inflight.n--; }
     say(`close stream ${t.id}: its ticket was let go`);
   }
 }
@@ -901,7 +901,7 @@ function imageEvent(e, kind, f) {
 export function on(e, kind, f, bind) {
   // The runner's dispatch_at fires what is due at the event's time first (a focus's `then` before the input); a refusal still lets the event run.
   const ends = kind === "close" || kind === "scrollend", go = f, wall = !clock.agent, own = ends ? Owner : null, pointer = kind === "pointerdown" || kind === "pointerup", /* another event's handler run inside a pointer handler (a focus it moved) is not that pointer event's: its `stopPropagation()` does not stop it */ run = (...a) => { if (pointer) return go(...a); const outer = Propagating; Propagating = null; try { return go(...a); } finally { Propagating = outer; } };
-  f = (...a) => { const to = wall && start ? Math.max(clock.now, performance.now() - start) : clock.now; if (clock.timers.some(t => t.due <= to && !(wall && t.frame)) || Mutations.some(m => m.due <= to || m.next <= to)) advance(to, wall); if (!ends || (e.isConnected && !own?.gone)) return run(...a); };
+  f = (...a) => { const to = wall && start ? Math.max(clock.now, performance.now() - start) : clock.now; if (clock.timers.some(t => t.due <= to && !(wall && t.frame)) || Mutations.some(m => m.due <= to || m.next <= to)) { Advancing = true; try { advance(to, wall); } finally { Advancing = false; } } if (!ends || (e.isConnected && !own?.gone)) return run(...a); };
   // A queued dialog close (or a scroll's end a due task's removal outlived) can outlive its arm, even while an exit animation keeps the element connected.
   const l = (t, g, capture = false) => { e.addEventListener(t, g, capture); if (ends) onEnd(() => e.removeEventListener(t, g, capture)); };
   if (OnHooks.file && e.localName === "input" && e.type === "file" && OnHooks.file(e, kind, f)) return;
@@ -934,7 +934,7 @@ export const onMIDI = (e, kind, f) => { (Sounds.midi ??= new Set()).add([e, f]);
 // The window's, heard by every connected element that declares it (studio diary R17).
 export const onUnload = (e, kind, f, l) => { return addEventListener("beforeunload", ev => { if (!e.isConnected) return; const outer = KeyEvent; KeyEvent = ev; try { f(); } finally { KeyEvent = outer; } }); };
 // Enter's default: after every `key` handler on the path (the window's listener is last), unless one prevented it, and after the browser's own default, HTML's `change` on Enter (gallery F26); the field's next key or edit (before it applies; an Enter from a textarea or an editor edits itself) runs it first, so the action reads the text Enter submitted (r27 t2: typing at once after Enter submitted the next text)
-export const onSubmit = (e, kind, f, l) => { return l("keydown", ev => { if (ev.key === "Enter" && !ev.isComposing && !ev.$submit) { ev.$submit = true; addEventListener("keydown", w => { if (w !== ev || ev.defaultPrevented) return; const run = () => { if (run.done) return; run.done = true; e.removeEventListener("keydown", run, true); e.removeEventListener("beforeinput", run, true); f(); }; e.addEventListener("keydown", run, true); if (ev.target.localName !== "textarea" && !ev.target.isContentEditable) e.addEventListener("beforeinput", run, true); setTimeout(run); }, { once: true }); } }); };
+export const onSubmit = (e, kind, f, l) => { return l("keydown", ev => { if (ev.key === "Enter" && !ev.isComposing && !ev.$submit) { ev.$submit = true; addEventListener("keydown", w => { if (w !== ev || ev.defaultPrevented) return; const run = () => { if (run.done) return; run.done = true; e.removeEventListener("keydown", run, true); e.removeEventListener("beforeinput", run, true); InputScope.run(ev.timeStamp, f); }; e.addEventListener("keydown", run, true); if (ev.target.localName !== "textarea" && !ev.target.isContentEditable) e.addEventListener("beforeinput", run, true); setTimeout(run); }, { once: true }); } }); };
 // Only from the origin of the src the app committed (glue.js `guestMessageAuthorized`, LLP 1020 D2): a guest that navigated away is not heard; an opaque sandbox's origin is "null".
 export const onMessage = (e, kind, f, l) => { return addEventListener("message", ev => { if (ev.source === e.contentWindow && ev.origin === guestOrigin(e)) f(typeof ev.data === "string" ? ev.data : JSON.stringify(ev.data)); }); };
 // The port's offsets, as the web host sends them (`glue.js` `attach`); an action taking one more parameter hears the `ScrollEvent` record.
@@ -1336,7 +1336,7 @@ function inOrder(list) {
 // adopts (a structure that no longer matches builds that row afresh).
 const ADOPT_MS = 16, SLICE_MS = 8;
 let AdoptBy = Infinity;
-const Lazy = [], LazyRows = new Map();
+const Lazy = [], LazyRows = new Map(); export const lazyWaiting = () => (Lazy.length ? 1 : 0); // what waiting rows add to `inflight`: they show their values and adopt on input, so marks.js does not count them
 let LazyAt = 0, LazyTask = null;
 const LAZY_EVENTS = ["pointerdown", "mousedown", "touchstart", "click", "keydown", "beforeinput", "input", "change", "focusin"];
 // Passive: a waiting row must never make the page's touches wait for script.
@@ -1495,5 +1495,5 @@ export function language(slot) {
   if (typeof document !== "object" || !document.documentElement) return;
   effect(() => { const t = table(slot()) ?? Texts[0]; document.documentElement.lang = t[0]; document.documentElement.dir = t[1] ? "rtl" : "ltr"; });
 }
-export * from "./router.js"; import { routerValid } from "./router.js"; // the router (LLP 1038), its own file
+export * from "./router.js"; import { routerValid, routerValue } from "./router.js"; // the router (LLP 1038), its own file
 export { queues, gated } from "./schedule.js"; // queued sends and gated tasks (LLP 1092), their own file

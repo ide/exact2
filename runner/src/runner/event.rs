@@ -1080,7 +1080,10 @@ impl<D: DataSource> Runner<D> {
     /// Deliver a host event to `view`: find its handler, evaluate the curried
     /// arguments in the instance's scope now, run the action, update.
     pub fn dispatch(&mut self, view: ViewId, event: Event) -> Result<CommitReceipt, RunnerError> {
-        self.arrived(|r| r.dispatch_event(view, event))
+        let outer = std::mem::replace(&mut self.dispatching_event, true);
+        let result = self.arrived(|r| r.dispatch_event(view, event));
+        self.dispatching_event = outer;
+        result
     }
 
     fn dispatch_event(&mut self, view: ViewId, event: Event) -> Result<CommitReceipt, RunnerError> {

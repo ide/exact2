@@ -1,5 +1,6 @@
 import { bundleOptions } from '../../js/bake/src/typescript.mjs';
-import { hatchWords, launchModules, moduleDirectory } from '../../scripts/app.mjs';
+import { hatchWords, moduleDirectory } from '../../scripts/app.mjs';
+import { launchModules } from '../../scripts/launch-modules.mjs';
 // The web build's JS target: `bun host/web-js/build.mjs <app> [--plan <baked app.plan>] [--out <dir>]`.
 //
 // 1. `exact-web-js js` compiles the plan (the app's Contract, or a baked
@@ -404,7 +405,7 @@ writeFileSync(resolve(gen, 'main.js'), [
   ] : []),
   ...(ts ? ["import { install as ts } from './ts-data.js';", `ts(data, ${mixed}${pageModules ? ", () => import('./native.js')" : ''});`] : []),
   // Launch marks install before the app boots; marks.js loads the services after startup.
-  ...(launchWeb.length ? ["import { install as launchMarks } from './marks.js';", `const marks = launchMarks(${JSON.stringify(launchWeb.map(m => ({ name: m.name, url: `./launch/${m.name}/service.js`, config: { ...(manifest.moduleConfig?.[m.name] ?? {}), 'app.CFBundleIdentifier': manifest.app?.id, 'app.CFBundleName': manifest.app?.name, 'fact.development': !production } })))});`] : []),
+  ...(launchWeb.length ? ["import { install as launchMarks } from './marks.js';", `const marks = launchMarks(${JSON.stringify(launchWeb.map(m => ({ name: m.name, url: `./launch/${m.name}/service.js`, config: { ...(manifest.moduleConfig?.[m.name] ?? {}), 'app.CFBundleIdentifier': manifest.app?.id, 'app.CFBundleName': manifest.app?.name, 'app.CFBundleShortVersionString': process.env.EXACT_VERSION ?? '0.1.0', 'app.CFBundleVersion': process.env.EXACT_BUILD_NUMBER ?? '1', 'fact.development': !production } })))});`] : []),
   "const start = () => {",
   "  const state = app();",
   ...(launchWeb.length ? ["  marks.mounted();"] : []),

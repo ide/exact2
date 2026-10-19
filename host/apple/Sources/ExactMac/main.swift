@@ -167,10 +167,15 @@ final class ExactWindow: NSWindow {
     override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect {
         agentMode ? frameRect : super.constrainFrameRect(frameRect, to: screen)
     }
-    /// A navigation is timed from its input: a mouse-up or key press.
+    /// A navigation is timed from the input whose dispatch changed the router: any
+    /// mouse, wheel or key event, as each can run a handler. Noted before dispatch,
+    /// since the action it triggers can navigate within it.
     override func sendEvent(_ event: NSEvent) {
+        let input = [.leftMouseDown, .leftMouseUp, .rightMouseDown, .rightMouseUp, .otherMouseDown, .otherMouseUp,
+                     .mouseMoved, .mouseEntered, .mouseExited, .leftMouseDragged, .rightMouseDragged, .otherMouseDragged, .scrollWheel, .keyDown, .keyUp, .flagsChanged].contains(event.type)
+        if input { ExactLaunch.shared.input(at: event.timestamp) }
         super.sendEvent(event)
-        if [.leftMouseUp, .keyDown].contains(event.type) { ExactLaunch.shared.input(at: event.timestamp) }
+        if input { ExactLaunch.shared.inputEnded() }
     }
 }
 

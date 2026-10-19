@@ -20,6 +20,8 @@ final class ObserveStore {
                 severity TEXT NOT NULL, name TEXT NOT NULL, body TEXT, attributes TEXT, dropped INTEGER NOT NULL DEFAULT 0);
             CREATE TABLE IF NOT EXISTS cursors (signal TEXT PRIMARY KEY, id INTEGER NOT NULL);
             """, nil, nil, nil)
+        // Add each row's running update to a store made before it (the statement fails when it exists).
+        for table in ["metrics", "logs", "sessions"] { sqlite3_exec(db, "ALTER TABLE \(table) ADD COLUMN running TEXT", nil, nil, nil) }
         let cutoff = Date().timeIntervalSince1970 - Self.retention
         run("DELETE FROM metrics WHERE time < ?", [cutoff])
         run("DELETE FROM logs WHERE time < ?", [cutoff])
@@ -75,14 +77,22 @@ final class ObserveStore {
         run("INSERT OR IGNORE INTO sessions (id, start, metadata) VALUES (?, ?, ?)", [id, start, json])
     }
 
+    /// The update running when a row is recorded (Exact's envelope digest; nil for the
+    /// embedded app), which each row keeps: a live activation does not relabel earlier rows.
+    var running: String?
+
+    /// The update a session ran last (`sessions.running`), which a crash recovered at a later launch carries.
+    func sessionRunning(_ id: String) -> String? { rows("SELECT running FROM sessions WHERE id = ?", [id]).first?.first as? String }
+    func setSessionRunning(_ id: String, _ running: String?) { _ = run("UPDATE sessions SET running = ? WHERE id = ?", [running, id]) }
+
     func addMetric(session: String, time: Double, category: String, name: String, value: Double, route: String? = nil, params: [String: Any]) {
         let json = params.isEmpty ? nil : String(decoding: (try? JSONSerialization.data(withJSONObject: params, options: [.sortedKeys])) ?? Data(), as: UTF8.self)
-        run("INSERT INTO metrics (session, time, category, name, value, route, params) VALUES (?, ?, ?, ?, ?, ?, ?)", [session, time, category, name, value, route, json])
+        run("INSERT INTO metrics (session, time, category, name, value, route, params, running) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", [session, time, category, name, value, route, json, running])
     }
 
     func addLog(session: String, time: Double, severity: String, name: String, body: String?, attributes: [String: Any], dropped: Int) {
         let json = String(decoding: (try? JSONSerialization.data(withJSONObject: attributes, options: [.sortedKeys])) ?? Data("{}".utf8), as: UTF8.self)
-        run("INSERT INTO logs (session, time, severity, name, body, attributes, dropped) VALUES (?, ?, ?, ?, ?, ?, ?)", [session, time, severity, name, body, json, dropped])
+        run("INSERT INTO logs (session, time, severity, name, body, attributes, dropped, running) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", [session, time, severity, name, body, json, dropped, running])
     }
 
     func cursor(_ signal: String) -> Int64 {

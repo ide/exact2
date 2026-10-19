@@ -273,7 +273,7 @@ final class ElementHatches {
             presenter.session?.log("hatch \(what): \(name) refused: the act queue is full")
             return false
         }
-        queue.append(Act(what: what, name: name, bytes: bytes, work: work))
+        queue.append(Act(what: what, name: name, bytes: bytes, input: NavigationMarks.shared.currentInput, work: work))
         queuedBytes += bytes
         if !scheduled {
             scheduled = true
@@ -282,7 +282,8 @@ final class ElementHatches {
         return true
     }
 
-    private struct Act { let what: String, name: String, bytes: Int, work: () -> Void }
+    /// `input`: the input whose dispatch queued it, which a navigation it makes is timed from.
+    private struct Act { let what: String, name: String, bytes: Int, input: Double?, work: () -> Void }
     static let maxQueued = 256, maxBytes = 1 << 20, snapshot = 64, inputBytes = 65536
     private var queue: [Act] = [], queuedBytes = 0, scheduled = false
     /// Acts refused, and drains run, since launch; the acts still queued.
@@ -300,7 +301,7 @@ final class ElementHatches {
         queue.removeFirst(batch.count)
         for act in batch {
             queuedBytes -= act.bytes
-            act.work()
+            NavigationMarks.shared.carrying(act.input, act.work)
         }
         if !queue.isEmpty, !scheduled {
             scheduled = true

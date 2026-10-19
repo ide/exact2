@@ -53,6 +53,13 @@ pub(crate) struct SubmittedFrame {
     identity: Rc<Identity>,
     picture: RefCell<Option<Picture>>,
 }
+#[cfg(any(target_os = "linux", target_os = "android"))]
+impl SubmittedFrame {
+    /// Its paint succeeded: its pixels are the tree's, not a failed paint's fallback.
+    pub(crate) fn painted(&self) -> bool {
+        self.identity.succeeded
+    }
+}
 #[cfg(all(test, target_os = "linux"))]
 impl SubmittedFrame {
     pub(crate) fn fixture(value: u8) -> Self {

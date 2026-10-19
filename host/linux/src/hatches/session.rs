@@ -64,6 +64,8 @@ pub(crate) struct Act {
     pub(crate) node: Rc<Node>,
     pub(crate) kind: ActKind,
     pub(crate) text: Option<String>,
+    /// The input whose dispatch queued it, which a navigation it makes is timed from.
+    pub(crate) input: Option<f64>,
 }
 
 #[derive(Default)]
@@ -110,6 +112,8 @@ pub(crate) struct Shared {
     pub(crate) now: Cell<f64>,
     /// The session is the agent's.
     pub(crate) agent: Cell<bool>,
+    /// The input being dispatched, which an act asked for meanwhile carries.
+    pub(crate) input: Cell<Option<f64>>,
     store: RefCell<Store>,
     acts: RefCell<Acts>,
     clock: RefCell<Clock>,
@@ -128,6 +132,7 @@ impl Shared {
         Shared {
             now: Cell::new(0.0),
             agent: Cell::new(false),
+            input: Cell::new(None),
             store: RefCell::new(Store::new(measuring)),
             acts: RefCell::default(),
             clock: RefCell::default(),
@@ -188,6 +193,7 @@ impl Shared {
             node: node.clone(),
             kind,
             text,
+            input: self.input.get(),
         });
         self.woke.set(true);
     }

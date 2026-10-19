@@ -83,6 +83,9 @@ export function projectRoots(history, navigate, say, after, hostBack, hostGo, ro
 /** The elements that may be the page's scroller: `<html data-scrolldocument>`
  * while one is (D4), which the shell's rule reads, as the web host's glue. */
 export const Docs = new Set();
+/** Elements the app marks `aria-busy="true"` (still loading), by test id else id: what time to interactive and `clock settle` wait for. */
+/** Elements marked `aria-busy` on a shown route (not in a pane that is not shown), as the runner's ledger reads them. */
+export const busy = () => [...document.querySelectorAll('[aria-busy="true"]')].filter(el => !inactive(el)).map(el => el.getAttribute('data-testid') ?? el.id);
 let Marked = false;
 export function markDocument() {
   if (!Docs.size && !Marked) return;

@@ -26,7 +26,7 @@ pub struct Outstanding {
     pub one_shots: Vec<String>,
     /// Resources whose current arguments failed: settled, but in error.
     pub failed: Vec<String>,
-    /// Mounted elements marked `aria-busy`, by test id, else view id.
+    /// Mounted elements marked `aria-busy` on a shown route, by test id, else view id.
     pub busy: Vec<String>,
     /// The data source can answer.
     pub data_ready: bool,
@@ -122,7 +122,11 @@ impl<D: DataSource> Runner<D> {
             let Some(node) = self.kernel.node(id) else {
                 continue;
             };
-            if node.props.bool(exact_kernel::PropId::AccessibilityBusy) == Some(true) {
+            // A busy element under a route that is not shown (a screen beneath a stack's
+            // top, an unselected tab) is not on screen.
+            if node.props.bool(exact_kernel::PropId::AccessibilityBusy) == Some(true)
+                && !crate::head::inactive(self.kernel(), id)
+            {
                 let name = node
                     .props
                     .str(exact_kernel::PropId::TestId)

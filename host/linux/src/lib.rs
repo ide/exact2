@@ -72,6 +72,7 @@ pub mod journal;
 pub mod launch_marks;
 mod media_session;
 pub mod navigation;
+pub mod navigation_marks;
 pub mod paint;
 pub mod picker;
 mod placement;

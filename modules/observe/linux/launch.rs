@@ -2,13 +2,14 @@
 // `contract::linux_entry` generates calls `launch_parts`, which runs `launch`.
 // `launch` does no I/O. It names the session, forwards journal events to a channel and
 // installs a panic hook. After the startup report, a background thread keeps the queue
-// (one bounded JSON file), records earlier crashes and sends rows in expo-observe's
-// OTLP/JSON, matching `apple/service/ObserveWire.swift` and `web/service.js`.
+// (one bounded JSON file), records earlier crashes and answers flushes, and a second
+// sends rows in expo-observe's OTLP/JSON, matching `apple/service/ObserveWire.swift` and
+// `web/service.js`, so no request delays storing an event.
 
 use exact_linux::journal::{self, serde_json, LaunchContext};
 use serde_json::{json, Map, Value};
 use std::path::PathBuf;
-use std::sync::mpsc;
+use std::sync::{mpsc, Arc, Mutex, MutexGuard, OnceLock};
 use std::time::{Duration, Instant};
 
 const SCHEMA_URL: &str = "https://opentelemetry.io/schemas/1.27.0";
@@ -100,7 +101,8 @@ pub fn launch(ctx: LaunchContext) {
     let session = session_id();
     let start = journal::wall();
     // A panic writes `pending-<session>.json`. The next launch sends it as a
-    // fatal `native.exception` for this session.
+    // fatal `native.exception` for this session, with the startup metrics
+    // measured before it that the session did not store.
     let (module, config, app, development) = (ctx.module, ctx.config, ctx.app, ctx.development);
     let context = move || LaunchContext {
         module,
@@ -109,6 +111,8 @@ pub fn launch(ctx: LaunchContext) {
         development,
     };
     let crash_session = session.clone();
+    let launch_type = LaunchType::new(this_launch);
+    let crash_launch_type = launch_type.clone();
     let previous = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
         let message = info
@@ -117,30 +121,69 @@ pub fn launch(ctx: LaunchContext) {
             .map(|s| s.to_string())
             .or_else(|| info.payload().downcast_ref::<String>().cloned())
             .unwrap_or_default();
+        // The crashed process's app and OS, for a session the service never saved: the
+        // launch that reads the record can be another build. The hook runs on the
+        // panicking thread, not in a signal handler, so it reads them now.
+        let parse = |s: &str| serde_json::from_str::<Value>(s).unwrap_or_default();
+        let dir = context().state_dir();
+        let _ = std::fs::create_dir_all(&dir);
+        // The startup report as it stands (the launch time, and TTR once its frame was
+        // presented), named as the report would be, so a crash before the report keeps
+        // them.
+        let startup = exact_linux::launch_marks::standing();
+        // Decide the launch type once launch ended, unless the startup report did, so
+        // that `launch.json` names this launch for the next one although it crashes
+        // before its report. Launch end is read after `standing`, so it has ended
+        // whenever there is a startup.
+        let launch =
+            exact_linux::launch_marks::launch_ended().then(|| crash_launch_type.decide(&dir));
+        let startup = startup.zip(launch).map(|(mut startup, launch)| {
+            startup.insert("launchType".into(), launch.into());
+            startup
+        });
         let record = json!({
             "session": crash_session, "sessionStart": start, "time": journal::wall(),
             "type": "panic", "message": message,
             "location": info.location().map(|l| format!("{}:{}", l.file(), l.line())),
             "thread": std::thread::current().name().map(str::to_string),
+            "metadata": metadata(&parse(app), &parse(config), development),
+            "startup": startup,
         });
-        let dir = context().state_dir();
-        let _ = std::fs::create_dir_all(&dir);
         let _ = std::fs::write(
             dir.join(format!("pending-{crash_session}.json")),
             record.to_string(),
         );
         previous(info);
     }));
-    let (tx, rx) = mpsc::channel::<Value>();
+    let (tx, rx) = mpsc::channel::<Message>();
+    let events = tx.clone();
     journal::subscribe(move |e| {
-        let _ = tx.send(e.json());
+        let _ = events.send(Message::Event(e.json()));
+    });
+    // Before the process ends (SIGTERM, SIGINT), the host waits until the service
+    // has stored what it was given; the next launch sends it.
+    journal::on_flush(move |bound| {
+        let (done, stored) = mpsc::channel();
+        if tx.send(Message::Flush(done)).is_ok() {
+            let _ = stored.recv_timeout(bound);
+        }
     });
     journal::after_startup(move || {
         let dir = context().state_dir();
         let config: Map<String, Value> = serde_json::from_str(config).unwrap_or_default();
         let app: Value = serde_json::from_str(app).unwrap_or_default();
-        Service::new(config, &app, development, dir, session, start).run(rx);
+        let mut service = Service::new(config, &app, development, dir, session, start);
+        service.launch_type = launch_type;
+        service.run(rx);
     });
+}
+
+/// What the launch part hands the service thread.
+enum Message {
+    /// A journal event.
+    Event(Value),
+    /// A reply, once the events sent before it are stored.
+    Flush(mpsc::Sender<()>),
 }
 
 /// Observe's custom-event validation, copied from expo-app-metrics (`LogEvents`).
@@ -185,7 +228,8 @@ mod rules {
     }
 }
 
-/// Same as expo's `EASClientID.deterministicUniformValue`: a stable value in [0, 1) per install.
+/// Same as expo main's `EASClientID.deterministicUniformValue` (splitmix64 over both
+/// halves of the id): a stable value in [0, 1) per install.
 fn uniform(id: &str) -> f64 {
     let hex: String = id.chars().filter(|c| *c != '-').collect();
     let half = |r: std::ops::Range<usize>| {
@@ -207,10 +251,49 @@ fn backoff(attempt: u32) -> f64 {
     (60.0 * 2f64.powi(attempt as i32 - 1)).min(900.0) * random
 }
 
-/// The server's Retry-After in seconds, clamped to 60-900. An HTTP-date value is ignored.
-fn retry_after(h: Option<&str>) -> Option<f64> {
-    let s: f64 = h?.trim().parse().ok()?;
+/// The server's Retry-After in seconds from `now` (Unix seconds), clamped to 60-900, as
+/// expo-observe's `parseRetryAfter` reads it: delta-seconds or an IMF-fixdate.
+fn retry_after(h: Option<&str>, now: f64) -> Option<f64> {
+    let raw = h?.trim();
+    let s = match raw.parse::<f64>() {
+        Ok(s) => s,
+        Err(_) => http_date(raw)? - now,
+    };
     s.is_finite().then(|| s.clamp(60.0, 900.0))
+}
+
+/// The Unix time of an IMF-fixdate (RFC 9110 §5.6.7), `Wed, 21 Oct 2026 07:28:00 GMT`.
+fn http_date(s: &str) -> Option<f64> {
+    const DAYS: [&str; 7] = ["Mon,", "Tue,", "Wed,", "Thu,", "Fri,", "Sat,", "Sun,"];
+    const MONTHS: [&str; 12] = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ];
+    let [day, date, month, year, time, "GMT"] = s.split(' ').collect::<Vec<_>>()[..] else {
+        return None;
+    };
+    let number = |s: &str, digits: usize| -> Option<i64> {
+        if s.len() != digits || !s.bytes().all(|b| b.is_ascii_digit()) {
+            return None;
+        }
+        s.parse().ok()
+    };
+    let [h, m, sec] = time.split(':').collect::<Vec<_>>()[..] else {
+        return None;
+    };
+    let (d, y) = (number(date, 2)?, number(year, 4)?);
+    let (h, m, sec) = (number(h, 2)?, number(m, 2)?, number(sec, 2)?);
+    let month = MONTHS.iter().position(|n| *n == month)? as i64 + 1;
+    if !DAYS.contains(&day) || !(1..=31).contains(&d) || h > 23 || m > 59 || sec > 60 {
+        return None;
+    }
+    // Days since 1970-01-01 in the proleptic Gregorian calendar, from a year that starts
+    // in March (Howard Hinnant's `days_from_civil`).
+    let y = if month <= 2 { y - 1 } else { y };
+    let era = y.div_euclid(400);
+    let yoe = y - era * 400;
+    let doy = (153 * ((month + 9) % 12) + 2) / 5 + d - 1;
+    let days = era * 146_097 + yoe * 365 + yoe / 4 - yoe / 100 + doy - 719_468;
+    Some((days * 86_400 + h * 3600 + m * 60 + sec) as f64)
 }
 
 /// An OTLP attribute with a string value.
@@ -323,12 +406,24 @@ fn device() -> Map<String, Value> {
 
 type Row = Map<String, Value>;
 
-/// Appends a row, dropping the oldest past `MAX_ROWS`.
-fn push_capped(queue: &mut Vec<Row>, row: Row) {
-    queue.push(row);
-    if queue.len() > MAX_ROWS {
-        queue.remove(0);
-    }
+/// A session's metadata: this process's app, OS and device, and the environment.
+fn metadata(app: &Value, config: &Value, development: bool) -> Value {
+    let environment = config["environment"].as_str().unwrap_or(if development {
+        "development"
+    } else {
+        "production"
+    });
+    json!({
+        "osName": "Linux",
+        "osVersion": read("/proc/sys/kernel/osrelease"),
+        "deviceModel": read("/sys/devices/virtual/dmi/id/product_name"),
+        // `en_US.UTF-8` becomes `en-US`. `C` and `POSIX` mean no language.
+        "language": std::env::var("LANG").ok().map(|l| l.split('.').next().unwrap_or("").replace('_', "-"))
+            .filter(|l| !l.is_empty() && l != "C" && l != "POSIX"),
+        "clientVersion": CLIENT_VERSION,
+        "appIdentifier": app["id"], "appName": app["name"], "appVersion": app["version"],
+        "environment": environment,
+    })
 }
 
 /// The JSON object `v` builds, as a map.
@@ -339,6 +434,73 @@ fn object(v: Value) -> Map<String, Value> {
     }
 }
 
+/// This launch's type, decided once after launch end by the first of its startup report
+/// and a panic, so that both name the same type and neither reads this launch as the
+/// previous one.
+struct LaunchType {
+    decided: OnceLock<&'static str>,
+    /// This launch's identity, which the next launch compares, and whether stderr is a
+    /// terminal: [`this_launch`], which tests replace.
+    this: fn() -> (Value, bool),
+}
+
+impl LaunchType {
+    fn new(this: fn() -> (Value, bool)) -> Arc<Self> {
+        Arc::new(LaunchType {
+            decided: OnceLock::new(),
+            this,
+        })
+    }
+
+    /// Warm when the previous launch was the same build in the same OS boot and stderr is
+    /// not a terminal, otherwise cold (Observe's iOS rule). The previous launch is the
+    /// one `dir`'s `launch.json` names, and deciding names this one there instead, as
+    /// Observe saves each launch's state at launch end. It does file I/O, so the service
+    /// decides at the startup report, and a panic hook when the panic comes first.
+    fn decide(&self, dir: &std::path::Path) -> &'static str {
+        // Keep this closure free of panics, since a panic hook on the thread running it
+        // would reenter `get_or_init`, which deadlocks
+        self.decided.get_or_init(|| {
+            let (this, terminal) = (self.this)();
+            let path = dir.join("launch.json");
+            let previous = read_json(&path);
+            let _ = std::fs::write(&path, this.to_string());
+            let same = |key: &str| !this[key].is_null() && previous[key] == this[key];
+            if same("boot") && same("build") && !terminal {
+                "warm"
+            } else {
+                "cold"
+            }
+        })
+    }
+}
+
+/// This launch as Observe's rule compares it: the OS boot and the build (the executable's
+/// size and mtime), and whether stderr is a terminal.
+fn this_launch() -> (Value, bool) {
+    use std::io::IsTerminal;
+    let boot = read("/proc/sys/kernel/random/boot_id");
+    let build = std::fs::metadata("/proc/self/exe").ok().map(|m| {
+        let mtime = m
+            .modified()
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok());
+        format!("{}:{}", m.len(), mtime.map_or(0, |d| d.as_nanos()))
+    });
+    (
+        json!({ "boot": boot, "build": build }),
+        std::io::stderr().is_terminal(),
+    )
+}
+
+/// A metric row of `session`'s, stamped `wall`.
+fn metric_row(session: &str, category: &str, name: &str, value: f64, wall: f64) -> Row {
+    object(json!({
+        "session": session, "time": wall, "category": category, "name": name, "value": value,
+    }))
+}
+
+/// The service thread's state: what turns journal events into rows.
 struct Service {
     /// `moduleConfig.observe`. Indexing a missing key gives `null`.
     config: Value,
@@ -346,16 +508,28 @@ struct Service {
     dir: PathBuf,
     session: String,
     client_id: String,
-    sessions: Map<String, Value>,
-    metrics: Vec<Row>,
-    logs: Vec<Row>,
+    /// The rows, which the [`Sender`] sends.
+    queue: Arc<Mutex<Queue>>,
     globals: Map<String, Value>,
     launch_route: Option<Value>,
     navigated: bool,
+    /// The metrics the last startup report and its late one stored, by their names there.
+    startup_metrics: std::collections::BTreeSet<String>,
+    /// This launch's type, which the launch part shares with its panic hook.
+    launch_type: Arc<LaunchType>,
     /// Reads the device state at TTI. Tests replace it.
     device: fn() -> Map<String, Value>,
-    due: Option<Instant>,
-    gate: (Option<Instant>, u32),
+}
+
+/// The signals, each sent to its own endpoint.
+const SIGNALS: [&str; 2] = ["metrics", "logs"];
+
+/// One endpoint's retry gate, as expo-observe keeps one per endpoint: nothing is
+/// sent before `after`, and `failures` retryable failures in a row set the backoff.
+#[derive(Clone, Copy, Debug, Default)]
+struct Gate {
+    after: Option<Instant>,
+    failures: u32,
 }
 
 impl Service {
@@ -374,82 +548,70 @@ impl Service {
             let _ = std::fs::write(&id_file, &id);
             id
         });
-        let queue = read_json(&dir.join("queue.json"));
-        let rows = |k: &str| -> Vec<Row> {
-            queue[k]
-                .as_array()
-                .map(|a| a.iter().filter_map(|r| r.as_object().cloned()).collect())
-                .unwrap_or_default()
-        };
         let mut s = Service {
             development,
+            queue: Arc::new(Mutex::new(Queue::load(dir.clone()))),
             dir,
             client_id,
-            sessions: queue["sessions"].as_object().cloned().unwrap_or_default(),
-            metrics: rows("metrics"),
-            logs: rows("logs"),
             globals: Map::new(),
             launch_route: None,
             navigated: false,
+            startup_metrics: Default::default(),
+            launch_type: LaunchType::new(this_launch),
             device,
-            due: Some(Instant::now() + DEBOUNCE),
-            gate: (None, 0),
             session,
             config: Value::Object(config),
         };
-        let environment = s.config["environment"].as_str().unwrap_or(if development {
-            "development"
-        } else {
-            "production"
-        });
-        let meta = json!({
-            "osName": "Linux",
-            "osVersion": read("/proc/sys/kernel/osrelease"),
-            "deviceModel": read("/sys/devices/virtual/dmi/id/product_name"),
-            // `en_US.UTF-8` becomes `en-US`. `C` and `POSIX` mean no language.
-            "language": std::env::var("LANG").ok().map(|l| l.split('.').next().unwrap_or("").replace('_', "-"))
-                .filter(|l| !l.is_empty() && l != "C" && l != "POSIX"),
-            "clientVersion": CLIENT_VERSION,
-            "appIdentifier": app["id"], "appName": app["name"], "appVersion": app["version"],
-            "environment": environment,
-        });
-        s.sessions
+        let meta = metadata(app, &s.config, development);
+        lock(&s.queue)
+            .sessions
             .insert(s.session.clone(), json!({ "start": start, "meta": meta }));
         if log_enabled() {
             eprintln!("observe: service started, session {}", s.session);
         }
         s.ingest_crashes();
-        s.save();
+        lock(&s.queue).save();
         s
     }
 
-    fn run(mut self, rx: mpsc::Receiver<Value>) {
-        loop {
-            let wait = self.due.map_or(Duration::from_secs(3600), |d| {
-                d.saturating_duration_since(Instant::now())
-            });
-            match rx.recv_timeout(wait) {
-                Ok(e) => self.event(&e),
-                Err(mpsc::RecvTimeoutError::Timeout) => {}
-                Err(mpsc::RecvTimeoutError::Disconnected) => return self.dispatch(),
-            }
-            if self.due.is_some_and(|d| Instant::now() >= d) {
-                self.due = None;
-                self.dispatch();
-            }
+    /// What sends this service's rows, its first dispatch after the debounce.
+    fn sender(&self) -> Sender {
+        Sender {
+            queue: self.queue.clone(),
+            config: self.config.clone(),
+            development: self.development,
+            session: self.session.clone(),
+            client_id: self.client_id.clone(),
+            due: Some(Instant::now() + DEBOUNCE),
+            gates: [Gate::default(); 2],
         }
     }
 
-    fn schedule(&mut self) {
-        self.due.get_or_insert_with(|| Instant::now() + DEBOUNCE);
+    fn run(self, rx: mpsc::Receiver<Message>) {
+        let sender = self.sender();
+        self.serve(rx, sender);
     }
 
-    fn save(&self) {
-        let q = json!({ "sessions": self.sessions, "metrics": self.metrics, "logs": self.logs });
-        let tmp = self.dir.join("queue.json.tmp");
-        if std::fs::write(&tmp, q.to_string()).is_ok() {
-            let _ = std::fs::rename(&tmp, self.dir.join("queue.json"));
+    /// Stores each event and answers each flush, while `sender` sends on a thread of
+    /// its own, which each stored event wakes.
+    fn serve(mut self, rx: mpsc::Receiver<Message>, sender: Sender) {
+        let (wake, woken) = mpsc::channel();
+        let sending = std::thread::spawn(move || sender.run(woken));
+        while let Ok(message) = rx.recv() {
+            match message {
+                Message::Event(e) => {
+                    if self.event(&e) {
+                        let _ = wake.send(());
+                    }
+                }
+                // Each event is stored as it is handled, so those before this one are.
+                Message::Flush(done) => {
+                    let _ = done.send(());
+                }
+            }
         }
+        drop(wake);
+        let _ = sending.join();
     }
 
     fn metric(
@@ -461,16 +623,14 @@ impl Service {
         route: Option<&Value>,
         params: Map<String, Value>,
     ) {
-        let mut r = object(json!({
-            "session": self.session, "time": wall, "category": category, "name": name, "value": value,
-        }));
+        let mut r = metric_row(&self.session, category, name, value, wall);
         if let Some(route) = route.filter(|r| r.is_string()) {
             r.insert("route".into(), route.clone());
         }
         if !params.is_empty() {
             r.insert("params".into(), Value::Object(params).to_string().into());
         }
-        push_capped(&mut self.metrics, r);
+        lock(&self.queue).push("metrics", r);
     }
 
     fn log(
@@ -489,26 +649,28 @@ impl Service {
         if let Some(b) = body {
             r.insert("body".into(), b.into());
         }
-        push_capped(&mut self.logs, r);
+        lock(&self.queue).push("logs", r);
     }
 
-    fn event(&mut self, e: &Value) {
+    /// Stores the rows `e` makes. Whether it stored any.
+    fn event(&mut self, e: &Value) -> bool {
         let wall = e["wall"].as_f64().unwrap_or_else(journal::wall);
         match e["kind"].as_str().unwrap_or("") {
-            "startup" => self.startup(e, wall),
+            "startup" => self.startup(e, wall, false),
+            "startup.tti" => self.startup(e, wall, true),
             "navigation.launch" => {
                 self.launch_route = Some(e.clone());
-                return;
+                return false;
             }
             "navigation" => self.navigation(e, wall),
             "app.attributes" => {
                 self.globals = rules::attributes(&e["attributes"]).0;
-                return;
+                return false;
             }
             "app.event" => {
                 let Some(name) = rules::name(e["name"].as_str().unwrap_or("")) else {
                     eprintln!("observe: dropped an event with an invalid name");
-                    return;
+                    return false;
                 };
                 let (kept, dropped) = rules::attributes(&e["attributes"]);
                 let mut attrs = self.globals.clone();
@@ -538,12 +700,13 @@ impl Service {
                 );
             }
             "app.error" => {
-                let mut attrs = object(json!({
+                let mut attrs = self.globals.clone();
+                attrs.extend(object(json!({
                     "expo.error.source": e["source"].as_str().unwrap_or("reportedByUser"),
                     "expo.error.is_fatal": false,
                     "exception.type": e["type"].as_str().unwrap_or("Error"),
                     "exception.message": e["message"].as_str().unwrap_or(""),
-                }));
+                })));
                 if let Some(stack) = e["stack"].as_str() {
                     attrs.insert("exception.stacktrace".into(), stack.into());
                 }
@@ -556,15 +719,22 @@ impl Service {
                     (attrs, 0),
                 );
             }
-            _ => return,
+            _ => return false,
         }
-        self.save();
-        self.schedule();
+        lock(&self.queue).save();
+        true
     }
 
-    /// Stores the launch metrics from the host's startup report under Observe's names.
-    fn startup(&mut self, e: &Value, wall: f64) {
+    /// Stores the launch metrics from the host's startup report under Observe's names,
+    /// each at the time of its own mark. A `late` report (`startup.tti`) follows one
+    /// that went out at the timeout and stores only what that one did not: the TTI
+    /// reached after it, and the TTR when the first frame came after it too.
+    fn startup(&mut self, e: &Value, wall: f64, late: bool) {
+        if !late {
+            self.startup_metrics.clear();
+        }
         let marks = &e["marks"];
+        let at = |name: &str| e["walls"][name].as_f64().unwrap_or(wall);
         let ms = |a: &str, b: &str| {
             Some(json!(
                 ((marks[a].as_f64()? - marks[b].as_f64()?) * 10.0).round() / 10_000.0
@@ -593,12 +763,21 @@ impl Service {
         if let Some(r) = e["processResolutionMs"].as_f64() {
             phases.insert("exact.launch.resolution_ms".into(), json!(r));
         }
+        if e["interrupted"] == json!(true) {
+            phases.insert("exact.launch.interrupted".into(), true.into());
+        }
         let device = (self.device)();
-        let launch = self.launch_type();
+        let launch = self.launch_type.decide(&self.dir);
+        let mut stored = Vec::new();
         for (name, value) in e["metrics"].as_object().into_iter().flatten() {
             let Some(value) = value.as_f64() else {
                 continue;
             };
+            if !self.startup_metrics.insert(name.clone()) {
+                continue;
+            }
+            stored.push(name.as_str());
+            let wall = at(name);
             let name = &if name == "coldLaunchTime" {
                 format!("{launch}LaunchTime")
             } else {
@@ -606,6 +785,7 @@ impl Service {
             };
             let mut params = self.globals.clone();
             params.extend(phases.clone());
+            let mut route = None;
             if name == "timeToInteractive" {
                 params.extend(device.clone());
                 params.insert("exact.tti.reason".into(), e["tti"].clone());
@@ -614,20 +794,51 @@ impl Service {
                     let steps: Vec<&str> = trace.iter().filter_map(Value::as_str).collect();
                     params.insert("exact.tti.trace".into(), steps.join(" → ").into());
                 }
+                // The screen shown at TTI, with Observe's navigation params.
+                if e["route"].is_object() {
+                    route = Some(e["route"]["route"].clone());
+                    let route_params = match &e["route"]["routeParams"] {
+                        Value::Null => json!({}),
+                        p => p.clone(),
+                    };
+                    params.insert("routeParams".into(), route_params);
+                    if !e["route"]["url"].is_null() {
+                        params.insert("url".into(), e["route"]["url"].clone());
+                    }
+                }
+                if e["late"] == json!(true) {
+                    params.insert("exact.tti.late".into(), true.into());
+                }
             }
-            self.metric("appStartup", name, value, wall, None, params);
+            self.metric("appStartup", name, value, wall, route.as_ref(), params);
+        }
+        // Note which startup metrics the session stored, by their names in the report, so
+        // that its crash record adds only the others
+        if !stored.is_empty() {
+            let names = json!(self.startup_metrics);
+            let mut queue = lock(&self.queue);
+            if let Some(session) = queue
+                .sessions
+                .get_mut(&self.session)
+                .and_then(Value::as_object_mut)
+            {
+                session.insert("startupStored".into(), names);
+            }
         }
         // The launch route's `cold_ttr` and `tti`, measured from boot. Observe measures
         // from its integration start, which has no Exact equivalent.
         if let (Some(route), Some(boot)) = (self.launch_route.clone(), marks["boot"].as_f64()) {
             let mut params = self.nav_params(&route, true);
             params.insert("exact.nav.anchor".into(), "boot".into());
-            if let Some(present) = marks["present"].as_f64() {
+            if let (Some(present), true) = (
+                marks["present"].as_f64(),
+                stored.contains(&"timeToFirstRender"),
+            ) {
                 self.metric(
                     "navigation",
                     "cold_ttr",
                     (present - boot) / 1000.0,
-                    wall,
+                    at("timeToFirstRender"),
                     Some(&route["route"]),
                     params.clone(),
                 );
@@ -635,44 +846,17 @@ impl Service {
             if let (Some(i), false, true) = (
                 marks["interactive"].as_f64(),
                 self.navigated,
-                e["metrics"]["timeToInteractive"].is_number(),
+                stored.contains(&"timeToInteractive"),
             ) {
                 self.metric(
                     "navigation",
                     "tti",
                     (i - boot) / 1000.0,
-                    wall,
+                    at("timeToInteractive"),
                     Some(&route["route"]),
                     params,
                 );
             }
-        }
-    }
-
-    /// Warm when the last launch was the same build in the same OS boot and no terminal
-    /// is attached, otherwise cold (Observe's iOS rule). The build is the executable's
-    /// size and mtime. Called after TTI because it does file I/O.
-    fn launch_type(&self) -> &'static str {
-        use std::io::IsTerminal;
-        let boot = read("/proc/sys/kernel/random/boot_id");
-        let build = std::fs::metadata("/proc/self/exe").ok().map(|m| {
-            let mtime = m
-                .modified()
-                .ok()
-                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok());
-            format!("{}:{}", m.len(), mtime.map_or(0, |d| d.as_nanos()))
-        });
-        let path = self.dir.join("launch.json");
-        let previous = read_json(&path);
-        let _ = std::fs::write(&path, json!({ "boot": boot, "build": build }).to_string());
-        let same = boot.is_some()
-            && previous["boot"] == json!(boot)
-            && build.is_some()
-            && previous["build"] == json!(build);
-        if same && !std::io::stdin().is_terminal() {
-            "warm"
-        } else {
-            "cold"
         }
     }
 
@@ -709,7 +893,8 @@ impl Service {
         self.metric("navigation", name, value, wall, Some(&e["route"]), params);
     }
 
-    /// Turns each pending panic record from an earlier process into a `native.exception` log.
+    /// Turns each pending panic record from an earlier process into a `native.exception`
+    /// log and the startup metrics it carries.
     fn ingest_crashes(&mut self) {
         for entry in std::fs::read_dir(&self.dir).into_iter().flatten().flatten() {
             let name = entry.file_name().to_string_lossy().into_owned();
@@ -722,13 +907,21 @@ impl Service {
             let Some(crashed) = o["session"].as_str() else {
                 continue;
             };
-            if !self.sessions.contains_key(crashed) {
-                let meta = self.sessions[&self.session]["meta"].clone();
-                self.sessions.insert(
+            let mut queue = lock(&self.queue);
+            if !queue.sessions.contains_key(crashed) {
+                // The crashed process's metadata, over this launch's for what it lacks.
+                let mut meta = queue.sessions[&self.session]["meta"].clone();
+                if let (Some(meta), Some(crashed)) = (meta.as_object_mut(), o["metadata"].as_object())
+                {
+                    meta.extend(crashed.iter().filter(|(_, v)| !v.is_null()).map(|(k, v)| (k.clone(), v.clone())));
+                }
+                queue.sessions.insert(
                     crashed.into(),
                     json!({ "start": o["sessionStart"], "meta": meta }),
                 );
             }
+            drop(queue);
+            self.crashed_startup(crashed, &o);
             let mut attrs = object(json!({
                 "exception.type": o["type"].as_str().unwrap_or("panic"),
                 "exception.message": o["message"].as_str().unwrap_or(""),
@@ -748,6 +941,97 @@ impl Service {
                 (attrs, 0),
             );
         }
+    }
+
+    /// Stores each startup metric a panic record carries (`startup.metrics`, each at its
+    /// `startup.walls` time) that the session that crashed did not store itself, under
+    /// that session and named as its report would name it.
+    fn crashed_startup(&mut self, crashed: &str, o: &Value) {
+        let startup = &o["startup"];
+        let Some(metrics) = startup["metrics"].as_object() else {
+            return;
+        };
+        let mut queue = lock(&self.queue);
+        let Some(session) = queue
+            .sessions
+            .get_mut(crashed)
+            .and_then(Value::as_object_mut)
+        else {
+            return;
+        };
+        // Store only the metrics the session's reports did not, and note these as stored
+        // too, so that the record read again adds none
+        let mut stored = session
+            .get("startupStored")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        let missing: Vec<(&String, f64)> = metrics
+            .iter()
+            .filter(|(name, _)| !stored.iter().any(|s| s.as_str() == Some(name.as_str())))
+            .filter_map(|(name, value)| Some((name, value.as_f64()?)))
+            .collect();
+        stored.extend(missing.iter().map(|(name, _)| json!(name)));
+        session.insert("startupStored".into(), stored.into());
+        let launch = if startup["launchType"] == "warm" {
+            "warm"
+        } else {
+            "cold"
+        };
+        let params = json!({ "exact.launch.interrupted": true, "exact.launch.crashed": true });
+        let crashed_at = o["time"].as_f64().unwrap_or_else(journal::wall);
+        for (name, value) in missing {
+            let wall = startup["walls"][name].as_f64().unwrap_or(crashed_at);
+            let name = if name == "coldLaunchTime" {
+                format!("{launch}LaunchTime")
+            } else {
+                name.clone()
+            };
+            let mut row = metric_row(crashed, "appStartup", &name, value, wall);
+            row.insert("params".into(), params.to_string().into());
+            queue.push("metrics", row);
+        }
+    }
+}
+
+/// The sender thread's state: what sends the queue, without holding its lock during a
+/// request, and when it sends next.
+struct Sender {
+    queue: Arc<Mutex<Queue>>,
+    config: Value,
+    development: bool,
+    session: String,
+    client_id: String,
+    /// The next dispatch: the debounce after an event, or the earliest retry gate
+    /// that holds queued rows.
+    due: Option<Instant>,
+    /// Each signal's retry gate, in [`SIGNALS`]' order.
+    gates: [Gate; 2],
+}
+
+impl Sender {
+    /// Dispatches when due. Each message on `woken` is an event stored; once the
+    /// service thread ends, sends what is left and returns.
+    fn run(mut self, woken: mpsc::Receiver<()>) {
+        loop {
+            let wait = self.due.map_or(Duration::from_secs(3600), |d| {
+                d.saturating_duration_since(Instant::now())
+            });
+            match woken.recv_timeout(wait) {
+                Ok(()) => self.schedule(),
+                Err(mpsc::RecvTimeoutError::Timeout) => {}
+                Err(mpsc::RecvTimeoutError::Disconnected) => return self.dispatch(),
+            }
+            if self.due.is_some_and(|d| Instant::now() >= d) {
+                self.dispatch();
+            }
+        }
+    }
+
+    /// Dispatches after the debounce, or sooner if a dispatch is already due.
+    fn schedule(&mut self) {
+        let soon = Instant::now() + DEBOUNCE;
+        self.due = Some(self.due.map_or(soon, |due| due.min(soon)));
     }
 
     fn resource(&self, meta: &Value) -> Value {
@@ -770,7 +1054,7 @@ impl Service {
     }
 
     /// `{"resourceMetrics":[…]}` or `{"resourceLogs":[…]}`, one resource per session.
-    fn body(&self, signal: &str, rows: &[Row]) -> Value {
+    fn body(&self, signal: &str, rows: &[Row], sessions: &Map<String, Value>) -> Value {
         let mut by: Vec<(String, Vec<Value>)> = Vec::new();
         for r in rows {
             let session = r["session"].as_str().unwrap_or("").to_string();
@@ -826,7 +1110,7 @@ impl Service {
         let resources: Vec<Value> = by
             .into_iter()
             .filter_map(|(s, items)| {
-                let meta = &self.sessions.get(&s)?["meta"];
+                let meta = &sessions.get(&s)?["meta"];
                 let scope = json!({ "name": "expo-observe", "version": meta["clientVersion"].as_str().unwrap_or("0") });
                 Some(json!({ "resource": self.resource(meta), inner: [{ "scope": scope, list: items }], "schemaUrl": SCHEMA_URL }))
             })
@@ -844,88 +1128,203 @@ impl Service {
             && (!self.development || c["dispatchInDebug"] == true)
     }
 
+    /// Sends each signal whose gate is open, until every signal with rows left has its
+    /// gate closed: a gate that opens during another signal's send is sent at once, and
+    /// so is a row the service thread stores meanwhile. A retryable failure of one
+    /// endpoint closes only its own gate, and the rows a closed gate holds are due at
+    /// its deadline.
     fn dispatch(&mut self) {
-        if self.gate.0.is_some_and(|after| Instant::now() < after) {
-            self.due = self.gate.0;
-            return;
-        }
+        self.due = None;
         let project = self.config["projectId"].as_str().map(str::to_string);
         let Some(project) = project.filter(|_| self.should_dispatch()) else {
-            self.metrics.clear();
-            self.logs.clear();
-            return self.save();
+            let mut queue = lock(&self.queue);
+            queue.metrics.clear();
+            queue.logs.clear();
+            return queue.save();
         };
         let base = self.config["endpoint"]
             .as_str()
             .unwrap_or("https://o.expo.dev")
             .trim_end_matches('/')
             .to_string();
-        if self.send("metrics", &format!("{base}/{project}/v1/metrics")) {
-            self.send("logs", &format!("{base}/{project}/v1/logs"));
+        let open = |gate: &Gate| gate.after.is_none_or(|after| after <= Instant::now());
+        loop {
+            for (i, signal) in SIGNALS.iter().enumerate() {
+                if open(&self.gates[i]) {
+                    self.send(i, &format!("{base}/{project}/v1/{signal}"));
+                }
+            }
+            let queue = lock(&self.queue);
+            let rows = [&queue.metrics, &queue.logs];
+            if !rows.iter().zip(&self.gates).any(|(r, g)| !r.is_empty() && open(g)) {
+                break;
+            }
         }
+        let mut queue = lock(&self.queue);
         // Forget sessions no queued row refers to, except the current one.
-        let live: std::collections::HashSet<String> = self
+        let live: std::collections::HashSet<String> = queue
             .metrics
             .iter()
-            .chain(&self.logs)
+            .chain(&queue.logs)
             .filter_map(|r| r["session"].as_str().map(str::to_string))
             .collect();
-        let current = self.session.clone();
-        self.sessions
-            .retain(|s, _| *s == current || live.contains(s));
-        self.save();
+        queue
+            .sessions
+            .retain(|s, _| *s == self.session || live.contains(s));
+        queue.save();
+        self.due = [&queue.metrics, &queue.logs]
+            .iter()
+            .zip(&self.gates)
+            .filter(|(rows, _)| !rows.is_empty())
+            .filter_map(|(_, gate)| gate.after)
+            .min();
     }
 
-    /// Sends one signal's rows chunk by chunk, as expo-observe's `DispatchLoop.swift` does.
-    /// Returns false when it has to back off.
-    fn send(&mut self, signal: &str, url: &str) -> bool {
+    /// Sends signal `i`'s rows chunk by chunk, as expo-observe's `DispatchLoop.swift` does,
+    /// until none are left or its gate closes. Each chunk is taken from the queue under its
+    /// lock and sent without it; the rows it held leave the queue by their ids, wherever
+    /// the rows stored meanwhile put them.
+    fn send(&mut self, i: usize, url: &str) {
+        let signal = SIGNALS[i];
         let mut limit = CHUNK;
         loop {
-            let queue = self.queue(signal);
-            if queue.is_empty() {
-                return true;
-            }
-            let rows: Vec<Row> = queue[..limit.min(queue.len())].to_vec();
-            let body = self.body(signal, &rows).to_string().into_bytes();
+            let (count, ids, body) = {
+                let queue = lock(&self.queue);
+                let rows = queue.rows(signal);
+                if rows.is_empty() {
+                    return;
+                }
+                let chunk = &rows[..limit.min(rows.len())];
+                let ids: Vec<u64> = chunk.iter().filter_map(Queue::id).collect();
+                (chunk.len(), ids, self.body(signal, chunk, &queue.sessions))
+            };
             let headers = [
                 ("content-type", "application/json"),
                 ("expo-appmetrics-skip", "1"),
             ];
-            let result = journal::post(url, &headers, body);
+            let result = journal::post(url, &headers, body.to_string().into_bytes());
             if log_enabled() {
                 let status = result
                     .as_ref()
                     .map_or_else(|e| format!("transport error ({e})"), |(s, _)| s.to_string());
-                eprintln!("observe: {signal} {} rows → {status}", rows.len());
+                eprintln!("observe: {signal} {count} rows → {status}");
             }
+            let gate = &mut self.gates[i];
             match result {
-                Ok((413, _)) if rows.len() > 1 => {
-                    self.gate.1 = 0;
-                    limit = rows.len() / 2;
+                Ok((413, _)) if count > 1 => {
+                    gate.failures = 0;
+                    limit = count / 2;
                 }
                 // Success, a lone 413 row, or a status Observe does not retry: drop the chunk.
                 Ok((status, _)) if !matches!(status, 429 | 502 | 503 | 504) => {
-                    self.gate.1 = 0;
-                    self.queue(signal).drain(..rows.len());
+                    gate.failures = 0;
+                    let mut queue = lock(&self.queue);
+                    queue.remove(signal, &ids);
+                    // Store the queue without the chunk before the next request, so an exit
+                    // during that one does not send it again.
+                    queue.save();
                     limit = CHUNK;
                 }
                 retryable => {
-                    self.gate.1 += 1;
+                    gate.failures += 1;
                     let after = retryable.ok().and_then(|(_, after)| after);
-                    let wait =
-                        retry_after(after.as_deref()).unwrap_or_else(|| backoff(self.gate.1));
-                    self.gate.0 = Some(Instant::now() + Duration::from_secs_f64(wait));
-                    return false;
+                    let wait = retry_after(after.as_deref(), journal::wall())
+                        .unwrap_or_else(|| backoff(gate.failures));
+                    gate.after = Some(Instant::now() + Duration::from_secs_f64(wait));
+                    return;
                 }
             }
         }
     }
+}
 
-    fn queue(&mut self, signal: &str) -> &mut Vec<Row> {
+/// The rows waiting to be sent and the sessions they name, stored in one bounded file.
+/// The service thread adds rows and the sender removes them, each under the lock.
+struct Queue {
+    dir: PathBuf,
+    sessions: Map<String, Value>,
+    metrics: Vec<Row>,
+    logs: Vec<Row>,
+    /// The next row's `id`, by which the sender removes the rows it sent.
+    next: u64,
+}
+
+impl Queue {
+    /// The queue stored in `dir`, each row with an id.
+    fn load(dir: PathBuf) -> Queue {
+        let stored = read_json(&dir.join("queue.json"));
+        let rows = |k: &str| -> Vec<Row> {
+            stored[k]
+                .as_array()
+                .map(|a| a.iter().filter_map(|r| r.as_object().cloned()).collect())
+                .unwrap_or_default()
+        };
+        let mut queue = Queue {
+            sessions: stored["sessions"].as_object().cloned().unwrap_or_default(),
+            metrics: rows("metrics"),
+            logs: rows("logs"),
+            next: 0,
+            dir,
+        };
+        let ids = queue.metrics.iter().chain(&queue.logs).filter_map(Queue::id);
+        queue.next = ids.max().map_or(0, |id| id + 1);
+        for row in queue.metrics.iter_mut().chain(queue.logs.iter_mut()) {
+            if Queue::id(row).is_none() {
+                row.insert("id".into(), queue.next.into());
+                queue.next += 1;
+            }
+        }
+        queue
+    }
+
+    fn id(row: &Row) -> Option<u64> {
+        row.get("id").and_then(Value::as_u64)
+    }
+
+    fn rows(&self, signal: &str) -> &[Row] {
+        if signal == "metrics" {
+            &self.metrics
+        } else {
+            &self.logs
+        }
+    }
+
+    fn rows_mut(&mut self, signal: &str) -> &mut Vec<Row> {
         if signal == "metrics" {
             &mut self.metrics
         } else {
             &mut self.logs
         }
     }
+
+    /// Appends `row` to `signal`'s rows with the next id, dropping the oldest past `MAX_ROWS`.
+    fn push(&mut self, signal: &str, mut row: Row) {
+        row.insert("id".into(), self.next.into());
+        self.next += 1;
+        let rows = self.rows_mut(signal);
+        rows.push(row);
+        if rows.len() > MAX_ROWS {
+            rows.remove(0);
+        }
+    }
+
+    /// Removes `signal`'s rows with these ids.
+    fn remove(&mut self, signal: &str, ids: &[u64]) {
+        self.rows_mut(signal)
+            .retain(|row| Queue::id(row).is_none_or(|id| !ids.contains(&id)));
+    }
+
+    fn save(&self) {
+        let q = json!({ "sessions": self.sessions, "metrics": self.metrics, "logs": self.logs });
+        let tmp = self.dir.join("queue.json.tmp");
+        if std::fs::write(&tmp, q.to_string()).is_ok() {
+            let _ = std::fs::rename(&tmp, self.dir.join("queue.json"));
+        }
+    }
+}
+
+/// The queue, locked, also after a thread panicked while it held it, so the other
+/// thread keeps storing or sending.
+fn lock(queue: &Mutex<Queue>) -> MutexGuard<'_, Queue> {
+    queue.lock().unwrap_or_else(|e| e.into_inner())
 }

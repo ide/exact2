@@ -778,6 +778,84 @@ fn a_stopped_ticket_ticks_no_more_and_perf_counts_the_live_ones() {
     );
 }
 
+const RELAY: &str = r##"routes nav
+  home "/"
+    detail "/detail/:id"
+component App
+  state n = 7
+  action open
+    n = n + 1
+    nav = push(nav, path("detail", n))
+  view
+    column width=300 height=300
+      column hatch="pad" testId="pad" width=100 height=40 background-color="#eeeeee"
+      button "Open" hatch="open" testId="open" press=open width=100 height=40
+"##;
+
+/// Clicks `open` when a pointer lifts on `pad`.
+#[derive(Default)]
+struct Relay {
+    open: Option<Element>,
+}
+impl Hatches for Relay {
+    fn element(&mut self, e: &Element, context: &mut Context<'_, Self>) {
+        if !e.is_new() {
+            return;
+        }
+        if e.hatch() == "open" {
+            self.open = Some(e.clone());
+        } else {
+            context.observe(e, |me, input, _| {
+                if let (
+                    Input::Pointer {
+                        phase: Phase::Up, ..
+                    },
+                    Some(open),
+                ) = (input, &me.open)
+                {
+                    open.click();
+                }
+            });
+        }
+    }
+}
+
+/// An act a hatch asks for while an input is dispatched is part of that
+/// dispatch: the router change it commits on the loop's turn is the input's.
+#[test]
+fn an_act_asked_for_during_an_input_carries_it() {
+    let mut p = boot::<Relay>(RELAY, &["pad", "open"]);
+    first_pixel(&mut p);
+    p.host_mut().routes.take();
+    p.dispatching(Some(7.0));
+    p.pointer_down(50., 20., 0.).unwrap();
+    p.pointer_up(50., 20., 1.).unwrap();
+    p.dispatching(None);
+    assert!(
+        p.host_mut().routes.take().is_empty(),
+        "the act waits for the turn"
+    );
+    p.hatch_turn();
+    let changes = p.host_mut().routes.take();
+    assert_eq!(
+        changes
+            .iter()
+            .map(|c| (c.0.url.as_str(), c.2))
+            .collect::<Vec<_>>(),
+        [("/detail/7", Some(7.0))]
+    );
+    // Dispatch a press outside any input's dispatch, as the agent's contacts are
+    p.pointer_down(50., 20., 2.).unwrap();
+    p.pointer_up(50., 20., 3.).unwrap();
+    p.hatch_turn();
+    let changes = p.host_mut().routes.take();
+    assert_eq!(
+        changes.iter().map(|c| c.2).collect::<Vec<_>>(),
+        [None],
+        "an act no input's dispatch asked for carries none"
+    );
+}
+
 const STORM: &str = r##"component App
   state n = 0
   action bump

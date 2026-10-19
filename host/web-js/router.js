@@ -7,6 +7,8 @@ const say = line => journal.push(`t=${clock.now} ${line}`);
 // [id, name, url, tab, params], params positional in the table's
 // first-declaration order of distinct `:names`.
 export let Routes = [], Names = []; // read by marks.js for a navigation's route pattern
+/** Functions marks.js adds, each called with `{top, url, removed}` when the router's value changes. */
+export const RouterChanges = [];
 const names = p => p.split("/").filter(s => s[0] === ":").map(s => s.slice(1));
 /** The plan's route table: [name, pattern, parent, tab, notfound] rows. */
 export function routes(table) {
@@ -148,7 +150,7 @@ export const x_path = (name, ...values) => path(Routes.find(r => r.name === name
 /** The router slot's changes, to the browser's history (`navigation.js`,
  * the web host's own), and a popstate back as the navigation root's
  * `navigate` (LLP 1038 D7, D11). */
-let RouterSlot = null, Shown = null, Navigate = null, History = null; export const pageHistory = () => History; // the page's navigation.js, which the agent observes: its own copy's state is never written
+let RouterSlot = null, Shown = null, Navigate = null, History = null; export const pageHistory = () => History; /** The router's value as committed, which marks.js's input scope compares (rt.js `InputScope`). */ export const routerValue = () => RouterSlot?.n?.v; // the page's navigation.js, which the agent observes: its own copy's state is never written
 /** The plan's navigation roots, with a router or without (document.js `projectRoots`). A page with one loads the input
  * piece after first paint: the focus follows its routes (input-glue.js `arrive`; LLP 1115.000 D4.2). */
 export function navigationRoots(history) { History = history; projectRoots(history, location => Navigate ? (Navigate(location), true) : false, say, After, hostBack, hostGo, href => { const match = matchRoute(canonical(href)); return match !== null && !Routes[match[0]].notfound; }); pressFeedback(); }
@@ -188,6 +190,7 @@ export function router(slot, history) {
     const removed = Shown ? Shown[1].flatMap(t => t[1].map(e => e[0])).filter(id => !ids.has(id)) : [];
     Shown = r;
     history.apply({ top: top[0], url: top[2], removed, visits: r[1].flatMap(t => t[1].map(e => [e[0], e[2]])) });
+    for (const f of RouterChanges) f({ top: top[0], url: top[2], removed });
   });
   // `effect` runs once synchronously. Its first apply follows
   // `projectRoots`' projection, so publish those initial visits now.

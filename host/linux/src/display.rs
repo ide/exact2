@@ -347,9 +347,13 @@ pub fn run<D: DataSource + Default>(config: &mut Config, started: Instant) -> i3
     let wall = || started.elapsed().as_secs_f64() * 1000.0;
     config.clock_started = Some(started);
     // Startup timestamps for Observe's launch metrics.
-    let mut marks = crate::launch_marks::LaunchMarks::new();
+    let mut marks = crate::launch_marks::Marks::new();
     let observe_log = std::env::var("EXACT_OBSERVE_LOG").as_deref() == Ok("1");
-    marks.launch_end();
+    marks.launch.launch_end();
+    // Publish each startup mark as it comes, so a panic before the report keeps it
+    marks.launch.publish();
+    // From here SIGTERM and SIGINT end the loop in order, boot included.
+    let terminating = terminate_on_signal();
     let (mut p, error) = match crate::app::boot_presenter::<D>(config, viewport) {
         Ok(v) => v,
         Err(e) => {
@@ -404,7 +408,12 @@ pub fn run<D: DataSource + Default>(config: &mut Config, started: Instant) -> i3
         },
         wall()
     );
-    loop {
+    let signal = loop {
+        // A signal that came during boot or the last turn ends the loop before this turn
+        // shows or measures more: a startup told to end before its frame has no TTR.
+        if let Some(signal) = take_signal() {
+            break signal;
+        }
         if measured {
             // A replaced host's flip and samples are the old runner's.
             frames.host(p.hosts);
@@ -413,6 +422,7 @@ pub fn run<D: DataSource + Default>(config: &mut Config, started: Instant) -> i3
             }
         }
         if p.dirty() && !display.pending() {
+            marks.frame(&mut p);
             let Some(frame) = p.display_frame() else {
                 eprintln!("exact: display/presenter submission ownership mismatch");
                 return 1;
@@ -420,16 +430,22 @@ pub fn run<D: DataSource + Default>(config: &mut Config, started: Instant) -> i3
             if measured {
                 frames.submitted(wall(), p.host().runner().seq(), p.hosts);
             }
-            let submitted = display.submit(frame);
-            marks.submitted(first_pixel.is_none());
-            match submitted {
-                Ok(Some(frame)) => presented(
-                    &mut p,
-                    frame,
-                    vnc.as_ref(),
-                    &mut first_pixel,
-                    &mut check_due,
-                ),
+            match display.submit(frame) {
+                Ok(Some(frame)) => {
+                    // The first frame's modeset is synchronous: it is on screen now, if its paint
+                    // succeeded (a failed one shows a fallback, not the tree).
+                    if frame.painted() {
+                        marks.shown(crate::launch_marks::boottime(), &p);
+                        marks.launch.publish();
+                    }
+                    presented(
+                        &mut p,
+                        frame,
+                        vnc.as_ref(),
+                        &mut first_pixel,
+                        &mut check_due,
+                    )
+                }
                 Ok(None) => {}
                 Err(e) => {
                     eprintln!("exact: {e}");
@@ -442,18 +458,16 @@ pub fn run<D: DataSource + Default>(config: &mut Config, started: Instant) -> i3
         if p.module_pending() {
             p.first_pixel();
         }
-        if first_pixel.is_some() && !p.module_pending() && !marks.done() {
-            marks.activated();
-            marks.turn(&crate::launch_marks::items(
-                &p.host().runner().outstanding(),
-            ));
+        if first_pixel.is_some() {
+            marks.turn(&mut p, display.pending());
         }
-        if marks.take_done() {
+        if marks.launch.take_timeout() {
             crate::journal::record("startup", marks.report());
             if observe_log {
-                eprintln!("observe: startup {}", marks.line());
+                eprintln!("observe: startup {}", marks.launch.line());
             }
         }
+        journal_done(&mut marks, observe_log);
         let now = wall();
         let mut timeout = work_timeout(
             display.pending(),
@@ -477,6 +491,9 @@ pub fn run<D: DataSource + Default>(config: &mut Config, started: Instant) -> i3
             let wait = due.saturating_duration_since(Instant::now()).as_millis() as i32;
             timeout = if timeout < 0 { wait } else { timeout.min(wait) };
         }
+        if let Some(wait) = marks.launch.timeout_in_ms() {
+            timeout = if timeout < 0 { wait } else { timeout.min(wait) };
+        }
         if input.is_empty() && vnc.is_none() && timeout < 0 {
             timeout = 1000;
         }
@@ -495,14 +512,26 @@ pub fn run<D: DataSource + Default>(config: &mut Config, started: Instant) -> i3
             fds.push(fd);
         }
         fds.push(display.fd());
-        match poll(&fds, display.fd(), timeout) {
-            Ok(true) => match display.ready() {
+        fds.extend(terminating);
+        let flipped = match poll(&fds, display.fd(), timeout) {
+            Ok(flipped) => flipped,
+            Err(e) => {
+                eprintln!("exact: {e}");
+                return 1;
+            }
+        };
+        // The handler stores the signal before it wakes the pipe, which is never
+        // read: the loop ends at the first turn that sees the signal, before the
+        // flip and the input it woke with.
+        if let Some(signal) = take_signal() {
+            break signal;
+        }
+        if flipped {
+            match display.ready() {
                 Ok(Some(frame)) => {
-                    if let Some(at) = display.last_flip() {
-                        marks.flipped(
-                            at,
-                            &crate::launch_marks::items(&p.host().runner().outstanding()),
-                        );
+                    if let Some(at) = display.last_flip().filter(|_| frame.painted()) {
+                        marks.shown(crate::launch_marks::monotonic_to_boottime(at), &p);
+                        marks.launch.publish();
                     }
                     presented(
                         &mut p,
@@ -525,11 +554,6 @@ pub fn run<D: DataSource + Default>(config: &mut Config, started: Instant) -> i3
                     eprintln!("exact: {e}");
                     return 1;
                 }
-            },
-            Ok(false) => {}
-            Err(e) => {
-                eprintln!("exact: {e}");
-                return 1;
             }
         }
         // Work this turn does (input, completions, timers, frame tasks) is
@@ -554,14 +578,23 @@ pub fn run<D: DataSource + Default>(config: &mut Config, started: Instant) -> i3
         }
         let mut events = input.read();
         if let Some(v) = vnc.as_mut() {
-            events.extend(v.take_events());
+            // A VNC event's time is its read, before its dispatch.
+            let at = crate::launch_marks::boottime();
+            events.extend(v.take_events().into_iter().map(|ev| (ev, at)));
         }
-        for ev in events {
+        for (ev, at) in events {
+            // Time from each input what its dispatch commits and what the hatch acts it asks
+            // for commit, but not the timers and frame tasks this turn runs after it. Every
+            // kind can run an authored action (a press or `pointerup` on a lift, `pointerdown`,
+            // `hover` and `pointermove` on motion, `wheel`, `keyup`, Back, a cancel's
+            // `pointerup`), and a dispatch that commits no router change times nothing.
+            p.dispatching(Some(at));
             if let Err(e) =
                 pointer::dispatch(&mut p, &mut pointer, viewport, config.scale, ev, wall())
             {
                 eprintln!("exact: {e}");
             }
+            p.dispatching(None);
         }
 
         // The hatches' turn (LLP 1075.003.000.001 §4.1): what they asked of
@@ -634,7 +667,81 @@ pub fn run<D: DataSource + Default>(config: &mut Config, started: Instant) -> i3
                 }
             }
         }
+    };
+    // An orderly end: a second signal now ends the process at once.
+    // SAFETY: signal sets the default action back; the handler holds no state to release.
+    unsafe {
+        libc::signal(libc::SIGTERM, libc::SIG_DFL);
+        libc::signal(libc::SIGINT, libc::SIG_DFL);
     }
+    // An unfinished startup reports what it measured, which starts the services if
+    // they have not, and they store what they were given; the module's storage finishes.
+    marks.launch.terminated();
+    journal_done(&mut marks, observe_log);
+    crate::journal::flush(FLUSH_BOUND);
+    crate::teardown::finish(&mut p, crate::teardown::EXIT_BOUND);
+    drop(display);
+    let _ = std::io::Write::flush(&mut std::io::stdout());
+    // The process ends by the signal, as it would have with no handler, so a parent
+    // (a shell, systemd) sees the same status.
+    // SAFETY: raise sends the signal to this thread; its default action ends the process.
+    unsafe { libc::raise(signal) };
+    128 + signal
+}
+
+/// How long the services may take to store the journal at an orderly end.
+const FLUSH_BOUND: Duration = Duration::from_secs(2);
+
+/// Journals the startup report once TTI, a failure or the end decided it.
+fn journal_done(marks: &mut crate::launch_marks::Marks, observe_log: bool) {
+    if marks.launch.take_done() {
+        let kind = marks.launch.done_kind();
+        crate::journal::record(kind, marks.report());
+        if observe_log {
+            eprintln!("observe: {kind} {}", marks.launch.line());
+        }
+    }
+}
+
+/// The termination signal the handler noted, until the loop takes it.
+static TERMINATE: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
+
+/// The termination signal the handler noted since the last call.
+fn take_signal() -> Option<i32> {
+    Some(TERMINATE.swap(0, std::sync::atomic::Ordering::Relaxed)).filter(|&s| s != 0)
+}
+/// The write end of the loop's wake pipe, once there is one.
+static WAKE: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(-1);
+
+extern "C" fn on_terminate(signal: libc::c_int) {
+    // Note the arrival first: the marks refuse what is shown or settled from then on.
+    crate::launch_marks::told_to_end();
+    TERMINATE.store(signal, std::sync::atomic::Ordering::Relaxed);
+    let fd = WAKE.load(std::sync::atomic::Ordering::Relaxed);
+    if fd >= 0 {
+        let byte = 1u8;
+        // SAFETY: write is async-signal-safe, and the byte outlives the call.
+        unsafe { libc::write(fd, (&byte as *const u8).cast(), 1) };
+    }
+}
+
+/// `SIGTERM` and `SIGINT` end the display loop in order. The handler notes the signal
+/// and when it came, and writes to a pipe the loop polls, since the signal can reach
+/// another thread, whose handler would not interrupt the loop's `poll`. The pipe's read
+/// end, or `None` (the signals keep their default action) when no pipe could be made.
+fn terminate_on_signal() -> Option<i32> {
+    let mut fds = [0; 2];
+    // SAFETY: pipe2 writes two descriptors into the array it is given.
+    if unsafe { libc::pipe2(fds.as_mut_ptr(), libc::O_NONBLOCK | libc::O_CLOEXEC) } != 0 {
+        return None;
+    }
+    WAKE.store(fds[1], std::sync::atomic::Ordering::Relaxed);
+    for signal in [libc::SIGTERM, libc::SIGINT] {
+        // SAFETY: the handler only reads the clock, stores to atomics and writes one
+        // byte, which are async-signal-safe.
+        unsafe { libc::signal(signal, on_terminate as *const () as libc::sighandler_t) };
+    }
+    Some(fds[0])
 }
 
 static TRACE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);

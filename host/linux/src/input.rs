@@ -92,9 +92,10 @@ pub const LINE: f32 = 40.0;
 /// An absolute device's (min, max) per axis, x then y.
 type Ranges = [(i32, i32); 2];
 
-/// Every device that points or types.
+/// Every device that points or types, each with whether it stamps its events
+/// on `CLOCK_BOOTTIME`.
 pub struct Input {
-    devices: Vec<(Device, Option<Ranges>)>,
+    devices: Vec<(Device, Option<Ranges>, bool)>,
     keyboard: Keyboard,
 }
 
@@ -128,16 +129,21 @@ impl Input {
             if !(pointer || absolute.is_some() || keyboard) {
                 continue;
             }
-            // SAFETY: fcntl on a file descriptor this process owns; the
-            // flags are read and written whole.
-            unsafe {
+            // SAFETY: fcntl and ioctl on a file descriptor this process owns;
+            // the flags are read and written whole, and EVIOCSCLOCKID reads one
+            // int through the pointer, which outlives the call.
+            let boottime = unsafe {
                 let fd = d.as_raw_fd();
                 let flags = libc::fcntl(fd, libc::F_GETFL);
                 if flags >= 0 {
                     libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK);
                 }
-            }
-            devices.push((d, absolute));
+                // Event times on the launch marks' clock (EVIOCSCLOCKID).
+                let clock: libc::c_int = libc::CLOCK_BOOTTIME;
+                let set = libc::_IOW::<libc::c_int>(b'E'.into(), 0xa0);
+                libc::ioctl(fd, set, &clock as *const libc::c_int) == 0
+            };
+            devices.push((d, absolute, boottime));
         }
         Input {
             devices,
@@ -157,14 +163,15 @@ impl Input {
 
     /// The descriptors to poll.
     pub fn fds(&self) -> Vec<i32> {
-        self.devices.iter().map(|(d, _)| d.as_raw_fd()).collect()
+        self.devices.iter().map(|(d, _, _)| d.as_raw_fd()).collect()
     }
 
-    /// Everything that arrived since the last read.
-    pub fn read(&mut self) -> Vec<InputEvent> {
+    /// Everything that arrived since the last read, each at its event time in
+    /// seconds on `CLOCK_BOOTTIME`, the launch marks' clock.
+    pub fn read(&mut self) -> Vec<(InputEvent, f64)> {
         let mut out = Vec::new();
         let mut gone = Vec::new();
-        for (index, (d, absolute)) in self.devices.iter_mut().enumerate() {
+        for (index, (d, absolute, boottime)) in self.devices.iter_mut().enumerate() {
             let events = match d.fetch_events() {
                 Ok(events) => events,
                 Err(e)
@@ -177,7 +184,7 @@ impl Input {
                 }
                 Err(_) => {
                     gone.push(index);
-                    out.push(InputEvent::Cancel);
+                    out.push((InputEvent::Cancel, crate::launch_marks::boottime()));
                     continue;
                 }
             };
@@ -187,6 +194,7 @@ impl Input {
                 ((v - range.0) as f32 / span).clamp(0.0, 1.0)
             };
             for e in events {
+                let at = seconds(e.timestamp(), *boottime);
                 let summary = e.destructure();
                 if !matches!(
                     summary,
@@ -210,33 +218,37 @@ impl Input {
                     | EventSummary::AbsoluteAxis(_, AbsoluteAxisCode::ABS_MT_POSITION_X, v) => {
                         if let Some(r) = absolute {
                             pointer.absolute.0 = Some(fraction(r[0], v));
+                            pointer.at = at;
                         }
                     }
                     EventSummary::AbsoluteAxis(_, AbsoluteAxisCode::ABS_Y, v)
                     | EventSummary::AbsoluteAxis(_, AbsoluteAxisCode::ABS_MT_POSITION_Y, v) => {
                         if let Some(r) = absolute {
                             pointer.absolute.1 = Some(fraction(r[1], v));
+                            pointer.at = at;
                         }
                     }
                     EventSummary::RelativeAxis(_, RelativeAxisCode::REL_X, v) => {
                         pointer.relative.0 += v as f32;
+                        pointer.at = at;
                     }
                     EventSummary::RelativeAxis(_, RelativeAxisCode::REL_Y, v) => {
                         pointer.relative.1 += v as f32;
+                        pointer.at = at;
                     }
                     EventSummary::RelativeAxis(_, RelativeAxisCode::REL_WHEEL_HI_RES, v) => {
-                        out.push(InputEvent::Wheel(0.0, -(v as f32) / 120.0 * LINE))
+                        out.push((InputEvent::Wheel(0.0, -(v as f32) / 120.0 * LINE), at))
                     }
                     EventSummary::RelativeAxis(_, RelativeAxisCode::REL_HWHEEL_HI_RES, v) => {
-                        out.push(InputEvent::Wheel((v as f32) / 120.0 * LINE, 0.0))
+                        out.push((InputEvent::Wheel((v as f32) / 120.0 * LINE, 0.0), at))
                     }
                     EventSummary::RelativeAxis(_, RelativeAxisCode::REL_WHEEL, v) => {
                         // A device with high-resolution wheels reports both;
                         // the coarse one is folded by the loop (see `coalesce`).
-                        out.push(InputEvent::Wheel(0.0, -(v as f32) * LINE));
+                        out.push((InputEvent::Wheel(0.0, -(v as f32) * LINE), at));
                     }
                     EventSummary::RelativeAxis(_, RelativeAxisCode::REL_HWHEEL, v) => {
-                        out.push(InputEvent::Wheel((v as f32) * LINE, 0.0))
+                        out.push((InputEvent::Wheel((v as f32) * LINE, 0.0), at))
                     }
                     EventSummary::Key(_, code, value) => {
                         let code = code.0;
@@ -244,27 +256,27 @@ impl Input {
                         match code {
                             // BTN_LEFT (a mouse) and BTN_TOUCH (a
                             // touchscreen). Both are a primary press.
-                            0x110 | 0x14a => out.push(InputEvent::Button(down)),
+                            0x110 | 0x14a => out.push((InputEvent::Button(down), at)),
                             // BTN_RIGHT, BTN_MIDDLE.
-                            0x111 => out.push(InputEvent::Aux(2, down)),
-                            0x112 => out.push(InputEvent::Aux(4, down)),
+                            0x111 => out.push((InputEvent::Aux(2, down), at)),
+                            0x112 => out.push((InputEvent::Aux(4, down), at)),
                             // BTN_SIDE, a mouse's back (thumb) button, and
                             // BTN_BACK, as some mice report it: Back at the
                             // press. Its release is nothing.
                             0x113 | 0x116 => {
                                 if value == 1 {
-                                    out.push(InputEvent::Back);
+                                    out.push((InputEvent::Back, at));
                                 }
                             }
                             _ => {
                                 if let Some(event) = self.keyboard.event(code, value, None) {
-                                    out.push(event);
+                                    out.push((event, at));
                                 }
                             }
                         }
                     }
                     EventSummary::Synchronization(_, SynchronizationCode::SYN_DROPPED, _) => {
-                        out.push(InputEvent::Cancel)
+                        out.push((InputEvent::Cancel, at))
                     }
                     _ => {}
                 }
@@ -284,32 +296,47 @@ impl Input {
 struct PointerReport {
     relative: (f32, f32),
     absolute: (Option<f32>, Option<f32>),
+    /// The time of the report's last axis event.
+    at: f64,
 }
 impl PointerReport {
-    fn flush(&mut self, out: &mut Vec<InputEvent>) {
+    fn flush(&mut self, out: &mut Vec<(InputEvent, f64)>) {
         let (dx, dy) = std::mem::take(&mut self.relative);
         if dx != 0. || dy != 0. {
-            out.push(InputEvent::Motion(dx, dy));
+            out.push((InputEvent::Motion(dx, dy), self.at));
         }
         let (x, y) = std::mem::take(&mut self.absolute);
         if x.is_some() || y.is_some() {
-            out.push(InputEvent::Absolute(x, y));
+            out.push((InputEvent::Absolute(x, y), self.at));
         }
+    }
+}
+
+/// An event's time in seconds on `CLOCK_BOOTTIME`. A device that refused the
+/// clock stamps `CLOCK_REALTIME`, converted here.
+fn seconds(t: std::time::SystemTime, boottime: bool) -> f64 {
+    let s = t
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0.0, |d| d.as_secs_f64());
+    if boottime {
+        s
+    } else {
+        s - (crate::journal::wall() - crate::launch_marks::boottime())
     }
 }
 
 /// A device that reports both `REL_WHEEL` and `REL_WHEEL_HI_RES` in one
 /// report would scroll twice; keep the fine one.
-fn coalesce(events: Vec<InputEvent>) -> Vec<InputEvent> {
+fn coalesce(events: Vec<(InputEvent, f64)>) -> Vec<(InputEvent, f64)> {
     let fine = events
         .iter()
-        .any(|e| matches!(e, InputEvent::Wheel(_, dy) if dy.abs() % LINE != 0.0));
+        .any(|(e, _)| matches!(e, InputEvent::Wheel(_, dy) if dy.abs() % LINE != 0.0));
     if !fine {
         return events;
     }
     events
         .into_iter()
-        .filter(|e| !matches!(e, InputEvent::Wheel(dx, dy) if (dy.abs() % LINE == 0.0 && *dy != 0.0) || (dx.abs() % LINE == 0.0 && *dx != 0.0)))
+        .filter(|(e, _)| !matches!(e, InputEvent::Wheel(dx, dy) if (dy.abs() % LINE == 0.0 && *dy != 0.0) || (dx.abs() % LINE == 0.0 && *dx != 0.0)))
         .collect()
 }
 
@@ -500,24 +527,36 @@ mod tests {
 mod pointer_tests {
     use super::*;
     #[test]
+    fn input_times_are_boottime_seconds() {
+        let boot = std::time::UNIX_EPOCH + std::time::Duration::from_millis(1500);
+        assert_eq!(seconds(boot, true), 1.5);
+        let now = seconds(std::time::SystemTime::now(), false);
+        assert!(
+            (now - crate::launch_marks::boottime()).abs() < 0.5,
+            "realtime converted"
+        );
+    }
+    #[test]
     fn a_report_keeps_diagonal_intent_atomic_and_boundaries_separate() {
         let mut report = PointerReport::default();
-        let mut out = vec![InputEvent::Button(true)];
+        let mut out = vec![(InputEvent::Button(true), 1.)];
         report.relative.0 += 10.;
         report.relative.1 += 30.;
+        report.at = 2.;
         report.flush(&mut out);
         report.absolute.0 = Some(0.2);
         report.absolute.1 = Some(0.3);
+        report.at = 3.;
         report.flush(&mut out);
-        out.push(InputEvent::Button(false));
+        out.push((InputEvent::Button(false), 4.));
         report.flush(&mut out);
         assert_eq!(
             out,
             vec![
-                InputEvent::Button(true),
-                InputEvent::Motion(10., 30.),
-                InputEvent::Absolute(Some(0.2), Some(0.3)),
-                InputEvent::Button(false)
+                (InputEvent::Button(true), 1.),
+                (InputEvent::Motion(10., 30.), 2.),
+                (InputEvent::Absolute(Some(0.2), Some(0.3)), 3.),
+                (InputEvent::Button(false), 4.)
             ]
         );
     }

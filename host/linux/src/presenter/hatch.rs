@@ -435,10 +435,23 @@ impl<D: DataSource> Presenter<D> {
         let acts = shared.snapshot();
         let ran = acts.len();
         for act in acts {
+            // Run an act inside the dispatch that queued it: what it commits is that input's doing
+            let outer = self.dispatching(act.input);
             self.hatch_act(act);
+            self.dispatching(outer);
         }
         self.hatch_log();
         ran
+    }
+
+    /// The input at `input` is being dispatched (`None`: none is): the router
+    /// changes committed and the hatch acts asked for until the next call are
+    /// its doing. Returns the one before, for a caller that restores it.
+    pub fn dispatching(&mut self, input: Option<f64>) -> Option<f64> {
+        if let Some(shared) = self.hatches.shared() {
+            shared.input.set(input);
+        }
+        self.host.routes.dispatching(input)
     }
 
     /// Acts still queued: what `clock settle` waits for.

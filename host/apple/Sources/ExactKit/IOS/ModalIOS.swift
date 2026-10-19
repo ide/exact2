@@ -770,7 +770,7 @@ final class ModalHost: NSObject, UIAdaptivePresentationControllerDelegate {
         DispatchQueue.main.async { [weak self, layer] in
             guard let self, layers.last === layer else { return }
             closeTop(animated: false, refit: false)
-            presenter.navigation.invokeBack(from: layer.route)
+            NavigationMarks.shared.platformDispatch { self.presenter.navigation.invokeBack(from: layer.route) }
             presenter.navigation.modalDidDismiss()
             fit()
         }

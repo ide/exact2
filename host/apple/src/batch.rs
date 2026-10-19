@@ -306,7 +306,8 @@ impl Batch {
             s.push(':');
             quote(v, &mut s);
         }
-        s.push_str("}}");
+        // Whether a dispatched event's own commit made it, which navigation metrics time from its input.
+        let _ = write!(s, "}},\"event\":{}}}", change.from_event);
         self.ops.push(s);
     }
 

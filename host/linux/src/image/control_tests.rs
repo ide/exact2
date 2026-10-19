@@ -668,3 +668,53 @@ fn a_box_that_changes_size_gets_the_whole_picture() {
         "back at the first size, still the whole"
     );
 }
+
+/// Only a picture in view that shows nothing of its source yet is loading on
+/// screen: not one out of view, a symbol, a failed source, or a picture that
+/// shows while its replacement decodes.
+#[test]
+fn loading_on_screen_counts_pictures_in_view_until_they_show() {
+    let mut k = kernel(2);
+    let mut images = Images::with_assets(Assets::selected(
+        PathBuf::new(),
+        Arc::new(|name| Ok((name != "missing").then(|| encoded(16, 10, [9, 100, 70, 255])))),
+    ));
+    let released = Arc::new(AtomicBool::new(false));
+    let release = released.clone();
+    *images.backend.hook.lock().unwrap() = Some(Arc::new(move |name, _| {
+        if name == "1" || name == "3" {
+            until(|| release.load(Ordering::Acquire));
+        }
+    }));
+    images.sync_visible(&k, &k.roots(), 1., |id| id == 1);
+    assert_eq!(images.loading_on_screen(), 1, "1 in view, 2 out of it");
+    released.store(true, Ordering::Release);
+    images.wait(SETTLED);
+    assert!(images.bitmaps.contains_key(&1));
+    assert_eq!(images.loading_on_screen(), 0);
+
+    released.store(false, Ordering::Release);
+    source(&mut k, 1, "3");
+    images.sync_visible(&k, &k.roots(), 1., |id| id == 1);
+    assert_eq!(
+        images.loading_on_screen(),
+        1,
+        "the old picture is not the new source's"
+    );
+    released.store(true, Ordering::Release);
+    images.wait(SETTLED);
+    assert_eq!(images.loading_on_screen(), 0);
+
+    source(&mut k, 1, "missing");
+    images.sync_visible(&k, &k.roots(), 1., |id| id == 1);
+    // `wait` ends once nothing is pending, which a failed source is not, maybe before the
+    // failure's report was taken: poll until it is.
+    until(|| {
+        images.poll();
+        images.views[&1].refusal.is_some()
+    });
+    assert_eq!(images.loading_on_screen(), 0);
+    source(&mut k, 1, "symbol:sf/star");
+    images.sync_visible(&k, &k.roots(), 1., |id| id == 1);
+    assert_eq!(images.loading_on_screen(), 0);
+}

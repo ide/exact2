@@ -120,7 +120,8 @@ pub struct Host<D: DataSource> {
     >,
     /// A pending activation's executor wake, so the display loop does not poll.
     preload_wake: exact_runner::PreloadWake,
-    router_op: Option<exact_runner::RouterChange>,
+    /// The router changes committed, for the navigation marks.
+    pub(crate) routes: crate::navigation_marks::Routes,
     navigation: crate::navigation::Navigation,
     presence: presence::Presence,
     presses: BTreeMap<NodeKey, press::Feedback>,
@@ -291,7 +292,7 @@ impl<D: DataSource> Host<D> {
             lowered_changed: Default::default(),
             played: Default::default(),
             preload_wake: Default::default(),
-            router_op: None,
+            routes: Default::default(),
             navigation: Default::default(),
             presence: Default::default(),
             presses: Default::default(),
@@ -1353,12 +1354,12 @@ impl<D: DataSource> Host<D> {
         (error.or(layout.err()), paint)
     }
 
-    // @ref LLP 1038 D6/D7/D11 — no batch consumer on this host. Keep the
-    // last coalesced op for inspection; navigation's agent section stays unavailable.
+    // @ref LLP 1038 D6/D7/D11 — no batch consumer on this host. Keep each coalesced op for
+    // the navigation marks and the last for inspection; the agent's `navigation` is unavailable.
     fn project_navigation(&mut self) -> bool {
         let mut changed = false;
         if let Some(change) = self.runner.take_router_change() {
-            self.router_op = Some(change);
+            self.routes.push(change);
             changed = true;
         }
         // Only stacks and popovers matter to it: the walk keeps those, in
@@ -1383,7 +1384,7 @@ impl<D: DataSource> Host<D> {
 
     /// The last router op; this host has no foreign batch consumer.
     pub fn router_op(&self) -> Option<&exact_runner::RouterChange> {
-        self.router_op.as_ref()
+        self.routes.last()
     }
 
     /// Hidden/inert through the route and authored inert ancestors.

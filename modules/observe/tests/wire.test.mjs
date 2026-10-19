@@ -3,7 +3,7 @@
 // `bun test ./modules/observe/tests/wire.test.mjs`. The Apple half needs swiftc, so it runs on macOS only.
 import { expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -37,7 +37,7 @@ function expected(signal, platform) {
     for (const scope of r.scopeMetrics ?? []) for (const m of scope.metrics) for (const a of m.gauge.dataPoints[0].attributes) {
       if (a.key !== 'expo.custom_params') continue;
       const params = JSON.parse(a.value.stringValue);
-      const extra = m.name.startsWith('expo.app_startup.') ? p.startupParams : params.isAppLaunch ? p.launchNavigationParams : {};
+      const extra = m.name.startsWith('expo.app_startup.') ? { ...p.startupParams, ...(m.name === 'expo.app_startup.tti' ? p.ttiParams : {}) } : params.isAppLaunch ? p.launchNavigationParams : {};
       a.value.stringValue = { ...params, ...extra };
     }
   }
@@ -64,7 +64,8 @@ test('the web service sends wire.json\'s bodies', async () => {
   try {
     const { start } = await import('../web/service.js');
     const service = start({ 'app.CFBundleIdentifier': fixture.app.id, 'app.CFBundleName': fixture.app.name, environment: fixture.environment, projectId: 'p', endpoint: 'http://sink' });
-    for (const e of fixture.events) service.event({ ...e, wall: e.wall * 1000 });
+    const ms = walls => walls && Object.fromEntries(Object.entries(walls).map(([k, v]) => [k, v * 1000]));
+    for (const e of fixture.events) service.event({ ...e, wall: e.wall * 1000, walls: ms(e.walls) });
     service.background();
     await new Promise(r => saved.setTimeout.value(r, 0));
   } finally {
@@ -95,5 +96,124 @@ test.skipIf(process.platform !== 'darwin')('the Apple service sends wire.json\'s
     expect(metrics.every(m => m.sent === false && typeof m.value === 'number' && typeof m.name === 'string')).toBe(true);
     expect(metrics.map(m => m.time)).toEqual([...metrics.map(m => m.time)].sort((a, b) => b - a));
     expect(out.unknown.error).toContain('recent');
+  } finally { rmSync(work, { recursive: true, force: true }); }
+}, 120_000);
+
+test.skipIf(process.platform !== 'darwin')('the Apple service labels each row with the update that ran when it was recorded', () => {
+  const work = mkdtempSync(join(tmpdir(), 'observe-update-'));
+  try {
+    const exe = join(work, 'harness');
+    const service = ['ObserveService', 'ObserveWire', 'ObserveRules', 'ObserveStore'].map(f => join(dir, `../apple/service/${f}.swift`));
+    const build = spawnSync('xcrun', ['swiftc', '-parse-as-library', '-swift-version', '5', '-module-cache-path', join(work, 'cache'),
+      ...service, join(dir, 'wire.swift'), '-lsqlite3', '-o', exe], { encoding: 'utf8' });
+    expect(build.status, build.stderr).toBe(0);
+    const navigation = fixture.events.find(e => e.kind === 'navigation');
+    const updates = events => {
+      const path = join(work, `fixture-${Math.random()}.json`);
+      writeFileSync(path, JSON.stringify({ ...fixture, events }));
+      const run = spawnSync(exe, [path, join(work, `store-${Math.random()}`)], { encoding: 'utf8' });
+      expect(run.status, run.stderr).toBe(0);
+      // Each resource's update id, with the metric names it holds.
+      return JSON.parse(run.stdout).metrics.resourceMetrics.map(r => [
+        r.resource.attributes.find(a => a.key === 'expo.app.update_id')?.value.stringValue ?? null,
+        r.scopeMetrics[0].metrics.map(m => m.name)]);
+    };
+    // A live activation: the rows before it keep the update they ran under.
+    const live = updates([{ kind: 'update.launched', entry: 'a'.repeat(64), seq: 1 }, navigation, { kind: 'update.launched', entry: 'b'.repeat(64), seq: 2 }, navigation]);
+    expect(live.map(([id]) => id)).toEqual(['a'.repeat(64), 'b'.repeat(64)]);
+    expect(live.every(([, names]) => names.length === 1)).toBe(true);
+    // A live activation before startup's report: the startup metrics keep the update their marks are of.
+    const startupEvent = fixture.events.find(e => e.kind === 'startup');
+    const relabel = updates([{ kind: 'update.launched', entry: 'a'.repeat(64), seq: 1 }, { kind: 'update.launched', entry: 'b'.repeat(64), seq: 2 }, { ...startupEvent, update: 'a'.repeat(64) }]);
+    expect(relabel.map(([id]) => id)).toEqual(['a'.repeat(64)]);
+    // A refused update: the embedded app runs, and its rows carry no update id.
+    const refused = updates([{ kind: 'update.launched', entry: 'a'.repeat(64), seq: 1 }, { kind: 'update.launched', entry: '', seq: 0 }, navigation]);
+    expect(refused.map(([id]) => id)).toEqual([null]);
+
+    // A crash under update A, recovered at the next launch (another session, no update): it keeps A.
+    const store = join(work, 'crash-store');
+    const run = f => {
+      const path = join(work, `fixture-${Math.random()}.json`);
+      writeFileSync(path, JSON.stringify(f));
+      const r = spawnSync(exe, [path, store], { encoding: 'utf8' });
+      expect(r.status, r.stderr).toBe(0);
+      return JSON.parse(r.stdout);
+    };
+    // Now, not the fixture's 2023: the store forgets rows and sessions past its retention.
+    const now = Date.now() / 1000;
+    run({ ...fixture, sessionStart: now, events: [{ kind: 'update.launched', entry: 'a'.repeat(64), seq: 1 }, { ...navigation, wall: now }] });
+    writeFileSync(join(store, `exact-observe-pending-${fixture.session}-${fixture.app.id}.json`),
+      JSON.stringify({ session: fixture.session, app: fixture.app.id, sessionStart: now, metadata: {}, signal: 6 }));
+    const next = run({ ...fixture, sessionStart: now, session: '00000000-0000-4000-8000-000000000002', events: [] });
+    const crash = next.logs.resourceLogs.find(r => r.scopeLogs[0].logRecords.some(l => l.attributes.some(a => a.key === 'event.name' && a.value.stringValue === 'native.exception')));
+    expect(crash.resource.attributes.find(a => a.key === 'expo.app.update_id')?.value.stringValue).toBe('a'.repeat(64));
+
+    // A crash during startup, before its service stored anything: the record names the update (ObserveCrash.swift).
+    const early = '00000000-0000-4000-8000-000000000003';
+    writeFileSync(join(store, `exact-observe-pending-${early}-${fixture.app.id}.json`),
+      JSON.stringify({ session: early, app: fixture.app.id, sessionStart: now, metadata: {}, updateId: 'b'.repeat(64), signal: 11 }));
+    const after = run({ ...fixture, sessionStart: now, session: '00000000-0000-4000-8000-000000000004', events: [] });
+    const startupCrash = after.logs.resourceLogs.find(r => r.scopeLogs[0].logRecords.some(l => l.attributes.some(a => a.key === 'session.id' && a.value.stringValue === early)));
+    expect(startupCrash.resource.attributes.find(a => a.key === 'expo.app.update_id')?.value.stringValue).toBe('b'.repeat(64));
+
+    // A crash before the startup report: the record's startup metrics are stored for the crashed session, once.
+    const loading = '00000000-0000-4000-8000-000000000005';
+    writeFileSync(join(store, `exact-observe-pending-${loading}-${fixture.app.id}.json`), JSON.stringify({ session: loading, app: fixture.app.id, sessionStart: now, metadata: {},
+      startup: { metrics: { coldLaunchTime: 0.9, timeToFirstRender: 0.3 }, walls: { coldLaunchTime: now + 0.9, timeToFirstRender: now + 1.2 } }, signal: 6 }));
+    const recovered = run({ ...fixture, sessionStart: now, session: '00000000-0000-4000-8000-000000000006', events: [] });
+    const rows = recovered.metrics.resourceMetrics.flatMap(r => r.scopeMetrics[0].metrics)
+      .filter(m => m.gauge.dataPoints[0].attributes.some(a => a.key === 'session.id' && a.value.stringValue === loading));
+    expect(rows.map(m => m.name).sort()).toEqual(['expo.app_startup.cold_launch_time', 'expo.app_startup.ttr']);
+    expect(JSON.parse(rows[0].gauge.dataPoints[0].attributes.find(a => a.key === 'expo.custom_params').value.stringValue)['exact.launch.crashed']).toBe(true);
+
+    // A timeout's report stored launch time, the first frame came later, then a crash: only TTR is recovered.
+    const partial = '00000000-0000-4000-8000-000000000007';
+    run({ ...fixture, sessionStart: now, session: partial, events: [{ kind: 'startup', wall: now + 30, metrics: { coldLaunchTime: 0.9 }, walls: { coldLaunchTime: now + 0.9 }, marks: {}, tti: 'timeout' }] });
+    writeFileSync(join(store, `exact-observe-pending-${partial}-${fixture.app.id}.json`), JSON.stringify({ session: partial, app: fixture.app.id, sessionStart: now, metadata: {},
+      startup: { metrics: { coldLaunchTime: 0.9, timeToFirstRender: 31 }, walls: { coldLaunchTime: now + 0.9, timeToFirstRender: now + 31 } }, signal: 6 }));
+    const later = run({ ...fixture, sessionStart: now, session: '00000000-0000-4000-8000-000000000008', events: [] });
+    const crashed = later.metrics.resourceMetrics.flatMap(r => r.scopeMetrics[0].metrics).filter(m => {
+      const a = m.gauge.dataPoints[0].attributes;
+      return a.some(x => x.key === 'session.id' && x.value.stringValue === partial) && JSON.parse(a.find(x => x.key === 'expo.custom_params')?.value.stringValue ?? '{}')['exact.launch.crashed'];
+    });
+    expect(crashed.map(m => m.name)).toEqual(['expo.app_startup.ttr']);
+
+    // An embedded startup (`update: ""`) that crashed after update B was activated: its startup rows name no update.
+    const embedded = '00000000-0000-4000-8000-000000000009';
+    writeFileSync(join(store, `exact-observe-pending-${embedded}-${fixture.app.id}.json`), JSON.stringify({ session: embedded, app: fixture.app.id, sessionStart: now, metadata: {}, updateId: 'b'.repeat(64),
+      startup: { metrics: { coldLaunchTime: 0.9 }, walls: { coldLaunchTime: now + 0.9 }, update: '' }, signal: 6 }));
+    const afterEmbedded = run({ ...fixture, sessionStart: now, session: '00000000-0000-4000-8000-00000000000a', events: [] });
+    const launchRow = afterEmbedded.metrics.resourceMetrics.find(r => r.scopeMetrics[0].metrics.some(m => m.name === 'expo.app_startup.cold_launch_time'
+      && m.gauge.dataPoints[0].attributes.some(a => a.key === 'session.id' && a.value.stringValue === embedded)));
+    expect(launchRow.resource.attributes.find(a => a.key === 'expo.app.update_id')).toBeUndefined();
+  } finally { rmSync(work, { recursive: true, force: true }); }
+}, 120_000);
+
+test.skipIf(process.platform !== 'darwin')('the Apple service gives the launch route startup\'s TTI only when that screen stayed on top', () => {
+  const work = mkdtempSync(join(tmpdir(), 'observe-launch-'));
+  try {
+    const exe = join(work, 'harness');
+    const service = ['ObserveService', 'ObserveWire', 'ObserveRules', 'ObserveStore'].map(f => join(dir, `../apple/service/${f}.swift`));
+    const build = spawnSync('xcrun', ['swiftc', '-parse-as-library', '-swift-version', '5', '-module-cache-path', join(work, 'cache'),
+      ...service, join(dir, 'wire.swift'), '-lsqlite3', '-o', exe], { encoding: 'utf8' });
+    expect(build.status, build.stderr).toBe(0);
+    // Startup's report with TTI. The host says whether the launch screen stayed on top (`launchScreen`); a navigation's
+    // own rows can come after startup's when both end at one vsync, and another window's navigation is not this one's.
+    const { late: _, launchScreen: __, ...reached } = fixture.events.find(e => e.kind === 'startup.tti');
+    const names = (launchScreen, before = []) => {
+      const path = join(work, `fixture-${Math.random()}.json`);
+      const launch = fixture.events.find(e => e.kind === 'navigation.launch');
+      writeFileSync(path, JSON.stringify({ ...fixture, events: [launch, ...before, { ...reached, kind: 'startup', ...(launchScreen ? { launchScreen } : {}) }] }));
+      const run = spawnSync(exe, [path, join(work, `store-${Math.random()}`)], { encoding: 'utf8' });
+      expect(run.status, run.stderr).toBe(0);
+      return JSON.parse(run.stdout).metrics.resourceMetrics.flatMap(r => r.scopeMetrics[0].metrics.map(m => m.name));
+    };
+    // Another window navigated before startup's TTI: the launch screen still stayed on top in its own.
+    const navigation = fixture.events.find(e => e.kind === 'navigation');
+    expect(names(true, [navigation])).toContain('expo.navigation.tti');
+    const elsewhere = names(false);
+    expect(elsewhere).toContain('expo.navigation.cold_ttr');
+    expect(elsewhere).toContain('expo.app_startup.tti');
+    expect(elsewhere).not.toContain('expo.navigation.tti');
   } finally { rmSync(work, { recursive: true, force: true }); }
 }, 120_000);
