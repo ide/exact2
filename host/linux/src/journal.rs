@@ -119,8 +119,16 @@ pub fn on_flush(f: impl Fn(std::time::Duration) + Send + Sync + 'static) {
 }
 
 /// Waits, `bound` at most in all, until each launch part that registered a flush has
-/// stored the events recorded so far. The process is about to end.
+/// stored the events recorded so far. The process is about to end: work waiting for
+/// startup starts now if no startup event came.
 pub fn flush(bound: std::time::Duration) {
+    let deferred = with(|j| {
+        j.started = true;
+        std::mem::take(&mut j.deferred)
+    });
+    for d in deferred {
+        std::thread::spawn(d);
+    }
     let flushes = with(|j| j.flushes.clone());
     let deadline = std::time::Instant::now() + bound;
     for f in flushes {

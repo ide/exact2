@@ -78,7 +78,7 @@ fn service(endpoint: &str, name: &str) -> Service {
 
 fn startup(s: &mut Service, n: usize) {
     for i in 0..n {
-        let e = json!({ "kind": "startup", "wall": 1_700_000_001.0 + i as f64, "tti": "settled",
+        let e = json!({ "kind": "startup", "wall": 1_700_000_001.0 + i as f64, "tti": "settled", "launchScreen": true,
             "metrics": { "coldLaunchTime": 0.004, "timeToFirstRender": 0.1, "timeToInteractive": 0.2 },
             "marks": { "process": 0.0, "boot": 4.0, "commit": 50.0, "present": 104.0, "activated": 60.0, "interactive": 204.0 } });
         s.event(&e);
@@ -90,12 +90,13 @@ fn startup_becomes_observes_metrics_on_its_wire() {
     let (url, seen) = sink(|_, _| (200, ""));
     let mut s = service(&url, "wire");
     let mut out = s.sender();
+    // The same report twice, as the host journals it each time it gains a metric: each once
     startup(&mut s, 2);
     out.dispatch();
     assert!(s.metrics().is_empty(), "acknowledged rows leave the queue");
     let seen = seen.lock().unwrap();
     let (path, rows, body) = &seen[0];
-    assert_eq!((path.as_str(), *rows), ("/p1/v1/metrics", 6));
+    assert_eq!((path.as_str(), *rows), ("/p1/v1/metrics", 3));
     let resource = &body["resourceMetrics"][0];
     assert_eq!(resource["schemaUrl"], SCHEMA_URL);
     assert_eq!(resource["scopeMetrics"][0]["scope"]["name"], "expo-observe");
@@ -114,14 +115,12 @@ fn startup_becomes_observes_metrics_on_its_wire() {
         .iter()
         .map(|m| m["name"].as_str().unwrap())
         .collect();
-    // A service is one launch, so its second report keeps the type its first decided
     assert_eq!(
-        names[..4],
+        names,
         [
             "expo.app_startup.cold_launch_time",
             "expo.app_startup.ttr",
-            "expo.app_startup.tti",
-            "expo.app_startup.cold_launch_time"
+            "expo.app_startup.tti"
         ]
     );
     assert!(metrics.iter().all(|m| m["unit"] == "s"));
@@ -163,36 +162,40 @@ fn the_launch_route_is_the_last_one_journaled() {
     assert_eq!(routes, [("cold_ttr", "/welcome"), ("tti", "/welcome")]);
 }
 
-/// A late report (`startup.tti`) stores only what the timeout's report did not:
-/// the TTI reached later, and the TTR when the first frame came after the timeout.
+/// The host journals its startup report each time it gains a metric: each metric is
+/// stored once, and the launch route's TTI only when the report says it stayed on top.
 #[test]
-fn a_late_report_stores_each_startup_metric_once() {
-    let (url, _) = sink(|_, _| (200, ""));
-    let mut s = service(&url, "late");
-    s.event(&json!({ "kind": "navigation.launch", "route": "/", "url": "/", "routeParams": {} }));
-    s.event(
-        &json!({ "kind": "startup", "wall": 1_700_000_031.0, "tti": "timeout",
-        "metrics": { "coldLaunchTime": 0.004 },
-        "marks": { "process": 0.0, "boot": 4.0 } }),
-    );
-    s.event(&json!({ "kind": "startup.tti", "wall": 1_700_000_040.0, "tti": "settled", "late": true,
-        "metrics": { "coldLaunchTime": 0.004, "timeToFirstRender": 35.0, "timeToInteractive": 36.0 },
-        "marks": { "process": 0.0, "boot": 4.0, "commit": 35_000.0, "present": 35_004.0, "interactive": 36_004.0 } }));
-    let metrics = s.metrics();
-    let rows: Vec<(&str, &str)> = metrics
-        .iter()
-        .map(|r| (r["category"].as_str().unwrap(), r["name"].as_str().unwrap()))
-        .collect();
-    assert_eq!(
-        rows,
-        [
+fn a_startup_report_gaining_metrics_stores_each_once() {
+    for launch_screen in [true, false] {
+        let (url, _) = sink(|_, _| (200, ""));
+        let mut s = service(&url, "grown");
+        s.event(
+            &json!({ "kind": "navigation.launch", "route": "/", "url": "/", "routeParams": {} }),
+        );
+        s.event(&json!({ "kind": "startup", "wall": 1_700_000_001.0,
+            "metrics": { "coldLaunchTime": 0.004 },
+            "marks": { "process": 0.0, "boot": 4.0 } }));
+        let tti = json!({ "kind": "startup", "wall": 1_700_000_040.0, "tti": "settled", "launchScreen": launch_screen,
+            "metrics": { "coldLaunchTime": 0.004, "timeToFirstRender": 35.0, "timeToInteractive": 36.0 },
+            "marks": { "process": 0.0, "boot": 4.0, "commit": 35_000.0, "present": 35_004.0, "interactive": 36_004.0 } });
+        s.event(&tti);
+        s.event(&tti);
+        let metrics = s.metrics();
+        let rows: Vec<(&str, &str)> = metrics
+            .iter()
+            .map(|r| (r["category"].as_str().unwrap(), r["name"].as_str().unwrap()))
+            .collect();
+        let mut expected = vec![
             ("appStartup", "coldLaunchTime"),
             ("appStartup", "timeToFirstRender"),
             ("appStartup", "timeToInteractive"),
             ("navigation", "cold_ttr"),
-            ("navigation", "tti")
-        ]
-    );
+        ];
+        if launch_screen {
+            expected.push(("navigation", "tti"));
+        }
+        assert_eq!(rows, expected);
+    }
 }
 
 /// A chunk the server accepted leaves the stored queue before the next request
@@ -228,7 +231,10 @@ fn a_413_halves_the_chunk_and_drops_a_lone_row() {
     let (url, seen) = sink(|_, rows| if rows > 2 { (413, "") } else { (200, "") });
     let mut s = service(&url, "large");
     let mut out = s.sender();
-    startup(&mut s, 2); // six rows
+    startup(&mut s, 1);
+    for name in ["cold_ttr", "warm_ttr", "tti"] {
+        s.event(&json!({ "kind": "navigation", "name": name, "value": 0.1, "route": "/a", "url": "/a" }));
+    } // six rows
     out.dispatch();
     assert!(s.metrics().is_empty());
     let sizes: Vec<usize> = seen.lock().unwrap().iter().map(|r| r.1).collect();
@@ -667,11 +673,9 @@ fn a_panic_leaves_a_record_the_next_launch_sends_as_fatal() {
     let before = json!({ "boot": "the boot before", "build": "1:1" });
     std::fs::write(dir.join("launch.json"), before.to_string()).unwrap();
     launch(ctx);
-    // The first frame showed and startup is still loading.
+    // Launch ended and startup is still loading.
     let mut marks = exact_linux::launch_marks::LaunchMarks::new();
     marks.launch_end();
-    marks.presented(exact_linux::launch_marks::boottime());
-    marks.publish();
     let _ = std::panic::catch_unwind(|| panic!("index out of bounds"));
     let pending: Vec<_> = std::fs::read_dir(&dir)
         .unwrap()
@@ -683,11 +687,10 @@ fn a_panic_leaves_a_record_the_next_launch_sends_as_fatal() {
     let record: Value = serde_json::from_slice(&std::fs::read(&pending[0]).unwrap()).unwrap();
     assert_eq!(record["message"], "index out of bounds");
     assert_eq!(record["metadata"]["appVersion"], "1.0");
-    let startup = &record["startup"];
-    assert!(startup["metrics"]["timeToFirstRender"].is_number());
-    assert!(startup["metrics"]["timeToInteractive"].is_null(), "no TTI");
-    assert!(startup["walls"]["timeToFirstRender"].is_number());
-    assert_eq!(startup["launchType"], "cold", "after another boot");
+    assert!(
+        record.get("startup").is_none(),
+        "no startup metrics: the service stores them"
+    );
     let (this, terminal) = this_launch();
     assert_eq!(
         read_json(&dir.join("launch.json")),
@@ -723,13 +726,10 @@ fn a_panic_leaves_a_record_the_next_launch_sends_as_fatal() {
     );
     assert_eq!(crashed["osVersion"], record["metadata"]["osVersion"]);
     assert_eq!(sessions["next-session"]["meta"]["appVersion"], "2.0");
-    let metrics = next.metrics();
-    let ttr = metrics
-        .iter()
-        .find(|r| r["name"] == "timeToFirstRender")
-        .unwrap();
-    assert_eq!(ttr["session"], record["session"]);
-    assert_eq!(ttr["time"], startup["walls"]["timeToFirstRender"]);
+    assert!(
+        next.metrics().is_empty(),
+        "a panic record carries no metric"
+    );
     // The same build in the same boot as the crashed launch: warm where /proc names both
     // and stderr is not a terminal (on Linux, not macOS)
     next.event(
@@ -751,136 +751,4 @@ fn a_panic_leaves_a_record_the_next_launch_sends_as_fatal() {
     );
     next.sender().dispatch(); // no project id: the rows are dropped, as Observe out of its gate
     assert!(next.logs().is_empty());
-}
-
-/// A panic record's startup object becomes the crashed session's startup rows, named
-/// as its report would name them and stamped at their marks, once; a session that
-/// stored its startup report before it crashed gets none from its record.
-#[test]
-fn a_crash_stores_its_startup_once_unless_the_session_stored_it() {
-    let (url, _) = sink(|_, _| (200, ""));
-    let mut reported = service(&url, "crash-startup");
-    startup(&mut reported, 1);
-    let dir = reported.dir.clone();
-    drop(reported);
-    let pending = |session: &str| {
-        let record = json!({
-            "session": session, "sessionStart": 1_700_000_000.0, "time": 1_700_000_002.0,
-            "type": "panic", "message": "boom",
-            "startup": {
-                "metrics": { "coldLaunchTime": 0.004, "timeToFirstRender": 0.1 },
-                "walls": { "coldLaunchTime": 1_700_000_000.5, "timeToFirstRender": 1_700_000_000.6 },
-                "launchType": "warm",
-            },
-        });
-        let path = dir.join(format!("pending-{session}.json"));
-        std::fs::write(path, record.to_string()).unwrap();
-    };
-    let launch = |session: &str| {
-        let app = json!({ "id": "com.example.test", "name": "Test", "version": "1.2" });
-        Service::new(Map::new(), &app, true, dir.clone(), session.into(), 0.0)
-    };
-    let startup_rows = |s: &Service, session: &str| {
-        let mut rows: Vec<(String, f64, Value)> = s
-            .metrics()
-            .iter()
-            .filter(|r| r["session"] == session && r["category"] == "appStartup")
-            .map(|r| {
-                let params = serde_json::from_str(r["params"].as_str().unwrap()).unwrap();
-                (
-                    r["name"].as_str().unwrap().into(),
-                    r["time"].as_f64().unwrap(),
-                    params,
-                )
-            })
-            .collect();
-        rows.sort_by(|a, b| a.0.cmp(&b.0));
-        rows
-    };
-    pending("crashed");
-    pending("s-1");
-    let next = launch("next");
-    let crash = json!({ "exact.launch.interrupted": true, "exact.launch.crashed": true });
-    assert_eq!(
-        startup_rows(&next, "crashed"),
-        [
-            ("timeToFirstRender".into(), 1_700_000_000.6, crash.clone()),
-            ("warmLaunchTime".into(), 1_700_000_000.5, crash.clone())
-        ]
-    );
-    assert_eq!(
-        startup_rows(&next, "s-1").len(),
-        3,
-        "its own report's rows, none from its record"
-    );
-    assert_eq!(
-        next.logs().len(),
-        2,
-        "each crash is still a native.exception"
-    );
-    drop(next);
-
-    // A record of the session read again stores nothing more.
-    pending("crashed");
-    let third = launch("third");
-    assert_eq!(startup_rows(&third, "crashed").len(), 2, "once");
-}
-
-/// A crash after the timeout's report, which stored only the launch time, stores from its
-/// record the TTR of the first frame that came after it, each metric once, as the late
-/// report would have.
-#[test]
-fn a_crash_after_a_partial_report_stores_the_metrics_it_left_out() {
-    let (url, _) = sink(|_, _| (200, ""));
-    let mut crashed = service(&url, "crash-partial");
-    crashed.event(
-        &json!({ "kind": "startup", "wall": 1_700_000_031.0, "tti": "timeout",
-        "metrics": { "coldLaunchTime": 0.004 }, "marks": { "process": 0.0, "boot": 4.0 } }),
-    );
-    let dir = crashed.dir.clone();
-    drop(crashed);
-    let record = json!({
-        "session": "s-1", "sessionStart": 1_700_000_000.0, "time": 1_700_000_040.0,
-        "type": "panic", "message": "boom",
-        "startup": {
-            "metrics": { "coldLaunchTime": 0.004, "timeToFirstRender": 35.0 },
-            "walls": { "coldLaunchTime": 1_700_000_000.5, "timeToFirstRender": 1_700_000_035.5 },
-            "launchType": "cold",
-        },
-    });
-    let launch = |session: &str| {
-        std::fs::write(dir.join("pending-s-1.json"), record.to_string()).unwrap();
-        let app = json!({ "id": "com.example.test", "name": "Test", "version": "1.2" });
-        Service::new(Map::new(), &app, true, dir.clone(), session.into(), 0.0)
-    };
-    let startup_rows = |s: &Service| -> Vec<(String, f64, Option<Value>)> {
-        s.metrics()
-            .iter()
-            .filter(|r| r["session"] == "s-1" && r["category"] == "appStartup")
-            .map(|r| {
-                let params = r["params"]
-                    .as_str()
-                    .map(|p| serde_json::from_str(p).unwrap());
-                let crashed = params.filter(|p: &Value| p["exact.launch.crashed"] == true);
-                (
-                    r["name"].as_str().unwrap().into(),
-                    r["time"].as_f64().unwrap(),
-                    crashed,
-                )
-            })
-            .collect()
-    };
-    let crash = json!({ "exact.launch.interrupted": true, "exact.launch.crashed": true });
-    let next = launch("next");
-    assert_eq!(
-        startup_rows(&next),
-        [
-            ("coldLaunchTime".into(), 1_700_000_031.0, None),
-            ("timeToFirstRender".into(), 1_700_000_035.5, Some(crash))
-        ],
-        "the report's launch time, and the record's TTR"
-    );
-    drop(next);
-    let third = launch("third");
-    assert_eq!(startup_rows(&third).len(), 2, "once");
 }

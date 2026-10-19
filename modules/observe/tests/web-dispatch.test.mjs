@@ -166,18 +166,22 @@ test('rows recorded during a send that trim the queue are not taken as sent', as
   expect(new Set(values).size).toBe(2001);
 });
 
-test('a first frame after the timeout report is sent with the late TTI, and nothing twice', async () => {
-  await withPage({}, async (start, sent) => {
-    const service = start(config);
-    service.event({ kind: 'navigation.launch', wall: 1700000000000, route: '/', routeParams: {}, url: '/' });
-    service.event({ kind: 'startup', wall: 1700000030000, metrics: {}, walls: {}, marks: {}, tti: 'timeout' });
-    service.event({ kind: 'startup.tti', wall: 1700000031000, metrics: { timeToFirstRender: 30.5, timeToInteractive: 31 }, walls: { timeToFirstRender: 1700000030500, timeToInteractive: 1700000031000 }, marks: { present: 30500, interactive: 31000 }, tti: 'settled', late: true });
-    service.event({ kind: 'startup.tti', wall: 1700000031000, metrics: { timeToFirstRender: 30.5, timeToInteractive: 31 }, walls: {}, marks: { present: 30500, interactive: 31000 }, tti: 'settled', late: true });
-    service.background();
-    await settle();
-    const names = sent.flatMap(s => s.body.resourceMetrics ?? []).flatMap(r => r.scopeMetrics[0].metrics).map(m => m.name).sort();
-    expect(names).toEqual(['expo.app_startup.tti', 'expo.app_startup.ttr', 'expo.navigation.cold_ttr', 'expo.navigation.tti']);
-  });
+test('a startup report journaled each time it gains a metric stores each metric once', async () => {
+  for (const launchScreen of [true, false]) {
+    await withPage({}, async (start, sent) => {
+      const service = start(config);
+      service.event({ kind: 'navigation.launch', wall: 1700000000000, route: '/', routeParams: {}, url: '/' });
+      service.event({ kind: 'startup', wall: 1700000000500, metrics: { timeToFirstRender: 0.5 }, walls: { timeToFirstRender: 1700000000500 }, marks: { present: 500 } });
+      const tti = { kind: 'startup', wall: 1700000001000, metrics: { timeToFirstRender: 0.5, timeToInteractive: 1 }, walls: { timeToFirstRender: 1700000000500, timeToInteractive: 1700000001000 }, marks: { present: 500, interactive: 1000 }, tti: 'settled' };
+      // The launch screen's TTI is startup's only when the host says that screen stayed on top.
+      service.event(launchScreen ? { ...tti, launchScreen } : tti);
+      service.event(launchScreen ? { ...tti, launchScreen } : tti);
+      service.background();
+      await settle();
+      const names = sent.flatMap(s => s.body.resourceMetrics ?? []).flatMap(r => r.scopeMetrics[0].metrics).map(m => m.name).sort();
+      expect(names).toEqual(['expo.app_startup.tti', 'expo.app_startup.ttr', 'expo.navigation.cold_ttr', ...(launchScreen ? ['expo.navigation.tti'] : [])]);
+    });
+  }
 });
 
 test('a prerendered page painted before its activation has a launch-route TTR of zero, not less', async () => {

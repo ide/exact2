@@ -75,19 +75,18 @@ function device() {
 /** Records the journal events of `session` as Observe rows in queue `q`, calling `saved` after each row. A journal
  * `recovered` from a closed page gets no device or network state: this page's is not that page's. */
 function recorder(session, q, saved, recovered = false) {
-  let globals = {}, launchRoute = null, navigated = false;
+  let globals = {}, launchRoute = null;
   /** The startup metrics sent, by name (`launch.` for the launch route's). */
   const sent = new Set();
   const params = extra => ({ ...globals, ...extra });
   const metric = (category, name, value, wall, route, p) => { q.metrics.push({ session, time: wall / 1000, category, name, value, route, params: JSON.stringify(p) }); saved(); };
   const log = (severity, name, body, attributes, dropped, wall) => { q.logs.push({ session, time: wall / 1000, severity, name, body, attributes, dropped }); saved(); };
 
-  /** The startup metrics, each at the time of its own mark, and each once: a report after the
-   * timeout's (`startup.tti`) sends only what that one lacked, such as a first frame that came after it. */
+  /** The startup metrics, each at the time of its own mark, and each once: the host journals its startup report
+   * each time it gains a metric. */
   function startup(e) {
     const m = e.marks ?? {}, from = m.activation ?? 0, walls = e.walls ?? {};
     const common = { 'exact.present.method': e.presentMethod ?? 'raf', 'exact.since_process_start.ttr': m.present !== undefined ? (m.present - from) / 1000 : undefined };
-    if (e.interrupted) common['exact.launch.interrupted'] = true;
     for (const [name, value] of Object.entries(e.metrics ?? {})) {
       if (sent.has(name)) continue;
       sent.add(name);
@@ -99,7 +98,6 @@ function recorder(session, q, saved, recovered = false) {
         if (!recovered) Object.assign(p, device());
         // The screen shown at TTI, with Observe's navigation params.
         if (e.route) { route = e.route.route; p.routeParams = e.route.routeParams ?? {}; p.url = e.route.url; }
-        if (e.late) p['exact.tti.late'] = true;
       }
       metric('appStartup', name, value, walls[name] ?? e.wall, route, p);
     }
@@ -109,15 +107,15 @@ function recorder(session, q, saved, recovered = false) {
     const p = params({ isAppLaunch: true, routeParams: launchRoute.routeParams ?? {}, url: launchRoute.url, 'exact.nav.anchor': 'activation' });
     const once = name => !sent.has(name) && sent.add(name);
     if (e.metrics?.timeToFirstRender !== undefined && once('launch.cold_ttr')) metric('navigation', 'cold_ttr', since(m.present), walls.timeToFirstRender ?? e.wall, launchRoute.route, p);
-    if (e.metrics?.timeToInteractive !== undefined && !navigated && once('launch.tti')) metric('navigation', 'tti', since(m.interactive), walls.timeToInteractive ?? e.wall, launchRoute.route, p);
+    // Startup's TTI is the launch screen's when that screen stayed on top until it (the host says so).
+    if (e.metrics?.timeToInteractive !== undefined && e.launchScreen && once('launch.tti')) metric('navigation', 'tti', since(m.interactive), walls.timeToInteractive ?? e.wall, launchRoute.route, p);
   }
 
   return e => {
     switch (e.kind) {
       case 'startup': startup(e); break;
-      case 'startup.tti': startup(e); break;
       case 'navigation.launch': launchRoute = e; break;
-      case 'navigation': navigated = true; metric('navigation', e.name, e.value, e.wall, e.route, params({ isAppLaunch: false, routeParams: e.routeParams ?? {}, url: e.url, ...Object.fromEntries(Object.entries(e).filter(([k]) => k.startsWith('exact.'))) })); break;
+      case 'navigation': metric('navigation', e.name, e.value, e.wall, e.route, params({ isAppLaunch: false, routeParams: e.routeParams ?? {}, url: e.url, ...Object.fromEntries(Object.entries(e).filter(([k]) => k.startsWith('exact.'))) })); break;
       case 'app.attributes': globals = rulesAttributes(e.attributes).kept; break;
       case 'app.event': {
         const name = rulesName(e.name); if (!name) break;
@@ -145,7 +143,7 @@ const bytes = s => new TextEncoder().encode(s).length;
  * left by an earlier hide; the journals of pages that closed before their service loaded
  * (`exact-journal:<app>:<session>`, under a Web Lock of that name while the page was open)
  * become queues of their own sessions, which the drain sends. */
-export function start(config, { boot = 0, session = uuid() } = {}) {
+export function start(config, { session = uuid() } = {}) {
   const app = config['app.CFBundleIdentifier'] ?? location.host;
   const prefix = `exact-observe:${app}:`, journals = `exact-journal:${app}:`;
   // Kept for this page only when storage refuses it (blocked, or over its quota): the queues already work without storage

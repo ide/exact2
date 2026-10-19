@@ -13,12 +13,11 @@
 // a change while it is hidden is not measured.
 // Events go to each launch module's web service, which receives earlier events first.
 // Nothing here may throw into the app: each hook the runtime calls is guarded.
-import { inflight, InflightDrops, lazyWaiting, Undrawn, Resources, clock, After, Routes, RouterChanges, routeAt, busy, inactive, poisoned, Advancing, InputScope } from './rt.js';
+import { inflight, InflightDrops, lazyWaiting, Undrawn, Resources, After, Routes, RouterChanges, routeAt, poisoned, Advancing, InputScope } from './rt.js';
 
-const STARTUP_TIMER_WINDOW_MS = 1000, TTI_TIMEOUT_MS = 30000;
 const events = [], services = [];
 const marks = {};
-let launch = [], outcome = null, reported = false, late = false, suppressed = null, dirty = false, lastTrace = '', trace = [], nav = null, hidden = false;
+let launch = [], outcome = null, suppressed = null, dirty = false, lastTrace = '', trace = [], nav = null, hidden = false, navigated = false;
 /** The earliest timestamp of the inputs dispatched in this task (a click follows its pointerup), and the input a
  * deferred commit runs as (`InputScope.run`). */
 let taskInput = null, scoped = null, current = null;
@@ -45,22 +44,10 @@ const record = (kind, fields = {}, at = performance.now()) => {
 };
 const guarded = f => (...a) => { try { return f(...a); } catch (e) { console.error(`exact: observe marks: ${e?.message ?? e}`); } };
 
-/** Each loading image's visibility as the browser reports it: `IntersectionObserver` for the viewport, an ancestor's clip,
- * scrolling and `display: none`, and `checkVisibility` for CSS `visibility`. Not in a navigation pane that is not shown.
- * An intersection change re-evaluates TTI; until its first report an image counts as on screen. */
-const intersecting = new WeakMap();
-let watcher;
-const onScreen = img => {
-  watcher ??= typeof IntersectionObserver === 'function'
-    ? new IntersectionObserver(guarded(entries => { for (const e of entries) intersecting.set(e.target, e.isIntersecting); changed(); queueMicrotask(evaluate); }))
-    : null;
-  if (watcher && !intersecting.has(img)) { intersecting.set(img, true); watcher.observe(img); }
-  return intersecting.get(img) !== false && img.checkVisibility?.({ visibilityProperty: true }) !== false && !inactive(img);
-};
-
 /** What the screen still lacks, by name. A request, or the wait for the Rust data module (`waiting`, which a failed load
  * never ends), counts only for a resource showing its placeholder: a refresh behind a shown answer and a mutation the app
- * sent don't hold TTI. A one-shot timer counts only when due within 1 s. */
+ * sent don't hold TTI, nor does a timer: it is the app's logic, not loading. Images don't either: a screen whose images
+ * are still loading can already be used. `aria-busy` is the agent's settle, not TTI's. */
 export function outstanding() {
   const out = [];
   for (const r of Resources) if ((r.ticket || r.waiting) && r.placeholder) out.push(`requests:${r.name}`);
@@ -68,12 +55,6 @@ export function outstanding() {
   // draws nothing (`Undrawn`), nor rows waiting to adopt: they show their values and adopt on the first input that reaches them.
   const own = inflight.n - Undrawn.tickets - Undrawn.storage - lazyWaiting();
   if (own > 0) out.push(`loading:${own}`);
-  // Images on screen still loading (a failed one is complete).
-  let images = 0;
-  for (const img of document.getElementById('exact-root')?.getElementsByTagName('img') ?? []) if (!img.complete && onScreen(img)) images++;
-  if (images) out.push(`images:${images}`);
-  for (const t of clock.timers) if (t.once && t.ms <= STARTUP_TIMER_WINDOW_MS) out.push(`oneShots:${t.ms}`);
-  for (const id of busy()) out.push(`busy:${id}`);
   return out;
 }
 
@@ -82,22 +63,22 @@ const nextOpportunity = () => new Promise(r => requestAnimationFrame(() => { con
 
 const here = () => location.pathname + location.search;
 
-/** Ends startup with outcome `o`. The startup report goes once; a TTI reached after it (the
- * timeout reported first) goes on its own, as `startup.tti`. */
+/** Ends startup with outcome `o`, journaling TTI if it was reached; the services load now, so that their own
+ * work does not delay the TTI they measure. */
 function finish(o) {
   if (outcome) return;
   outcome = o;
   // The screen on top at startup's TTI has been interactive.
   if (marks.interactive !== undefined) { const s = topScreen(); if (s) s.interactive = true; }
-  if (!reported) reportStartup(o);
-  else if (marks.interactive !== undefined) record('startup.tti', report(o));
+  journalReport();
+  loadServices();
 }
 
-function reportStartup(o) {
-  if (reported) return;
-  reported = true;
-  record('startup', report(o));
-  loadServices();
+/** Journals the startup report with the metrics measured so far, at the first paint and when startup ends, as
+ * Observe records each metric at its own mark: the services store each once. */
+function journalReport() {
+  const r = report(outcome);
+  if (Object.keys(r.metrics).length) record('startup', r);
 }
 
 /** Each metric in seconds, with `walls`, the time of its end mark in ms since 1970. A mark
@@ -107,10 +88,10 @@ function report(o) {
   const metric = (name, t) => { const end = Math.max(t, from); metrics[name] = (end - from) / 1000; walls[name] = performance.timeOrigin + end; };
   if (!suppressed && marks.present !== undefined) metric('timeToFirstRender', marks.present);
   if (!suppressed && marks.interactive !== undefined) metric('timeToInteractive', marks.interactive);
-  const r = { metrics, walls, marks: { ...marks }, tti: o, trace, presentMethod: marks.presentMethod, bootPath: 'web' };
-  // The screen that became interactive.
-  if (marks.interactive !== undefined) { r.route = { ...route(here()), url: here() }; if (late) r.late = true; }
-  if (hidden) r.interrupted = true;
+  const r = { metrics, walls, marks: { ...marks }, trace, presentMethod: marks.presentMethod, bootPath: 'web' };
+  if (o) r.tti = o;
+  // The screen that became interactive, and whether it is the launch screen, on top since launch.
+  if (marks.interactive !== undefined) { r.route = { ...route(here()), url: here() }; if (!navigated) r.launchScreen = true; }
   if (suppressed) r.suppressed = suppressed;
   return r;
 }
@@ -124,7 +105,6 @@ async function evaluateNow() {
   if (line !== lastTrace && trace.length < 32) trace.push(`${Math.round(performance.now())} [${line}]`);
   lastTrace = line;
   if (!outcome && !suppressed && !out.length) {
-    const declared = trace.length > 1 && /^\d+ \[(busy:[^,\]]*(, )?)+\]$/.test(trace[trace.length - 2]);
     let at = performance.now();
     if (dirty) {
       const frame = await nextOpportunity();
@@ -134,8 +114,8 @@ async function evaluateNow() {
     }
     if (outstanding().length || outcome) return;
     // Before the first paint is marked (the fallback waits for a better entry), keep the TTI it would be.
-    if (marks.present === undefined) { candidate = { at, painted: generation, declared }; return; }
-    interactiveAt(at, declared);
+    if (marks.present === undefined) { candidate = { at, painted: generation }; return; }
+    interactiveAt(at);
   }
   const n = nav;
   if (n && n.presented !== undefined && !n.done && !out.length) {
@@ -165,10 +145,10 @@ function failed() {
 
 /** The TTI startup reached before its first paint was marked, and the screen it was for. */
 let candidate = null;
-function interactiveAt(at, declared) {
+function interactiveAt(at) {
   marks.interactive = Math.max(at, marks.present);
   dirty = false;
-  finish(declared ? 'declared' : 'settled');
+  finish('settled');
 }
 
 /** A location's route pattern (`/photo/:photo`) and its bound parameters, as the native hosts send. */
@@ -204,6 +184,7 @@ function routerChanged({ top, url, removed }) {
     nextOpportunity().then(guarded(() => { if (launching !== mine) return; launching = null; const s = topScreen(); if (s) s.shown = true; }));
     return;
   }
+  navigated = true;
   startNavigation(screen, url, !screen.interactive);
 }
 /** The launch screen's changes while no frame has painted it yet, or null once one has. */
@@ -250,12 +231,12 @@ function presentFrom(c0, served) {
   const take = (t, method) => {
     if (done || hidden) return;
     done = true; marks.present = method === 'served_fcp' ? t : Math.max(t, c0); marks.presentMethod = method; record('mark', { mark: 'present', method });
-    // A first paint after the timeout's report goes now, as Observe records one on its own, not with a TTI that may never come.
-    if (reported && !outcome) record('startup.tti', report('pending'));
+    // TTR goes now, as Observe records it on its own.
+    journalReport();
     // Settled before the paint was marked, with nothing changed since: TTI is when it settled.
     const c = candidate;
     candidate = null;
-    if (c && c.painted === generation && !outcome && !failed() && !outstanding().length) interactiveAt(c.at, c.declared);
+    if (c && c.painted === generation && !outcome && !failed() && !outstanding().length) interactiveAt(c.at);
     else evaluate();
   };
   try {
@@ -293,16 +274,13 @@ export function install(modules) {
     background();
     keepJournal();
   }));
-  const timeout = () => setTimeout(guarded(() => { if (!outcome) { late = true; reportStartup('timeout'); } }), TTI_TIMEOUT_MS);
   if (document.prerendering) {
-    // Startup is measured from activation, so its timeout starts then too.
-    document.addEventListener('prerenderingchange', guarded(() => { marks.activation = activationStart() || performance.now(); timeout(); }), { once: true });
+    // Startup is measured from activation.
+    document.addEventListener('prerenderingchange', guarded(() => { marks.activation = activationStart() || performance.now(); }), { once: true });
   } else if (document.visibilityState === 'hidden') {
     // Opened hidden: no one saw it start. The services still load, for what follows.
     suppressed = 'hidden';
     finish('hidden');
-  } else {
-    timeout();
   }
   RouterChanges.push(guarded(routerChanged));
   addEventListener('pagehide', guarded(() => { background(); keepJournal(); }));
@@ -318,8 +296,6 @@ export function install(modules) {
   // transition runs later. What it commits it commits at once.
   InputScope.capture = inputNow;
   InputScope.run = (at, f) => { const outer = scoped; scoped = at; try { return f(); } finally { scoped = outer; } };
-  // An image's load or error (which do not bubble, so heard as they descend) can end the screen's loading.
-  for (const t of ['load', 'error']) document.addEventListener(t, e => { if (e.target?.localName === 'img') { watcher?.unobserve(e.target); intersecting.delete(e.target); changed(); queueMicrotask(evaluate); } }, { capture: true, passive: true });
   // Uncaught errors and unhandled rejections.
   addEventListener('error', e => record('app.error', { source: 'global', type: e.error?.name ?? 'Error', message: e.message, stack: e.error?.stack }));
   addEventListener('unhandledrejection', e => record('app.error', { source: 'global', type: e.reason?.name ?? 'UnhandledRejection', message: String(e.reason?.message ?? e.reason), stack: e.reason?.stack }));
@@ -359,7 +335,7 @@ function keepJournal() {
 function loadServices() {
   for (const m of launch) {
     import(/* @vite-ignore */ m.url).then(mod => {
-      const s = mod.start(m.config, { boot: marks.activation, session });
+      const s = mod.start(m.config, { session });
       services.push(s);
       for (const e of events) s.event(e);
     }).catch(e => console.error(`exact: ${m.name} service: ${e}`));

@@ -155,37 +155,6 @@ test.skipIf(process.platform !== 'darwin')('the Apple service labels each row wi
     const after = run({ ...fixture, sessionStart: now, session: '00000000-0000-4000-8000-000000000004', events: [] });
     const startupCrash = after.logs.resourceLogs.find(r => r.scopeLogs[0].logRecords.some(l => l.attributes.some(a => a.key === 'session.id' && a.value.stringValue === early)));
     expect(startupCrash.resource.attributes.find(a => a.key === 'expo.app.update_id')?.value.stringValue).toBe('b'.repeat(64));
-
-    // A crash before the startup report: the record's startup metrics are stored for the crashed session, once.
-    const loading = '00000000-0000-4000-8000-000000000005';
-    writeFileSync(join(store, `exact-observe-pending-${loading}-${fixture.app.id}.json`), JSON.stringify({ session: loading, app: fixture.app.id, sessionStart: now, metadata: {},
-      startup: { metrics: { coldLaunchTime: 0.9, timeToFirstRender: 0.3 }, walls: { coldLaunchTime: now + 0.9, timeToFirstRender: now + 1.2 } }, signal: 6 }));
-    const recovered = run({ ...fixture, sessionStart: now, session: '00000000-0000-4000-8000-000000000006', events: [] });
-    const rows = recovered.metrics.resourceMetrics.flatMap(r => r.scopeMetrics[0].metrics)
-      .filter(m => m.gauge.dataPoints[0].attributes.some(a => a.key === 'session.id' && a.value.stringValue === loading));
-    expect(rows.map(m => m.name).sort()).toEqual(['expo.app_startup.cold_launch_time', 'expo.app_startup.ttr']);
-    expect(JSON.parse(rows[0].gauge.dataPoints[0].attributes.find(a => a.key === 'expo.custom_params').value.stringValue)['exact.launch.crashed']).toBe(true);
-
-    // A timeout's report stored launch time, the first frame came later, then a crash: only TTR is recovered.
-    const partial = '00000000-0000-4000-8000-000000000007';
-    run({ ...fixture, sessionStart: now, session: partial, events: [{ kind: 'startup', wall: now + 30, metrics: { coldLaunchTime: 0.9 }, walls: { coldLaunchTime: now + 0.9 }, marks: {}, tti: 'timeout' }] });
-    writeFileSync(join(store, `exact-observe-pending-${partial}-${fixture.app.id}.json`), JSON.stringify({ session: partial, app: fixture.app.id, sessionStart: now, metadata: {},
-      startup: { metrics: { coldLaunchTime: 0.9, timeToFirstRender: 31 }, walls: { coldLaunchTime: now + 0.9, timeToFirstRender: now + 31 } }, signal: 6 }));
-    const later = run({ ...fixture, sessionStart: now, session: '00000000-0000-4000-8000-000000000008', events: [] });
-    const crashed = later.metrics.resourceMetrics.flatMap(r => r.scopeMetrics[0].metrics).filter(m => {
-      const a = m.gauge.dataPoints[0].attributes;
-      return a.some(x => x.key === 'session.id' && x.value.stringValue === partial) && JSON.parse(a.find(x => x.key === 'expo.custom_params')?.value.stringValue ?? '{}')['exact.launch.crashed'];
-    });
-    expect(crashed.map(m => m.name)).toEqual(['expo.app_startup.ttr']);
-
-    // An embedded startup (`update: ""`) that crashed after update B was activated: its startup rows name no update.
-    const embedded = '00000000-0000-4000-8000-000000000009';
-    writeFileSync(join(store, `exact-observe-pending-${embedded}-${fixture.app.id}.json`), JSON.stringify({ session: embedded, app: fixture.app.id, sessionStart: now, metadata: {}, updateId: 'b'.repeat(64),
-      startup: { metrics: { coldLaunchTime: 0.9 }, walls: { coldLaunchTime: now + 0.9 }, update: '' }, signal: 6 }));
-    const afterEmbedded = run({ ...fixture, sessionStart: now, session: '00000000-0000-4000-8000-00000000000a', events: [] });
-    const launchRow = afterEmbedded.metrics.resourceMetrics.find(r => r.scopeMetrics[0].metrics.some(m => m.name === 'expo.app_startup.cold_launch_time'
-      && m.gauge.dataPoints[0].attributes.some(a => a.key === 'session.id' && a.value.stringValue === embedded)));
-    expect(launchRow.resource.attributes.find(a => a.key === 'expo.app.update_id')).toBeUndefined();
   } finally { rmSync(work, { recursive: true, force: true }); }
 }, 120_000);
 
@@ -199,7 +168,7 @@ test.skipIf(process.platform !== 'darwin')('the Apple service gives the launch r
     expect(build.status, build.stderr).toBe(0);
     // Startup's report with TTI. The host says whether the launch screen stayed on top (`launchScreen`); a navigation's
     // own rows can come after startup's when both end at one vsync, and another window's navigation is not this one's.
-    const { late: _, launchScreen: __, ...reached } = fixture.events.find(e => e.kind === 'startup.tti');
+    const { launchScreen: _, ...reached } = fixture.events.find(e => e.kind === 'startup' && e.metrics.timeToInteractive !== undefined);
     const names = (launchScreen, before = []) => {
       const path = join(work, `fixture-${Math.random()}.json`);
       const launch = fixture.events.find(e => e.kind === 'navigation.launch');

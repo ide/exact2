@@ -13,6 +13,7 @@ final class ObserveService {
     let store: ObserveStore?
     let clientId: UUID
     let metadata: [String: Any]
+    /// The latest device and network values the launch part journaled (`device` events), which TTI carries.
     var device: [String: Any] = [:]
     /// The route shown at launch. It gets startup's `tti` when the startup report says it stayed on top (`launchScreen`).
     var launchRoute: [String: Any]?
@@ -41,7 +42,7 @@ final class ObserveService {
     let crashDirectory: String?
 
     /// `root` and `clientId` are for tests: `root` holds the store and the crash records.
-    init(config: [String: Any], handoff: Data, root: URL? = nil, clientId fixedId: UUID? = nil) {
+    init(config: [String: Any], root: URL? = nil, clientId fixedId: UUID? = nil) {
         self.config = config
         session = config["session"] as? String ?? UUID().uuidString
         if let fixedId {
@@ -56,15 +57,6 @@ final class ObserveService {
         store = ObserveStore(directory: root ?? base.appendingPathComponent("exact/\(config["app.CFBundleIdentifier"] as? String ?? Bundle.main.bundleIdentifier ?? "app")/observe", isDirectory: true))
         crashDirectory = root?.path ?? NSSearchPathForDirectoriesInDomains(.cachesDirectory, .userDomainMask, true).first
         metadata = Self.metadata(config)
-        for record in Self.records(handoff) {
-            if record["kind"] as? String == "device" { device = record["params"] as? [String: Any] ?? [:] }
-        }
-        // Remove a disconnected path's cost flags, which the launch part kept from the connection
-        // before it, as Observe omits them without one (`MetricParamsBuilder.swift`).
-        if device["expo.network.connected"] as? Bool == false {
-            device["expo.network.isExpensive"] = nil
-            device["expo.network.isConstrained"] = nil
-        }
         if Self.logEnabled { fputs("observe: service started, session \(session)\n", stderr) }
         queue.async { [self] in
             store?.saveSession(session, start: config["sessionStart"] as? Double ?? Date().timeIntervalSince1970, metadata: metadata)
@@ -81,7 +73,7 @@ final class ObserveService {
             let wall = e["wall"] as? Double ?? Date().timeIntervalSince1970
             switch kind {
             case "startup": startup(e, wall: wall)
-            case "startup.tti": startup(e, wall: wall)
+            case "device": for (k, v) in e where k.hasPrefix("expo.") { device[k] = v }
             case "memory.warning": memoryWarning(e, wall: wall)
             case "navigation.launch": launchRoute = e
             case "navigation": navigation(e, wall: wall)
@@ -100,9 +92,8 @@ final class ObserveService {
         }
     }
 
-    /// The startup metrics stored, by name (`launch.` for the launch route's): a report after
-    /// the timeout's (`startup.tti`) stores only what that one lacked, such as a first frame
-    /// that came after it.
+    /// The startup metrics stored, by name (`launch.` for the launch route's): the host journals
+    /// its startup report each time it gains a metric.
     var stored: Set<String> = []
 
     /// Stores the launch metrics from ExactLaunch's startup report under Observe's names,
@@ -152,13 +143,17 @@ final class ObserveService {
         // Cold or warm, by Observe's heuristic (a reboot since the last launch).
         if let type = e["launchType"] { phases["exact.launch.type"] = type }
         if e["debugger"] as? Bool == true { phases["exact.launch.debugger"] = true }
-        if e["interrupted"] as? Bool == true { phases["exact.launch.interrupted"] = true }
         for (name, value) in metrics where stored.insert(name).inserted {
             var params = globals
             for (k, v) in phases { params[k] = v }
             var route: String?
             if name == "timeToInteractive" {
                 for (k, v) in device { params[k] = v }
+                // A disconnected path has no cost flags, as Observe omits them without one (`MetricParamsBuilder.swift`).
+                if device["expo.network.connected"] as? Bool == false {
+                    params["expo.network.isExpensive"] = nil
+                    params["expo.network.isConstrained"] = nil
+                }
                 // The screen shown at TTI, with Observe's navigation params.
                 if let r = e["route"] as? [String: Any] {
                     route = r["route"] as? String
@@ -166,7 +161,6 @@ final class ObserveService {
                     if let url = r["url"] { params["url"] = url }
                 }
                 if let frames = e["frames"] as? [String: Any] { for (k, v) in frames { params[k] = v } }
-                if e["late"] as? Bool == true { params["exact.tti.late"] = true }
                 params["exact.tti.reason"] = e["tti"] ?? "settled"
                 // What was outstanding over time, ms from process start: shows what held TTI.
                 if let trace = e["trace"] as? [String], !trace.isEmpty { params["exact.tti.trace"] = trace.joined(separator: " → ") }
@@ -289,18 +283,6 @@ final class ObserveService {
             let current = store.running
             store.running = o["updateId"] as? String ?? store.sessionRunning(crashed)
             store.addLog(session: crashed, time: modified, severity: "fatal", name: "native.exception", body: nil, attributes: attrs, dropped: 0)
-            // The startup metrics the crashed process measured, each its service did not store (a timeout's
-            // report can have stored launch time, not the first frame after it).
-            if let s = o["startup"] as? [String: Any], let metrics = s["metrics"] as? [String: Double] {
-                let stored = Set(store.rows("SELECT name FROM metrics WHERE session = ? AND category = 'appStartup'", [crashed]).compactMap { $0.first as? String })
-                let walls = s["walls"] as? [String: Double] ?? [:]
-                // The update those marks are of, if the snapshot names it; else the crash's.
-                if s["update"] != nil { store.running = (s["update"] as? String).flatMap { $0.isEmpty ? nil : $0 } }
-                for (name, value) in metrics where !stored.contains(name) {
-                    store.addMetric(session: crashed, time: walls[name] ?? modified, category: "appStartup", name: name, value: value,
-                                    params: ["exact.launch.interrupted": true, "exact.launch.crashed": true])
-                }
-            }
             store.running = current
         }
     }
@@ -487,20 +469,6 @@ final class ObserveService {
         m["appName"] = app("CFBundleDisplayName") ?? app("CFBundleName")
         return m
     }
-
-    static func records(_ data: Data) -> [[String: Any]] {
-        var out: [[String: Any]] = []
-        var i = 0
-        let bytes = [UInt8](data)
-        while i + 4 <= bytes.count {
-            let n = Int(UInt32(bytes[i]) | UInt32(bytes[i + 1]) << 8 | UInt32(bytes[i + 2]) << 16 | UInt32(bytes[i + 3]) << 24)
-            i += 4
-            guard i + n <= bytes.count else { break }
-            if let o = (try? JSONSerialization.jsonObject(with: Data(bytes[i..<i + n]))) as? [String: Any] { out.append(o) }
-            i += n
-        }
-        return out
-    }
 }
 
 // MARK: Queries from the app's own module
@@ -532,9 +500,9 @@ extension ObserveService {
 @_cdecl("exact_service_start")
 public func exactServiceStart(_ config: UnsafePointer<UInt8>?, _ configLength: UInt32, _ handoff: UnsafePointer<UInt8>?, _ handoffLength: UInt32) -> UnsafeMutableRawPointer? {
     let c = config.map { Data(bytes: $0, count: Int(configLength)) } ?? Data()
-    let h = handoff.map { Data(bytes: $0, count: Int(handoffLength)) } ?? Data()
     let o = (try? JSONSerialization.jsonObject(with: c)) as? [String: Any] ?? [:]
-    return Unmanaged.passRetained(ObserveService(config: o, handoff: h)).toOpaque()
+    // The launch part hands off nothing: device state comes as `device` journal events.
+    return Unmanaged.passRetained(ObserveService(config: o)).toOpaque()
 }
 
 @_cdecl("exact_service_event")

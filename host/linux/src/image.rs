@@ -527,22 +527,6 @@ impl Images {
             .collect();
         reports
     }
-    /// Pictures in view that show nothing of their source yet and have not
-    /// failed: the host still drawing them holds time to interactive. A picture
-    /// out of view, a symbol, and one re-decoded at another size while its
-    /// picture shows do not count.
-    pub fn loading_on_screen(&self) -> usize {
-        self.views
-            .iter()
-            .filter(|(id, v)| {
-                v.visible
-                    && !v.source.is_empty()
-                    && v.symbol_size.is_none()
-                    && !(v.displayed_source == v.source && self.bitmaps.contains_key(id))
-                    && matches!(v.refusal, None | Some(Refusal::QueueFull | Refusal::Budget))
-            })
-            .count()
-    }
     /// Pending work, including capacity waits; this is not an animation request.
     pub fn pending(&self) -> bool {
         self.views.values().any(|v| {

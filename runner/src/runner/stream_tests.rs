@@ -327,9 +327,10 @@ fn outstanding_counts_a_failed_resource_as_settled() {
     assert!(out.is_clear(), "{out:?}");
 }
 
-/// A short `after` task is outstanding until it fires; a long one never is.
+/// A timer is the app's logic, not loading: an armed `after` task, short or long,
+/// leaves the ledger clear.
 #[test]
-fn outstanding_counts_only_short_one_shot_tasks() {
+fn an_armed_timer_is_not_outstanding() {
     let mut b = PlanBuilder::new(exact_kernel::SCHEMA_DIGEST, 1);
     let body = b.code(Asm::new());
     let soon = b.action("soon", &[], &[], body);
@@ -339,7 +340,7 @@ fn outstanding_counts_only_short_one_shot_tasks() {
     b.timer(60_000, later, true);
     b.node(NodeType::View as u8, None, None, 0, &[], &[], None);
     let plan = b.finish().unwrap();
-    let mut r = Runner::boot(
+    let r = Runner::boot(
         plan,
         Scripted::default(),
         Kernel::with_monospace(),
@@ -347,9 +348,8 @@ fn outstanding_counts_only_short_one_shot_tasks() {
         "/",
     )
     .unwrap();
-    assert_eq!(r.outstanding().one_shots, vec!["soon".to_string()]);
-    let _ = r.advance(20.);
-    assert!(r.outstanding().one_shots.is_empty(), "spent once it fired");
+    let out = r.outstanding();
+    assert!(out.is_clear(), "{out:?}");
 }
 
 #[test]

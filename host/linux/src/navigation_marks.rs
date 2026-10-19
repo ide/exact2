@@ -166,6 +166,8 @@ pub struct NavigationMarks {
     /// A frame of the session was presented. Until then a router change
     /// replaces the launch route.
     presented: bool,
+    /// A router change navigated after the launch route was shown.
+    navigated: bool,
     pending: Option<Pending>,
     /// Where the events go, each at its mark: the journal, or a test's collector.
     pub(crate) record: fn(&str, Map<String, Value>, f64),
@@ -179,6 +181,7 @@ impl NavigationMarks {
             screens: ScreenHistory::default(),
             top: None,
             presented: false,
+            navigated: false,
             pending: None,
             record: crate::journal::record_at,
             log: std::env::var("EXACT_OBSERVE_LOG").as_deref() == Ok("1"),
@@ -205,6 +208,11 @@ impl NavigationMarks {
     /// The route on top: `route`, `url` and `routeParams`.
     pub fn current(&self) -> Option<&Map<String, Value>> {
         self.top.as_ref()
+    }
+
+    /// Whether the launch screen has stayed on top since launch, with nothing navigated to.
+    pub fn on_launch_screen(&self) -> bool {
+        !self.navigated
     }
 
     /// A navigation waits for its render or its TTI.
@@ -234,6 +242,7 @@ impl NavigationMarks {
             (self.record)("navigation.launch", fields, committed);
             return;
         }
+        self.navigated = true;
         let (start, cause) = match input {
             Some(input) => (input.min(committed), "input"),
             None => (committed, "program"),

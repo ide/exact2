@@ -3575,8 +3575,7 @@ What the app stores (`state.slots`, its data module) is the app's own; an
 `app.test.contract` `type … append` into a filled password field is refused.
 
 `aria-busy=(not ready)` marks a region as still loading: assistive technology
-hears it, and time to interactive (`modules/observe`) waits until no element is
-busy.
+hears it.
 
 `border`, `border-top/right/bottom/left` take CSS width/style/color in any order,
 resetting omitted components to medium/none/currentcolor. Widths are px/pt,

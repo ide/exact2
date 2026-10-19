@@ -3,15 +3,14 @@
 //! Only what the screen still lacks counts: a request for a resource already
 //! showing an answer (kept, baked or settled) is a background refresh, and a
 //! mutation the app sent is a write, so neither holds TTI. Device holds don't
-//! count because they wait on a person. A resource whose current arguments
-//! failed counts as done.
+//! count because they wait on a person, and timers don't because they are the
+//! app's logic, not loading its screen shows. A resource whose current arguments
+//! failed counts as done. `aria-busy` doesn't count: reading it walks the
+//! whole tree, and TTI reads the ledger each turn until it is reached.
 
 use super::{Runner, Target};
 
 use crate::DataSource;
-
-/// An `after` task armed with at most this delay counts as startup work.
-pub const STARTUP_TIMER_WINDOW_MS: f64 = 1000.0;
 
 /// The runner's outstanding work, by kind.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -22,12 +21,8 @@ pub struct Outstanding {
     pub streams: Vec<String>,
     /// Resources showing a placeholder until their source can answer.
     pub awaiting: Vec<String>,
-    /// Armed one-shot tasks due within the startup window, by action name.
-    pub one_shots: Vec<String>,
     /// Resources whose current arguments failed: settled, but in error.
     pub failed: Vec<String>,
-    /// Mounted elements marked `aria-busy` on a shown route, by test id, else view id.
-    pub busy: Vec<String>,
     /// The data source can answer.
     pub data_ready: bool,
     /// A refused commit poisoned the runner: every action now fails.
@@ -47,9 +42,7 @@ impl Outstanding {
             ("requests", &self.requests),
             ("streams", &self.streams),
             ("awaiting", &self.awaiting),
-            ("oneShots", &self.one_shots),
             ("failed", &self.failed),
-            ("busy", &self.busy),
         ] {
             out.push_str(&format!(",\"{name}\":["));
             for (i, item) in items.iter().enumerate() {
@@ -66,11 +59,7 @@ impl Outstanding {
 
     /// Nothing the app started is still on its way.
     pub fn is_clear(&self) -> bool {
-        self.requests.is_empty()
-            && self.streams.is_empty()
-            && self.awaiting.is_empty()
-            && self.one_shots.is_empty()
-            && self.busy.is_empty()
+        self.requests.is_empty() && self.streams.is_empty() && self.awaiting.is_empty()
     }
 }
 
@@ -107,33 +96,6 @@ impl<D: DataSource> Runner<D> {
             } else if self.awaiting[i] {
                 out.awaiting.push(name());
             }
-        }
-        for (t, row) in self.timers.iter().zip(&self.plan.timers) {
-            if row.once
-                && t.next_ms.is_finite()
-                && row.interval_ms as f64 <= STARTUP_TIMER_WINDOW_MS
-            {
-                out.one_shots
-                    .push(self.plan.str(self.plan.action(row.action).name).to_string());
-            }
-        }
-        let mut stack: Vec<u32> = self.kernel.roots().into_iter().rev().collect();
-        while let Some(id) = stack.pop() {
-            let Some(node) = self.kernel.node(id) else {
-                continue;
-            };
-            // A busy element under a route that is not shown (a screen beneath a stack's
-            // top, an unselected tab) is not on screen.
-            if node.props.bool(exact_kernel::PropId::AccessibilityBusy) == Some(true)
-                && !crate::head::inactive(self.kernel(), id)
-            {
-                let name = node
-                    .props
-                    .str(exact_kernel::PropId::TestId)
-                    .map_or_else(|| id.to_string(), str::to_owned);
-                out.busy.push(name);
-            }
-            stack.extend(node.children().into_iter().rev());
         }
         out
     }

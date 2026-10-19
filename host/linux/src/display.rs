@@ -350,14 +350,16 @@ pub fn run<D: DataSource + Default>(config: &mut Config, started: Instant) -> i3
     let mut marks = crate::launch_marks::Marks::new();
     let observe_log = std::env::var("EXACT_OBSERVE_LOG").as_deref() == Ok("1");
     marks.launch.launch_end();
-    // Publish each startup mark as it comes, so a panic before the report keeps it
-    marks.launch.publish();
+    // Launch time goes now, which starts the services on their own thread.
+    journal_grown(&mut marks, observe_log);
     // From here SIGTERM and SIGINT end the loop in order, boot included.
     let terminating = terminate_on_signal();
     let (mut p, error) = match crate::app::boot_presenter::<D>(config, viewport) {
         Ok(v) => v,
         Err(e) => {
             eprintln!("exact: boot: {e}");
+            // The services store what they were given, as at an orderly end.
+            crate::journal::flush(FLUSH_BOUND);
             return 1;
         }
     };
@@ -436,7 +438,6 @@ pub fn run<D: DataSource + Default>(config: &mut Config, started: Instant) -> i3
                     // succeeded (a failed one shows a fallback, not the tree).
                     if frame.painted() {
                         marks.shown(crate::launch_marks::boottime(), &p);
-                        marks.launch.publish();
                     }
                     presented(
                         &mut p,
@@ -461,13 +462,7 @@ pub fn run<D: DataSource + Default>(config: &mut Config, started: Instant) -> i3
         if first_pixel.is_some() {
             marks.turn(&mut p, display.pending());
         }
-        if marks.launch.take_timeout() {
-            crate::journal::record("startup", marks.report());
-            if observe_log {
-                eprintln!("observe: startup {}", marks.launch.line());
-            }
-        }
-        journal_done(&mut marks, observe_log);
+        journal_grown(&mut marks, observe_log);
         let now = wall();
         let mut timeout = work_timeout(
             display.pending(),
@@ -489,9 +484,6 @@ pub fn run<D: DataSource + Default>(config: &mut Config, started: Instant) -> i3
         }
         if let Some(due) = check_due {
             let wait = due.saturating_duration_since(Instant::now()).as_millis() as i32;
-            timeout = if timeout < 0 { wait } else { timeout.min(wait) };
-        }
-        if let Some(wait) = marks.launch.timeout_in_ms() {
             timeout = if timeout < 0 { wait } else { timeout.min(wait) };
         }
         if input.is_empty() && vnc.is_none() && timeout < 0 {
@@ -531,7 +523,6 @@ pub fn run<D: DataSource + Default>(config: &mut Config, started: Instant) -> i3
                 Ok(Some(frame)) => {
                     if let Some(at) = display.last_flip().filter(|_| frame.painted()) {
                         marks.shown(crate::launch_marks::monotonic_to_boottime(at), &p);
-                        marks.launch.publish();
                     }
                     presented(
                         &mut p,
@@ -674,10 +665,10 @@ pub fn run<D: DataSource + Default>(config: &mut Config, started: Instant) -> i3
         libc::signal(libc::SIGTERM, libc::SIG_DFL);
         libc::signal(libc::SIGINT, libc::SIG_DFL);
     }
-    // An unfinished startup reports what it measured, which starts the services if
-    // they have not, and they store what they were given; the module's storage finishes.
+    // An unfinished startup ends, the services store what they were given (starting
+    // now if startup never did), and the module's storage finishes.
     marks.launch.terminated();
-    journal_done(&mut marks, observe_log);
+    journal_grown(&mut marks, observe_log);
     crate::journal::flush(FLUSH_BOUND);
     crate::teardown::finish(&mut p, crate::teardown::EXIT_BOUND);
     drop(display);
@@ -692,13 +683,12 @@ pub fn run<D: DataSource + Default>(config: &mut Config, started: Instant) -> i3
 /// How long the services may take to store the journal at an orderly end.
 const FLUSH_BOUND: Duration = Duration::from_secs(2);
 
-/// Journals the startup report once TTI, a failure or the end decided it.
-fn journal_done(marks: &mut crate::launch_marks::Marks, observe_log: bool) {
-    if marks.launch.take_done() {
-        let kind = marks.launch.done_kind();
-        crate::journal::record(kind, marks.report());
+/// Journals the startup report each time it gains a metric (launch time, TTR, TTI).
+fn journal_grown(marks: &mut crate::launch_marks::Marks, observe_log: bool) {
+    if marks.launch.take_grown() {
+        crate::journal::record("startup", marks.report());
         if observe_log {
-            eprintln!("observe: {kind} {}", marks.launch.line());
+            eprintln!("observe: startup {}", marks.launch.line());
         }
     }
 }

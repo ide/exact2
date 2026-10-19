@@ -41,17 +41,14 @@ public final class ExactLaunch: NSObject {
     private var commitPending = false
     private var link: CADisplayLink?
     private var vsync: Vsync?
-    /// How time to interactive ended: settled, declared or failed (reached), or
+    /// How time to interactive ended: settled or failed (reached), or
     /// interrupted, activation_failed or logic_failed (never reached).
     private(set) var ttiOutcome: String?
     /// The app went to the background (on macOS, was hidden) before time to
     /// interactive. As in Observe, what was measured before it still reports.
     private(set) var interruptedAt: Double?
-    /// The startup report is journaled. It goes out at time to interactive, an
-    /// interruption, a failure, or `ttiTimeout`, whichever is first; a time to
-    /// interactive reached after the timeout is journaled on its own (`startup.tti`).
-    private var reported = false
-    /// `ttiTimeout` passed first. The display link is off until the screen settles.
+    /// `ttiTimeout` passed without TTI: the display link is off until the screen settles, and
+    /// TTI has no frame parameters, its window not having been timed throughout.
     private var late = false
     /// When work last cleared while late, for the vsync the next tick picks.
     private var clearedAt: Double?
@@ -76,8 +73,6 @@ public final class ExactLaunch: NSObject {
     /// The vsync at which a settled screen becomes interactive, unless work reappears.
     private var candidate: Double?
     private var evaluateScheduled = false
-    /// The app's `aria-busy` elements were the last outstanding work.
-    private var declaredLast = false
     static let ttiTimeout = 30.0
 
     private override init() {
@@ -113,33 +108,26 @@ public final class ExactLaunch: NSObject {
         if hidden, suppressed == nil { suppressed = "hidden" }
         if marks[.delegateInit] == nil, suppressed == nil { suppressed = "no delegate mark" }
         launchType = classify()
-        DispatchQueue.main.async { [weak self] in self?.firstTurn = true }
-        #if !os(iOS)
-        // Launch time is measured, and nothing can make this launch a background one now: a
-        // crash in the boot that follows at once keeps it.
-        snapshot()
-        #endif
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            firstTurn = true
+            #if os(iOS)
+            // No scene by the first turn: a background launch, whose scene connects only when the user opens the app.
+            if marks[.scene] == nil { backgroundLaunch() }
+            #endif
+        }
         ExactJournal.shared.record("launch", ["type": launchType ?? "", "suppressed": suppressed ?? ""])
         watchInterruption()
         guard suppressed == nil, !ExactEnv.agentMode else { loadServices(.afterStartup); return }
         link = mainDisplayLink(self, #selector(tick(_:)))
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.ttiTimeout) { [weak self] in
-            guard let self, ttiOutcome == nil, suppressed == nil, !reported else { return }
-            #if os(iOS)
-            // No scene yet: a background launch whose scene connects only when the user opens the app.
-            if marks[.scene] == nil {
-                suppressed = "background launch"
-                Self.startupSnapshot = nil
-                stopWatching()
-                loadServices(.afterStartup)
-                return
-            }
-            #endif
+            // Not interactive yet: the display link stops, as it costs power; host work still drawing
+            // keeps being read without it (`evaluate`), and a later TTI still reports.
+            guard let self, ttiOutcome == nil, suppressed == nil else { return }
             if let o = outstandingNow() { lastOutstanding = o }
             late = true
             stopWatching()
-            journalStartup("timeout")
-            // Host work still drawing keeps being read without the link (`evaluate`).
+            loadServices(.afterStartup)
             scheduleEvaluate()
         }
     }
@@ -151,17 +139,18 @@ public final class ExactLaunch: NSObject {
     public func sceneConnected() {
         guard marks[.scene] == nil else { return }
         marks[.scene] = CACurrentMediaTime()
-        if firstTurn, suppressed == nil {
-            suppressed = "background launch"
-            Self.startupSnapshot = nil
-            stopWatching()
-            loadServices(.afterStartup)
-        }
-        // A foreground launch: its launch time stands, before the scene's session boots.
-        snapshot()
+        if firstTurn { backgroundLaunch() }
     }
     /// The main thread has run a turn since `didFinishLaunching`.
     private var firstTurn = false
+
+    /// A background launch (a push, a background task) has no startup metrics.
+    private func backgroundLaunch() {
+        guard suppressed == nil else { return }
+        suppressed = "background launch"
+        stopWatching()
+        loadServices(.afterStartup)
+    }
 
     // MARK: Session hooks
 
@@ -284,19 +273,10 @@ public final class ExactLaunch: NSObject {
         marks[.present] = present
         loadServices(.afterFirstPixel)
         scheduleEvaluate()
-        // Once its vsync is past, TTR is measured: a crash after it keeps it, also with the main
-        // thread blocked then (`startupSnapshotFramed`).
-        snapshot(framedAt: present)
-        DispatchQueue.main.asyncAfter(deadline: .now() + max(0, present - CACurrentMediaTime())) { [weak self] in self?.snapshot() }
-        // A first frame after the timeout's report goes on its own, as Observe records one, not with
-        // a TTI that may never come: once its vsync is past (it can be the next one), unless startup
-        // ended first, whose report then has it if it came before.
-        if reported, ttiOutcome == nil, suppressed == nil {
-            DispatchQueue.main.asyncAfter(deadline: .now() + max(0, present - CACurrentMediaTime())) { [weak self] in
-                guard let self, ttiOutcome == nil else { return }
-                journalLate("pending")
-            }
-        }
+        // The report goes with TTR (and launch time, now that the first tree's update is known) once its
+        // vsync is past (it can be the next one): also when startup ended before then, as TTI can be decided
+        // before that vsync, and the report then left the frame out; one after an interruption is not in it.
+        DispatchQueue.main.asyncAfter(deadline: .now() + max(0, present - CACurrentMediaTime())) { [weak self] in self?.journalReport() }
     }
 
     // MARK: Time to interactive
@@ -325,7 +305,7 @@ public final class ExactLaunch: NSObject {
         guard let data = session.agent("{\"op\":\"outstanding\"}").data(using: .utf8),
               let o = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
         var out: [String] = []
-        for key in ["requests", "streams", "awaiting", "oneShots", "busy"] {
+        for key in ["requests", "streams", "awaiting"] {
             out += (o[key] as? [String] ?? []).map { "\(key):\($0)" }
         }
         out += session.hostOutstanding.map { "host:\($0)" }
@@ -337,7 +317,6 @@ public final class ExactLaunch: NSObject {
     /// It is never earlier than the first render.
     private func evaluate() {
         guard ttiOutcome == nil, suppressed == nil, let outstanding = outstandingNow() else { return }
-        if outstanding.isEmpty, !lastOutstanding.isEmpty, lastOutstanding.allSatisfy({ $0.hasPrefix("busy:") }) { declaredLast = true }
         if outstanding != lastOutstanding || trace.isEmpty, trace.count < 32, let p = marks[.process] {
             trace.append("\(String(format: "%.1f", (CACurrentMediaTime() - p) * 1000)) [\(outstanding.joined(separator: ", "))]")
         }
@@ -381,55 +360,35 @@ public final class ExactLaunch: NSObject {
     private func interactive(at t: Double) {
         marks[.interactive] = max(t, marks[.present] ?? t)
         if let s = launchSession { NavigationMarks.shared.interactive(for: s) }
-        finish(!failedResources.isEmpty ? "failed" : declaredLast ? "declared" : "settled")
+        finish(!failedResources.isEmpty ? "failed" : "settled")
     }
 
     private func finish(_ outcome: String) {
         guard ttiOutcome == nil else { return }
         ttiOutcome = outcome
         stopWatching()
-        if !reported {
-            journalStartup(outcome)
-            return
-        }
-        // After the timeout's report: a frame drawn before the end whose vsync was not read yet, and
-        // TTI. The report keeps only what came before an interruption; the services store each once.
+        // A frame drawn before an interruption or a failure shows at the vsync after its commit.
         resolvePresent(estimate: true)
-        if marks[.present] != nil || marks[.interactive] != nil { journalLate(outcome) }
-    }
-
-    /// Journals what the timeout's report lacked (`startup.tti`): the services store each metric once.
-    private func journalLate(_ outcome: String) {
-        var r = report()
-        r["tti"] = outcome
-        ExactJournal.shared.record("startup.tti", r)
-        if ExactEnv.environment["EXACT_OBSERVE_LOG"] == "1" { fputs("observe: startup.tti \(smokeLine())\n", stderr) }
-    }
-
-    /// Journals the startup report, once.
-    private func journalStartup(_ outcome: String) {
-        guard !reported else { return }
-        // A failure can end startup before the drawn commit's vsync was read.
-        resolvePresent(estimate: true)
-        reported = true
-        var r = report()
-        r["tti"] = outcome
-        ExactJournal.shared.record("startup", r)
-        // The timeout's report left out a frame whose vsync was still to come: it goes late, once past.
-        if let p = marks[.present], p > CACurrentMediaTime(), ttiOutcome == nil {
-            DispatchQueue.main.asyncAfter(deadline: .now() + (p - CACurrentMediaTime())) { [weak self] in
-                guard let self, ttiOutcome == nil else { return }
-                journalLate("pending")
-            }
-        }
+        journalReport()
         if ExactEnv.environment["EXACT_OBSERVE_LOG"] == "1", launchSession != nil || interruptedAt != nil { fputs("observe: startup \(smokeLine())\n", stderr) }
         loadServices(.afterStartup)
+    }
+
+    /// Journals the startup report with the metrics measured so far, at TTR and when startup
+    /// ends, as Observe records each metric at its own mark: the services store each once.
+    private func journalReport() {
+        #if os(iOS)
+        // Only once the scene connected in time is this a foreground launch, which has metrics.
+        guard marks[.scene] != nil else { return }
+        #endif
+        guard !metricMarks().isEmpty else { return }
+        ExactJournal.shared.record("startup", report())
     }
 
     func requestService(module: String, when: ExactServiceLoad, config: [String: Any], handoff: @escaping () -> Data) {
         services.append((module, when, config, handoff))
         if when == .afterFirstPixel, marks[.present] != nil || suppressed != nil { loadServices(.afterFirstPixel) }
-        if when == .afterStartup, reported || suppressed != nil { loadServices(.afterStartup) }
+        if when == .afterStartup, ttiOutcome != nil || late || suppressed != nil { loadServices(.afterStartup) }
     }
 
     /// Loads due services in a later turn, never inside the work that triggered them.
@@ -467,9 +426,7 @@ public final class ExactLaunch: NSObject {
         NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
             // The interrupted startup report goes first, so a service's send on background carries it.
             if let self, ttiOutcome == nil, suppressed == nil {
-                interruptedNow()
-                // A commit drawn before now shows at the vsync after it.
-                resolvePresent(estimate: true)
+                interruptedAt = CACurrentMediaTime()
                 finish("interrupted")
             }
             ExactJournal.shared.record("background")
@@ -492,8 +449,7 @@ public final class ExactLaunch: NSObject {
             // services store it before the process ends; they send it at the next launch.
             guard let self else { return }
             if ttiOutcome == nil, suppressed == nil {
-                interruptedNow()
-                resolvePresent(estimate: true)
+                interruptedAt = CACurrentMediaTime()
                 finish("terminated")
             }
             loadServicesNow()
@@ -531,8 +487,9 @@ public final class ExactLaunch: NSObject {
     public func report(for session: ExactSession? = nil) -> [String: Any] {
         var out: [String: Any] = ["activation": activation]
         if let launchType { out["launchType"] = launchType }
-        // The update startup's marks are of (none drawn yet: the one running now).
-        out["update"] = launchUpdate ?? Self.runningUpdate.map { String(cString: $0) } ?? ""
+        // The update startup's marks are of: the first tree's, else the one running now; none
+        // before the first generation started, when it is not known yet.
+        if let update = launchUpdate ?? Self.runningUpdate.map({ String(cString: $0) }) { out["update"] = update }
         if let suppressed { out["suppressed"] = suppressed }
         if let bootPath { out["bootPath"] = bootPath }
         if let ttiOutcome { out["tti"] = ttiOutcome }
@@ -584,8 +541,8 @@ public final class ExactLaunch: NSObject {
             if let route = launchSession.flatMap({ NavigationMarks.shared.current(for: $0) }) { out["route"] = route }
             // Its TTI is the launch screen's too (`navigation` `tti`, `isAppLaunch`) when that screen stayed on top.
             if let s = launchSession, NavigationMarks.shared.onLaunchScreen(s) { out["launchScreen"] = true }
-            // The frames from didFinishLaunching to TTI; a late TTI's window was not timed throughout.
-            if late { out["late"] = true } else if !frames.params.isEmpty { out["frames"] = frames.params }
+            // The frames from didFinishLaunching to TTI, unless its window was not timed throughout.
+            if !late, !frames.params.isEmpty { out["frames"] = frames.params }
         }
         return out
     }
@@ -594,37 +551,8 @@ public final class ExactLaunch: NSObject {
         metricMarks().mapValues { $0.value }
     }
 
-    /// The startup metrics measured so far (`startupSnapshot`): launch time once launch
-    /// ends, TTR once its frame is past.
-    private func snapshot(framedAt frame: Double? = nil) {
-        #if os(iOS)
-        // Only once the scene connected in time is this a foreground launch, which has metrics.
-        guard marks[.scene] != nil else { return }
-        #endif
-        guard suppressed == nil else { return }
-        // With `frame`: the metrics once that frame has come (before an interruption only).
-        let m = frame == nil ? metricMarks() : Self.metricMarks(marks, launchType: launchType, interruptedAt: interruptedAt)
-        let offset = Date().timeIntervalSince1970 - CACurrentMediaTime()
-        var o: [String: Any] = ["metrics": m.mapValues { $0.value }, "walls": m.mapValues { $0.end + offset }]
-        // Also `""`, the embedded app: recovery then labels no update, not the one running at the crash.
-        if let launchUpdate { o["update"] = launchUpdate }
-        guard !m.isEmpty, let d = try? JSONSerialization.data(withJSONObject: o, options: [.sortedKeys]) else { return }
-        let text = strdup(String(decoding: d, as: UTF8.self))
-        guard let frame else { Self.startupSnapshot = text; return }
-        var base = mach_timebase_info_data_t()
-        mach_timebase_info(&base)
-        Self.startupSnapshotFrameAt = UInt64(frame * 1e9) * UInt64(base.denom) / UInt64(base.numer)
-        Self.startupSnapshotFramed = text
-    }
-
     /// The update the launch's first tree is of (`""` for the embedded app), which its startup metrics carry.
     private var launchUpdate: String?
-
-    /// Interrupted (background, quitting): a frame due after it was not seen, so a crash keeps none.
-    private func interruptedNow() {
-        interruptedAt = CACurrentMediaTime()
-        if let p = marks[.present], p > interruptedAt ?? .infinity { Self.startupSnapshotFramed = nil }
-    }
 
     /// Also a frame whose vsync is not past yet (the next one, predicted from the last sample) is not in a report.
     private func metricMarks() -> [String: (value: Double, end: Double)] {
@@ -657,8 +585,8 @@ public final class ExactLaunch: NSObject {
 /// next; delay is the time past each frame's target interval.
 struct FrameStats {
     private var previous: Double?
-    private(set) var rendered = 0
-    private(set) var expected = 0
+    /// Frames timed, from one vsync to the next.
+    private(set) var timed = 0
     private(set) var slow = 0
     private(set) var frozen = 0
     private(set) var delay = 0.0
@@ -667,8 +595,7 @@ struct FrameStats {
         defer { previous = timestamp }
         guard let previous, target > 0, timestamp > previous else { return }
         let d = timestamp - previous
-        rendered += 1
-        expected += max(1, Int((d / target).rounded()))
+        timed += 1
         if d >= 0.017 { slow += 1 }
         if d >= 0.7 { frozen += 1 }
         delay += max(0, d - target)
@@ -676,7 +603,7 @@ struct FrameStats {
 
     /// Observe's TTI parameters, or none when no frame was timed.
     var params: [String: Any] {
-        guard expected > 0 else { return [:] }
+        guard timed > 0 else { return [:] }
         return ["expo.frameRate.slowFrames": slow, "expo.frameRate.frozenFrames": frozen, "expo.frameRate.totalDelay": delay]
     }
 }
@@ -712,6 +639,38 @@ func mainDisplayLink(_ target: Any, _ selector: Selector) -> CADisplayLink? {
     #endif
     link?.add(to: .main, forMode: .common)
     return link
+}
+
+/// Runs each waiter at the first vsync after the turn it asked in: Core Animation commits that
+/// turn's changes at its end, so that vsync is the first frame that can show them. One display
+/// link serves every waiter and runs only while one waits.
+final class NextFrame: NSObject {
+    static let shared = NextFrame()
+    private var waiting: [(ended: Double, run: (Double) -> Void)] = []
+    private var link: CADisplayLink?
+
+    /// Calls `run` with that vsync's time, once it has passed.
+    func after(_ run: @escaping (Double) -> Void) {
+        DispatchQueue.main.async { [self] in
+            waiting.append((CACurrentMediaTime(), run))
+            if link == nil { link = mainDisplayLink(self, #selector(tick(_:))) }
+        }
+    }
+
+    @objc private func tick(_ link: CADisplayLink) {
+        let v = Vsync(link)
+        var due: [(Double, (Double) -> Void)] = []
+        waiting.removeAll { w in
+            guard let g = v.next(after: w.ended), v.at + 1e-6 >= g else { return false }
+            due.append((g, w.run))
+            return true
+        }
+        if waiting.isEmpty {
+            self.link?.invalidate()
+            self.link = nil
+        }
+        for (g, run) in due { run(g) }
+    }
 }
 
 /// A display-link sample: its vsync time and observed interval, in seconds.

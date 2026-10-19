@@ -1,7 +1,7 @@
 // Observe on Linux, compiled into the app's executable. The entry that
 // `contract::linux_entry` generates calls `launch_parts`, which runs `launch`.
 // `launch` does no I/O. It names the session, forwards journal events to a channel and
-// installs a panic hook. After the startup report, a background thread keeps the queue
+// installs a panic hook. From the first startup report, a background thread keeps the queue
 // (one bounded JSON file), records earlier crashes and answers flushes, and a second
 // sends rows in expo-observe's OTLP/JSON, matching `apple/service/ObserveWire.swift` and
 // `web/service.js`, so no request delays storing an event.
@@ -101,8 +101,7 @@ pub fn launch(ctx: LaunchContext) {
     let session = session_id();
     let start = journal::wall();
     // A panic writes `pending-<session>.json`. The next launch sends it as a
-    // fatal `native.exception` for this session, with the startup metrics
-    // measured before it that the session did not store.
+    // fatal `native.exception` for this session.
     let (module, config, app, development) = (ctx.module, ctx.config, ctx.app, ctx.development);
     let context = move || LaunchContext {
         module,
@@ -127,27 +126,17 @@ pub fn launch(ctx: LaunchContext) {
         let parse = |s: &str| serde_json::from_str::<Value>(s).unwrap_or_default();
         let dir = context().state_dir();
         let _ = std::fs::create_dir_all(&dir);
-        // The startup report as it stands (the launch time, and TTR once its frame was
-        // presented), named as the report would be, so a crash before the report keeps
-        // them.
-        let startup = exact_linux::launch_marks::standing();
-        // Decide the launch type once launch ended, unless the startup report did, so
-        // that `launch.json` names this launch for the next one although it crashes
-        // before its report. Launch end is read after `standing`, so it has ended
-        // whenever there is a startup.
-        let launch =
-            exact_linux::launch_marks::launch_ended().then(|| crash_launch_type.decide(&dir));
-        let startup = startup.zip(launch).map(|(mut startup, launch)| {
-            startup.insert("launchType".into(), launch.into());
-            startup
-        });
+        // Decide the launch type once launch ended, unless the service did, so that
+        // `launch.json` names this launch for the next one although it panics first.
+        if exact_linux::launch_marks::launch_ended() {
+            crash_launch_type.decide(&dir);
+        }
         let record = json!({
             "session": crash_session, "sessionStart": start, "time": journal::wall(),
             "type": "panic", "message": message,
             "location": info.location().map(|l| format!("{}:{}", l.file(), l.line())),
             "thread": std::thread::current().name().map(str::to_string),
             "metadata": metadata(&parse(app), &parse(config), development),
-            "startup": startup,
         });
         let _ = std::fs::write(
             dir.join(format!("pending-{crash_session}.json")),
@@ -434,9 +423,8 @@ fn object(v: Value) -> Map<String, Value> {
     }
 }
 
-/// This launch's type, decided once after launch end by the first of its startup report
-/// and a panic, so that both name the same type and neither reads this launch as the
-/// previous one.
+/// This launch's type, decided once after launch end by the first of the service and a
+/// panic, so that both name the same type and neither reads this launch as the previous one.
 struct LaunchType {
     decided: OnceLock<&'static str>,
     /// This launch's identity, which the next launch compares, and whether stderr is a
@@ -512,8 +500,8 @@ struct Service {
     queue: Arc<Mutex<Queue>>,
     globals: Map<String, Value>,
     launch_route: Option<Value>,
-    navigated: bool,
-    /// The metrics the last startup report and its late one stored, by their names there.
+    /// The startup metrics stored, by their names in the report: the host journals its
+    /// startup report each time it gains a metric.
     startup_metrics: std::collections::BTreeSet<String>,
     /// This launch's type, which the launch part shares with its panic hook.
     launch_type: Arc<LaunchType>,
@@ -555,7 +543,6 @@ impl Service {
             client_id,
             globals: Map::new(),
             launch_route: None,
-            navigated: false,
             startup_metrics: Default::default(),
             launch_type: LaunchType::new(this_launch),
             device,
@@ -656,8 +643,7 @@ impl Service {
     fn event(&mut self, e: &Value) -> bool {
         let wall = e["wall"].as_f64().unwrap_or_else(journal::wall);
         match e["kind"].as_str().unwrap_or("") {
-            "startup" => self.startup(e, wall, false),
-            "startup.tti" => self.startup(e, wall, true),
+            "startup" => self.startup(e, wall),
             "navigation.launch" => {
                 self.launch_route = Some(e.clone());
                 return false;
@@ -726,13 +712,8 @@ impl Service {
     }
 
     /// Stores the launch metrics from the host's startup report under Observe's names,
-    /// each at the time of its own mark. A `late` report (`startup.tti`) follows one
-    /// that went out at the timeout and stores only what that one did not: the TTI
-    /// reached after it, and the TTR when the first frame came after it too.
-    fn startup(&mut self, e: &Value, wall: f64, late: bool) {
-        if !late {
-            self.startup_metrics.clear();
-        }
+    /// each at the time of its own mark, and each once.
+    fn startup(&mut self, e: &Value, wall: f64) {
         let marks = &e["marks"];
         let at = |name: &str| e["walls"][name].as_f64().unwrap_or(wall);
         let ms = |a: &str, b: &str| {
@@ -763,10 +744,6 @@ impl Service {
         if let Some(r) = e["processResolutionMs"].as_f64() {
             phases.insert("exact.launch.resolution_ms".into(), json!(r));
         }
-        if e["interrupted"] == json!(true) {
-            phases.insert("exact.launch.interrupted".into(), true.into());
-        }
-        let device = (self.device)();
         let launch = self.launch_type.decide(&self.dir);
         let mut stored = Vec::new();
         for (name, value) in e["metrics"].as_object().into_iter().flatten() {
@@ -787,7 +764,7 @@ impl Service {
             params.extend(phases.clone());
             let mut route = None;
             if name == "timeToInteractive" {
-                params.extend(device.clone());
+                params.extend((self.device)());
                 params.insert("exact.tti.reason".into(), e["tti"].clone());
                 // What was outstanding over time, ms from process start: shows what held TTI.
                 if let Some(trace) = e["trace"].as_array().filter(|t| !t.is_empty()) {
@@ -806,24 +783,8 @@ impl Service {
                         params.insert("url".into(), e["route"]["url"].clone());
                     }
                 }
-                if e["late"] == json!(true) {
-                    params.insert("exact.tti.late".into(), true.into());
-                }
             }
             self.metric("appStartup", name, value, wall, route.as_ref(), params);
-        }
-        // Note which startup metrics the session stored, by their names in the report, so
-        // that its crash record adds only the others
-        if !stored.is_empty() {
-            let names = json!(self.startup_metrics);
-            let mut queue = lock(&self.queue);
-            if let Some(session) = queue
-                .sessions
-                .get_mut(&self.session)
-                .and_then(Value::as_object_mut)
-            {
-                session.insert("startupStored".into(), names);
-            }
         }
         // The launch route's `cold_ttr` and `tti`, measured from boot. Observe measures
         // from its integration start, which has no Exact equivalent.
@@ -843,9 +804,10 @@ impl Service {
                     params.clone(),
                 );
             }
-            if let (Some(i), false, true) = (
+            // Startup's TTI is the launch screen's when that screen stayed on top until it.
+            if let (Some(i), true, true) = (
                 marks["interactive"].as_f64(),
-                self.navigated,
+                e["launchScreen"] == json!(true),
                 stored.contains(&"timeToInteractive"),
             ) {
                 self.metric(
@@ -880,7 +842,6 @@ impl Service {
         let (Some(name), Some(value)) = (e["name"].as_str(), e["value"].as_f64()) else {
             return;
         };
-        self.navigated = true;
         let mut params = self.nav_params(e, false);
         for (k, v) in e
             .as_object()
@@ -893,8 +854,7 @@ impl Service {
         self.metric("navigation", name, value, wall, Some(&e["route"]), params);
     }
 
-    /// Turns each pending panic record from an earlier process into a `native.exception`
-    /// log and the startup metrics it carries.
+    /// Turns each pending panic record from an earlier process into a `native.exception` log.
     fn ingest_crashes(&mut self) {
         for entry in std::fs::read_dir(&self.dir).into_iter().flatten().flatten() {
             let name = entry.file_name().to_string_lossy().into_owned();
@@ -911,9 +871,15 @@ impl Service {
             if !queue.sessions.contains_key(crashed) {
                 // The crashed process's metadata, over this launch's for what it lacks.
                 let mut meta = queue.sessions[&self.session]["meta"].clone();
-                if let (Some(meta), Some(crashed)) = (meta.as_object_mut(), o["metadata"].as_object())
+                if let (Some(meta), Some(crashed)) =
+                    (meta.as_object_mut(), o["metadata"].as_object())
                 {
-                    meta.extend(crashed.iter().filter(|(_, v)| !v.is_null()).map(|(k, v)| (k.clone(), v.clone())));
+                    meta.extend(
+                        crashed
+                            .iter()
+                            .filter(|(_, v)| !v.is_null())
+                            .map(|(k, v)| (k.clone(), v.clone())),
+                    );
                 }
                 queue.sessions.insert(
                     crashed.into(),
@@ -921,7 +887,6 @@ impl Service {
                 );
             }
             drop(queue);
-            self.crashed_startup(crashed, &o);
             let mut attrs = object(json!({
                 "exception.type": o["type"].as_str().unwrap_or("panic"),
                 "exception.message": o["message"].as_str().unwrap_or(""),
@@ -940,56 +905,6 @@ impl Service {
                 None,
                 (attrs, 0),
             );
-        }
-    }
-
-    /// Stores each startup metric a panic record carries (`startup.metrics`, each at its
-    /// `startup.walls` time) that the session that crashed did not store itself, under
-    /// that session and named as its report would name it.
-    fn crashed_startup(&mut self, crashed: &str, o: &Value) {
-        let startup = &o["startup"];
-        let Some(metrics) = startup["metrics"].as_object() else {
-            return;
-        };
-        let mut queue = lock(&self.queue);
-        let Some(session) = queue
-            .sessions
-            .get_mut(crashed)
-            .and_then(Value::as_object_mut)
-        else {
-            return;
-        };
-        // Store only the metrics the session's reports did not, and note these as stored
-        // too, so that the record read again adds none
-        let mut stored = session
-            .get("startupStored")
-            .and_then(Value::as_array)
-            .cloned()
-            .unwrap_or_default();
-        let missing: Vec<(&String, f64)> = metrics
-            .iter()
-            .filter(|(name, _)| !stored.iter().any(|s| s.as_str() == Some(name.as_str())))
-            .filter_map(|(name, value)| Some((name, value.as_f64()?)))
-            .collect();
-        stored.extend(missing.iter().map(|(name, _)| json!(name)));
-        session.insert("startupStored".into(), stored.into());
-        let launch = if startup["launchType"] == "warm" {
-            "warm"
-        } else {
-            "cold"
-        };
-        let params = json!({ "exact.launch.interrupted": true, "exact.launch.crashed": true });
-        let crashed_at = o["time"].as_f64().unwrap_or_else(journal::wall);
-        for (name, value) in missing {
-            let wall = startup["walls"][name].as_f64().unwrap_or(crashed_at);
-            let name = if name == "coldLaunchTime" {
-                format!("{launch}LaunchTime")
-            } else {
-                name.clone()
-            };
-            let mut row = metric_row(crashed, "appStartup", &name, value, wall);
-            row.insert("params".into(), params.to_string().into());
-            queue.push("metrics", row);
         }
     }
 }
@@ -1156,7 +1071,11 @@ impl Sender {
             }
             let queue = lock(&self.queue);
             let rows = [&queue.metrics, &queue.logs];
-            if !rows.iter().zip(&self.gates).any(|(r, g)| !r.is_empty() && open(g)) {
+            if !rows
+                .iter()
+                .zip(&self.gates)
+                .any(|(r, g)| !r.is_empty() && open(g))
+            {
                 break;
             }
         }
@@ -1266,7 +1185,11 @@ impl Queue {
             next: 0,
             dir,
         };
-        let ids = queue.metrics.iter().chain(&queue.logs).filter_map(Queue::id);
+        let ids = queue
+            .metrics
+            .iter()
+            .chain(&queue.logs)
+            .filter_map(Queue::id);
         queue.next = ids.max().map_or(0, |id| id + 1);
         for row in queue.metrics.iter_mut().chain(queue.logs.iter_mut()) {
             if Queue::id(row).is_none() {

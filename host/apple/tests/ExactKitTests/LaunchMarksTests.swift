@@ -37,15 +37,14 @@ final class LaunchMarksTests: XCTestCase {
         for _ in 0..<10 { t += target; f.add(at: t, target: target) }
         t += 3 * target; f.add(at: t, target: target)
         t += 0.75; f.add(at: t, target: target)
-        XCTAssertEqual(f.rendered, 12)
-        XCTAssertEqual(f.expected, 10 + 3 + 45)
+        XCTAssertEqual(f.timed, 12)
         XCTAssertEqual(f.slow, 2, "at 17 ms or more")
         XCTAssertEqual(f.frozen, 1, "at 700 ms or more")
         XCTAssertEqual(f.delay, 2 * target + (0.75 - target), accuracy: 1e-9)
         XCTAssertEqual(f.params["expo.frameRate.slowFrames"] as? Int, 2)
         XCTAssertEqual(f.params["expo.frameRate.frozenFrames"] as? Int, 1)
         f.add(at: t, target: target)
-        XCTAssertEqual(f.rendered, 12, "a repeated timestamp is no frame")
+        XCTAssertEqual(f.timed, 12, "a repeated timestamp is no frame")
     }
 
     func testAScreenIsAVisitAtItsURLShownWhenPresented() {

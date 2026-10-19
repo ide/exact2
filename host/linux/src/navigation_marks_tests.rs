@@ -1,6 +1,9 @@
 use super::*;
+use crate::launch_marks::tests::{boot, land, Held};
 use crate::launch_marks::Marks;
+use exact_runner::DataSource;
 use std::cell::RefCell;
+use std::sync::mpsc::Receiver;
 
 thread_local! {
     /// What the marks journaled on this test's thread.
@@ -308,17 +311,13 @@ fn a_screen_measures_tti_until_it_has_been_interactive() {
     );
 }
 
-/// Home, and a detail screen that is busy until `done`.
+/// Home, and a detail screen.
 const APP: &str = r#"routes nav
   home "/"
     detail "/detail/:id"
 component App
-  state busy = false
   action open
-    busy = true
     nav = push(nav, "/detail/7")
-  action done
-    busy = false
   action back
     nav = back(nav)
   view
@@ -329,33 +328,21 @@ component App
             button press=open testId="open"
               text "Open"
           if e.name == "detail"
-            column aria-busy=(busy) testId="detail"
-              button press=done testId="done"
-                text "Done"
-              button press=back testId="back"
-                text "Back"
+            button press=back testId="back"
+              text "Back"
 "#;
 
-fn press(p: &mut crate::Presenter<()>, test_id: &str) {
+fn press<D: DataSource>(p: &mut crate::Presenter<D>, test_id: &str) {
     let kernel = p.host().kernel();
     let key = kernel.find_by_test_id(test_id)[0];
     let id = kernel.node_by_key(key).unwrap().id;
     p.dispatch_press(id, 0., false);
 }
 
-/// An app booted, its marks journaling into this test's collector, and its
-/// first frame presented by the display loop's calls.
-fn launch(source: &str) -> (crate::Presenter<()>, Marks) {
-    let (mut p, error) = crate::Presenter::boot_with(
-        &crate::test_plan(source),
-        (),
-        (400., 800.),
-        1.,
-        std::path::PathBuf::new(),
-        crate::presenter::PainterChoice::Cpu,
-    )
-    .unwrap();
-    assert!(error.is_none(), "{error:?}");
+/// An app booted on a [`Held`] source, its marks journaling into this test's
+/// collector, and its first frame presented by the display loop's calls.
+fn launch(source: &str) -> (crate::Presenter<Held>, Marks, Receiver<exact_runner::Reply>) {
+    let (mut p, handed) = boot(source);
     let mut m = Marks::new();
     m.navigation.record = collect;
     m.launch.launch_end();
@@ -364,11 +351,11 @@ fn launch(source: &str) -> (crate::Presenter<()>, Marks) {
     m.shown(boottime(), &p);
     p.display_complete(&first);
     m.turn(&mut p, false);
-    (p, m)
+    (p, m, handed)
 }
 
 /// One frame through the display loop's calls: built, submitted, and flipped at `at`.
-fn flip(m: &mut Marks, p: &mut crate::Presenter<()>, at: f64) {
+fn flip<D: DataSource>(m: &mut Marks, p: &mut crate::Presenter<D>, at: f64) {
     m.frame(p);
     let frame = p.display_frame().unwrap();
     m.turn(p, true);
@@ -381,7 +368,7 @@ fn flip(m: &mut Marks, p: &mut crate::Presenter<()>, at: f64) {
 /// the input that pressed the button to the flips that show the screen.
 #[test]
 fn the_display_loop_journals_an_apps_navigations() {
-    let (mut p, mut m) = launch(APP);
+    let (mut p, mut m, _) = launch(APP);
     while !m.launch.done() && p.dirty() {
         flip(&mut m, &mut p, boottime());
     }
@@ -403,26 +390,21 @@ fn the_display_loop_journals_an_apps_navigations() {
     let shown = boottime() + 0.016;
     flip(&mut m, &mut p, shown);
     let events = take();
-    assert_eq!(kinds(&events), ["navigation cold_ttr"], "busy");
+    assert_eq!(
+        kinds(&events),
+        ["navigation cold_ttr", "navigation tti"],
+        "nothing outstanding: interactive at the flip that shows it"
+    );
     let ttr = &events[0].1;
     assert_eq!(
         (&ttr["route"], &ttr["url"], &ttr["exact.nav.cause"]),
         (&json("/detail/:id"), &json("/detail/7"), &json("input"))
     );
     assert_eq!(ttr["routeParams"], serde_json::json!({ "id": "7" }));
-    assert!((ttr["value"].as_f64().unwrap() - (shown - tapped)).abs() < 1e-9);
-    assert_eq!(ttr["_at"], shown, "stamped at its flip");
-
-    press(&mut p, "done");
-    let settled = boottime() + 0.033;
-    flip(&mut m, &mut p, settled);
-    let events = take();
-    assert_eq!(kinds(&events), ["navigation tti"]);
-    assert!((events[0].1["value"].as_f64().unwrap() - (settled - tapped)).abs() < 1e-9);
-    assert_eq!(
-        events[0].1["_at"], settled,
-        "stamped at the settled frame's flip"
-    );
+    for (_, metric) in &events {
+        assert!((metric["value"].as_f64().unwrap() - (shown - tapped)).abs() < 1e-9);
+        assert_eq!(metric["_at"], shown, "stamped at its flip");
+    }
 
     press(&mut p, "back");
     flip(&mut m, &mut p, boottime() + 0.016);
@@ -432,16 +414,14 @@ fn the_display_loop_journals_an_apps_navigations() {
     assert_eq!(m.navigation.current().unwrap()["url"], "/");
 }
 
-/// Home, busy until `done`, and a detail screen that is ready.
-const BUSY_HOME: &str = r#"routes nav
+/// Home, loading `item` (0 until it answers), and a detail screen that is ready.
+const LOADING_HOME: &str = r#"routes nav
   home "/"
     detail "/detail/:id"
 component App
-  state busy = true
+  resource item = item() as shape number else fallback()
   action open
     nav = push(nav, "/detail/7")
-  action done
-    busy = false
   action back
     nav = back(nav)
   view
@@ -449,54 +429,57 @@ component App
       for e in stack(nav) key=e.id
         column navigationKey=`${e.id}` position="absolute" inset=0
           if e.name == "home"
-            column aria-busy=(busy) testId="home"
+            column testId="home"
+              text `${item}`
               button press=open testId="open"
                 text "Open"
-              button press=done testId="done"
-                text "Done"
           if e.name == "detail"
             button press=back testId="back"
               text "Back"
 "#;
 
 /// Startup's TTI makes the screen on top interactive, not the launch screen: a
-/// launch that leaves its busy home for a ready screen settles there, and the
-/// home it returns to still measures its first TTI.
+/// launch that leaves its loading home for a ready screen settles there once the
+/// load lands, timed from the input that opened it, and the home it returns to
+/// still measures its first TTI.
 #[test]
 fn startup_tti_marks_the_screen_on_top_interactive() {
-    let (mut p, mut m) = launch(BUSY_HOME);
+    let (mut p, mut m, handed) = launch(LOADING_HOME);
     while p.dirty() {
         flip(&mut m, &mut p, boottime());
     }
-    assert!(!m.launch.done(), "home is busy");
+    assert!(!m.launch.done(), "home is loading");
 
-    p.dispatching(Some(boottime()));
+    let tapped = boottime();
+    p.dispatching(Some(tapped));
     press(&mut p, "open");
     p.dispatching(None);
     m.turn(&mut p, false);
     flip(&mut m, &mut p, boottime() + 0.016);
+    assert!(!m.launch.done(), "still loading");
+    assert_eq!(kinds(&take()), ["navigation.launch", "navigation cold_ttr"]);
+
+    land(&mut p, &handed);
+    let settled = boottime() + 0.033;
+    flip(&mut m, &mut p, settled);
     assert!(m.launch.done(), "startup settles on the detail screen");
     assert_eq!(m.report()["route"]["url"], "/detail/7");
     let events = take();
-    assert_eq!(
-        kinds(&events),
-        ["navigation.launch", "navigation cold_ttr", "navigation tti"]
-    );
+    assert_eq!(kinds(&events), ["navigation tti"]);
+    let tti = &events[0].1;
+    assert_eq!(tti["url"], "/detail/7");
+    assert!((tti["value"].as_f64().unwrap() - (settled - tapped)).abs() < 1e-9);
+    assert_eq!(tti["_at"], settled, "stamped at the settled frame's flip");
 
     press(&mut p, "back");
     flip(&mut m, &mut p, boottime() + 0.016);
     let events = take();
-    assert_eq!(kinds(&events), ["navigation warm_ttr"]);
-    assert_eq!(events[0].1["url"], "/");
-    press(&mut p, "done");
-    flip(&mut m, &mut p, boottime() + 0.033);
-    let events = take();
     assert_eq!(
         kinds(&events),
-        ["navigation tti"],
+        ["navigation warm_ttr", "navigation tti"],
         "home was never interactive"
     );
-    assert_eq!(events[0].1["url"], "/");
+    assert_eq!(events[1].1["url"], "/");
 }
 
 /// Armed by a press, a timer opens the detail screen a second later.
@@ -527,7 +510,7 @@ component App
 /// same loop turn runs after it, which navigates, is timed from its commit.
 #[test]
 fn a_timer_after_an_input_is_not_its_doing() {
-    let (mut p, mut m) = launch(TIMER);
+    let (mut p, mut m, _) = launch(TIMER);
     while !m.launch.done() && p.dirty() {
         flip(&mut m, &mut p, boottime());
     }
@@ -584,7 +567,7 @@ component App
 /// input's time) is not the input's doing, though the same dispatch ran it.
 #[test]
 fn a_timer_due_before_an_input_is_not_its_doing() {
-    let (mut p, mut m) = launch(DUE);
+    let (mut p, mut m, _) = launch(DUE);
     while !m.launch.done() && p.dirty() {
         flip(&mut m, &mut p, boottime());
     }
@@ -616,7 +599,7 @@ fn a_timer_due_before_an_input_is_not_its_doing() {
 /// control is the runner's `host_back`, not a dispatched event: it is still the input's.
 #[test]
 fn the_platforms_back_is_its_inputs_doing() {
-    let (mut p, mut m) = launch(DUE);
+    let (mut p, mut m, _) = launch(DUE);
     while !m.launch.done() && p.dirty() {
         flip(&mut m, &mut p, boottime());
     }
@@ -660,7 +643,7 @@ component App
 /// of its own.
 #[test]
 fn a_pointerdowns_navigation_is_its_inputs_doing() {
-    let (mut p, mut m) = launch(POINTER_DOWN);
+    let (mut p, mut m, _) = launch(POINTER_DOWN);
     while !m.launch.done() && p.dirty() {
         flip(&mut m, &mut p, boottime());
     }

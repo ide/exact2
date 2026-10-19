@@ -6,7 +6,7 @@
     "Bodies are compared as parsed JSON: object key order is ignored, expo.custom_params is parsed, and metrics are sorted by name, then time.",
     "Only these resource attributes are compared: the ones below and platforms.<name>.resource. The rest (os.version, device.*, browser.language) describe the machine.",
     "platforms.<name>.startupParams join every expo.app_startup.* metric's params, ttiParams expo.app_startup.tti's as well, and launchNavigationParams the launch route's. They are each host's own launch phases and anchor.",
-    "The startup report here went out at the timeout, without TTI; startup.tti carries the TTI reached later. Each startup metric's time is its walls entry: when its end mark happened.",
+    "The host journals its startup report each time it gains a metric: here first with launch time and TTR, then with TTI too; each metric is stored once. Each startup metric's time is its walls entry: when its end mark happened.",
     "Crash records and update downloads are not here: each platform records different ones.",
     "Truncation lengths are counted per platform: graphemes on Apple, as Observe does, UTF-16 units on the web and chars on Linux. The strings here are ASCII, so the counts agree.",
     "Pinned rules: the launch route gets a navigation tti exactly when the startup event has a timeToInteractive metric and nothing navigated first; navigation params copy every exact.* field of the event; a missing url is omitted; app.error uses the event's source (default reportedByUser); exact.boot.path appears only when the startup event has a bootPath."
@@ -23,14 +23,13 @@
     {
       "kind": "startup",
       "wall": 1700000000.9,
-      "tti": "timeout",
       "metrics": {"coldLaunchTime":0.25,"timeToFirstRender":0.1},
       "walls": {"coldLaunchTime":1700000000.3,"timeToFirstRender":1700000000.4},
       "marks": {"process":0,"didFinishLaunching":2,"scene":3,"activation":4,"boot":4,"commit":50,"activated":60,"present":104},
       "trace": ["110.0 [requests:stations, activation]", "180.0 [requests:stations]"]
     },
     {
-      "kind": "startup.tti",
+      "kind": "startup",
       "wall": 1700000001,
       "tti": "failed",
       "metrics": {"coldLaunchTime":0.25,"timeToFirstRender":0.1,"timeToInteractive":31.202},
@@ -38,8 +37,7 @@
       "marks": {"process":0,"didFinishLaunching":2,"scene":3,"activation":4,"boot":4,"commit":50,"activated":60,"present":104,"interactive":31204},
       "trace": ["110.0 [requests:stations, activation]", "180.0 [requests:stations]", "31204.0 []"],
       "route": {"route":"/stations/[id]","routeParams":{"id":"sf"},"url":"/stations/sf"},
-      "launchScreen": true,
-      "late": true
+      "launchScreen": true
     },
     {
       "kind": "navigation",
@@ -127,7 +125,7 @@
                           {
                             "key": "expo.custom_params",
                             "value": {
-                              "stringValue": "{\"count\":2,\"exact.tti.late\":true,\"exact.tti.reason\":\"failed\",\"exact.tti.trace\":\"110.0 [requests:stations, activation] → 180.0 [requests:stations] → 31204.0 []\",\"expo.network.connected\":true,\"expo.network.type\":\"wifi\",\"routeParams\":{\"id\":\"sf\"},\"tier\":\"gold\",\"url\":\"/stations/sf\"}"
+                              "stringValue": "{\"count\":2,\"exact.tti.reason\":\"failed\",\"exact.tti.trace\":\"110.0 [requests:stations, activation] → 180.0 [requests:stations] → 31204.0 []\",\"expo.network.connected\":true,\"expo.network.type\":\"wifi\",\"routeParams\":{\"id\":\"sf\"},\"tier\":\"gold\",\"url\":\"/stations/sf\"}"
                             }
                           }
                         ]

@@ -437,7 +437,6 @@ public final class ExactSession {
         if fillInFlight || !afterFill.isEmpty { out.append("fill") }
         if tickInFlight || hasPublished { out.append("published") }
         if canvasInFlight || canvasOwed || presenter.canvas2d.loadingCount > 0 { out.append("canvas") }
-        if rasters.loadingOnScreen > 0 { out.append("images") }
         #if os(iOS)
         if SvgFilterLive.inFlight > 0 { out.append("svgPicture") }
         #endif

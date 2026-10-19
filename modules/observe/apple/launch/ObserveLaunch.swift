@@ -1,6 +1,8 @@
 // Observe's launch part, run at the app delegate's init. It does no I/O. It installs
-// crash capture, starts tracking device and network state, records that state at
-// startup, and requests the service (which stores and sends) once startup is over.
+// crash capture, journals the device and network state and each change of it (the
+// service attaches the state at TTI, as Observe reads it then), and requests the
+// service (which stores and sends) for when startup is over, so that loading it
+// (about 5 ms of the main thread) does not delay the TTI it measures.
 import ExactKit
 import Foundation
 import Network
@@ -12,10 +14,7 @@ import UIKit
 
 public enum ObserveLaunch: ExactLaunchPart {
     public static let module = "observe"
-    nonisolated(unsafe) static var ring = ExactRing(capacity: 128 * 1024)
     nonisolated(unsafe) static var path: NWPathMonitor?
-    /// The device record is in the ring.
-    nonisolated(unsafe) static var recorded = false
 
     public static func launch(_ context: ExactLaunchContext) {
         var config = context.config
@@ -31,29 +30,13 @@ public enum ObserveLaunch: ExactLaunchPart {
                              metadata: ["appVersion": context.app["CFBundleShortVersionString"] as? String ?? "", "appBuildNumber": context.app["CFBundleVersion"] as? String ?? "",
                                         "osVersion": "\(v.majorVersion).\(v.minorVersion).\(v.patchVersion)"])
         startDeviceCaches()
-        context.subscribe { event in
-            // Record the device and network state as of the startup event's time.
-            if event.kind == "startup" { recordDevice(at: event.at) }
-        }
-        // Delivery to subscribers can run after the service loads: then the handoff takes the state now.
-        context.requestService(.afterStartup, config: config, handoff: {
-            recordDevice(at: CACurrentMediaTime())
-            return ring.encoded()
-        })
+        context.requestService(.afterStartup, config: config, handoff: { Data() })
     }
 
-    static func recordDevice(at t: Double) {
-        guard !recorded else { return }
-        recorded = true
-        ring.append(Data(deviceRecord(at: t).utf8))
-    }
-
-    /// Device and network changes, timed by `CACurrentMediaTime` (seconds), oldest first.
-    nonisolated(unsafe) static var history: [(at: Double, key: String, value: Any)] = []
-
+    /// A device or network value, journaled on the main thread when it changes: the service
+    /// holds the latest of each in journal order.
     static func note(_ key: String, _ value: Any) {
-        history.append((CACurrentMediaTime(), key, value))
-        if history.count > 64 { history.removeFirst() }
+        ExactEvents.journal("device", [key: value])
     }
 
     static func startDeviceCaches() {
@@ -137,24 +120,5 @@ public enum ObserveLaunch: ExactLaunchPart {
         case .critical: "critical"
         @unknown default: "unknown"
         }
-    }
-
-    /// `{"kind":"device","params":{…}}` with each key's last value at or before `at`.
-    /// Keys never observed by then are absent. `exact.device.changed` is set when the
-    /// thermal state or low power mode changed during launch.
-    static func deviceRecord(at: Double) -> String {
-        var params: [String: Any] = [:]
-        var seen: [String: Int] = [:]
-        var oldest: Double?
-        for h in history where h.at <= at {
-            params[h.key] = h.value
-            seen[h.key, default: 0] += 1
-            oldest = oldest ?? h.at
-        }
-        if let oldest { params["exact.device.age_ms"] = ((at - oldest) * 1000).rounded() }
-        if seen["expo.device.thermalState", default: 0] > 1 || seen["expo.device.lowPowerMode", default: 0] > 1 { params["exact.device.changed"] = true }
-        let o: [String: Any] = ["kind": "device", "params": params]
-        let d = (try? JSONSerialization.data(withJSONObject: o)) ?? Data()
-        return String(decoding: d, as: UTF8.self)
     }
 }

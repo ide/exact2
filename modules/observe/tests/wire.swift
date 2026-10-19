@@ -13,11 +13,11 @@ enum WireHarness {
             "session": fixture["session"]!, "sessionStart": fixture["sessionStart"]!, "environment": fixture["environment"]!,
             "app.CFBundleIdentifier": app["id"]!, "app.CFBundleName": app["name"]!,
         ]
-        // The handoff is length-prefixed JSON records. The device record holds the state at TTI.
-        let record = try JSONSerialization.data(withJSONObject: ["kind": "device", "params": fixture["device"]!])
-        var handoff = withUnsafeBytes(of: UInt32(record.count).littleEndian) { Data($0) }
-        handoff.append(record)
-        let service = ObserveService(config: config, handoff: handoff, root: root, clientId: UUID(uuidString: fixture["clientId"] as! String)!)
+        let service = ObserveService(config: config, root: root, clientId: UUID(uuidString: fixture["clientId"] as! String)!)
+        // The device state at TTI, as the launch part journals it before then.
+        var device = fixture["device"] as! [String: Any]
+        device["kind"] = "device"
+        service.event(try JSONSerialization.data(withJSONObject: device))
         for e in fixture["events"] as! [Any] { service.event(try JSONSerialization.data(withJSONObject: e)) }
         let out = service.queue.sync {
             ["metrics": service.chunk("metrics", limit: 200)?.body ?? [:], "logs": service.chunk("logs", limit: 200)?.body ?? [:],

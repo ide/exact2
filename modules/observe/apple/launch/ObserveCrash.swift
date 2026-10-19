@@ -1,6 +1,8 @@
-// Crash capture: on a fatal signal, write one pending record, then re-raise with the
-// default action. The record's text is formatted at launch into static memory, so the
-// handler only calls the async-signal-safe `open`, `write` and `close`.
+// Crash capture: on a fatal signal, write one pending record, then hand the signal to the
+// action installed before this one, whole (`sigaction`: the default action unless the app
+// or another crash reporter installed one). The record's text is formatted at launch into
+// static memory, so the handler only calls the async-signal-safe `open`, `write`, `close`,
+// `sigaction` and `raise`.
 // The service reads the record at the next launch and attributes it to the crashed session.
 import ExactKit
 import Foundation
@@ -11,6 +13,8 @@ enum ObserveCrash {
     nonisolated(unsafe) static var headLength = 0
     /// Scratch for the signal number and "}\n", allocated at install: the handler must not allocate.
     nonisolated(unsafe) static var tail: UnsafeMutablePointer<UInt8>?
+    /// Each signal's action before this one, by signal number.
+    nonisolated(unsafe) static var previous: UnsafeMutablePointer<sigaction>?
     static let signals: [Int32] = [SIGABRT, SIGSEGV, SIGBUS, SIGILL, SIGFPE, SIGTRAP]
 
     /// The record's file name, `exact-observe-pending-<session>-<app>.json`: the session
@@ -32,10 +36,17 @@ enum ObserveCrash {
         head!.initialize(from: bytes, count: bytes.count)
         headLength = bytes.count
         tail = UnsafeMutablePointer<UInt8>.allocate(capacity: 8)
-        for s in signals { signal(s, handler) }
+        let before = UnsafeMutablePointer<sigaction>.allocate(capacity: Int(NSIG))
+        before.initialize(repeating: sigaction(), count: Int(NSIG))
+        previous = before
+        var action = sigaction()
+        action.__sigaction_u = __sigaction_u(__sa_sigaction: handler)
+        action.sa_flags = SA_SIGINFO
+        sigemptyset(&action.sa_mask)
+        for s in signals { sigaction(s, &action, before + Int(s)) }
     }
 
-    static let handler: @convention(c) (Int32) -> Void = { sig in
+    static let handler: @convention(c) (Int32, UnsafeMutablePointer<__siginfo>?, UnsafeMutableRawPointer?) -> Void = { sig, info, _ in
         if let path = ObserveCrash.path, let head = ObserveCrash.head, let tail = ObserveCrash.tail {
             let fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0o644)
             if fd >= 0 {
@@ -49,14 +60,6 @@ enum ObserveCrash {
                     let end: StaticString = "\","
                     _ = write(fd, end.utf8Start, end.utf8CodeUnitCount)
                 }
-                // The startup metrics measured so far (ExactKit's): a crash before the startup report keeps them.
-                if let s = ExactLaunch.crashSnapshot() {
-                    let key: StaticString = "\"startup\":"
-                    _ = write(fd, key.utf8Start, key.utf8CodeUnitCount)
-                    _ = write(fd, s, strlen(s))
-                    let comma: StaticString = ","
-                    _ = write(fd, comma.utf8Start, comma.utf8CodeUnitCount)
-                }
                 let signalKey: StaticString = "\"signal\":"
                 _ = write(fd, signalKey.utf8Start, signalKey.utf8CodeUnitCount)
                 // The signal number in decimal, then "}\n": formatting functions aren't async-signal-safe.
@@ -68,7 +71,11 @@ enum ObserveCrash {
                 close(fd)
             }
         }
-        signal(sig, SIG_DFL)
-        raise(sig)
+        if let previous = ObserveCrash.previous { sigaction(sig, previous + Int(sig), nil) } else { signal(sig, SIG_DFL) }
+        // A fault the processor raised recurs when this handler returns, so that action sees the
+        // original fault and its address. A signal software raised (`abort`, `kill`) is raised again,
+        // to be delivered once this handler returns; `abort` would set the default action instead.
+        let code = info?.pointee.si_code ?? 0
+        if sig == SIGABRT || !(1..<SI_USER).contains(code) { raise(sig) }
     }
 }

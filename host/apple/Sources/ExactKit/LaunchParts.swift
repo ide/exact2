@@ -133,40 +133,9 @@ public final class ExactLaunchContext {
     }
 
     /// Loads `lib<module>_service.dylib` at `when` and starts it with `config` and
-    /// `handoff`, the bytes the launch part kept (for example its ring).
+    /// `handoff`, the bytes the launch part kept for its service.
     public func requestService(_ when: ExactServiceLoad, config: [String: Any], handoff: @escaping () -> Data) {
         ExactLaunch.shared.requestService(module: module, when: when, config: config, handoff: handoff)
-    }
-}
-
-/// An in-memory ring of records a launch part keeps until its service loads.
-/// `capacity` is in bytes. When full it drops and counts the oldest records.
-public final class ExactRing {
-    public let capacity: Int
-    private var records: [Data] = []
-    private var bytes = 0
-    public private(set) var dropped = 0
-
-    public init(capacity: Int) { self.capacity = capacity }
-
-    public func append(_ record: Data) {
-        records.append(record)
-        bytes += record.count
-        while bytes > capacity, !records.isEmpty {
-            bytes -= records.removeFirst().count
-            dropped += 1
-        }
-    }
-
-    /// Length-prefixed (UInt32, little-endian) records, oldest first.
-    public func encoded() -> Data {
-        var out = Data()
-        for r in records {
-            var n = UInt32(r.count).littleEndian
-            withUnsafeBytes(of: &n) { out.append(contentsOf: $0) }
-            out.append(r)
-        }
-        return out
     }
 }
 
@@ -296,21 +265,6 @@ extension ExactLaunch {
     /// The updating composition sets it as each generation starts; a crash handler may read
     /// it at any time, so a replaced string is never freed.
     nonisolated(unsafe) public static var runningUpdate: UnsafeMutablePointer<CChar>?
-    /// The startup metrics measured so far, `{"metrics":{…},"walls":{…}}` as in the startup
-    /// report (launch time once launch ends, TTR once its frame is past): a crash handler may
-    /// read it at any time, so a crash before the report keeps them. A replaced one is never freed.
-    nonisolated(unsafe) public static var startupSnapshot: UnsafeMutablePointer<CChar>?
-    /// The same with TTR, published when the first frame's vsync is found, for a crash once its
-    /// time (`startupSnapshotFrameAt`, `mach_absolute_time` ticks) has come: a main thread blocked
-    /// after that frame cannot publish it then.
-    nonisolated(unsafe) public static var startupSnapshotFramed: UnsafeMutablePointer<CChar>?
-    nonisolated(unsafe) public static var startupSnapshotFrameAt: UInt64 = .max
-
-    /// What a crash now keeps of startup, read by a signal handler: a clock read and two pointers.
-    public static func crashSnapshot() -> UnsafeMutablePointer<CChar>? {
-        if let framed = startupSnapshotFramed, mach_absolute_time() >= startupSnapshotFrameAt { return framed }
-        return startupSnapshot
-    }
     public func inputEnded() { NavigationMarks.shared.inputEnded() }
 }
 

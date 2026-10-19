@@ -14,7 +14,7 @@
 //! screen shows the latest tree.
 
 use exact_runner::DataSource;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
 
 fn clock(id: libc::clockid_t) -> f64 {
@@ -88,8 +88,6 @@ pub fn items(o: &exact_runner::runner::outstanding::Outstanding) -> Vec<String> 
         ("requests", &o.requests),
         ("streams", &o.streams),
         ("awaiting", &o.awaiting),
-        ("oneShots", &o.one_shots),
-        ("busy", &o.busy),
     ] {
         out.extend(list.iter().map(|n| format!("{key}:{n}")));
     }
@@ -99,8 +97,7 @@ pub fn items(o: &exact_runner::runner::outstanding::Outstanding) -> Vec<String> 
 /// What TTI reads at one moment: the outstanding work, and the tree it was read against.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Ledger {
-    /// Outstanding work as `kind:name` items: the runner's, then the host's
-    /// (`host:images` while a picture in view is loading), then `activation`
+    /// Outstanding work as `kind:name` items: the runner's, then `activation`
     /// while the data module is not active.
     pub items: Vec<String>,
     /// Resources whose current arguments failed: settled, but in error.
@@ -133,9 +130,6 @@ pub fn ledger<D: DataSource>(p: &crate::Presenter<D>) -> Ledger {
     let host = p.host();
     let o = host.runner().outstanding();
     let mut items = items(&o);
-    if p.images().loading_on_screen() > 0 {
-        items.push("host:images".into());
-    }
     if !o.data_ready || host.data_pending() {
         items.push("activation".into());
     }
@@ -161,6 +155,8 @@ pub struct Marks {
     /// The route on top when TTI was reached. The report goes out a turn later,
     /// after the router changes that turn takes.
     route: Option<serde_json::Map<String, serde_json::Value>>,
+    /// The launch screen was still on top at TTI, with nothing navigated to.
+    launch_screen: bool,
     /// When the process was told to end, if it was ([`ending`]; tests replace it).
     pub(crate) ending: fn() -> Option<f64>,
 }
@@ -173,6 +169,7 @@ impl Marks {
             navigation: Default::default(),
             built: None,
             route: None,
+            launch_screen: false,
             ending,
         }
     }
@@ -230,15 +227,21 @@ impl Marks {
         self.navigation.turn(&now, still, at);
     }
 
-    /// The startup report, with the route on top at TTI.
+    /// The startup report, with the route on top at TTI and whether it is the launch screen.
     pub fn report(&self) -> serde_json::Map<String, serde_json::Value> {
-        self.launch.report(self.route.as_ref())
+        let mut r = self.launch.report(self.route.as_ref());
+        if self.launch_screen {
+            r.insert("launchScreen".into(), true.into());
+        }
+        r
     }
 
-    /// Once startup reaches TTI: the route on top then, and its screen is interactive.
+    /// Once startup reaches TTI: the route on top then, whether it is the launch screen,
+    /// and its screen is interactive.
     fn interactive_route(&mut self) {
         if self.route.is_none() && self.launch.interactive.is_some() {
             self.route = self.navigation.current().cloned();
+            self.launch_screen = self.navigation.on_launch_screen();
             self.navigation.startup_interactive();
         }
     }
@@ -257,10 +260,6 @@ impl Default for Marks {
     }
 }
 
-/// Seconds after launch end at which the startup report goes out without TTI;
-/// a TTI reached later is reported on its own (`startup.tti`).
-pub const TTI_TIMEOUT: f64 = 30.0;
-
 /// One launch's marks, from process start to time to interactive (TTI).
 #[derive(Default)]
 pub struct LaunchMarks {
@@ -273,19 +272,10 @@ pub struct LaunchMarks {
     interactive: Option<f64>,
     outcome: Option<&'static str>,
     trace: Vec<String>,
-    /// The outstanding items the last ledger read showed.
-    last: Vec<String>,
-    /// Work cleared after only the app's `aria-busy` elements were outstanding.
-    declared: bool,
     /// The resources failed at the last ledger read.
     failed: Vec<String>,
-    reported: bool,
-    /// The timeout passed first: the startup report went out without TTI.
-    late: bool,
-    /// The timeout's report carried TTR: its first frame came before.
-    ttr_reported: bool,
-    /// The process was told to end before TTI.
-    terminated: Option<f64>,
+    /// How many metrics the startup reports journaled so far carried.
+    journaled: usize,
 }
 
 impl LaunchMarks {
@@ -302,6 +292,7 @@ impl LaunchMarks {
     /// Marks launch end: the display is open and Exact is about to build its first tree.
     pub fn launch_end(&mut self) {
         self.launch_end.get_or_insert_with(boottime);
+        LAUNCH_ENDED.store(true, Ordering::Relaxed);
     }
 
     /// A frame went on screen at `at`. The first is the first render: its
@@ -360,53 +351,30 @@ impl LaunchMarks {
         }
     }
 
-    /// Keeps what TTI's reason reads from a ledger, as the Apple host does: whether
-    /// work cleared after only `aria-busy` was outstanding, and the failed resources.
+    /// Keeps what TTI's reason reads from a ledger, as the Apple host does: the
+    /// failed resources.
     fn read(&mut self, now: &Ledger) {
-        if now.items.is_empty()
-            && !self.last.is_empty()
-            && self.last.iter().all(|i| i.starts_with("busy:"))
-        {
-            self.declared = true;
-        }
-        if self.last != now.items {
-            self.last.clone_from(&now.items);
-        }
         if self.failed != now.failed {
             self.failed.clone_from(&now.failed);
         }
     }
 
     /// TTI at `at`, never before the first render: `failed` when a resource
-    /// failed, `declared` when the app's `aria-busy` was the last work, else `settled`.
+    /// failed, else `settled`.
     fn interactive(&mut self, at: f64) {
         self.interactive = Some(self.present.map_or(at, |p| at.max(p)));
-        self.outcome = Some(if !self.failed.is_empty() {
-            "failed"
-        } else if self.declared {
-            "declared"
-        } else {
+        self.outcome = Some(if self.failed.is_empty() {
             "settled"
+        } else {
+            "failed"
         });
     }
 
     /// The process is ending (SIGTERM, SIGINT): an unfinished startup ends as
-    /// `terminated`, keeping its launch time and TTR, with no TTI, as the Apple
-    /// host's does at `willTerminate`.
+    /// `terminated`, with no TTI, as the Apple host's does at `willTerminate`.
     pub fn terminated(&mut self) {
         if self.outcome.is_none() {
-            self.terminated = Some(boottime());
             self.outcome = Some("terminated");
-        }
-    }
-
-    /// Publishes the marks [`standing`] reads: the display loop's, after each mark.
-    pub fn publish(&self) {
-        for (slot, mark) in PUBLISHED
-            .iter()
-            .zip([self.process, self.launch_end, self.present])
-        {
-            slot.store(mark.map_or(0, f64::to_bits), Ordering::Relaxed);
         }
     }
 
@@ -415,49 +383,21 @@ impl LaunchMarks {
         self.outcome.is_some()
     }
 
-    /// True when a startup report is due: once, when TTI is decided, and after
-    /// the timeout's report only with a metric that one lacked. A first frame
-    /// after the timeout goes at once, as Observe records one on its own, not
-    /// with a TTI that may never come; a later TTI goes when reached. A failure
-    /// after the timeout reports nothing new.
-    pub fn take_done(&mut self) -> bool {
-        let frame = self.late && self.present.is_some() && !self.ttr_reported;
-        let decided = self.outcome.is_some()
-            && !self.reported
-            && (!self.late || frame || self.interactive.is_some());
-        self.reported |= decided;
-        self.ttr_reported |= frame;
-        frame || decided
-    }
-
-    /// True once, when [`TTI_TIMEOUT`] passes without TTI: the startup report goes now.
-    pub fn take_timeout(&mut self) -> bool {
-        let due = self.outcome.is_none()
-            && !self.late
-            && self
-                .launch_end
-                .is_some_and(|l| boottime() - l >= TTI_TIMEOUT);
-        self.late |= due;
-        self.ttr_reported |= due && self.present.is_some();
-        due
-    }
-
-    /// Milliseconds until [`TTI_TIMEOUT`], while it is still ahead.
-    pub fn timeout_in_ms(&self) -> Option<i32> {
-        let l = self
-            .launch_end
-            .filter(|_| self.outcome.is_none() && !self.late)?;
-        Some((((l + TTI_TIMEOUT - boottime()) * 1000.0).ceil().max(0.0)) as i32)
-    }
-
-    /// The journal kind of the report [`take_done`](Self::take_done) announced:
-    /// `startup.tti` after the timeout reported first.
-    pub fn done_kind(&self) -> &'static str {
-        if self.late {
-            "startup.tti"
-        } else {
-            "startup"
-        }
+    /// True when the startup report has a metric it lacked when last journaled: it is
+    /// journaled each time it gains one (launch time, TTR, TTI), as Observe records each
+    /// at its own mark, and the services store each metric once.
+    pub fn take_grown(&mut self) -> bool {
+        let measured = [
+            self.process.and(self.launch_end),
+            self.launch_end.and(self.present),
+            self.launch_end.and(self.interactive),
+        ]
+        .iter()
+        .flatten()
+        .count();
+        let grown = measured > self.journaled;
+        self.journaled = self.journaled.max(measured);
+        grown
     }
 
     /// The journal's `startup` fields, shaped like ExactKit's `report()`.
@@ -496,29 +436,14 @@ impl LaunchMarks {
         out.insert("metrics".into(), Value::Object(metrics));
         out.insert("walls".into(), Value::Object(walls));
         out.insert("marks".into(), Value::Object(marks));
-        if self.late && self.interactive.is_some() {
-            out.insert("late".into(), true.into());
-        }
         out.insert("launchType".into(), "cold".into());
         out.insert("bootPath".into(), "display".into());
-        out.insert(
-            "tti".into(),
-            self.outcome
-                .unwrap_or(if self.late { "timeout" } else { "pending" })
-                .into(),
-        );
+        if let Some(outcome) = self.outcome {
+            out.insert("tti".into(), outcome.into());
+        }
         out.insert("trace".into(), json!(self.trace));
         if !self.failed.is_empty() {
             out.insert("failed".into(), json!(self.failed));
-        }
-        if let Some(t) = self.terminated {
-            out.insert("interrupted".into(), true.into());
-            if let Some(p) = self.process {
-                out.insert(
-                    "interruptedAt".into(),
-                    json!(((t - p) * 10_000.0).round() / 10.0),
-                );
-            }
         }
         out.insert("processResolutionMs".into(), json!(self.resolution_ms));
         // The screen that became interactive, as Observe names the screen whose marker fired.
@@ -547,34 +472,12 @@ impl LaunchMarks {
     }
 }
 
-/// The marks [`standing`] reads, as the display loop last published them
-/// ([`LaunchMarks::publish`]): the process start, launch end and the first
-/// frame's presentation, each the `f64` bits of its [`boottime`], 0 for none.
-static PUBLISHED: [AtomicU64; 3] = [const { AtomicU64::new(0) }; 3];
+/// Launch end was marked ([`LaunchMarks::launch_end`]), which a panic hook reads.
+static LAUNCH_ENDED: AtomicBool = AtomicBool::new(false);
 
-/// The startup report's `metrics` and `walls` as they stand, from the published
-/// marks: the launch time once launch ended, and TTR once its frame was presented,
-/// never TTI. A panic hook reads it, so a crash before the report keeps what was
-/// measured. `None` while there is no metric.
-pub fn standing() -> Option<serde_json::Map<String, serde_json::Value>> {
-    let [process, launch_end, present] = PUBLISHED.each_ref().map(|slot| {
-        Some(slot.load(Ordering::Relaxed))
-            .filter(|&bits| bits != 0)
-            .map(f64::from_bits)
-    });
-    let (metrics, walls) = metrics_and_walls(process, launch_end, present, None);
-    (!metrics.is_empty()).then(|| {
-        let mut out = serde_json::Map::new();
-        out.insert("metrics".into(), metrics.into());
-        out.insert("walls".into(), walls.into());
-        out
-    })
-}
-
-/// Whether the display loop published launch end. Once it has, it stays published, so
-/// this is true after [`standing`] returned a metric.
+/// Whether launch end was marked: from then on, this launch is the previous one for the next.
 pub fn launch_ended() -> bool {
-    PUBLISHED[1].load(Ordering::Relaxed) != 0
+    LAUNCH_ENDED.load(Ordering::Relaxed)
 }
 
 /// The report's `metrics`, in seconds (launch time from process start, TTR and TTI
@@ -606,137 +509,83 @@ fn metrics_and_walls(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
-    /// A launch that stays loading past [`TTI_TIMEOUT`] reports what it has then,
-    /// and its TTI later on its own, each metric at its own end mark.
+    /// The startup report goes each time it gains a metric: launch time at launch end,
+    /// TTR at the first frame, TTI when reached, each at its own end mark, and a TTI
+    /// long after launch still reports.
     #[test]
-    fn a_late_tti_is_reported_after_the_timeout_report() {
+    fn the_startup_report_goes_each_time_it_gains_a_metric() {
         let now = boottime();
         let mut m = LaunchMarks {
             process: Some(now - 40.0),
             launch_end: Some(now - 39.0),
-            commit: Some(now - 38.9),
-            present: Some(now - 38.9),
             ..Default::default()
         };
-        assert!(m.timeout_in_ms().is_some_and(|ms| ms == 0), "already due");
-        assert!(m.take_timeout(), "due once");
-        assert!(!m.take_timeout(), "and only once");
-        assert!(m.timeout_in_ms().is_none());
-        let first = m.report(None);
-        assert_eq!(first["tti"], "timeout");
-        assert!(first["metrics"]["timeToInteractive"].is_null());
-        assert!(first["metrics"]["coldLaunchTime"].is_number());
-        assert!(first.get("late").is_none(), "no TTI yet");
-        let walls = first["walls"].as_object().unwrap();
+        assert!(m.take_grown() && !m.take_grown(), "launch time, once");
+        let launched = m.report(None);
+        assert!(launched["metrics"]["coldLaunchTime"].is_number());
+        assert!(launched["metrics"]["timeToFirstRender"].is_null());
+        assert!(launched.get("tti").is_none(), "startup goes on");
+
+        m.presented(now - 38.9);
+        let loading = Ledger {
+            items: vec!["requests:feed".into()],
+            ..Default::default()
+        };
+        m.turn(&loading, true, now);
+        assert!(
+            m.take_grown() && !m.take_grown(),
+            "TTR, while loading continues"
+        );
+        let shown = m.report(None);
+        assert!(shown["metrics"]["timeToFirstRender"].is_number());
+        assert!(shown["metrics"]["timeToInteractive"].is_null());
+        let walls = shown["walls"].as_object().unwrap();
         let wall = |k: &str| walls[k].as_f64().unwrap();
         assert!(
             (wall("timeToFirstRender") - wall("coldLaunchTime") - 0.1).abs() < 1e-6,
             "each at its own mark"
         );
 
-        m.turn(&Ledger::default(), true, boottime());
-        assert!(m.take_done());
-        assert_eq!(m.done_kind(), "startup.tti");
-        let late = m.report(None);
-        assert_eq!(late["tti"], "settled");
-        assert_eq!(late["late"], true);
-        assert!(late["metrics"]["timeToInteractive"].as_f64().unwrap() >= 39.0);
-    }
-
-    /// A first frame after the timeout: the timeout's report has no TTR. The TTR
-    /// goes once, at once while loading continues, then the TTI on its own; or
-    /// with the TTI or the end that comes in the same turn.
-    #[test]
-    fn a_first_frame_after_the_timeout_reports_its_ttr_late() {
-        let now = boottime();
-        let launch = || LaunchMarks {
-            process: Some(now - 40.0),
-            launch_end: Some(now - 39.0),
-            ..Default::default()
-        };
-        let mut m = launch();
-        assert!(m.take_timeout());
-        assert!(m.report(None)["metrics"]["timeToFirstRender"].is_null());
-        m.presented(now - 1.0);
         m.turn(&Ledger::default(), true, now);
-        assert!(m.take_done() && !m.take_done(), "once");
-        assert_eq!(m.done_kind(), "startup.tti");
-        let late = m.report(None);
-        assert!(late["metrics"]["timeToFirstRender"].is_number());
-        assert!(late["metrics"]["timeToInteractive"].is_number());
-
-        let mut ended = launch();
-        assert!(ended.take_timeout());
-        ended.presented(now - 1.0);
-        ended.terminated();
-        assert!(ended.take_done(), "the TTR the timeout's report lacked");
-        let late = ended.report(None);
-        assert_eq!(late["tti"], "terminated");
-        assert!(late["metrics"]["timeToFirstRender"].is_number());
-        assert!(late["metrics"]["timeToInteractive"].is_null());
-
-        let mut loading = launch();
-        assert!(loading.take_timeout());
-        loading.presented(now - 1.0);
-        let busy = Ledger {
-            items: vec!["busy:list".into()],
-            ..Default::default()
-        };
-        loading.turn(&busy, true, now);
         assert!(
-            loading.take_done() && !loading.take_done(),
-            "the TTR at once, while loading continues"
+            m.take_grown() && !m.take_grown(),
+            "TTI, 39 s after launch end"
         );
-        let ttr = loading.report(None);
-        assert!(ttr["metrics"]["timeToFirstRender"].is_number());
-        assert!(ttr["metrics"]["timeToInteractive"].is_null());
-        loading.turn(&Ledger::default(), true, now);
-        assert!(loading.take_done() && !loading.take_done(), "then the TTI");
-        assert!(loading.report(None)["metrics"]["timeToInteractive"].is_number());
+        let interactive = m.report(None);
+        assert_eq!(interactive["tti"], "settled");
+        assert!(
+            interactive["metrics"]["timeToInteractive"]
+                .as_f64()
+                .unwrap()
+                >= 39.0
+        );
+        m.terminated();
+        assert!(!m.take_grown());
     }
 
-    /// TTI before the timeout is the ordinary startup report.
+    /// A poisoned runner or a failed activation ends startup without TTI, as the
+    /// process's end does: what was measured before stays, and nothing more goes.
     #[test]
-    fn a_timely_tti_needs_no_timeout() {
-        let now = boottime();
-        let mut m = LaunchMarks {
-            process: Some(now - 1.0),
-            launch_end: Some(now - 0.9),
-            commit: Some(now - 0.8),
-            present: Some(now - 0.8),
-            ..Default::default()
-        };
-        m.turn(&Ledger::default(), true, boottime());
-        assert!(!m.take_timeout());
-        assert!(m.take_done());
-        assert_eq!(m.done_kind(), "startup");
-        assert!(m.report(None).get("late").is_none());
-    }
-
-    /// A poisoned runner or a failed activation ends startup without TTI; after
-    /// the timeout's report, it reports nothing more.
-    #[test]
-    fn a_failed_launch_reports_no_tti() {
-        for (failure, outcome) in [
-            (
-                Ledger {
-                    poisoned: true,
-                    ..Ledger::default()
-                },
-                "logic_failed",
-            ),
-            (
-                Ledger {
-                    items: vec!["activation".into()],
-                    activation_failed: true,
-                    ..Ledger::default()
-                },
-                "activation_failed",
-            ),
-        ] {
+    fn a_failed_or_ended_launch_reports_no_tti() {
+        let failures = [
+            Ledger {
+                poisoned: true,
+                ..Ledger::default()
+            },
+            Ledger {
+                items: vec!["activation".into()],
+                activation_failed: true,
+                ..Ledger::default()
+            },
+        ];
+        for (failure, outcome) in failures.into_iter().map(Some).chain([None]).zip([
+            "logic_failed",
+            "activation_failed",
+            "terminated",
+        ]) {
             let now = boottime();
             let mut m = LaunchMarks {
                 process: Some(now - 1.0),
@@ -745,166 +594,109 @@ mod tests {
                 present: Some(now - 0.8),
                 ..Default::default()
             };
-            m.shown(now, &Ledger::default(), &failure);
-            assert!(!m.done(), "a failed app does not settle");
-            m.turn(&failure, true, boottime());
-            assert!(m.take_done() && !m.take_done(), "reported once");
-            assert_eq!(m.done_kind(), "startup");
+            assert!(m.take_grown(), "launch time and TTR");
+            match &failure {
+                Some(failure) => {
+                    m.shown(now, &Ledger::default(), failure);
+                    assert!(!m.done(), "a failed app does not settle");
+                    m.turn(failure, true, boottime());
+                }
+                None => m.terminated(),
+            }
+            assert!(m.done());
+            assert!(!m.take_grown(), "{outcome}: nothing more");
             let report = m.report(None);
             assert_eq!(report["tti"], outcome);
             assert!(report["metrics"]["timeToInteractive"].is_null());
-            assert!(report["metrics"]["timeToFirstRender"].is_number());
-
-            let mut late = LaunchMarks {
-                launch_end: Some(now - 31.0),
-                present: Some(now - 30.9),
-                ..Default::default()
-            };
-            assert!(late.take_timeout());
-            late.turn(&failure, true, boottime());
-            assert!(
-                late.done() && !late.take_done(),
-                "{outcome} after the timeout"
-            );
+            m.turn(&Ledger::default(), true, boottime());
+            assert!(!m.take_grown(), "{outcome}: no TTI after it");
         }
     }
 
-    /// What a crash keeps of the published marks: the launch time, and TTR once its
-    /// frame was presented, each as the report has it, never TTI.
-    #[test]
-    fn the_standing_report_keeps_launch_time_and_ttr_never_tti() {
-        LaunchMarks::default().publish();
-        assert!(standing().is_none(), "no metric before launch end");
-        let now = boottime();
-        let mut m = LaunchMarks {
-            process: Some(now - 1.0),
-            launch_end: Some(now - 0.9),
-            ..Default::default()
-        };
-        m.publish();
-        let launched = standing().unwrap();
-        assert!(launched["metrics"]["coldLaunchTime"].is_number());
-        assert!(
-            launched["metrics"]["timeToFirstRender"].is_null(),
-            "no frame yet"
-        );
-        m.presented(now - 0.8);
-        m.turn(&Ledger::default(), true, now);
-        assert!(m.done(), "interactive");
-        m.publish();
-        let shown = standing().unwrap();
-        let report = m.report(None);
-        let names =
-            |o: &serde_json::Value| o.as_object().unwrap().keys().cloned().collect::<Vec<_>>();
-        assert_eq!(
-            names(&shown["metrics"]),
-            ["coldLaunchTime", "timeToFirstRender"]
-        );
-        assert_eq!(names(&shown["walls"]), names(&shown["metrics"]));
-        for name in ["coldLaunchTime", "timeToFirstRender"] {
-            assert_eq!(shown["metrics"][name], report["metrics"][name]);
-            let wall = |o: &serde_json::Map<_, _>| o["walls"][name].as_f64().unwrap();
-            assert!(
-                (wall(&shown) - wall(&report)).abs() < 1e-3,
-                "at its own mark"
-            );
-        }
-    }
-
-    /// A startup the process ends before TTI reports what it measured, once; one
-    /// that reached TTI, or whose timeout report went out, reports nothing more.
-    #[test]
-    fn a_terminated_startup_keeps_what_it_measured() {
-        let now = boottime();
-        let launch = || LaunchMarks {
-            process: Some(now - 1.0),
-            launch_end: Some(now - 0.9),
-            commit: Some(now - 0.8),
-            present: Some(now - 0.8),
-            ..Default::default()
-        };
-        let mut m = launch();
-        m.terminated();
-        assert!(m.take_done() && !m.take_done());
-        assert_eq!(m.done_kind(), "startup");
-        let report = m.report(None);
-        assert_eq!(report["tti"], "terminated");
-        assert_eq!(report["interrupted"], true);
-        assert!(report["metrics"]["coldLaunchTime"].is_number());
-        assert!(report["metrics"]["timeToFirstRender"].is_number());
-        assert!(report["metrics"]["timeToInteractive"].is_null());
-
-        let mut settled = launch();
-        settled.turn(&Ledger::default(), true, boottime());
-        assert!(settled.take_done());
-        settled.terminated();
-        assert!(!settled.take_done());
-        assert_eq!(settled.report(None)["tti"], "settled");
-
-        let mut late = LaunchMarks {
-            launch_end: Some(now - 31.0),
-            present: Some(now - 30.9),
-            ..Default::default()
-        };
-        assert!(late.take_timeout());
-        late.terminated();
-        assert!(!late.take_done(), "the timeout's report went out");
-    }
-
-    /// TTI's reason: `failed` when a resource failed, `declared` when the app's
-    /// `aria-busy` was the last outstanding work, else `settled`.
+    /// TTI's reason: `failed` when a resource failed, else `settled`.
     #[test]
     fn tti_says_how_it_was_reached() {
-        for (outstanding, failed, outcome) in [
-            ("requests:feed", None, "settled"),
-            ("busy:screen", None, "declared"),
-            ("requests:feed", Some("feed"), "failed"),
-            ("busy:screen", Some("feed"), "failed"),
-        ] {
+        for (failed, outcome) in [(None, "settled"), (Some("feed"), "failed")] {
             let now = boottime();
             let mut m = LaunchMarks {
                 present: Some(now - 0.5),
                 ..Default::default()
             };
             let loading = Ledger {
-                items: vec![outstanding.into(), "busy:list".into()],
+                items: vec!["requests:feed".into()],
                 ..Ledger::default()
             };
             m.turn(&loading, true, boottime());
-            m.turn(
-                &Ledger {
-                    items: vec![outstanding.into()],
-                    ..Ledger::default()
-                },
-                false,
-                boottime(),
-            );
             let clear = Ledger {
                 failed: failed.into_iter().map(String::from).collect(),
                 ..Ledger::default()
             };
             m.shown(now, &clear, &clear);
             let report = m.report(None);
-            assert_eq!(report["tti"], outcome, "{outstanding} {failed:?}");
+            assert_eq!(report["tti"], outcome, "{failed:?}");
             assert_eq!(report.get("failed").is_some(), failed.is_some());
         }
     }
 
-    /// An app whose screen is busy until `done` is pressed.
-    const BUSY: &str = r#"component App
-  state busy = true
-  action done
-    busy = false
+    /// An app whose screen loads `item` (0 until it answers).
+    const LOADING: &str = r#"component App
+  resource item = item() as shape number else fallback()
   view
-    column aria-busy=(busy) testId="screen"
-      button press=done testId="done"
-        text "Done"
+    text `${item}` testId="screen"
 "#;
 
-    fn boot(source: &str) -> crate::Presenter<()> {
+    /// Answers `fallback` now with 0 and every other source later with 1, once
+    /// the test sends the reply the executor hands over ([`land`]): a request
+    /// that holds TTI until the test lets it land.
+    pub(crate) struct Held(pub(crate) std::sync::mpsc::Sender<exact_runner::Reply>);
+
+    impl DataSource for Held {
+        fn query(
+            &mut self,
+            source: &str,
+            _: &[exact_runner::Value],
+        ) -> Result<exact_runner::Value, exact_runner::DataError> {
+            Err(exact_runner::DataError::UnknownSource(source.into()))
+        }
+        fn answer(
+            &mut self,
+            _: &mut exact_runner::Store,
+            source: &str,
+            _: &[exact_runner::Value],
+        ) -> Result<exact_runner::Answer, exact_runner::DataError> {
+            Ok(match source {
+                "fallback" => exact_runner::Answer::Now(exact_runner::Value::Number(0.0)),
+                _ => exact_runner::Answer::Later(exact_runner::Request::continuation(1)),
+            })
+        }
+        fn dispatch(&mut self, _: u64, _: &exact_runner::Store) -> exact_runner::Dispatch {
+            let replies = self.0.clone();
+            exact_runner::Dispatch::Run(exact_runner::Work::Later(Box::new(move |reply| {
+                let _ = replies.send(reply);
+            })))
+        }
+        fn parse(
+            &mut self,
+            _: &mut exact_runner::Store,
+            _: &str,
+            _: &[exact_runner::Value],
+            _: exact_runner::Outcome,
+        ) -> Result<exact_runner::Answer, exact_runner::DataError> {
+            Ok(exact_runner::Answer::Now(exact_runner::Value::Number(1.0)))
+        }
+    }
+
+    /// An app booted on a [`Held`] source, and the replies its executor hands over.
+    pub(crate) fn boot(
+        source: &str,
+    ) -> (
+        crate::Presenter<Held>,
+        std::sync::mpsc::Receiver<exact_runner::Reply>,
+    ) {
+        let (replies, handed) = std::sync::mpsc::channel();
         let (p, error) = crate::Presenter::boot_with(
             &crate::test_plan(source),
-            (),
+            Held(replies),
             (400., 800.),
             1.,
             std::path::PathBuf::new(),
@@ -912,22 +704,29 @@ mod tests {
         )
         .unwrap();
         assert!(error.is_none(), "{error:?}");
-        p
+        (p, handed)
     }
 
-    fn press(p: &mut crate::Presenter<()>, test_id: &str) {
-        let kernel = p.host().kernel();
-        let key = kernel.find_by_test_id(test_id)[0];
-        let id = kernel.node_by_key(key).unwrap().id;
-        p.dispatch_press(id, 0., false);
+    /// Lands the request a [`Held`] source holds: waits for the executor to hand
+    /// over its reply, sends it, and pumps the answer into the runner.
+    pub(crate) fn land(
+        p: &mut crate::Presenter<Held>,
+        handed: &std::sync::mpsc::Receiver<exact_runner::Reply>,
+    ) {
+        let reply = handed
+            .recv_timeout(Duration::from_secs(20))
+            .expect("the executor hands over the request");
+        reply.send(exact_runner::Outcome::Storage(b"1".to_vec()));
+        assert_eq!(p.pump(0.0), None);
+        assert!(ledger(p).clear(), "landed: {:?}", ledger(p).items);
     }
 
     /// TTI is the presentation of the first frame built with nothing
-    /// outstanding: not the flip of a frame built while busy, though the work
+    /// outstanding: not the flip of a frame built while loading, though the work
     /// cleared before it, and not a turn whose change is not yet on screen.
     #[test]
     fn startup_settles_on_the_frame_that_shows_it() {
-        let mut p = boot(BUSY);
+        let (mut p, handed) = boot(LOADING);
         let mut m = Marks::new();
         m.launch.launch_end();
         let t = boottime();
@@ -941,17 +740,17 @@ mod tests {
             m.launch.activated.is_some(),
             "the first frame activates data"
         );
-        assert_eq!(ledger(&p).items, ["busy:screen"]);
+        assert_eq!(ledger(&p).items, ["requests:item"]);
         assert!(!m.launch.done());
 
         m.frame(&mut p);
-        let busy = p.display_frame().unwrap();
-        press(&mut p, "done");
+        let loading = p.display_frame().unwrap();
+        land(&mut p, &handed);
         m.turn(&mut p, true);
         assert!(!m.launch.done(), "a frame awaits its flip");
         m.shown(t + 0.016, &p);
-        p.display_complete(&busy);
-        assert!(!m.launch.done(), "that frame was built while busy");
+        p.display_complete(&loading);
+        assert!(!m.launch.done(), "that frame was built while loading");
         m.turn(&mut p, false);
         assert!(!m.launch.done(), "the change is not on screen yet");
 
@@ -960,18 +759,14 @@ mod tests {
         m.shown(t + 0.033, &p);
         p.display_complete(&settled);
         assert_eq!(m.launch.interactive, Some(t + 0.033));
-        assert_eq!(
-            m.launch.outcome,
-            Some("declared"),
-            "aria-busy was the last work"
-        );
+        assert_eq!(m.launch.outcome, Some("settled"));
     }
 
     /// A frame whose paint failed shows a fallback, not the tree: the screen that
     /// settled in it is not interactive until a paint of it succeeds.
     #[test]
     fn a_failed_paint_of_the_settled_screen_is_not_interactive() {
-        let mut p = boot(BUSY);
+        let (mut p, handed) = boot(LOADING);
         let mut m = Marks::new();
         m.launch.launch_end();
         let t = boottime();
@@ -981,7 +776,7 @@ mod tests {
         p.display_complete(&first);
         m.turn(&mut p, false);
 
-        press(&mut p, "done");
+        land(&mut p, &handed);
         p.brush
             .replace_backend(Box::new(crate::presenter::fail_backend::Failure));
         m.frame(&mut p);
@@ -1016,7 +811,7 @@ mod tests {
     #[test]
     fn nothing_after_the_termination_signal_is_measured() {
         // The signal came before the first frame's modeset returned.
-        let mut p = boot(BUSY);
+        let (mut p, _handed) = boot(LOADING);
         let mut m = Marks {
             ending: ended,
             ..Marks::new()
@@ -1034,13 +829,12 @@ mod tests {
             "a frame at the signal is not measured"
         );
         m.launch.terminated();
-        assert!(m.launch.take_done());
         let report = m.report();
         assert_eq!(report["tti"], "terminated");
         assert!(report["metrics"]["timeToFirstRender"].is_null());
 
         // It came after the first frame and before the frame that settles.
-        let mut p = boot(BUSY);
+        let (mut p, handed) = boot(LOADING);
         let mut m = Marks {
             ending: ended,
             ..Marks::new()
@@ -1053,7 +847,7 @@ mod tests {
         m.shown(t - 0.1, &p);
         p.display_complete(&first);
         m.turn(&mut p, false);
-        press(&mut p, "done");
+        land(&mut p, &handed);
         ENDED.with(|e| e.set(Some(t)));
         m.frame(&mut p);
         let settled = p.display_frame().unwrap();
@@ -1066,7 +860,7 @@ mod tests {
             "nothing settles after the signal"
         );
         m.launch.terminated();
-        assert!(m.launch.take_done());
+        assert!(m.launch.take_grown(), "the TTR before the signal");
         let report = m.report();
         assert_eq!(report["tti"], "terminated");
         assert!(report["metrics"]["timeToFirstRender"].is_number());

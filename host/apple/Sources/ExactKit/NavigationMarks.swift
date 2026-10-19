@@ -6,8 +6,7 @@
 // as shown when its first frame is presented, so one superseded before it stays cold.
 // A navigation starts at the input being dispatched when the router changed (the tap
 // whose action navigated, also when its dispatch queued the press for a later turn),
-// otherwise at the commit; one UIKit made itself starts at the last touch or press
-// before UIKit began it (a Back tap, a swipe's touch that moved).
+// otherwise at the commit; one UIKit made itself starts when UIKit begins it.
 // Render time is the first vsync after the committing run-loop turn, journaled once the
 // display link reaches it. TTI is when outstanding work clears, never before render, and
 // at the next vsync if the screen changed after it was shown. While the app is in the
@@ -25,9 +24,6 @@ final class NavigationMarks: NSObject {
     /// The timestamp of the input being dispatched, in seconds on the
     /// `CACurrentMediaTime` clock: set just before its dispatch, cleared after.
     private var dispatching: Double?
-    /// The latest touch (in any phase: a swipe's moving touch begins one) or press, for a
-    /// transition UIKit begins after it.
-    private var lastTouch: Double?
     /// Per session, the screens shown so far.
     private var screens: [ObjectIdentifier: ScreenHistory] = [:]
     /// Per session, the route on top: `route`, `url` and `routeParams`.
@@ -82,7 +78,6 @@ final class NavigationMarks: NSObject {
     /// An input is about to be dispatched at `timestamp`; `inputEnded` follows its dispatch.
     func input(at timestamp: TimeInterval) {
         dispatching = timestamp
-        lastTouch = timestamp
     }
     func inputEnded() { dispatching = nil }
     /// The input being dispatched, which work its dispatch queues for a later turn carries (`carrying`).
@@ -126,7 +121,6 @@ final class NavigationMarks: NSObject {
         launched.remove(key)
         navigated.remove(key)
         launching[key] = nil
-        foregroundTops[key] = nil
         if pending?.key == key {
             pending = nil
             stop()
@@ -137,39 +131,24 @@ final class NavigationMarks: NSObject {
     /// there may have put on top, is presented again.
     func foreground() {
         inBackground = false
-        // Each session's screen on top at the first frame after the return is shown (one a change
-        // replaced before that frame is not).
-        foregroundEnded = nil
-        DispatchQueue.main.async { [weak self] in
-            guard let self, !inBackground else { return }
-            foregroundEnded = CACurrentMediaTime()
-            foregroundTops = screens.compactMapValues { $0.current }
-            if foregroundLink == nil { foregroundLink = mainDisplayLink(self, #selector(foregroundTick(_:))) }
+        // Each session's screen on top on return is shown at the first frame after the return's turn,
+        // if still on top then: a router change that replaced it is measured on its own.
+        foregroundTurn += 1
+        let mine = foregroundTurn
+        let tops = screens.compactMapValues { $0.current }
+        NextFrame.shared.after { [weak self] _ in
+            guard let self, foregroundTurn == mine, !inBackground else { return }
+            for (key, top) in tops where screens[key]?.current.map({ $0 == top }) == true { screens[key]?.markShown() }
         }
     }
-    private var foregroundEnded: Double?
-    /// Each session's screen on top when the return's turn ended.
-    private var foregroundTops: [ObjectIdentifier: (visit: UInt64, url: String)] = [:]
-    private var foregroundLink: CADisplayLink?
-
-    @objc private func foregroundTick(_ link: CADisplayLink) {
-        let v = Vsync(link)
-        guard let ended = foregroundEnded, let g = v.next(after: ended), v.at + 1e-6 >= g else { return }
-        foregroundEnded = nil
-        foregroundLink?.invalidate()
-        foregroundLink = nil
-        // A screen a router change replaced since is not marked: that change's own render marks its screen.
-        for (key, top) in foregroundTops where screens[key]?.current.map({ $0 == top }) == true { screens[key]?.markShown() }
-        foregroundTops = [:]
-    }
+    /// The last return to the foreground, which only its own frame marks.
+    private var foregroundTurn = 0
 
     /// The first frame of UIKit's last transition of its own (its Back
     /// button, a back swipe), in seconds on the `CACurrentMediaTime` clock,
-    /// and the input being dispatched when UIKit began it.
+    /// and when UIKit began it.
     private var platformShowing: Double?
-    private var platformTurnEnded: Double?
-    private var platformInput: Double?
-    private var platformLink: CADisplayLink?
+    private var platformBegan: Double?
     /// UIKit's own transition is being dispatched to the app (`platformDispatch`).
     private var platformDispatching = false
 
@@ -178,24 +157,22 @@ final class NavigationMarks: NSObject {
     /// Core Animation commits the transition at the turn's end.
     func platformBeganShowing() {
         platformShowing = nil
-        // Only a touch or press begins UIKit's own transitions: the latest before it. UIKit reaches
-        // `willShow` after it, in the layout pass of a Back tap's turn or a turn or two after a
-        // swipe's touch moved. One over a second before is not its (code that popped).
-        platformInput = dispatching ?? lastTouch.flatMap { CACurrentMediaTime() - $0 <= 1.0 ? $0 : nil }
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            platformTurnEnded = CACurrentMediaTime()
-            if platformLink == nil { platformLink = mainDisplayLink(self, #selector(platformTick(_:))) }
+        // Only a touch or press begins UIKit's own transitions, and UIKit reaches `willShow` in the
+        // layout pass of a Back tap's turn or a turn or two after a swipe's touch moved: the
+        // navigation starts here (or at the input still being dispatched), as Observe's starts
+        // when the navigation is asked for.
+        let began = dispatching ?? CACurrentMediaTime()
+        platformBegan = began
+        NextFrame.shared.after { [weak self] vsync in
+            guard let self, platformBegan == began else { return }
+            platformShowing = vsync
         }
     }
 
     /// That transition was cancelled (a swipe let go): it showed nothing.
     func platformCancelled() {
         platformShowing = nil
-        platformTurnEnded = nil
-        platformInput = nil
-        platformLink?.invalidate()
-        platformLink = nil
+        platformBegan = nil
     }
 
     /// Runs the dispatch of UIKit's completed transition to the app (its Back, a dismissal):
@@ -206,36 +183,15 @@ final class NavigationMarks: NSObject {
         defer {
             platformDispatching = false
             platformShowing = nil
-            platformInput = nil
+            platformBegan = nil
         }
         dispatch()
     }
 
-    @objc private func platformTick(_ link: CADisplayLink) {
-        defer { platformLink?.invalidate(); platformLink = nil }
-        guard let ended = platformTurnEnded, let g = Vsync(link).next(after: ended) else { return }
-        platformShowing = g
-        platformTurnEnded = nil
-    }
-
-    /// Per session, the launch screen's frame not yet shown: when the turn that last
-    /// changed it ended (nil until that turn ends).
-    private var launching: [ObjectIdentifier: Double?] = [:]
-    private var launchLink: CADisplayLink?
-
-    /// The first vsync after the launch screen's last turn shows it.
-    @objc private func launchTick(_ link: CADisplayLink) {
-        let v = Vsync(link)
-        for (key, ended) in launching {
-            guard let ended, let g = v.next(after: ended), v.at + 1e-6 >= g else { continue }
-            screens[key]?.markShown()
-            launching[key] = nil
-        }
-        if launching.isEmpty {
-            launchLink?.invalidate()
-            launchLink = nil
-        }
-    }
+    /// Per session, the launch screen not yet shown: the change that last replaced it, whose
+    /// turn's frame shows it.
+    private var launching: [ObjectIdentifier: Int] = [:]
+    private var launchChanges = 0
 
     func routerChanged(_ session: ExactSession, payload: [String: Any]) {
         guard let visit = (payload["top"] as? NSNumber)?.uint64Value else { return }
@@ -256,13 +212,13 @@ final class NavigationMarks: NSObject {
             // Startup's route is its session's: another window's first route is not the launch's.
             if session === ExactLaunch.shared.launchSession { ExactJournal.shared.record("navigation.launch", fields) }
             note("launch \(fields["route"] ?? "")")
-            // Waiting for this turn's end (a value of nil, not a removal).
-            launching[key] = .some(nil)
-            // Core Animation commits at the end of this turn, so the next turn is after it.
-            DispatchQueue.main.async { [weak self] in
-                guard let self, launching[key] != nil else { return }
-                launching[key] = CACurrentMediaTime()
-                if launchLink == nil { launchLink = mainDisplayLink(self, #selector(launchTick(_:))) }
+            launchChanges += 1
+            let mine = launchChanges
+            launching[key] = mine
+            NextFrame.shared.after { [weak self] _ in
+                guard let self, launching[key] == mine else { return }
+                screens[key]?.markShown()
+                launching[key] = nil
             }
             return
         }
@@ -275,9 +231,8 @@ final class NavigationMarks: NSObject {
             return
         }
         // The platform's own change: its screen showed when UIKit began to
-        // show it, not now, after the transition (a Back tap's pop is ~0.5 s).
-        // UIKit's transition, however long it ran (a held swipe), unless it ended over a second ago
-        // with no router change: then this change is not its. Nor is a change no event made (a
+        // show it, not now, after the transition (a Back tap's pop is ~0.5 s),
+        // however long it ran (a held swipe). Not a change no event made (a
         // timer's or an answer's redirect during a swipe), which waits for its own frame.
         let fromEvent = payload["event"] as? Bool != false
         // UIKit's change reaches the app in the dispatch of its completed transition: only a change
@@ -285,12 +240,12 @@ final class NavigationMarks: NSObject {
         // swipe) or another after.
         let platform = fromEvent && platformDispatching ? platformShowing : nil
         // A change a timer made, which the runner fired before the event's own commit, is not the input's.
-        let input = platform != nil ? platformInput : fromEvent ? dispatching : nil
+        let input = platform != nil ? platformBegan : fromEvent ? dispatching : nil
         let start = min(input ?? now, platform ?? now)
         fields["exact.nav.cause"] = input != nil ? "input" : "program"
         if platform != nil {
             platformShowing = nil
-            platformInput = nil
+            platformBegan = nil
         }
         note("change \(fields["route"] ?? "") visit \(visit) \(screen.shown ? "warm" : "cold") \(fields["exact.nav.cause"] ?? "")")
         if let shown = platform {
