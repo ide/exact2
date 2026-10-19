@@ -1054,6 +1054,9 @@ pub(super) fn check_command(
     if matches!(name, "requestMIDIAccess" | "sendMIDI") {
         return midi::args(name, args, scope, shapes, span);
     }
+    if name.starts_with("observe") {
+        return observe_args(name, args, scope, shapes, span);
+    }
     if name == "postMessage" {
         // The web's argument order, `postMessage(message, target)`: the target
         // is a surface's literal name, checked against the app's canvases.
@@ -1112,6 +1115,53 @@ fn root_font_size_args(
         "`setRootFontSize(px)` takes the root font size in px, above 0 (`rem` follows it, as `:root { font-size }`), `setRootFontSize(\"125%\")` a percentage of the host's size above 0, which keeps following it, or `setRootFontSize(\"medium\")` for the host's own size",
         span,
     )
+}
+
+/// Checks `observe(name[, Shape(key=value)[, severity]])`,
+/// `observeAttributes(Shape(key=value))` and `observeError(message[, "TypeName"])`.
+fn observe_args(
+    name: &str,
+    args: &[Expr],
+    scope: &Scope,
+    shapes: &Shapes,
+    span: Span,
+) -> Result<(), TypeError> {
+    let (usage, max) = match name {
+        "observe" => ("`observe(name)`, `observe(name, Shape(key=value))` or `observe(name, Shape(key=value), \"warn\")`", 3),
+        "observeAttributes" => ("`observeAttributes(Shape(key=value))`", 1),
+        _ => ("`observeError(message)` or `observeError(message, \"TypeName\")`", 2),
+    };
+    if args.is_empty() || args.len() > max {
+        return err("type-observe", usage.to_string(), span);
+    }
+    for (i, arg) in args.iter().enumerate() {
+        let ty = infer(arg, scope, shapes)?;
+        let record = name == "observeAttributes" || (name == "observe" && i == 1);
+        // The attributes must be constructed here: a record value carries no
+        // field names for the host.
+        let constructed = matches!(arg, Expr::Call(_, fields, _)
+            if fields.iter().all(|f| matches!(f, Expr::NamedArg(..))));
+        if record && !constructed {
+            return err(
+                "type-observe",
+                format!("{usage}: the attributes are a shape constructed here, every field named"),
+                arg.span(),
+            );
+        }
+        let ok = if record {
+            !matches!(ty, Ty::String | Ty::Number | Ty::Bool)
+        } else {
+            matches!(ty, Ty::String)
+        };
+        if !ok {
+            return err(
+                "type-observe",
+                format!("{usage}: argument {} is `{ty}`", i + 1),
+                arg.span(),
+            );
+        }
+    }
+    Ok(())
 }
 
 /// Check a view, recording each attribute's refusal and moving on. A

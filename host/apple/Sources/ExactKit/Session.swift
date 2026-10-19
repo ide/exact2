@@ -428,6 +428,18 @@ public final class ExactSession {
     // main instead, and runs after the slice lands, in order.
     private(set) var fillInFlight = false
     private var afterFill: [(generation: Int, work: () -> Void, cancelled: (() -> Void)?)] = []
+    /// Work the owner or presenter still owes this session's screen. The
+    /// screen has not settled while this is non-empty.
+    var hostOutstanding: [String] {
+        var out: [String] = []
+        if fillInFlight || !afterFill.isEmpty { out.append("fill") }
+        if tickInFlight || hasPublished { out.append("published") }
+        if canvasInFlight || canvasOwed || presenter.canvas2d.loadingCount > 0 { out.append("canvas") }
+        #if os(iOS)
+        if SvgFilterLive.inFlight > 0 { out.append("svgPicture") }
+        #endif
+        return out
+    }
     private let published = NSLock()
     /// What the owner committed without main waiting.
     private enum Published { case fill(UInt32), tick, canvas }
@@ -805,6 +817,7 @@ public final class ExactSession {
     @discardableResult
     public func boot(size: CGSize) -> Batch {
         let t = CACurrentMediaTime()
+        ExactLaunch.shared.bootEntered(self)
         primePreferences()
         primeTime()  // `prepare` primes again; the fallback boot reads this
         if let bytes = app.lastPlan {
@@ -832,6 +845,7 @@ public final class ExactSession {
     @discardableResult
     public func boot(plan bytes: Data, size: CGSize) -> Batch {
         let t = CACurrentMediaTime()
+        ExactLaunch.shared.bootEntered(self)
         primePreferences()
         primeTime()
         let cp = text.checkpoint()
@@ -857,7 +871,7 @@ public final class ExactSession {
         }
         apply(batch)
         treeIsIn()
-        if batch.error == nil { tellTime(); refuseUnheardLaunch() }
+        if batch.error == nil { tellTime(); refuseUnheardLaunch(); ExactLaunch.shared.treeApplied(self, path: "baked") }
         // A fresh runner must receive the view's current viewport and insets.
         if batch.error == nil { view?.rebooted() }
         applyMs = (CACurrentMediaTime() - tApply) * 1000
@@ -946,6 +960,7 @@ public final class ExactSession {
         treeIsIn()
         tellTime()
         refuseUnheardLaunch()
+        ExactLaunch.shared.treeApplied(self, path: label)
         view?.rebooted()
         autofocusHeld = false
         if restart { presenter.restoreFocus(kept, tree: agent("{\"op\":\"tree\"}")) }
@@ -1053,7 +1068,7 @@ public final class ExactSession {
         // Each batch says what its turn left owed; batches apply in the owner's order, so the last one applied is the runner's now.
         canvasOwed = batch.canvasOwed
         if canvasOwed { askCanvasDraw() }
-        for op in batch.ops where op.op == .router { routerOp = op.payload }
+        for op in batch.ops where op.op == .router { routerOp = op.payload; NavigationMarks.shared.routerChanged(self, payload: op.payload) }
         // @ref LLP 1048.003 D1 — the head's title, for the app that owns the chrome.
         for op in batch.ops where op.op == .title {
             presenter.headTitle(op.payload["title"] as? String)
@@ -1102,6 +1117,8 @@ public final class ExactSession {
             transformInputHold?.cancelIfInputIneligible()
             presenter.transformGeometry.changed()
             applying = false
+            ExactLaunch.shared.applied(self, changed: !batch.ops.isEmpty)
+            NavigationMarks.shared.applied(self)
             #if os(macOS)
             regions.flush()
             #endif
@@ -1134,6 +1151,10 @@ public final class ExactSession {
                     continue
                 }
                 if name == "relaunch" { app.deliver { [weak self] in self?.relaunch() }; continue }
+                if name.hasPrefix("observe") {
+                    ExactEvents.hostCommand(name, args)
+                    continue
+                }
                 if name == "haptic" {
                     // @ref LLP 1077 D14 — feedback from app logic.
                     app.deliver { Haptics.play(args.first as? String ?? "") }
@@ -1234,6 +1255,7 @@ public final class ExactSession {
         guard state != .destroyed, generation == drawnGeneration else { return }
         if firstDrawMs == nil { firstDrawMs = ExactEnv.wall() }
         app.sharedStore.firstPixel()
+        ExactLaunch.shared.drawn(self)
         guard activatedGeneration != drawnGeneration else { return }
         activatedGeneration = drawnGeneration
         DispatchQueue.main.async { [weak self] in
@@ -1249,8 +1271,10 @@ public final class ExactSession {
             apply(batch)
             dataGeneration = drawnGeneration
             activityOutput?.drain()
+            if batch.error != nil { ExactLaunch.shared.activated(self, ok: false) }
             storeRefresh.activated = { [weak self] in
                 guard let self, state != .destroyed, generation == drawnGeneration else { return }
+                ExactLaunch.shared.activated(self, ok: true)
                 presenter.collections.dataReady(); app.firstPixel(token)
             }
             storeRefresh.record(batch)
