@@ -725,17 +725,31 @@ pub fn parse(text: &str) -> Result<Option<Dimension>, EnvRefusal> {
 
 /// A calculation's CSS text for a browser, which has no layout regions (LLP
 /// 1123 D10): each region's name is the safe area's, which is what the
-/// region resolves to on a host that reports none. Names are matched as CSS
+/// region resolves to on a host that reports none. Each `env()` of an edge
+/// is read through the page's `--exact-safe-area-inset-<edge>`, which falls
+/// back to it: a sheet the web draws gives its content its own safe area,
+/// as UIKit's does (LLP 1115.000 D4.8). Names are matched as CSS
 /// identifiers, escapes decoded, and the rest of the text is kept as written.
 pub fn browser_css(c: super::Comparison, out: &mut String) {
     let mut text = String::new();
     c.css(&mut text);
-    if !text.contains("-exact-") && !text.contains('\\') {
+    if !text.to_ascii_lowercase().contains("env(") && !text.contains('\\') {
         out.push_str(&text);
         return;
     }
     let mut input = cssparser::ParserInput::new(&text);
     rename_regions(&mut cssparser::Parser::new(&mut input), out);
+}
+
+/// The page's own name for an edge's safe-area inset, which a sheet the web
+/// draws sets for its content; elsewhere unset, so the browser's stands.
+pub fn browser_inset(edge: Edge) -> &'static str {
+    match edge {
+        Edge::Top => "--exact-safe-area-inset-top",
+        Edge::Right => "--exact-safe-area-inset-right",
+        Edge::Bottom => "--exact-safe-area-inset-bottom",
+        Edge::Left => "--exact-safe-area-inset-left",
+    }
 }
 
 fn rename_regions(p: &mut cssparser::Parser<'_, '_>, out: &mut String) {
@@ -750,6 +764,35 @@ fn rename_regions(p: &mut cssparser::Parser<'_, '_>, out: &mut String) {
                 let (_, edge) = Region::from_name(name).expect("matched");
                 out.push_str(ENV_NAMES[0].0);
                 out.push_str(edge.name());
+                continue;
+            }
+            // An edge's `env()`, through the page's name for it.
+            Token::Function(ref name) if name.eq_ignore_ascii_case("env") => {
+                let (function, mut inner, mut edge) =
+                    (p.slice_from(start).to_owned(), String::new(), None);
+                let _ = p.parse_nested_block(|p| {
+                    let first = p.state();
+                    if let Ok(Token::Ident(name)) = p.next() {
+                        edge = name
+                            .strip_prefix(ENV_NAMES[0].0)
+                            .and_then(Edge::from_name)
+                            .or(Region::from_name(name).map(|(_, e)| e));
+                    }
+                    p.reset(&first);
+                    rename_regions(p, &mut inner);
+                    Ok::<(), cssparser::ParseError<'_, ()>>(())
+                });
+                if let Some(edge) = edge {
+                    out.push_str("var(");
+                    out.push_str(browser_inset(edge));
+                    out.push_str(", ");
+                }
+                out.push_str(&function);
+                out.push_str(&inner);
+                out.push(')');
+                if edge.is_some() {
+                    out.push(')');
+                }
                 continue;
             }
             Token::Function(_) | Token::ParenthesisBlock => ')',

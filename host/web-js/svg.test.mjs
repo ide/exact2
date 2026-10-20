@@ -156,13 +156,14 @@ test('compiled SVG geometry bindings render, change, unset and preserve zero', a
         return ['calc(10vh + 10px)', 'min(10vh, 50px)', 'max(10vh, 50px)', 'clamp(10px, 10vh, 100px)',
           'env(safe-area-inset-top, 3px)', 'env(viewport-segment-height 1 0, 25%)', '-exact-hairline', '2em', '2rem'].map(length => {
           commit(() => W(value, length), 'test');
-          const css = length === '-exact-hairline' ? 'var(--exact-hairline, 1px)' : length;
+          // The page's names: the hairline's, and a safe-area edge's, which falls back to the browser's (regions.js).
+          const css = length === '-exact-hairline' ? 'var(--exact-hairline, 1px)' : length.startsWith('env(safe-area') ? `var(--exact-safe-area-inset-top, ${length})` : length;
           control.style.height = ''; control.style.height = css;
           const fallback = { length, attribute: element.getAttribute('height'), css: element.style.height,
             control: control.style.height, height: element.getBoundingClientRect().height,
             expected: control.getBoundingClientRect().height, motion: held.at(-1) };
           commit(() => W(value, '10vh'), 'test');
-          return { ...fallback, restored: [element.getAttribute('height'), element.style.height] };
+          return { ...fallback, written: css, restored: [element.getAttribute('height'), element.style.height] };
         });
       } finally { Hooks.style = previous; svg.remove(); }
     });
@@ -170,7 +171,7 @@ test('compiled SVG geometry bindings render, change, unset and preserve zero', a
       expect(result.attribute, result.length).toBeNull();
       expect(result.css, result.length).toBe(result.control);
       expect(result.height, result.length).toBeCloseTo(result.expected, 3);
-      expect(result.motion, result.length).toBe(result.length === '-exact-hairline' ? 'var(--exact-hairline, 1px)' : result.length);
+      expect(result.motion, result.length).toBe(result.written);
       expect(result.restored).toEqual(['10vh', '']);
     }
     await browser.close();

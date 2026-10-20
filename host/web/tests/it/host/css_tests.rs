@@ -202,7 +202,7 @@ fn style_rows_lower_to_css_by_their_names() {
     for expected in [
         "scroll-behavior:smooth;",
         "scroll-padding-top:92px;",
-        "scroll-padding-bottom:calc(env(safe-area-inset-bottom) + 49px);",
+        "scroll-padding-bottom:calc(var(--exact-safe-area-inset-bottom, env(safe-area-inset-bottom)) + 49px);",
         "display:-webkit-box;",
         "-webkit-box-orient:vertical;",
         "-webkit-line-clamp:2;",
@@ -234,9 +234,9 @@ fn style_rows_lower_to_css_by_their_names() {
         "orphans:1;",
         "break-before:column;",
         "break-inside:avoid-column;",
-        "padding-top:env(safe-area-inset-top);",
-        "padding-bottom:calc(env(safe-area-inset-bottom) + 12px);",
-        "margin-left:calc(env(safe-area-inset-left) - 2px);",
+        "padding-top:var(--exact-safe-area-inset-top, env(safe-area-inset-top));",
+        "padding-bottom:calc(var(--exact-safe-area-inset-bottom, env(safe-area-inset-bottom)) + 12px);",
+        "margin-left:calc(var(--exact-safe-area-inset-left, env(safe-area-inset-left)) - 2px);",
     ] {
         assert!(css.contains(expected), "{expected} in {css}");
     }
@@ -473,9 +473,9 @@ fn comparison_lengths_lower_to_css_comparisons() {
     let (css, skipped) = css_text(&s, &[]);
     assert!(skipped.is_empty(), "{skipped:?}");
     for expected in [
-        "padding-bottom:clamp(15px, env(safe-area-inset-bottom), 60px);",
-        "bottom:calc(59px + clamp(15px, env(safe-area-inset-bottom), 60px));",
-        "padding-top:max(15px, -4px + env(safe-area-inset-top));",
+        "padding-bottom:clamp(15px, var(--exact-safe-area-inset-bottom, env(safe-area-inset-bottom)), 60px);",
+        "bottom:calc(59px + clamp(15px, var(--exact-safe-area-inset-bottom, env(safe-area-inset-bottom)), 60px));",
+        "padding-top:max(15px, -4px + var(--exact-safe-area-inset-top, env(safe-area-inset-top)));",
         "width:min(50vw, 300px);",
         "height:10px;",
     ] {

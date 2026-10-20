@@ -76,7 +76,7 @@ test('the neutral sheet\'s lengths and ratios are the metric table\'s neutral co
     'alert-title': ['font-size'], 'alert-message-gap': ['margin-bottom', 'margin-top'], 'alert-scroll-gutter': ['padding-inline-end'],
     'menu-min-width': ['min-width'], 'menu-max-width': ['max-width'], 'menu-margin': ['max-width'], 'menu-padding': ['padding'], 'menu-offset': ['margin'],
     'menu-row-height': ['min-height'], 'menu-row-padding-block': ['padding'], 'menu-row-padding-inline': ['padding'], 'menu-row-gap': ['--exact-button-space-width'],
-    'sheet-wide': ['@media'], 'sheet-width': ['width'], 'sheet-max-height': ['max-height'], 'sheet-margin': ['width', 'max-height'], 'sheet-top': ['inset'],
+    'sheet-wide': ['@media'], 'sheet-width': ['width'], 'sheet-max-height': ['max-height'], 'sheet-margin': ['width', 'max-height'], 'sheet-top': ['inset'], 'sheet-bottom': ['--exact-safe-area-inset-bottom'],
     'list-row-inset': ['padding-left', 'padding-right'],
     'raised-shadow-y': ['--exact-raised'], 'raised-shadow-blur': ['--exact-raised'], 'modal-shadow-y': ['--exact-modal'], 'modal-shadow-blur': ['--exact-modal'],
   };
@@ -430,6 +430,31 @@ for (const engine of ['chromium', 'firefox', 'webkit']) test(`${engine}: a sheet
         return [css('opened', 'position'), box('opened'), css('opened', 'borderTopLeftRadius'), css('opened', 'borderBottomLeftRadius'), box('tabs')[1] < box('opened')[1] + box('opened')[3], css('opened', 'zIndex'), moving, path.length === 0 || (path[0] === 712 && path[1] > 12 && path[1] < 712)];
       });
       expect([engine, reducedMotion, got]).toEqual([engine, reducedMotion, ['fixed', [0, 12, 400, 688], '12px', '0px', true, '1', reducedMotion === 'reduce' ? [] : ['box-shadow', 'translate'], true]]);
+      await context.close();
+    }
+  } finally {
+    await browser.close();
+  }
+}, 90000);
+
+// A sheet's content has the sheet's own safe area, as UIKit gives a sheet its own: an author's `env(safe-area-inset-*)`,
+// as the web writes it (css.rs), is none at the top and at least 16 px at the bottom; a card's is 16 px at the bottom
+// and none at its sides. Outside a sheet it is the browser's (none here).
+const inset = (edge) => `var(--exact-safe-area-inset-${edge}, env(safe-area-inset-${edge}))`;
+const insets = `<div id="exact-root"><div id="page" style="padding:${['top', 'right', 'bottom', 'left'].map(inset).join(' ')}"></div>
+  <div navigationKey="2" navigationPresentation="modal"><div id="inside" style="padding:${['top', 'right', 'bottom', 'left'].map(inset).join(' ')}"></div></div></div>`;
+for (const engine of ['chromium', 'firefox', 'webkit']) test(`${engine}: a sheet's content has the sheet's own safe area`, async () => {
+  const browser = await launch(engine);
+  try {
+    for (const [width, want] of [[400, ['0px', '0px', '16px', '0px']], [1000, ['0px', '0px', '16px', '0px']]]) {
+      const context = await browser.newContext({ viewport: { width, height: 700 } });
+      const page = await context.newPage();
+      await page.setContent(`<style>${sheet()}</style>${insets}<script>${helpers}</script>`);
+      const got = await page.evaluate(() => ['page', 'inside'].map((id) => ['Top', 'Right', 'Bottom', 'Left'].map((edge) => css(id, `padding${edge}`))));
+      expect([engine, width, got]).toEqual([engine, width, [['0px', '0px', '0px', '0px'], want]]);
+      // The browser's insets are none here, so the top's (and a card's sides') is read as the sheet says it.
+      const said = await page.evaluate(() => ['top', 'right', 'left'].map((edge) => getComputedStyle(document.getElementById('inside')).getPropertyValue(`--exact-safe-area-inset-${edge}`).trim()));
+      expect([engine, width, said]).toEqual([engine, width, width < 900 ? ['0px', '', ''] : ['0px', '0px', '0px']]);
       await context.close();
     }
   } finally {

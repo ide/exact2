@@ -466,30 +466,31 @@ fn complex_svg_geometry_attributes_take_the_initial_value() {
 
 /// A browser has no layout regions (LLP 1123 D10): each is written as the
 /// safe area it resolves to on every host that reports none, its offset
-/// and any calculation around it kept.
+/// and any calculation around it kept, read through the page's name for the
+/// edge, which a sheet the web draws sets (LLP 1115.000 D4.8).
 #[test]
 fn a_layout_region_is_the_browsers_safe_area() {
     use exact_kernel::{StyleId, StyleValue};
     for (text, css) in [
         (
             "env(-exact-layout-margins-inset-left)",
-            "padding-left:env(safe-area-inset-left)",
+            "padding-left:var(--exact-safe-area-inset-left, env(safe-area-inset-left))",
         ),
         (
             "env(-exact-readable-content-corners-inset-right)",
-            "padding-left:env(safe-area-inset-right)",
+            "padding-left:var(--exact-safe-area-inset-right, env(safe-area-inset-right))",
         ),
         (
             "calc(env(-exact-safe-area-corners-inset-top) + 4px)",
-            "padding-left:calc(env(safe-area-inset-top) + 4px)",
+            "padding-left:calc(var(--exact-safe-area-inset-top, env(safe-area-inset-top)) + 4px)",
         ),
         (
             "max(16px, env(-exact-layout-margins-corners-inset-bottom))",
-            "padding-left:max(16px, env(safe-area-inset-bottom))",
+            "padding-left:max(16px, var(--exact-safe-area-inset-bottom, env(safe-area-inset-bottom)))",
         ),
         (
             "max(16px, env(-exact-readable-content-inset-left, 8px))",
-            "padding-left:max(16px, env(safe-area-inset-left, 8px))",
+            "padding-left:max(16px, var(--exact-safe-area-inset-left, env(safe-area-inset-left, 8px)))",
         ),
     ] {
         let mut style = StyleProps::default();
@@ -499,8 +500,8 @@ fn a_layout_region_is_the_browsers_safe_area() {
         let (out, _) = crate::css::css_text(&style, &[]);
         assert!(out.contains(css), "{text}: {out}");
         assert!(
-            !out.contains("-exact-"),
-            "no name a browser does not know: {out}"
+            !out.replace("--exact-safe-area-inset-", "").contains("-exact-"),
+            "no name a browser does not know, but the page's own: {out}"
         );
     }
 }

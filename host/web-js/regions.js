@@ -1,19 +1,26 @@
-// A bound length's layout regions (LLP 1123 D10) as the browser's safe area:
-// the name in `env(-exact-<region>-inset-<edge>)` becomes
-// `safe-area-inset-<edge>`, as css.rs writes a literal one through the
-// kernel's `browser_css`. A browser keeps an `env()` value's text as written,
-// escapes included, so the text is read as CSS Syntax §4 tokenizes it, after
-// its preprocessing (§3.3): comments, strings, numbers, hashes, at-keywords,
-// CDO and CDC and `url()` contents are passed over, and an identifier is compared with its
-// escapes decoded. Only `env()`'s first argument is renamed; everything else is
-// kept as written.
+// A bound length's `env()` as css.rs writes a literal one (the kernel's
+// `browser_css`): a layout region's name (LLP 1123 D10),
+// `env(-exact-<region>-inset-<edge>)`, becomes `safe-area-inset-<edge>`, and
+// each edge's `env()` is read through the page's
+// `--exact-safe-area-inset-<edge>`, which falls back to it (a sheet gives its
+// content its own safe area, LLP 1115.000 D4.8). A browser keeps an `env()`
+// value's text as written, escapes included, so the text is read as CSS
+// Syntax §4 tokenizes it, after its preprocessing (§3.3): comments, strings,
+// numbers, hashes, at-keywords, CDO and CDC and `url()` contents are passed
+// over, and an identifier is compared with its escapes decoded. Only
+// `env()`'s first argument is renamed, and an edge's `env()` is wrapped in
+// that `var()`; everything else is kept as written.
 const REGION = /^-exact-(?:safe-area-corners|layout-margins(?:-corners)?|readable-content(?:-corners)?)-inset-(top|right|bottom|left)$/;
+const EDGE = /^safe-area-inset-(top|right|bottom|left)$/;
 
 export function regions(text) {
-  // Return a value without a region's prefix spelled out or an escape as it is: almost every value
-  if (!text.includes("-exact-") && !text.includes("\\")) return text;
+  // Return a value with no `env()` spelled out or an escape as it is: almost every value
+  if (!/env/i.test(text) && !text.includes("\\")) return text;
   const s = text.includes("\r") || text.includes("\f") ? text.replace(/\r\n?|\f/g, "\n") : text;
   let out = "", copied = 0, i = 0, argument = false; // whether the next token is `env()`'s first
+  // The parentheses open, and each `env()` open: the depth inside it, where it starts in `out`, and its edge.
+  let depth = 0; const open = [];
+  const wrap = (env, close) => { if (env.edge) out = out.slice(0, env.at) + `var(--exact-safe-area-inset-${env.edge}, ` + out.slice(env.at) + close; };
   while (i < s.length) {
     const start = i, c = s.charCodeAt(i);
     if (c === 0x2f && s.charCodeAt(i + 1) === 0x2a) { // a comment
@@ -34,6 +41,11 @@ export function regions(text) {
       i = identEnd(s, i + 1); // a hash or an at-keyword
       argument = false;
     } else if (!startsIdent(s, i)) {
+      if (c === 0x28) depth++;
+      else if (c === 0x29 && depth > 0) {
+        if (open.at(-1)?.depth === depth) { out += s.slice(copied, i + 1); copied = i + 1; wrap(open.pop(), ")"); }
+        depth--;
+      }
       i++;
       argument = false;
     } else {
@@ -41,10 +53,15 @@ export function regions(text) {
       if (s.charCodeAt(i) === 0x28) { // a function
         const name = decode(s.slice(start, i++)).toLowerCase();
         argument = name === "env";
-        if (name === "url") i = urlEnd(s, i);
+        if (argument) { out += s.slice(copied, start); copied = start; open.push({ depth: depth + 1, at: out.length, edge: null }); }
+        // An unquoted `url(` is one token, its `)` included
+        const end = name === "url" ? urlEnd(s, i) : i;
+        if (end === i) depth++;
+        i = end;
       } else {
-        const region = argument && REGION.exec(decode(s.slice(start, i)));
+        const name = argument && decode(s.slice(start, i)), region = name && REGION.exec(name), edge = region?.[1] ?? (name && EDGE.exec(name)?.[1]);
         argument = false;
+        if (edge) open.at(-1).edge = edge;
         if (region) {
           out += s.slice(copied, start) + `safe-area-inset-${region[1]}`;
           copied = i;
@@ -52,6 +69,8 @@ export function regions(text) {
       }
     }
   }
+  // An `env()` left open is closed where the text ends, as CSS closes it, the `var()` around it too
+  if (open.some((env) => env.edge)) { out += s.slice(copied); copied = s.length; while (open.length) wrap(open.pop(), ""); }
   return copied === 0 ? s : out + s.slice(copied);
 }
 

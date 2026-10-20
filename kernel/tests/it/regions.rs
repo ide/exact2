@@ -247,25 +247,27 @@ fn region_lengths_travel_the_wire() {
 }
 
 /// A browser gets the safe area's name for each region, an escaped name
-/// included, and the rest of the text as written, a fallback too.
+/// included, read through the page's name for it (`--exact-safe-area-inset-*`,
+/// which a sheet sets for its content), and the rest of the text as written, a
+/// fallback too.
 #[test]
 fn a_browser_reads_each_region_as_its_safe_area() {
     for (text, want) in [
         (
             "max(16px, env(-exact-layout-margins-inset-left))",
-            "max(16px, env(safe-area-inset-left))",
+            "max(16px, var(--exact-safe-area-inset-left, env(safe-area-inset-left)))",
         ),
         (
             r"max(16px, env(-exact-\6c ayout-margins-inset-left, 8px))",
-            "max(16px, env(safe-area-inset-left, 8px))",
+            "max(16px, var(--exact-safe-area-inset-left, env(safe-area-inset-left, 8px)))",
         ),
         (
             "calc(env(-exact-readable-content-corners-inset-right, 30px) + 5px)",
-            "calc(env(safe-area-inset-right, 30px) + 5px)",
+            "calc(var(--exact-safe-area-inset-right, env(safe-area-inset-right, 30px)) + 5px)",
         ),
         (
             "min(10vw, env(safe-area-inset-top))",
-            "min(10vw, env(safe-area-inset-top))",
+            "min(10vw, var(--exact-safe-area-inset-top, env(safe-area-inset-top)))",
         ),
     ] {
         let mut style = StyleProps::default();
