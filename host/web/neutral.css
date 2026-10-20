@@ -300,7 +300,7 @@
   /* A modal route is a sheet (D4.8): the page's ground over a scrim, above its siblings and the tab bar (`z-index`:
      WebKit paints a sidebar that scrolls over the scrim otherwise). Narrow, it is iOS's sheet, from 12 px below the
      window's safe area at the top to its bottom, its top corners rounded; wide (900 px, the navigation glue's
-     `WIDE`), a card as tall as its content up to the window. It slides up as it opens and back down as it closes
+     `WIDE`), a card of a sheet's height, as iPad's form sheet is. It slides up as it opens and back down as it closes
      (navigation.js `sheetLeaves`), unless the person asks for less motion; a sheet beneath another leaves the scrim
      to the one above. Its content has its own safe area, as a UIKit sheet's does: none at the top, and at the bottom
      the window's but at least 16 px (a card's: 16 px, none at its sides), which an author's `env(safe-area-inset-*)`
@@ -315,7 +315,7 @@
   #exact-root [navigationPresentation="modal"][data-exact-covered] { box-shadow: none; }
   @media (min-width: 900px) {
     #exact-root [navigationPresentation="modal"][data-exact-covered] { box-shadow: var(--exact-modal); }
-    #exact-root [navigationPresentation="modal"] { inset: 0 !important; margin: auto !important; width: min(35rem, calc(100vw - 64px)) !important; height: fit-content !important; max-height: min(45rem, calc(100vh - 64px)) !important; border-radius: 12px; box-shadow: var(--exact-modal), 0 0 0 100vmax var(--exact-scrim); --exact-safe-area-inset-right: 0px; --exact-safe-area-inset-bottom: 16px; --exact-safe-area-inset-left: 0px; }
+    #exact-root [navigationPresentation="modal"] { inset: 0 !important; margin: auto !important; width: min(35rem, calc(100vw - 64px)) !important; height: min(45rem, calc(100vh - 64px)) !important; border-radius: 12px; box-shadow: var(--exact-modal), 0 0 0 100vmax var(--exact-scrim); --exact-safe-area-inset-right: 0px; --exact-safe-area-inset-bottom: 16px; --exact-safe-area-inset-left: 0px; }
     @starting-style { #exact-root [navigationPresentation="modal"] { box-shadow: var(--exact-modal), 0 0 0 100vmax transparent; } }
   }
 
