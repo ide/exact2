@@ -6,6 +6,7 @@ import { readFileSync } from 'node:fs';
 import { withLook, appleColors } from '../look.mjs';
 import { suiteBrowser } from '../../../scripts/agent-launch.mjs';
 import { glueDeclarations } from './glue-fixture.mjs';
+import { decodePng } from '../../../scripts/png.mjs';
 
 const read = (path) => readFileSync(new URL(path, import.meta.url), 'utf8');
 const shell = read('../index.html'), neutral = read('../neutral.css');
@@ -66,7 +67,7 @@ test('the neutral sheet\'s lengths and ratios are the metric table\'s neutral co
     'focus-ring-offset': ['outline-offset'],
     'mark-size': ['width', 'height', 'background'], 'mark-size-coarse': ['width', 'height'],
     'switch-width': ['width'], 'switch-height': ['height'], 'range-height': ['height'], 'range-track': ['height'], 'range-thumb-line': ['border'],
-    'button-padding-block': ['padding'], 'button-padding-inline': ['padding'], 'button-padding-inline-symbol': ['padding-inline'],
+    'button-padding-block': ['padding'], 'button-padding-inline': ['padding', 'padding-inline'], 'button-padding-inline-symbol': ['padding-inline'],
     'field-padding-block': ['padding'], 'field-padding-block-coarse': ['padding-block'], 'field-padding-inline': ['padding'],
     'file-padding-block': ['padding'], 'file-gap': ['margin-inline-end'],
     'segmented-padding': ['padding'], 'segment-padding-block': ['padding'], 'segment-padding-inline': ['padding'], 'segment-height-coarse': ['min-height'],
@@ -391,6 +392,23 @@ for (const engine of ['chromium', 'firefox', 'webkit']) test(`${engine}: the neu
       // own keeps it.
       const OWN = [[52, 199, 89, 1], '1'], [inks, heldInks] = (await highlight('translucent')).map((seen) => seen[4]);
       expect([at('symbols'), inks, heldInks]).toEqual([at('symbols'), [[inks[0][0], '1'], OWN, OWN], [[[...inks[0][0].slice(0, 3), 0.75], '1'], OWN, OWN]]);
+      // Let go (the input glue marks the release), it eases out of the highlight over a quarter second: the fill, the
+      // face, a symbol in the button's ink and a sheet's word; a symbol in a colour of its own has nothing to ease.
+      const released = (id) => page.evaluate((id) => {
+        const b = document.getElementById(id);
+        b.toggleAttribute('data-pressed', true);
+        getComputedStyle(b).opacity;
+        b.removeAttribute('data-pressed');
+        b.setAttribute('data-exact-released', '');
+        // (WebKit eases an `::after` that draws nothing too.)
+        const eases = b.getAnimations({ subtree: true }).filter((a) => !a.effect.pseudoElement || getComputedStyle(a.effect.target, a.effect.pseudoElement).content !== 'none');
+        const seen = eases.map((a) => `${a.effect.target.id || a.effect.target.localName}${a.effect.pseudoElement ?? ''} ${a.transitionProperty} ${a.effect.getTiming().duration} ${a.effect.getTiming().easing}`).sort();
+        for (const a of eases) a.finish();
+        b.removeAttribute('data-exact-released');
+        return seen;
+      }, id);
+      expect([at('released'), await released('translucent'), await released('sheet-cancel')]).toEqual([at('released'),
+        ['span opacity 250 ease-in-out', 'translucent background-color 250 ease-in-out', 'unsaid background-color 250 ease-in-out'], ['sheet-cancel::after opacity 250 ease-in-out']]);
       // A tinted button held shows its stronger wash under a pointer too.
       await page.hover('#tinted');
       expect([at('tinted hovered'), (await highlight('tinted')).map((seen) => seen[1][3])]).toEqual([at('tinted hovered'), [0.08, 0.16]]);
@@ -826,6 +844,42 @@ test('a size the author wrote on a platform button is its box, and an unsized bu
     await page.setContent(`<style>${sheet()}</style><div id="exact-root">${button('unsized', '')}${button('sized', 'width:84px;height:24px', 'width height')}${button('square', 'width:28px;height:28px', 'width height')}${button('short', 'height:24px', 'height')}${button('unsaid', 'width:28px;height:28px')}</div><script>${helpers}</script>`);
     const got = await page.evaluate(() => ({ unsized: box('unsized')[3], sized: box('sized').slice(2), square: box('square').slice(2), short: box('short')[3], unsaid: box('unsaid').slice(2) }));
     expect(got).toEqual({ unsized: 36, sized: [84, 24], square: [28, 28], short: 24, unsaid: [36, 36] }); // `unsaid`: the floor, were the host not to say
+  } finally { await browser.close(); }
+}, 90000);
+
+// LLP 1116.020 D2: a sheet's bar says the name of a button whose face is only a symbol. A width its author wrote for
+// the symbol, inline (the wasm runtime) or in a class (the JS target), leaves the word its padding and its wash, as
+// UIKit sizes a bar item to its title: 16 px either side of the word, inside the bar, in either direction.
+for (const engine of ['chromium', 'firefox', 'webkit']) test(`${engine}: a sheet's bar word keeps its padding whatever width its author wrote`, async () => {
+  const browser = await launch(engine);
+  try {
+    for (const dir of ['ltr', 'rtl']) {
+      const page = await browser.newPage({ viewport: { width: 400, height: 300 }, colorScheme: 'light' });
+      const word = (id, attributes) => `<button type="button" data-native data-button-style="bordered" aria-label="Cancel" id="${id}" ${attributes}><img data-symbol-source="symbol:sf/xmark" alt=""></button>`;
+      await page.setContent(`<!doctype html><html dir="${dir}"><style>${sheet()} #exact-root#exact-root .sized { width: 44px; height: 44px; display: flex; }</style><div id="exact-root">
+        <div navigationKey="1" navigationPresentation="modal"><header id="bar" style="display:flex;align-items:center"><div style="flex:1;min-width:0"><h2>Last Parked</h2></div>
+        ${word('inline', 'data-exact-said="width height" style="width:44px;height:44px;display:flex"')}${word('class', 'data-exact-said="width height" class="sized"')}${word('unsized', 'style="display:grid"')}</header></div>
+      </div><script>${helpers}</script>`);
+      for (const id of ['inline', 'class', 'unsized']) {
+        const at = [engine, dir, id];
+        const [padding, room, height, inside] = await page.evaluate((id) => {
+          const [x, , width, height] = box(id), [bar, , barWidth] = box('bar');
+          return [[css(id, 'paddingInlineStart'), css(id, 'paddingInlineEnd')], Math.round(width - parseFloat(css(id, 'width', '::after'))), height, x >= bar + 16 && x + width <= bar + barWidth - 16];
+        }, id);
+        expect([at, padding, room, height, inside]).toEqual([at, ['16px', '16px'], 34, id === 'unsized' ? 36 : 44, true]);
+        // The pointer's wash fills the padding on both sides: a pixel in each matches the other and not the ground.
+        const pixels = async () => {
+          const { width, height, data } = decodePng(await page.locator(`#${id}`).screenshot());
+          return [4, width - 5].map((x) => [...data.subarray((Math.floor(height / 2) * width + x) * 4, (Math.floor(height / 2) * width + x) * 4 + 3)]);
+        };
+        const [ground] = await pixels();
+        await page.hover(`#${id}`);
+        const [start, end] = await pixels();
+        expect([at, start, end.join() === start.join(), start.join() !== ground.join()]).toEqual([at, start, true, true]);
+        await page.mouse.move(1, 299);
+      }
+      await page.close();
+    }
   } finally { await browser.close(); }
 }, 90000);
 

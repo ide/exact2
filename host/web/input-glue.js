@@ -299,8 +299,22 @@ export function createInputHandlers({ root, views, retiredViews, ready, inertAnc
     paint(el, state, EASE.duration);
     if (!down && (now || !el.isConnected)) endPaint(el, state);
   };
+  // A release is marked (`data-exact-released`) until the transitions it starts end or a press comes again: neutral.css
+  // eases a native button out of its highlight then, as UIKit does. A release at once (the window went) or on the
+  // agent's clock is not marked, so it lands at once.
+  const releases = new WeakMap();
   const showPress = (el, down, now = false) => {
+    const eased = !down && !now && !agentMode && el.hasAttribute("data-pressed");
+    if (down || eased) el.toggleAttribute("data-exact-released", eased);
     el.toggleAttribute("data-pressed", down);
+    // The press is styled now, so a release before the next frame (a quick tap) still eases out of it, as a UIButton's
+    // does (LLP 1061 D2).
+    if (down) getComputedStyle(el).opacity;
+    else if (eased) {
+      const ends = Promise.allSettled(el.getAnimations({ subtree: true }).filter(a => a instanceof CSSTransition).map(a => a.finished));
+      releases.set(el, ends);
+      ends.then(() => { if (releases.get(el) === ends) { releases.delete(el); el.removeAttribute("data-exact-released"); } });
+    }
     showPaint(el, down, now);
     // A design token's scale is its property's `var()`: the computed value
     // is the token's (LLP 1121 D7).
