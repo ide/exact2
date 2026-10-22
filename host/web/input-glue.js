@@ -299,8 +299,27 @@ export function createInputHandlers({ root, views, retiredViews, ready, inertAnc
     paint(el, state, EASE.duration);
     if (!down && (now || !el.isConnected)) endPaint(el, state);
   };
+  // A native button's release is marked (`data-exact-released`) until the transitions it starts end or a press comes
+  // again, and while it is marked neutral.css eases the button out of its press, as UIKit does. A release at once (the
+  // window went) or on the agent's clock is not marked, so it lands at once.
+  const releases = new WeakMap(), RELEASED = new Set(["opacity", "background-color", "--exact-wash"]);
   const showPress = (el, down, now = false) => {
+    const native = el.matches("button[data-button-style]");
+    const eased = native && !down && !now && !agentMode && el.hasAttribute("data-pressed");
     el.toggleAttribute("data-pressed", down);
+    if (native && down) {
+      // The press is styled now, so a release before the next frame (a quick tap) still eases out of it, as a
+      // UIButton's highlight does (LLP 1061 D2).
+      el.removeAttribute("data-exact-released");
+      getComputedStyle(el).opacity;
+    } else if (eased) {
+      el.setAttribute("data-exact-released", "");
+      // What the release eases: the button's fill or wash, and its face's opacity and its symbols' ink.
+      const ease = el.getAnimations({ subtree: true }).filter(a => RELEASED.has(a.transitionProperty) && (a.effect.target === el || a.effect.target.parentElement === el));
+      const ends = Promise.allSettled(ease.map(a => a.finished));
+      releases.set(el, ends);
+      ends.then(() => { if (releases.get(el) === ends) el.removeAttribute("data-exact-released"); });
+    }
     showPaint(el, down, now);
     // A design token's scale is its property's `var()`: the computed value
     // is the token's (LLP 1121 D7).
