@@ -392,6 +392,23 @@ for (const engine of ['chromium', 'firefox', 'webkit']) test(`${engine}: the neu
       // own keeps it.
       const OWN = [[52, 199, 89, 1], '1'], [inks, heldInks] = (await highlight('translucent')).map((seen) => seen[4]);
       expect([at('symbols'), inks, heldInks]).toEqual([at('symbols'), [[inks[0][0], '1'], OWN, OWN], [[[...inks[0][0].slice(0, 3), 0.75], '1'], OWN, OWN]]);
+      // Let go (the input glue marks the release), it eases out of the highlight over a quarter second: the fill, the
+      // face, a symbol in the button's ink and a sheet's word; a symbol in a colour of its own has nothing to ease.
+      const released = (id) => page.evaluate((id) => {
+        const b = document.getElementById(id);
+        b.toggleAttribute('data-pressed', true);
+        getComputedStyle(b).opacity;
+        b.removeAttribute('data-pressed');
+        b.setAttribute('data-exact-released', '');
+        // (WebKit eases an `::after` that draws nothing too.)
+        const eases = b.getAnimations({ subtree: true }).filter((a) => !a.effect.pseudoElement || getComputedStyle(a.effect.target, a.effect.pseudoElement).content !== 'none');
+        const seen = eases.map((a) => `${a.effect.target.id || a.effect.target.localName}${a.effect.pseudoElement ?? ''} ${a.transitionProperty} ${a.effect.getTiming().duration} ${a.effect.getTiming().easing}`).sort();
+        for (const a of eases) a.finish();
+        b.removeAttribute('data-exact-released');
+        return seen;
+      }, id);
+      expect([at('released'), await released('translucent'), await released('sheet-cancel')]).toEqual([at('released'),
+        ['span opacity 250 ease-in-out', 'translucent background-color 250 ease-in-out', 'unsaid background-color 250 ease-in-out'], ['sheet-cancel::after opacity 250 ease-in-out']]);
       // A tinted button held shows its stronger wash under a pointer too.
       await page.hover('#tinted');
       expect([at('tinted hovered'), (await highlight('tinted')).map((seen) => seen[1][3])]).toEqual([at('tinted hovered'), [0.08, 0.16]]);

@@ -134,6 +134,15 @@
     & > :not(img), &::after { opacity: .75; }
     & > img { --exact-tint: color-mix(in srgb, currentColor 75%, transparent); }
   }
+  /* Let go, the highlight eases out over a quarter second (ease-in-out), as UIKit's does (measured on iOS 27), so even a
+     tap too quick to see held shows it; it comes in at once. The input glue marks the release only while it eases
+     (`data-exact-released`), so nothing else animates (a filled button's fill as it is enabled, say). Glass's wash, an
+     image, goes at once. */
+  #exact-root button:is([data-button-style="plain"], [data-button-style="borderless"], [data-button-style="filled"], [data-button-style="bordered-prominent"], [data-button-style$="glass"])[data-exact-released]:not(:disabled, :is([role="menu"], [data-exact-chooser]) *) {
+    &:is([data-button-style="filled"], [data-button-style="bordered-prominent"]) { transition: background-color .25s ease-in-out; }
+    & > :not(img), &::after { transition: opacity .25s ease-in-out; }
+    & > img { transition: background-color .25s ease-in-out; }
+  }
   /* Disabled, in every style (LLP 1116.005 D8): the grey ink, and the neutral fill where the style filled with the
      accent; an outline fades to a divider. */
   #exact-root button[data-button-style]:disabled { color: var(--exact-gray-text); background-image: none; }
