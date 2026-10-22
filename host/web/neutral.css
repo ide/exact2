@@ -334,9 +334,12 @@
   :where(#exact-root [navigationPresentation="modal"] > header:not([data-exact-said~="justify-content"])) > :is(h1, h2, h3, h4, h5, h6),
   :where(#exact-root [navigationPresentation="modal"] > header:not([data-exact-said~="justify-content"]) > [role="heading"]) { margin-inline: auto; text-align: center; }
   /* LLP 1116.020 D2: a sheet's button whose face is only a symbol says its name instead, padded as a word is (above):
-     iOS draws a Cancel's xmark and a Save's checkmark, and a web dialog's buttons are words. */
+     iOS draws a Cancel's xmark and a Save's checkmark, and a web dialog's buttons are words. A width written for the
+     symbol neither takes the padding away nor clips the word: UIKit sizes a bar item to its title, with 16 points of
+     its glass either side (measured on iOS 27), the padding's 1em at the web's 16 px body. */
   :where(#exact-root [navigationPresentation="modal"] > header button[aria-label]:not(:has(> :not(img[data-symbol-source])))) > img { display: none; }
   :where(#exact-root [navigationPresentation="modal"] > header button[aria-label]:not(:has(> :not(img[data-symbol-source]))))::after { content: attr(aria-label); }
+  #exact-root [navigationPresentation="modal"] > header button[data-button-style][aria-label]:not(:has(> :not(img[data-symbol-source]))) { min-width: max-content; padding-inline: 1em; }
 
   /* A dialog is a modal surface. An alert reads as a page does, its title and message at the start. Its actions share
      the row equally in the order written, a title too long for its share taking a row of its own, and a destructive
