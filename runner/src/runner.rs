@@ -81,6 +81,7 @@ mod kept_tests;
 mod lines;
 mod lists;
 mod media_session;
+pub mod outstanding;
 mod page;
 mod perf;
 pub mod persist;
@@ -1460,8 +1461,7 @@ impl<D: DataSource> Runner<D> {
         self.reuse = on;
     }
 
-    /// Whether an update failed after the tree began to change (see
-    /// [`RunnerError::Poisoned`]).
+    /// Whether an update failed after the tree began to change (see [`RunnerError::Poisoned`]).
     pub fn is_poisoned(&self) -> bool {
         self.poisoned
     }

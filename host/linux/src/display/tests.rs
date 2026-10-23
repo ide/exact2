@@ -18,6 +18,12 @@ fn flip(crtc_id: u32, sequence: u32) -> Event {
     })
 }
 fn read_once(last: Option<u32>, result: io::Result<Vec<Event>>) -> io::Result<Option<u32>> {
+    read_timed(last, result).map(|r| r.map(|(sequence, _)| sequence))
+}
+fn read_timed(
+    last: Option<u32>,
+    result: io::Result<Vec<Event>>,
+) -> io::Result<Option<(u32, Duration)>> {
     let mut result = Some(result);
     receive_flip(crtc(7), last, || {
         result
@@ -26,9 +32,14 @@ fn read_once(last: Option<u32>, result: io::Result<Vec<Event>>) -> io::Result<Op
     })
 }
 
+/// The kernel's flip timestamp is returned, not the time the loop read the
+/// event: TTI uses it as the moment the frame was shown.
 #[test]
 fn matching_crtc_read_accepts_the_frame_sequence() {
-    assert_eq!(read_once(None, Ok(vec![flip(7, 30)])).unwrap(), Some(30));
+    assert_eq!(
+        read_timed(None, Ok(vec![flip(7, 30)])).unwrap(),
+        Some((30, Duration::from_millis(16)))
+    );
 }
 
 #[test]

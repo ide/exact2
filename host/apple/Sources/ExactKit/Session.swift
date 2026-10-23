@@ -412,6 +412,8 @@ public final class ExactSession {
     public private(set) var bootMs = 0.0
     public private(set) var rustMs = 0.0
     public private(set) var applyMs = 0.0
+    /// The first batch's apply, part by part, in ms (`ApplyProfile`).
+    public private(set) var applyParts: [String: Double] = [:]
     /// Commands from the batch being applied, delivered after it (D2).
     private var pendingCommands: [(String, [Any], UInt32?)] = []
     private(set) var applying = false
@@ -423,6 +425,17 @@ public final class ExactSession {
     private typealias IdleWork = (views: Int?, work: () -> Void, cancelled: (() -> Void)?)
     private var afterFill: [IdleWork] = []
     private var viewsEpoch = 0
+    /// Native work that still prevents this session from settling
+    var hostOutstanding: [String] {
+        var out: [String] = []
+        if fillInFlight || !afterFill.isEmpty { out.append("fill") }
+        if tickInFlight || hasPublished { out.append("published") }
+        if canvasInFlight || canvasOwed || presenter.canvas2d.loadingCount > 0 { out.append("canvas") }
+        #if os(iOS)
+        if SvgFilterLive.inFlight > 0 { out.append("svgPicture") }
+        #endif
+        return out
+    }
     private let published = NSLock()
     /// What the owner committed without main waiting.
     enum Published { case fill(UInt32), tick, canvas, notice, reply, cancelledReply }
@@ -808,6 +821,8 @@ public final class ExactSession {
     func boot(size: CGSize, fallbackSize: (() -> CGSize)?) -> Batch {
         var size = size
         let t = CACurrentMediaTime()
+        ApplyProfile.begin()
+        ExactLaunch.shared.bootEntered(self)
         primePreferences()
         primeTime()  // `prepare` primes again; the fallback boot reads this
         if let bytes = app.lastPlan {
@@ -816,6 +831,7 @@ public final class ExactSession {
             if app.selectedToken != 0 { app.lifecycle?.generationStarted(app, token: app.selectedToken) }
             if let candidate = prepare(bytes, resolver: app.resolver, token: app.selectedToken, module: app.lastModule, size: size), let batch = commit(candidate) {
                 presentCommitted(batch, label: "selected")
+                _ = ApplyProfile.end() // only the baked boot's first batch is profiled
                 return batch
             }
             let reason = app.resolver.refusal ?? "initial plan refused"
@@ -835,6 +851,8 @@ public final class ExactSession {
     @discardableResult
     public func boot(plan bytes: Data, size: CGSize) -> Batch {
         let t = CACurrentMediaTime()
+        ApplyProfile.begin()
+        ExactLaunch.shared.bootEntered(self)
         primePreferences()
         primeTime()
         let cp = text.checkpoint()
@@ -858,9 +876,12 @@ public final class ExactSession {
             text.commitFonts()
             appFileRoots = AppFiles.learn(runtime) // before the first frame's `app:/` images load (LLP 1069.002 D7)
         }
+        if !ApplyProfile.on { ApplyProfile.begin() }
+        ApplyProfile.add("runner", since: started)
         apply(batch)
+        applyParts = ApplyProfile.end()
         treeIsIn()
-        if batch.error == nil { tellTime(); refuseUnheardLaunch() }
+        if batch.error == nil { tellTime(); refuseUnheardLaunch(); ExactLaunch.shared.treeApplied(self, path: "baked") }
         // A fresh runner must receive the view's current viewport and insets.
         if batch.error == nil { view?.rebooted() }
         applyMs = (CACurrentMediaTime() - tApply) * 1000
@@ -968,6 +989,7 @@ public final class ExactSession {
         treeIsIn()
         tellTime()
         refuseUnheardLaunch()
+        ExactLaunch.shared.treeApplied(self, path: label)
         view?.rebooted()
         autofocusHeld = false
         if restart { presenter.restoreFocus(kept, tree: agent("{\"op\":\"tree\"}")) }
@@ -1083,7 +1105,7 @@ public final class ExactSession {
         // Each batch says what its turn left owed; batches apply in the owner's order, so the last one applied is the runner's now.
         canvasOwed = batch.canvasOwed
         if canvasOwed { askCanvasDraw() }
-        for op in batch.ops where op.op == .router { routerOp = op.payload }
+        for op in batch.ops where op.op == .router { routerOp = op.payload; NavigationMarks.shared.routerChanged(self, payload: op.payload) }
         // @ref LLP 1048.003 D1 — the head's title, for the app that owns the chrome.
         for op in batch.ops where op.op == .title {
             presenter.headTitle(op.payload["title"] as? String)
@@ -1132,6 +1154,20 @@ public final class ExactSession {
             transformInputHold?.cancelIfInputIneligible()
             presenter.transformGeometry.changed()
             applying = false
+            ExactLaunch.shared.applied(self, changed: !batch.ops.isEmpty) { [presenter] in
+                // Summarize op kinds and a few node IDs for the TTI trace
+                var kinds: [String: Int] = [:], names: [String] = []
+                for op in batch.ops {
+                    kinds[op.op.rawValue, default: 0] += 1
+                    guard op.nodeID != nil, names.count < 4 else { continue }
+                    let view = presenter.views[op.id]
+                    let name = view?.props["testId"] ?? view?.kind ?? op.kind
+                    if !names.contains(name) { names.append(name) }
+                }
+                let ops = kinds.sorted { $0.value > $1.value }.prefix(3).map { "\($0.key)×\($0.value)" }.joined(separator: " ")
+                return names.isEmpty ? ops : "\(ops) (\(names.joined(separator: ", ")))"
+            }
+            NavigationMarks.shared.applied(self)
             #if os(macOS)
             regions.flush()
             #endif
@@ -1164,6 +1200,10 @@ public final class ExactSession {
                     continue
                 }
                 if name == "relaunch" { app.deliver { [weak self] in self?.relaunch() }; continue }
+                if name.hasPrefix("observe") {
+                    ExactEvents.hostCommand(name, args)
+                    continue
+                }
                 if name == "haptic" {
                     // @ref LLP 1077 D14 — feedback from app logic.
                     app.deliver { Haptics.play(args.first as? String ?? "") }
@@ -1378,11 +1418,6 @@ public final class ExactSession {
         pendingViewDark = []
         unreported = []
     }
-    /// The agent API's runner half (LLP 1012): `tree`, `state`, `logs`, `settle`.
-    public func agent(_ request: String) -> String { runtime.agent(request) }
-    /// A line for the runner's journal (LLP 1012 §3; LLP 1035.001 D6): a
-    /// refused intent and its reason, read back through `logs`.
-    public func log(_ line: String) { runtime.log(line) }
     /// Deliver an embedder's value through a declared change handler. The
     /// selector must name exactly one live node; file contents stay data.
     @discardableResult public func change(testId: String, value: String) -> Bool {
@@ -1433,35 +1468,6 @@ public final class ExactSession {
         apply(batch)
         return batch.error == nil
     }
-    /// The number of live views the presenter holds (the smoke reads it).
-    public var viewCount: Int { presenter.views.count }
-    /// The first root's frame size (the smoke reads it).
-    public var rootSize: CGSize { presenter.rootSize }
-    /// The viewport's size in points: what the kernel lays out under.
-    public var viewportSize: CGSize { presenter.viewportSize }
-    /// The text engine's counters since this session started (the smoke reads them).
-    public var measureCount: Int { Owner.shared.sync { text.measuring.measureCount } }
-    public var measureHits: Int { Owner.shared.sync { text.measuring.measureHits } }
-    public var measureSeconds: Double { Owner.shared.sync { text.measuring.measureSeconds } }
-    /// The GPU module's and the web arm's status lines (the smoke reads them).
-    public var gpuStatus: String { canvases.status }
-    public var webStatus: String { webviews.status }
-    /// The window's occlusion changed (macOS): the canvases follow.
-    public func occlusionChanged() {
-        #if os(macOS)
-        canvases.occlusionChanged()
-        #endif
-        frames.run(frames.motion || frames.timerSoon || canvases.wantsFrames)
-    }
-    /// The scene became active (iOS): the canvases follow.
-    public func becameActive() { frames.run(frames.motion || frames.timerSoon || canvases.wantsFrames) }
-    #if os(iOS) || os(tvOS)
-    /// A hardware keyboard's Tab (or Shift-Tab) when no node of this session
-    /// holds the focus: an app's last responder forwards it here, as macOS's
-    /// window starts its key-view loop at the view.
-    public func moveFocus(backward: Bool) { presenter.moveFocus(backward: backward) }
-    #endif
-
     /// Everything attributable to this session goes (D2): the display link
     /// and clock, the surface instances, the web views, the views, the
     /// runtime — and its handle is a stranger from here on.

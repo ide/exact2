@@ -332,6 +332,7 @@ public final class Agent {
                 return ["id": Int(node.id), "applied": decorations.state]
             }
             nativeSections["presence"] = presenter.presenceObservation()
+            nativeSections["observe"] = ExactLaunch.shared.report(for: session)
             nativeSections["media"] = presenter.views.compactMap { id, view in view.video.map { ["id": id, "state": $0.state()] as [String: Any] } }
             nativeSections["mediaSession"] = mediaSessionState() // LLP 1098 D10
             // The drive's app storage (trivia F7): none unless it names a scratch store.
@@ -892,6 +893,12 @@ public final class Agent {
                     out["tickets"] = o["tickets"]
                     return out
                 }
+                // An aria-busy element is still loading, so the screen has not settled.
+                if let busy = ExactLaunch.ledger(session)?.items.filter({ $0.hasPrefix("busy:") }), !busy.isEmpty {
+                    var out = reply(landed, false, reason: "busy")
+                    out["busy"] = busy.map { String($0.dropFirst(5)) }
+                    return out
+                }
                 return reply(landed, true)
             }
             rounds += 1
@@ -1132,4 +1139,41 @@ public extension ExactEnv {
     /// `--touch platform` launches with (LLP 1080.000 D7), shows UIKit's:
     /// a real touch opens one and picks its item.
     static let agentPaints = agentDriven && environment["EXACT_AGENT_PRESENTATION"] != "native"
+}
+
+extension ExactSession {
+    /// The agent API's runner half (LLP 1012): `tree`, `state`, `logs`, `settle`.
+    public func agent(_ request: String) -> String { runtime.agent(request) }
+    /// A line for the runner's journal (LLP 1012 §3; LLP 1035.001 D6): a
+    /// refused intent and its reason, read back through `logs`.
+    public func log(_ line: String) { runtime.log(line) }
+    /// The number of live views the presenter holds (the smoke reads it).
+    public var viewCount: Int { presenter.views.count }
+    /// The first root's frame size (the smoke reads it).
+    public var rootSize: CGSize { presenter.rootSize }
+    /// The viewport's size in points: what the kernel lays out under.
+    public var viewportSize: CGSize { presenter.viewportSize }
+    /// The text engine's counters since this session started (the smoke reads them).
+    public var measureCount: Int { Owner.shared.sync { text.measuring.measureCount } }
+    public var measureHits: Int { Owner.shared.sync { text.measuring.measureHits } }
+    public var measureSeconds: Double { Owner.shared.sync { text.measuring.measureSeconds } }
+    /// The GPU module's and the web arm's status lines (the smoke reads them).
+    public var gpuStatus: String { canvases.status }
+    public var webStatus: String { webviews.status }
+    /// The window's occlusion changed (macOS): the canvases follow.
+    public func occlusionChanged() {
+        #if os(macOS)
+        canvases.occlusionChanged()
+        #endif
+        frames.run(frames.motion || frames.timerSoon || canvases.wantsFrames)
+    }
+    /// The scene became active (iOS): the canvases follow.
+    public func becameActive() { frames.run(frames.motion || frames.timerSoon || canvases.wantsFrames) }
+    #if os(iOS) || os(tvOS)
+    /// A hardware keyboard's Tab (or Shift-Tab) when no node of this session
+    /// holds the focus: an app's last responder forwards it here, as macOS's
+    /// window starts its key-view loop at the view.
+    public func moveFocus(backward: Bool) { presenter.moveFocus(backward: backward) }
+    #endif
+
 }
