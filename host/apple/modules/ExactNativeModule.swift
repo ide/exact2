@@ -542,6 +542,8 @@ final class ExactHatches {
     let surfaceHasFn: SurfaceHasFn?, surfaceSensorFn: SurfaceSensorFn?
     /// One of 168 or more: a package's call of the app's handler (LLP 1133.016 D15 item 1; ExactExtensions.swift).
     let invokeFn: Invocations.InvokeFn?
+    /// One of 176 or more: a module's service query (ExactServices.swift).
+    let serviceFn: ServiceFn?
     #if os(iOS) || os(tvOS)
     /// One of 112 or more: a held tab's navigation controller, built (`ExactTab.controller`).
     typealias StackFn = @convention(c) (UnsafeMutableRawPointer?, UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer?
@@ -596,6 +598,8 @@ final class ExactHatches {
         surfaceSensorFn = surfaces ? table.load(fromByteOffset: 152, as: UnsafeRawPointer?.self).map { unsafeBitCast($0, to: SurfaceSensorFn.self) } : nil
         invokeFn = table.load(as: UInt32.self) >= 168
             ? table.load(fromByteOffset: 160, as: UnsafeRawPointer?.self).map { unsafeBitCast($0, to: Invocations.InvokeFn.self) } : nil
+        serviceFn = table.load(as: UInt32.self) >= 176
+            ? table.load(fromByteOffset: 168, as: UnsafeRawPointer?.self).map { unsafeBitCast($0, to: ServiceFn.self) } : nil
     }
 
     /// A package picture changed (0) or revoked (1): the host's raster loader acts on it.

@@ -626,15 +626,15 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
         guard primaryOwner == nil, !syncing, presenter.session?.view?.window != nil else { giveBackBootCover(); return }
         syncing = true
         defer { syncing = false }
-        guard let p = projection(batch) else { giveBackBootCover(); return }
+        guard let p = ApplyProfile.time("nav.projection", { projection(batch) }) else { giveBackBootCover(); return }
         // After the projection, whose first `reset` clears the covers.
         _ = adoptBootCover()
         let parts = NavigationRules.segments(presentations: p.routes[...p.selected].map { $0.props["navigationPresentation"] })
-        installPrimary(p, first: Array(p.chosen[parts[0]]))
-        primaryOwner?.view.layoutIfNeeded()
+        ApplyProfile.time("nav.primary") { installPrimary(p, first: Array(p.chosen[parts[0]])) }
+        ApplyProfile.time("nav.layout") { primaryOwner?.view.layoutIfNeeded() }
         // The content area the bar leaves reaches layout in this turn, before
         // the first frame (LLP 1075.003 Q3 (c)).
-        reportCovers()
+        ApplyProfile.time("nav.covers") { reportCovers() }
         refitForBars()
     }
 
@@ -757,7 +757,7 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
                 // A press that pushed may hand its control's focus to the arriving route's first autofocus (PressHandoffIOS).
                 if pushOrPop || arrives { presenter.pressShows((stack.last as? RouteController)?.node) }
             }
-            nav.view.layoutIfNeeded()
+            ApplyProfile.time("nav.layout") { nav.view.layoutIfNeeded() }
         }
         unanimated = false
         if mounted.count > common {
@@ -1200,6 +1200,14 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
         // @ref LLP 1038 D6/D11; LLP 1035.001 D2 — a cancelled swipe calls
         // willShow again for its source, in the transition already begun.
         guard let transition = pushOrPop(on: navigationController), transition.viewController(forKey: .to) === viewController else { return }
+        // UIKit's own (its Back button, its menu, a swipe): Observe's render
+        // mark is this transition's first frame, unless it is cancelled.
+        if !syncing {
+            NavigationMarks.shared.platformBeganShowing()
+            transition.animate(alongsideTransition: nil) { context in
+                if context.isCancelled { NavigationMarks.shared.platformCancelled() }
+            }
+        }
         // As the swipe begins: an update may remove its source's node while
         // the finger is down
         let swipe: Swipe? = transition.initiallyInteractive

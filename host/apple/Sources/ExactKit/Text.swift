@@ -39,6 +39,8 @@ final class PresentedText: TextPresentation {
         engine.controlFont(size: size, weight: weight, family: family, italic: italic)
     }
     func measure(_ engine: TextEngine, _ request: ExactMeasureRequest) -> ExactMetrics? {
+        // The boot's paragraphs, counted (the launch report's `text.measures`).
+        if ApplyProfile.on { ApplyProfile.count("text.measures") }
         #if os(macOS)
         return engine.readerMeasureOnUI(request)
         #else

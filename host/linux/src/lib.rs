@@ -32,6 +32,9 @@
 //!   leaves the process (LLP 1016 D2), its wake a socketpair the loop polls.
 //! - [`delivery`] — the optional app-supplied delivery adapter boundary
 //!   (LLP 1030 D4); no updater is linked by the host.
+//! - [`journal`] — the event journal launch parts subscribe to: startup,
+//!   custom events, errors.
+//! - [`launch_marks`] — startup timestamps for the display path.
 //! - [`app`] — the entry: the environment, headless or display.
 //! - [`display`], [`input`], [`vnc`] (Linux) — KMS dumb buffers, evdev, and
 //!   the screen over RFB with a client's pointer and keys as input.
@@ -66,6 +69,8 @@ pub mod host;
 pub mod image;
 #[cfg(target_os = "linux")]
 pub mod input;
+pub mod journal;
+pub mod launch_marks;
 mod media_session;
 pub mod navigation;
 pub mod paint;

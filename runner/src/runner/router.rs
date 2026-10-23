@@ -26,6 +26,11 @@ pub struct RouterChange {
     pub removed: Vec<u64>,
     /// Every retained visit's canonical location, in tab/stack order.
     pub visits: Vec<(u64, String)>,
+    /// The top's route pattern (`/post/:id`), which navigation metrics group
+    /// by. Empty when the table has no such route.
+    pub pattern: String,
+    /// The top's bound parameters, in the table's order.
+    pub params: Vec<(String, String)>,
 }
 
 /// The router seam (LLP 1047 D4): what the runner and its VM ask of a plan's
@@ -529,6 +534,24 @@ impl Routing for RouterContext {
             .filter(|e| !ids.contains(&e.id))
             .map(|e| e.id)
             .collect();
+        let pattern = self
+            .table
+            .routes
+            .iter()
+            .find(|route| route.name == top.name)
+            .map(|route| route.pattern.clone())
+            .unwrap_or_default();
+        let params = self
+            .table
+            .param_names()
+            .into_iter()
+            .filter_map(|n| {
+                top.params
+                    .get(n)
+                    .filter(|v| !v.is_empty())
+                    .map(|v| (n.to_string(), v.clone()))
+            })
+            .collect();
         Ok(Some(RouterChange {
             top: top.id,
             url: top.url.clone(),
@@ -539,6 +562,8 @@ impl Routing for RouterContext {
                 .flat_map(|t| &t.stack)
                 .map(|e| (e.id, e.url.clone()))
                 .collect(),
+            pattern,
+            params,
         }))
     }
 

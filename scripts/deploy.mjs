@@ -3,8 +3,6 @@ import { requireReleasePins } from '../game/inputs.mjs';
 // `exact deploy` — the publisher (LLP 1030.000 D3 the verb, D4 the policies,
 // D5 one library in its own process, D7 where things live; LLP 1030 D3 the
 // classifier and D3a the compatibility id; LLP 1026 D11 the signed head).
-// The repo has no `exact` binary; this script is the verb:
-//
 //   bun scripts/deploy.mjs <app> [--origin <dir|url>] [--channel <name>]
 //       [--only bundle|origin] [--platform <p>]… [--snapshot <sha>] [--dirty]
 //       [--release <id>] [--keys <dir>] [--json] [--yes]
@@ -39,12 +37,7 @@ import { requireReleasePins } from '../game/inputs.mjs';
 // key and prints the public half to paste in; the private key never enters
 // the repository. `update/tests/it/publisher.rs` reads a head this script
 // produced and proves the client verifies it.
-//
-// Owed, not built: `--watch` (D5's continuous publisher: the same library,
-// a separate least-privileged process watching the deploy branch); an
-// object-store adapter (an https origin is read-only here); the binary
-// lanes (1030.000 §6). Dev imports the same artifact comparison; a
-// platform with no completed receipt is reported as unbuilt.
+// Continuous publishing, writable HTTP origins and binary lanes remain unimplemented (LLP 1030.000 D5, §6); missing receipts report unbuilt.
 import { spawnSync } from 'node:child_process';
 import { randomBytes, verify } from 'node:crypto';
 import { Refusal, refuse, canonicalBytes, canonicalJson, publicKeyFromRaw, loadSigner, keygen, validateRawIntegers } from './deploy-signing.mjs';
@@ -691,6 +684,13 @@ function buildFor(app, platform, sourceRoot, run) {
     env.SDKROOT = sdk.stdout.trim();
     env[apple === 'ios' ? 'IPHONEOS_DEPLOYMENT_TARGET' : 'MACOSX_DEPLOYMENT_TARGET'] = apple === 'ios' ? '17.0' : '14.0';
     env.EXACT_APPLE_LINK = 'plan'; // a compatibility input: link as the production archive does (host/apple/link.mjs)
+    // Build scripts compile Objective-C++ for the Mac, and cc-rs inherits
+    // SDKROOT, which names the phone's: give those units the Mac SDK, as
+    // host/apple/build.mjs does.
+    if (apple === 'ios') {
+      const mac = spawnSync('xcrun', ['--sdk', 'macosx', '--show-sdk-path'], {encoding:'utf8'}).stdout.trim();
+      env.HOST_CXXFLAGS = `${process.env.HOST_CXXFLAGS ?? ''} -isysroot ${mac}`;
+    }
   }
   return buildBake(app, platform, target, {env, analysis:true});
 }
