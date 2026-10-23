@@ -567,6 +567,8 @@ final class ExactHatches {
     /// One of 176 or more: an authored content arrangement.
     typealias ArrangementFn = @convention(c) (UnsafeMutableRawPointer?, UInt32, UnsafeMutableRawPointer?) -> Int32
     let arrangementFn: ArrangementFn?
+    /// One of 184 or more: a module's service query (ExactServices.swift).
+    let serviceFn: ServiceFn?
     #if os(iOS) || os(tvOS)
     /// One of 112 or more: a held tab's navigation controller, built (`ExactTab.controller`).
     typealias StackFn = @convention(c) (UnsafeMutableRawPointer?, UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer?
@@ -623,6 +625,8 @@ final class ExactHatches {
             ? table.load(fromByteOffset: 160, as: UnsafeRawPointer?.self).map { unsafeBitCast($0, to: Invocations.InvokeFn.self) } : nil
         arrangementFn = table.load(as: UInt32.self) >= 176
             ? table.load(fromByteOffset: 168, as: UnsafeRawPointer?.self).map { unsafeBitCast($0, to: ArrangementFn.self) } : nil
+        serviceFn = table.load(as: UInt32.self) >= 184
+            ? table.load(fromByteOffset: 176, as: UnsafeRawPointer?.self).map { unsafeBitCast($0, to: ServiceFn.self) } : nil
     }
 
     /// A package picture changed (0) or revoked (1): the host's raster loader acts on it.

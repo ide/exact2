@@ -3,7 +3,7 @@
 // `scripts/agent.mjs web` asks. Input and screenshots stay the carrier's own
 // (CDP). Loaded only under `?agent`; never part of an app's boot bytes.
 import names, { types } from './names.js';
-import { pieces, pageHistory, Head, navigateRoot, Tasks, journal, unopened } from './rt.js';
+import { pieces, pageHistory, Head, navigateRoot, Tasks, journal, unopened, busy as busyIds } from './rt.js';
 import * as perf from './perf.js';
 // LLP 1133.003 §9's gate, under the agent only (ts-stream.js calls in):
 // `perf streams` reads, per stream, each message from its receipt to the
@@ -513,6 +513,8 @@ export function install(exact) {
           if (exact.lists?.owedScrolls?.() || (!quiet && (exact.lists?.scrollsFired?.() ?? 0) !== lastRound)) return { clock: exact.clock.now, settled: false, reason: 'scroll-event' };
           // The rounds ran out with a scroller still being set moving: not settled.
           if (!quiet && moved) return { clock: exact.clock.now, settled: false, reason: 'scroll' };
+          const busy = busyIds();
+          if (busy.length && !exact.inflight.n) return { clock: exact.clock.now, settled: false, reason: 'busy', busy };
           return { clock: exact.clock.now, settled: !exact.inflight.n };
         }
         // A jump that crosses timers stops after each timer whose commit

@@ -859,3 +859,36 @@ fn production_trust_requires_keys_and_has_a_distinct_cohort() {
     );
     let _ = std::fs::remove_dir_all(dir);
 }
+
+/// A module client with a store pins its compiled module into the id:
+/// the same module is the same cohort, any other module another.
+#[test]
+fn a_stored_module_client_pins_its_module_into_the_id() {
+    let dir = app("pinned-module");
+    let manifest = Manifest::read(&dir).unwrap();
+    let id = |module| {
+        super::compatibility_id_pinned(
+            &dir,
+            "ios",
+            "aarch64-apple-ios",
+            &manifest,
+            Some(""),
+            None,
+            None,
+            module,
+        )
+        .unwrap()
+    };
+    let plain = id(None);
+    let a = id(Some("aa"));
+    assert!(plain.inputs["typescriptModule"].is_null());
+    assert_eq!(a.inputs["typescriptModule"], "aa");
+    assert_ne!(a.id, plain.id, "the module is in the id");
+    assert_eq!(id(Some("aa")).id, a.id, "the same module, the same cohort");
+    assert_ne!(id(Some("bb")).id, a.id, "another module, another cohort");
+    assert_eq!(
+        a.id,
+        super::compatibility_digest(&a.inputs),
+        "the id digests the inputs it reports"
+    );
+}

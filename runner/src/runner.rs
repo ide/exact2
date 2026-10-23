@@ -85,6 +85,7 @@ mod kept_tests;
 mod lines;
 mod lists;
 mod media_session;
+pub mod outstanding;
 mod overrun;
 mod page;
 mod perf;
