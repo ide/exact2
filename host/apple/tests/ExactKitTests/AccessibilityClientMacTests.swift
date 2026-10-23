@@ -52,12 +52,12 @@ private final class AXClient: @unchecked Sendable {
         var value: CFTypeRef?
         return AXUIElementCopyAttributeValue(element, attribute as CFString, &value) == .success ? value : nil
     }
-    /// The element whose AXIdentifier is `identifier`, found from the application down.
-    private static func find(_ identifier: String, in element: AXUIElement, depth: Int = 0) -> AXUIElement? {
-        if value(element, "AXIdentifier") as? String == identifier { return element }
+    /// Find an element by an attribute, usually its AXIdentifier.
+    private static func find(_ identifier: String, in element: AXUIElement, depth: Int = 0, attribute: String = "AXIdentifier") -> AXUIElement? {
+        if value(element, attribute) as? String == identifier { return element }
         guard depth < 40 else { return nil }
         for child in value(element, "AXChildren") as? [AXUIElement] ?? [] {
-            if let hit = find(identifier, in: child, depth: depth + 1) { return hit }
+            if let hit = find(identifier, in: child, depth: depth + 1, attribute: attribute) { return hit }
         }
         return nil
     }
@@ -66,11 +66,11 @@ private final class AXClient: @unchecked Sendable {
         let app = app
         return onClient { Self.find(identifier, in: app) }
     }
-    /// Its attributes among `names`, each as text; nil when no element has the identifier.
-    func attributes(of identifier: String, _ names: [String]) -> [String: String]? {
+    /// Its attributes among `names`, each as text; nil when no element matches.
+    func attributes(of identifier: String, _ names: [String], matching attribute: String = "AXIdentifier") -> [String: String]? {
         let app = app
         return onClient {
-            guard let element = Self.find(identifier, in: app) else { return nil }
+            guard let element = Self.find(identifier, in: app, attribute: attribute) else { return nil }
             var out: [String: String] = [:]
             for name in names { if let v = Self.value(element, name) { out[name] = "\(v)" } }
             return out
@@ -843,5 +843,53 @@ final class AccessibilityClientMacTests: XCTestCase {
         NSEvent.keyEvent(with: up ? .keyUp : .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
             windowNumber: window.windowNumber, context: nil, characters: "\u{1b}", charactersIgnoringModifiers: "\u{1b}", isARepeat: false, keyCode: 53)!
     }
+}
+// AX reads initialize AppKit's accessibility machinery. Keep them in a process
+// apart from the observer tests, which measure its initial native notifications.
+final class ComboboxAccessibilityClientMacTests: XCTestCase {
+    func testAComboboxInputServesItsRoleValueAndExpandedStateToVoiceOver() throws {
+        guard AXIsProcessTrusted() else { throw XCTSkip("this process is not trusted for accessibility") }
+        _ = NSApplication.shared
+        NSApp.setActivationPolicy(.accessory)
+        NSApp.finishLaunching()
+        for type in ["search", "text"] {
+            let label = "Book (\(type))"
+            let p = Presenter()
+            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 300), styleMask: [.titled], backing: .buffered, defer: false)
+            window.isReleasedWhenClosed = false
+            window.contentView = p.viewport
+            defer { window.close() }
+            p.apply(wireBatch([
+                ["op": "create", "id": 1, "kind": "view"],
+                ["op": "roots", "ids": [1]],
+                ["op": "frame", "id": 1, "x": 0.0, "y": 0.0, "w": 400.0, "h": 300.0],
+                ["op": "create", "id": 11, "kind": "input", "handlers": ["input"],
+                 "props": ["type": type, "value": "Pira", "accessibilityRole": "combobox", "accessibilityLabel": label, "accessibilityExpanded": "false", "testId": "book-combo"]],
+                ["op": "children", "id": 1, "ids": [11]],
+                ["op": "frame", "id": 11, "x": 10.0, "y": 40.0, "w": 280.0, "h": 24.0],
+            ]))
+            p.syncAccessibility()
+            window.orderFront(nil)
+            window.layoutIfNeeded()
+            let client = AXClient(), attributes = ["AXRole", "AXRoleDescription", "AXDescription", "AXValue", "AXExpanded"]
+            let field = try XCTUnwrap(p.views[11]?.field)
+            XCTAssertEqual(field is NSSearchField, type == "search")
+            XCTAssertEqual(field.accessibilityRole(), .comboBox)
+            XCTAssertEqual(field.cell?.accessibilityAttributeValue(.role) as? String, "AXComboBox")
+            let collapsed = try XCTUnwrap(client.attributes(of: label, attributes, matching: "AXDescription"), "the \(type) input")
+            XCTAssertEqual(collapsed["AXRole"], "AXComboBox")
+            XCTAssertEqual(collapsed["AXRoleDescription"], NSAccessibility.Role.comboBox.description(with: nil))
+            XCTAssertEqual(collapsed["AXDescription"], label)
+            XCTAssertEqual(collapsed["AXValue"], "Pira")
+            XCTAssertEqual(collapsed["AXExpanded"], "0")
+            p.apply(wireBatch([["op": "props", "id": 11, "set": ["accessibilityExpanded": "true", "value": "Piranesi"]]]))
+            let expanded = try XCTUnwrap(client.attributes(of: label, attributes, matching: "AXDescription"))
+            XCTAssertEqual(expanded["AXExpanded"], "1")
+            XCTAssertEqual(expanded["AXValue"], "Piranesi")
+            p.apply(wireBatch([["op": "props", "id": 11, "clear": ["accessibilityRole", "accessibilityExpanded"]]]))
+            XCTAssertEqual(client.attributes(of: label, attributes, matching: "AXDescription")?["AXRole"], "AXTextField")
+        }
+    }
+
 }
 #endif
