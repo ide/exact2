@@ -9,6 +9,7 @@ use contract_syntax::{
 use std::collections::{BTreeMap, BTreeSet};
 
 mod midi;
+mod observe;
 mod permission;
 mod sounds;
 
@@ -994,6 +995,9 @@ pub(super) fn check_command(
     }
     if matches!(name, "requestMIDIAccess" | "sendMIDI") {
         return midi::args(name, args, scope, shapes, span);
+    }
+    if name.starts_with("observe") {
+        return observe::args(name, args, scope, shapes, span);
     }
     if name == "postMessage" {
         // The web's argument order, `postMessage(message, target)`: the target

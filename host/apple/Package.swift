@@ -8,6 +8,10 @@ import Foundation
 let libDir = ProcessInfo.processInfo.environment["EXACT_LIB_DIR"] ?? (Context.packageDirectory + "/../../target/host-dev")
 let libName = ProcessInfo.processInfo.environment["EXACT_LIB"] ?? "caltrain_apple"
 
+// The app's module launch parts. `build.mjs` generates this target when the
+// manifest's `launch` names any; otherwise the empty default is used.
+let launchParts = ProcessInfo.processInfo.environment["EXACT_LAUNCH_PARTS"] ?? "Sources/ExactLaunchParts"
+
 let composition = ProcessInfo.processInfo.environment["EXACT_APP_COMPOSITION"] ?? "embedded"
 precondition(["embedded", "updating"].contains(composition), "EXACT_APP_COMPOSITION must be embedded or updating")
 
@@ -52,9 +56,11 @@ let widgetCore = ProcessInfo.processInfo.environment["EXACT_WIDGET_CORE"] == "1"
 let sharedCore = ProcessInfo.processInfo.environment["EXACT_CORE_FRAMEWORK"]
 let core: [Target] = [
     .systemLibrary(name: "CExact", path: "Sources/CExact"),
+    // C, so its constructor runs before `main` and can read the process start and prewarm flag.
+    .target(name: "CExactLaunch", path: "Sources/CExactLaunch"),
     sharedCore.map { .binaryTarget(name: "ExactCore", path: $0) } ?? .target(
         name: "ExactCore",
-        dependencies: ["CExact"],
+        dependencies: ["CExact", "CExactLaunch"],
         path: "Sources/ExactCore",
         swiftSettings: [.unsafeFlags(["-application-extension"])] + devTools,
         linkerSettings: (widgetCore ? [.unsafeFlags(["-Xlinker", "-force_load", "-Xlinker", libDir + "/lib" + libName + ".a"])] : [.unsafeFlags(["-L", libDir]), .linkedLibrary(libName)]) + [.linkedLibrary("c++"), .linkedFramework("ImageIO")]
@@ -72,6 +78,7 @@ let core: [Target] = [
     .target(name: "ExactMediaPicker", dependencies: ["ExactKit"], path: "Sources/ExactMediaPicker"),
     .target(name: "ExactAuthSession", dependencies: ["ExactKit"], path: "Sources/ExactAuthSession"),
     .target(name: "ExactNumerals", dependencies: ["ExactKit"], path: "Sources/ExactNumerals"),
+    .target(name: "ExactLaunchParts", dependencies: ["ExactKit"], path: launchParts),
     .target(name: "ExactComposition", dependencies: [.target(name: "ExactKit")] + (composition == "updating" ? [.target(name: "ExactUpdates")] : [])
                 + capabilities.map { .target(name: $0.target) },
             path: composition == "updating" ? "Sources/ExactUpdating" : "Sources/ExactEmbedded",
@@ -80,8 +87,8 @@ let core: [Target] = [
 
 let executables: [Target] = [
     .executableTarget(name: "ExactWatch", dependencies: ["ExactCore", "ExactSnapshot"], path: "Sources/ExactWatch", swiftSettings: devTools),
-    .executableTarget(name: "ExactMac", dependencies: ["ExactKit", "ExactComposition"], path: "Sources/ExactMac"),
-    .executableTarget(name: "ExactIOS", dependencies: ["ExactKit", "ExactComposition"], path: "Sources/ExactIOS"),
+    .executableTarget(name: "ExactMac", dependencies: ["ExactKit", "ExactComposition", "ExactLaunchParts"], path: "Sources/ExactMac"),
+    .executableTarget(name: "ExactIOS", dependencies: ["ExactKit", "ExactComposition", "ExactLaunchParts"], path: "Sources/ExactIOS"),
     .executableTarget(name: "ExactHostMac", dependencies: ["ExactKit", "ExactComposition"], path: "Sources/ExactHostMac"),
     .executableTarget(name: "ExactHostIOS", dependencies: ["ExactKit", "ExactComposition"], path: "Sources/ExactHostIOS"),
 ]
