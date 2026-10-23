@@ -1290,9 +1290,8 @@ pub fn props_of(node: &NodeFacts<'_>) -> SortedMap<String, String> {
             }
         }
     }
-    // A size or a padding its author wrote on a platform button is the
-    // author's, but in CSS the look's floor (neutral.css: 36 px each way, 44
-    // on a touch device) outranks both: the sheet is told which were written.
+    // Mark authored size and padding so neutral.css can remove the platform
+    // minimum on that axis; CSS minimums otherwise outrank the author's size
     if node.node_type == NodeType::Control && node.props.str(PropId::Type) == Some("button") {
         use StyleId::{Height, PaddingBottom, PaddingLeft, PaddingRight, PaddingTop, Width};
         let written = |ids: &[StyleId]| ids.iter().any(|id| node.style.written.has(*id));

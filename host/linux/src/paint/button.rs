@@ -232,10 +232,10 @@ fn face_layout(
     let said = |id| (neutral || filled) && rows.button.written.has(id);
     let (said_width, said_height) = (said(StyleId::Width), said(StyleId::Height));
     let padding_block = neutral
-        && tab_root.is_none()
+        && !rows.neutral_role_floor
         && (said(StyleId::PaddingTop) || said(StyleId::PaddingBottom));
     let padding_inline = neutral
-        && tab_root.is_none()
+        && !rows.neutral_role_floor
         && (said(StyleId::PaddingLeft) || said(StyleId::PaddingRight));
     let lone_symbol =
         (face.symbol.is_some() || face.raster) && face.title.is_none() && face.subtitle.is_none();
@@ -888,6 +888,7 @@ mod tests {
             },
             style: ButtonFaceStyle {
                 neutral_tab_root: None,
+                neutral_role_floor: false,
                 title: StyleProps::default(),
                 subtitle: None,
                 symbol: StyleProps::default(),

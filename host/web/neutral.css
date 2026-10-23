@@ -55,11 +55,9 @@
      Written padding removes the floor, as UIKit's contentInsets do, and can make targets smaller than WCAG 2.5.8's
      24 px minimum. This follows UIKit even when adjacent small targets cannot meet the spacing exception. */
   @media (any-pointer: coarse) { #exact-root button[data-button-style] { min-height: max(2.25em, var(--exact-touch-floor, 44px)); min-width: max(2.25em, var(--exact-touch-floor, 44px)); } }
-  /* The floor and the padding are the look's, and a size the author wrote is the author's (LLP 1115: what is written
-     wins). In CSS a minimum outranks a size, and a border box is never narrower than its padding, so the host names a
-     written `width` or `height` (`data-exact-said`, D2's bit; the JS target marks a bound one as it writes it,
-     `data-exact-width`, `data-exact-height`) and on that axis the look steps aside: the minimum is CSS's own again
-     and the label is centred in the box that was written, which is the box the kernel lays out. */
+  /* Remove the look's minimum and padding on an authored size axis (LLP 1115: author > platform).
+     Otherwise CSS minimums and padding can enlarge the requested box. Literal sizes use `data-exact-said`;
+     the JS writer marks bound sizes with `data-exact-width` and `data-exact-height`. */
   #exact-root button[data-button-style]:is([data-exact-said~="height"], [data-exact-height]) { min-height: auto; padding-block: 0; }
   #exact-root button[data-button-style]:is([data-exact-said~="width"], [data-exact-width]):not([navigationPresentation="modal"] > header button[aria-label]:not(:has(> :not(img[data-symbol-source])))) { min-width: auto; padding-inline: 0; }
   /* Written padding is UIKit's contentInsets (LLP 1069.011.001 D15): content plus insets, with no minimum; an
@@ -115,11 +113,9 @@
     #exact-root, #exact-root * { --exact-accent-text: lab(from var(--exact-accent, AccentColor) calc((49 - l) * 1e6 + 100) 0 0 / 1); }
     #exact-root button:is([data-button-style="filled"], [data-button-style="bordered-prominent"], [data-button-style="prominent-glass"], [data-button-style="prominent-clear-glass"]) { color: lab(from var(--exact-accent, AccentColor) calc((49 - l) * 1e6 + 100) 0 0 / 1); }
   }
-  /* Hover, and a bordered, gray or tinted button's press: a wash over its fill, as an image, so the fill beneath is
-     whatever the style or the accent made it. A wash that a release eases (below) is drawn in `--exact-wash`, a
-     registered colour, so it can ease. A tinted button's is its accent whatever its ink, as UIKit's `.tinted()`
-     highlights its tint's fill whatever foreground colour is set (measured on iOS 27); Chrome would not ease an ink
-     (`currentColor`) there. */
+  /* Draw hover and press washes over the fill. Register `--exact-wash` so the release can interpolate its colour.
+     Tinted buttons use the accent even with authored title ink, matching UIKit's `.tinted()` on iOS 27;
+     Chrome cannot interpolate `currentColor` in this custom property. */
   @property --exact-wash { syntax: "<color>"; inherits: false; initial-value: transparent; }
   @media (hover: hover) {
     #exact-root button:is([data-button-style="bordered"], [data-button-style="gray"]):not([role="tab"], [role="radio"], :disabled):hover { background-color: transparent; background-image: linear-gradient(var(--exact-wash) 0 0); --exact-wash: var(--exact-quaternary-fill); }
@@ -152,10 +148,9 @@
     & > :not(img), &::after { opacity: .75; }
     & > img { --exact-tint: color-mix(in srgb, currentColor 75%, transparent); }
   }
-  /* Released, a button eases out of its press over a quarter second, ease-in-out, as UIKit's highlight does in every
-     style (measured on iOS 27), so even a quick tap shows; the press itself comes at once. The input glue marks the
-     release only while it eases (`data-exact-released`), so nothing else animates (a filled button's fill as it is
-     enabled, say). */
+  /* Ease the highlight back over 250 ms, ease-in-out, matching UIKit on iOS 27. The press starts immediately,
+     so a quick tap still shows. The input glue keeps `data-exact-released` only while these effects run;
+     later state changes, such as enabling a filled button, keep their own timing. */
   #exact-root button[data-exact-released]:not(:disabled, :is([role="menu"], [data-exact-chooser]) *) {
     &:is([data-button-style="bordered"], [data-button-style="gray"]):not([role="tab"], [role="radio"]), &:is([data-button-style="tinted"], [data-button-style="bordered-tinted"], [data-button-style$="glass"]) { background-image: linear-gradient(var(--exact-wash) 0 0); transition: --exact-wash .25s ease-in-out; }
     &:is([data-button-style="filled"], [data-button-style="bordered-prominent"]) { transition: background-color .25s ease-in-out; }
@@ -363,12 +358,10 @@
      the shell's heading reset (`margin: 0`) and wins by coming after it. */
   :where(#exact-root [navigationPresentation="modal"] > header:not([data-exact-said~="justify-content"])) > :is(h1, h2, h3, h4, h5, h6),
   :where(#exact-root [navigationPresentation="modal"] > header:not([data-exact-said~="justify-content"]) > [role="heading"]) { margin-inline: auto; text-align: center; }
-  /* LLP 1116.020 D2: a sheet's button whose face is only a symbol says its name instead, padded as a word is (above):
-     iOS draws a Cancel's xmark and a Save's checkmark, and a web dialog's buttons are words. It is sized to its word
-     whatever width was written for the symbol (the look's floor and padding stay; the size step-aside above skips
-     it), as UIKit sizes a bar item: the word and 16 points of glass either side (measured on iOS 27), which is the
-     look's 1em padding at the web's 16 px body. In a bar with no room for the word, the word ends in an ellipsis,
-     whatever the button's `display`. */
+  /* Replace a sheet bar's symbol-only button with its accessible name (LLP 1116.020 D2). Size it to that word,
+     preserving the look's padding even when the symbol had an authored width. UIKit leaves 16 points on each
+     side (measured on iOS 27), matching 1em at the web's 16 px body. A word that cannot fit ends in an ellipsis,
+     including in an authored block display. */
   :where(#exact-root [navigationPresentation="modal"] > header button[aria-label]:not(:has(> :not(img[data-symbol-source])))) > img { display: none; }
   :where(#exact-root [navigationPresentation="modal"] > header button[aria-label]:not(:has(> :not(img[data-symbol-source]))))::after { content: attr(aria-label); display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   #exact-root [navigationPresentation="modal"] > header button[data-button-style][aria-label]:is([data-exact-said~="width"], [data-exact-width]):not(:has(> :not(img[data-symbol-source]))) { width: max-content !important; }

@@ -538,12 +538,20 @@ for (const engine of ['chromium', 'firefox', 'webkit']) test(`${engine}: a nativ
         await page.tap('#box');
         expect([engine, 'box', await page.evaluate(() => marks)]).toEqual([engine, 'box', ['data-pressed', 'data-pressed']]);
       } else {
-        // A transition the author started in the button is not the release's: the mark goes when the release's ease ends.
-        await page.evaluate(() => { const face = document.getElementById('translucent-face'); face.style.transition = 'color 3s linear'; getComputedStyle(face).color; face.style.color = 'rgb(255, 0, 0)'; });
-        await page.click('#translucent');
-        await page.evaluate(() => document.getAnimations().forEach((a) => a.transitionProperty !== 'color' && a.finish()));
-        await page.waitForFunction(() => !document.getElementById('translucent').hasAttribute('data-exact-released'), undefined, { timeout: 1000 });
-        expect([engine, 'authored', await page.evaluate(() => document.getElementById('translucent-face').getAnimations().map((a) => a.transitionProperty))]).toEqual([engine, 'authored', ['color']]);
+        // Existing author transitions stay independent, including properties the platform also animates
+        for (const [id, property, value] of [['translucent-face', 'color', 'rgb(255, 0, 0)'], ['translucent', 'opacity', '0.5'], ['translucent-face', 'background-color', 'rgb(255, 0, 0)']]) {
+          await page.evaluate(([id, property, value]) => {
+            const node = document.getElementById(id);
+            node.style.transition = `${property} 3s linear`;
+            getComputedStyle(node).getPropertyValue(property);
+            node.style.setProperty(property, value);
+          }, [id, property, value]);
+          await page.click('#translucent');
+          await page.evaluate(() => document.getAnimations().forEach((a) => a.effect.getTiming().duration < 3000 && a.finish()));
+          await page.waitForFunction(() => !document.getElementById('translucent').hasAttribute('data-exact-released'), undefined, { timeout: 1000 });
+          expect([engine, id, property, await page.evaluate((id) => document.getElementById(id).getAnimations().map((a) => a.transitionProperty), id)]).toEqual([engine, id, property, [property]]);
+          await page.evaluate((id) => { document.getAnimations().forEach((a) => a.finish()); document.getElementById(id).removeAttribute('style'); }, id);
+        }
       }
       await page.close();
     }

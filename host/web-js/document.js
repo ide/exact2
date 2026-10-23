@@ -80,10 +80,8 @@ export function projectRoots(history, navigate, say, after, hostBack, hostGo, ro
   after.push(project); history.activate(root, say);
 }
 
-/** Mark the routes of a page rendered ahead of time (render.mjs), which runs
- * no projection, as document.rs marks them and navigation.js `project` will:
- * every tabpanel but the selected one, and every route but its stack's shown
- * one, hidden and inert; the route under a selected sheet shown, still inert. */
+/** Project route visibility before startup. A modal keeps the underlying page
+ * and intervening sheets visible but inert, as navigation.js `project` does. */
 export function markRoutes(root) {
   for (const nav of [...root.getElementsByTagName("*")].filter(e => e.hasAttribute("navigationBack"))) {
     const key = nav.getAttribute("navigationKey"), panels = panelsOf(nav);
@@ -95,7 +93,8 @@ export function markRoutes(root) {
     stacks.forEach((routes, i) => {
       const shown = i === at ? routes.findIndex(r => r.getAttribute("navigationKey") === key) : routes.length - 1;
       const sheet = routes[shown]?.getAttribute("navigationPresentation") === "modal";
-      routes.forEach((r, j) => mark(r, j !== shown && !(sheet && j + 1 === shown), j !== shown));
+      const beneath = routes.findLastIndex((r, j) => j < shown && r.getAttribute("navigationPresentation") !== "modal");
+      routes.forEach((r, j) => mark(r, j !== shown && !(sheet && j >= beneath && j < shown), j !== shown));
     });
   }
 }

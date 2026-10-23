@@ -586,6 +586,48 @@ component Tabs
   }
 }, 240000);
 
+test('JavaScript prerender keeps every sheet and its underlying page visible through adoption', async () => {
+  await renderedPages(`routes nav
+  home "/" render=build
+
+component Sheets
+  view
+    main navigationKey="top" navigationBack="back" height="100%"
+      column navigationKey="old" id="old" position="absolute" inset=0
+        text "Earlier page"
+      column navigationKey="base" id="base" position="absolute" inset=0
+        text "Base page"
+      column navigationKey="lower" id="lower" navigationPresentation="modal" height=500
+        text "Lower sheet"
+      column navigationKey="top" id="top" navigationPresentation="modal" height=200
+        text "Top sheet"
+`, async (_, _html, dist) => {
+    const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch(req) {
+      const path = new URL(req.url).pathname;
+      return new Response(Bun.file(resolve(dist, path === '/' ? 'index.html' : path.slice(1))));
+    } });
+    const visibility = () => ['old', 'base', 'lower', 'top'].map(id => {
+      const node = document.getElementById(id);
+      return [id, getComputedStyle(node).visibility, node.inert];
+    });
+    const expected = [['old', 'hidden', true], ['base', 'visible', true], ['lower', 'visible', true], ['top', 'visible', false]];
+    try {
+      for (const engine of ['chromium', 'firefox', 'webkit']) {
+        const suite = await suiteBrowser(engine);
+        try {
+          const before = await suite.newPage({ javaScriptEnabled: false });
+          await before.goto(server.url.href);
+          expect([engine, 'prerender', await before.evaluate(visibility)]).toEqual([engine, 'prerender', expected]);
+          const after = await suite.newPage();
+          await after.goto(server.url.href);
+          await after.waitForFunction(() => globalThis.exact?.journal?.some(line => line.endsWith('adopted the document')));
+          expect([engine, 'adopted', await after.evaluate(visibility)]).toEqual([engine, 'adopted', expected]);
+        } finally { await suite.close(); }
+      }
+    } finally { server.stop(true); }
+  });
+}, 60000);
+
 test('both document renderers preserve browser scrolling before startup', async () => {
   for (const how of ['js', 'rust']) {
     await renderedPages(`routes nav
