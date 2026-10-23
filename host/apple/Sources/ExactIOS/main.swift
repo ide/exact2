@@ -12,6 +12,7 @@
 // builds, bundles, installs, and launches.
 import ExactKit
 import ExactComposition
+import ExactLaunchParts
 import UIKit
 #if !os(tvOS)
 import UserNotifications
@@ -27,6 +28,7 @@ func processStart() -> Double? {
     let t = info.kp_proc.p_starttime
     return Double(t.tv_sec) + Double(t.tv_usec) / 1e6
 }
+ExactLaunch.shared.main()
 let mainAt = Date().timeIntervalSince1970
 let execToMainMs = processStart().map { (mainAt - $0) * 1000 }
 
@@ -177,6 +179,7 @@ func printSmoke() {
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
         print("painted \(session.firstDrawMs.map { String(format: "%.1f", $0) } ?? "?") ms")
         print("stamps: " + ExactEnv.stamps.map { "\($0.0) \(String(format: "%.1f", $0.1))" }.joined(separator: " · ") + " · first layout \(session.firstLayoutMs.map { String(format: "%.1f", $0) } ?? "?") · first draw \(session.firstDrawMs.map { String(format: "%.1f", $0) } ?? "?")")
+        print("observe: \(ExactLaunch.shared.smokeLine())")
         print("gpu: \(session.gpuStatus)")
         print("web: \(session.webStatus)")
         print("smoke ok")
@@ -185,6 +188,11 @@ func printSmoke() {
 }
 
 final class AppDelegate: UIResponder, UIApplicationDelegate {
+    override init() {
+        ExactLaunch.shared.delegateInit()
+        ExactLaunch.shared.runLaunchParts(ExactLaunchParts.all)
+        super.init()
+    }
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
         ExactEnv.stamp("didFinishLaunching")
         // EXACT_PLAN naming a local bake with its module (LLP 1116.003) is the
@@ -207,6 +215,7 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
         // `SIGUSR1` saves its trace (LLP 1142 D5): a simulator app is a Mac process.
         TraceSignal.install { session }
         if ExactEnv.agentFreezes { session.clock = 0 }
+        ExactLaunch.shared.didFinishLaunching()
         return true
     }
     #if !os(tvOS)
@@ -254,6 +263,7 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     func scene(_ scene: UIScene, willConnectTo session: UISceneSession, options connectionOptions: UIScene.ConnectionOptions) {
         guard let ws = scene as? UIWindowScene else { return }
         ExactEnv.stamp("scene")
+        ExactLaunch.shared.sceneConnected()
         // @ref LLP 1038 D8 — consume the launch URL before constructing the view.
         #if !os(tvOS)
         let notificationResponse = connectionOptions.notificationResponse
