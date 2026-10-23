@@ -3929,6 +3929,10 @@ What the app stores (`state.slots`, its data module) is the app's own; an
 hears it, and time to interactive (`modules/observe`) waits until no element is
 busy.
 
+key on the web and iOS. `aria-busy=(not ready)` marks a region as still loading:
+assistive technology hears it, and time to interactive (`modules/observe`) waits
+until no element is busy.
+
 `border`, `border-top/right/bottom/left` take CSS width/style/color in any order,
 resetting omitted components to medium/none/currentcolor. Widths are px/pt,
 unitless zero, or thin/medium/thick (1/3/5 px); styles are none/hidden/solid/inset/dotted/dashed.

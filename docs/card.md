@@ -62,7 +62,7 @@ functions: call -> result
   text.trim() -> string
   pending(resourceOrMutationName)  failed(resourceOrMutationName)  failure(resourceOrMutationName)  path("routeName", args…)  empty(field=constant, …)  some(expr)  DeclaredShape(field=value, …)
 
-tags: attributes; on events. Every tag takes CSS's style attributes (flex gap padding font-size …) and colour roles (-exact-label); `contract vocab <name>` gives a style's values
+tags: attributes; on events. Every tag takes CSS styles (flex gap padding font-size …) and colour roles (-exact-label); `contract vocab <name>` gives a style's values
   view box row column main nav article aside section header footer hr: id testId role title tabindex; on press hover key keyup focus blur contextmenu dblclick
   text "…": markup; on selectionchange
   image "…": alt; on load
@@ -178,7 +178,7 @@ a dated record: The write reads the clock, not a ticked `now`, and stores `at`, 
   action log
     let at = time.epochAtZero + performanceNow()
     days = days.concat([formatDate(at, time.utcOffset, "iso")])
-a test, and verify: By `testId` or exact text, each test from empty storage. `clock data` after a reply, `clock settle` after a push, sheet or alert, `clock held` after an action whose long-poll (`exactHeld`) reply you read; `reload` relaunches on its storage; never wait in real time. `bun exact.mjs verify` runs the tests, checks each screen a test ends on and relaunches once; `verify ios` last, for iPhone; `--shots <dir>` keeps screenshots.
+a test, and verify: By `testId` or exact text, each test from empty storage. `clock data` after a reply, `clock settle` after a push, sheet or alert; `reload` relaunches on its storage; never wait in real time. `bun exact.mjs verify` runs the tests, checks each screen a test ends on and relaunches once; `verify ios` last, for iPhone; `--shots <dir>` keeps screenshots.
   test "a pick survives a relaunch"
     tap "pick"
     clock data
@@ -192,7 +192,7 @@ composing a screen: One focal point. Emphasis is a part, not paint on a `button`
       text "Log today"
 
 rules
-- An event hands its action its payload after the captured arguments: text for a field, `select` or date; a bool for a checkbox or switch; a number for a range; nothing for `press` and `submit`. `change=set(i.id)` calls `set(id, payload)`.
+- Events append payloads to captured arguments: text for fields, `select` or dates; bool for checkboxes or switches; numbers for ranges; nothing for `press` or `submit`. `change=set(i.id)` calls `set(id, payload)`.
 
 ```contract
 component App

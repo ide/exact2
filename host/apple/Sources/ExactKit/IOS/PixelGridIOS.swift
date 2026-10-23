@@ -214,4 +214,10 @@ extension Presenter {
         applyFrame(view, old.layout)
     }
 }
+extension CGRect {
+    /// The rect inside the given edges (never negative in size).
+    func insetBy(left: CGFloat, top: CGFloat, right: CGFloat, bottom: CGFloat) -> CGRect {
+        CGRect(x: minX + left, y: minY + top, width: max(0, width - left - right), height: max(0, height - top - bottom))
+    }
+}
 #endif

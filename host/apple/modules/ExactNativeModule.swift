@@ -214,6 +214,7 @@ open class ExactModule {
     open class var views: [String: ExactNativeFactory] { [:] }
     public let context: ExactModuleContext
     public required init(context: ExactModuleContext) { self.context = context }
+
     /// A long call (`native.later`): start the work and return; reply once.
     open func later(_ request: [String: Any], reply: ExactReply) {
         reply.fail("\(type(of: self)) answers no native.later")
@@ -519,6 +520,8 @@ final class ExactHatches {
     /// One of 120 or more: `app.onLine`.
     typealias OnLineFn = @convention(c) (UnsafeMutableRawPointer?) -> UInt32
     let onLineFn: OnLineFn?
+    /// A host table of 128 bytes or more: a module's service asked.
+    let serviceFn: ServiceFn?
     #if os(iOS) || os(tvOS)
     /// One of 112 or more: a held tab's navigation controller, built (`ExactTab.controller`).
     typealias StackFn = @convention(c) (UnsafeMutableRawPointer?, UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer?
@@ -563,6 +566,8 @@ final class ExactHatches {
         #endif
         onLineFn = table.load(as: UInt32.self) >= 120
             ? table.load(fromByteOffset: 112, as: UnsafeRawPointer?.self).map { unsafeBitCast($0, to: OnLineFn.self) } : nil
+        serviceFn = table.load(as: UInt32.self) >= 128
+            ? table.load(fromByteOffset: 120, as: UnsafeRawPointer?.self).map { unsafeBitCast($0, to: ServiceFn.self) } : nil
     }
 
     func onLine() -> Bool? { onLineFn.flatMap { f in let answer = f(host); return answer > 1 ? nil : answer == 1 } }

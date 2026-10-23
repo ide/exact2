@@ -6,17 +6,12 @@ import * as Ov from "./overlay.js"; import { beatAfter } from "./beat.js"; impor
 const heldOr = (fact, value, apply) => { const x = globalThis.exact; if (!x) return apply(); (x.asked ??= {})[fact] = { value, apply }; if (!x.held?.[fact]) apply(); else x.onAsked?.(); }; // a fact a development page holds over the app's own: kept as asked, applied when not held (LLP 1122 T7, theme2's F2)
 export const writeRecords = () => Ov.Writes.list.map(w => ({ id: w.id, mutation: w.m.name, landed: !!w.landed })); // the agent's `state.writes`
 let Media = null; export function useMedia(m) { Media = m; } // and media.js only where a plan has a `video` or `audio`
-// The JS runtime is imported by name, so a bundle carries only what its generated plan uses.
-// Semantics kept from the runner (LLP 1005 §6):
-// - an action's writes land together at its commit (the VM collects
-//   `StoreSlot`s), then one synchronous flush updates the DOM, then its
-//   commands run (focus after the tree is there);
-// - derives and resources settle lazily and glitch-free (a pull, not a push);
-//   an equal value keeps its old object, so nothing downstream reruns;
-// - a resource admits its compiled value only while its arguments equal the
-//   compiled ones; a source not ready keeps the value and asks again when it
-//   is; a later answer lands in its own commit, if its ticket is current;
-// - timers fire on a clock the host moves (`advance`), each at its own time.
+// The bundle imports only the runtime names its plan uses.
+// A commit collects writes, flushes the DOM, then runs host commands.
+// Derives and resources settle lazily; equal values keep their identity.
+// A resource accepts an answer only for its current arguments; a later
+// answer commits independently when its ticket is still current.
+// The host advances timers, each at its own time (LLP 1005 §6).
 let Listener = null, Owner = null, Queue = [], FocusQueue = [], Flushing = false, Rev = 0;
 const CLEAN = 0, CHECK = 1, DIRTY = 2;
 function node(fn, v, effect) {
@@ -266,6 +261,7 @@ export const Hosts = {
   blur: id => { const a = document.activeElement; if (a && a !== document.body && (id == null || a.id === id)) a.blur(); }, ...commands(say, () => agentMode()), // commands.js's: selectText, openURL, postMessage, reload, delivery's; `blur()` drops whatever holds focus; `blur(id)` only when that node holds it (navigation.js runFocusCommands)
   setScheme: s => heldOr("scheme", s, () => { document.documentElement.style.colorScheme = s === "system" ? "" : s; }), requestFullscreen: id => Media ? Media.requestFullscreen(id) : say(`requestFullscreen: refused: no video with id "${id}"`), // media.js's where a plan has media; without any, the same refusal
   copyText: t => navigator.clipboard?.writeText(t), haptic: k => navigator.vibrate?.(k === "selection" ? 5 : 12), /* LLP 1077 D14: vibration where the browser has it */ scrollIntoView: (id, block, inline, behavior) => { const e = liveById(id); if (e) e.scrollIntoView({ block: block ?? "start", inline: inline ?? "nearest", behavior: behavior ?? "auto" }); else say(`scrollIntoView "${id}" refused: no live node with that id`); }, /* an element's, by id (minesweeper F3); list.js takes a row's */ scrollBy: (id, x, y) => { const e = liveById(id); if (e) e.scrollBy(x, y); else say(`scrollBy "${id}" refused: no live node with that id`); }, // LLP 1101.004 R3
+  observe: n => say(`observe ${n}`), observeAttributes: () => {}, observeError: m => say(`observeError ${m}`), // journal lines only; marks.js replaces these when the app has launch modules
 };
 let KeyEvent = null, Propagating = null; Hosts.preventDefault = () => { KeyEvent?.preventDefault(); if (KeyEvent?.type === "beforeunload") KeyEvent.returnValue = ""; }; Hosts.stopPropagation = () => { const e = KeyEvent ?? Propagating; if (e) e.$stopped = true; }; // Propagating: the pointer's down or up a handler is running for, which only its `stopPropagation()` reaches (its default is the browser's); // the key, focus, wheel, beforeunload or clipboard event whose handler is running (`on`): commands run before its commit returns; a stopped key reaches no ancestor's `key` handler, its default still does (files diary F8); a prevented beforeunload is the browser's "Leave site?" (Safari reads `returnValue`)
 export const Sounds = { apply: null, own: new Set(["playSound", "playSounds", "stopSounds", "sendMIDI", "requestMIDIAccess"]), gate: null, stood: null, seq: null, midi: null, midiApply: null, beatAt: null }; // The voice table's and the MIDI queue's commands (LLP 1096 D5, LLP 1125 D7): the runtime's own, never a host's; sounds.js and midi.js apply a commit's once it stood, and transport.js reads the sequences in the gate step and plays them once it stood (LLP 1125 D2).
@@ -398,6 +394,8 @@ let Ticket = 0;
 const sameReq = (a, b) => a && b && a.storage === b.storage && a.method === b.method && a.url === b.url && a.body === b.body && JSON.stringify(a.headers) === JSON.stringify(b.headers) && a.http === b.http;
 /** Requests in flight, for the agent's `clock settle`. */
 export const inflight = { n: 0 };
+/** Elements the app marks `aria-busy="true"` (still loading), by test id else id. */
+export const busy = () => [...document.querySelectorAll('[aria-busy="true"]')].map(el => el.getAttribute('data-testid') ?? el.id);
 function send(t, land) {
   Out.push(() => {
     t.waiting = true; counted(t, inflight);
@@ -464,6 +462,7 @@ export function res(name, source, args, initial, initialArgs, type, ph, carried 
   // Nothing kept: the placeholder shows, pending (LLP 1048.003 D6).
   const hold = () => {
     if (r.value !== undefined) return;
+    r.placeholder = true; // until an answer lands: what time-to-interactive waits for (marks.js)
     const v = typeof ph === "function" ? ph() : ph;
     if (v === undefined) throw new Failed(`${name} answers later and has nothing to show; give it an \`else\``);
     r.value = v;
@@ -471,7 +470,7 @@ export function res(name, source, args, initial, initialArgs, type, ph, carried 
   const take = (v, a, origin) => { // `origin`: when it was asked (overlay.js)
     if (type && !conforms(v, type, [0], r.checked)) throw new Failed(`${name}: the answer does not conform to its shape`, "shape");
     r.checked = v;
-    r.value = v; r.settled = a; r.origin = origin;
+    r.value = v; r.settled = a; r.origin = origin; r.placeholder = false;
   };
   // A reply the source cannot take leaves the value, failed for its arguments (`r.failed`, the runner's `failed_args`).
   // A stream's message (`o.more`) is a settlement that keeps the ticket (LLP 1016.000 D1); a message
@@ -532,8 +531,8 @@ export function res(name, source, args, initial, initialArgs, type, ph, carried 
     return r.value;
   })(), r.settled ?? r.asked, r.origin), type);
   Object.assign(r, {
-    save: () => [r.value, r.settled, r.ticket, r.ticket?.args, r.store, r.failed, r.baked, r.error, r.ticket?.again, r.code, r.origin, r.forced, r.reconciling, r.rev, r.reason],
-    restore: x => { [r.value, r.settled, r.ticket] = x; if (r.ticket) { r.ticket.args = x[3]; r.ticket.again = x[8]; } r.store = x[4]; r.failed = x[5]; r.baked = x[6]; r.error = x[7]; r.code = x[9]; r.origin = x[10]; r.forced = x[11]; r.reconciling = x[12]; r.rev = x[13]; r.reason = x[14]; write(ver.n, ver.n.v + 1); }, // and what it shows is read again, from what was put back
+    save: () => [r.value, r.settled, r.ticket, r.ticket?.args, r.store, r.failed, r.baked, r.error, r.ticket?.again, r.code, r.origin, r.forced, r.reconciling, r.rev, r.reason, r.placeholder],
+    restore: x => { [r.value, r.settled, r.ticket] = x; if (r.ticket) { r.ticket.args = x[3]; r.ticket.again = x[8]; } r.store = x[4]; r.failed = x[5]; r.baked = x[6]; r.error = x[7]; r.code = x[9]; r.origin = x[10]; r.forced = x[11]; r.reconciling = x[12]; r.rev = x[13]; r.reason = x[14]; r.placeholder = x[15]; write(ver.n, ver.n.v + 1); }, // and what it shows is read again, from what was put back
     force: undo => { r.forced = true; flag(ver, ver.n.v + 1, undo); },
     touch: undo => flag(ver, ver.n.v + 1, undo), // its writes changed: what it shows is laid over again
     reconcile: undo => { r.forced = r.reconciling = true; flag(ver, ver.n.v + 1, undo); },
