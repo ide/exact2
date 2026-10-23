@@ -916,6 +916,54 @@ for (const engine of ['chromium', 'firefox', 'webkit']) test(`${engine}: a sheet
   } finally { await browser.close(); }
 }, 90000);
 
+// LLP 1116.020 D2: a sheet's bar says the name of a button whose face is only a symbol. A width its author wrote for
+// the symbol, inline (the wasm runtime) or in a class (the JS target), leaves the word its padding and its wash, as
+// UIKit sizes a bar item to its title: 16 px either side of the word, inside the bar, in either direction. Two long
+// names in a narrow bar both stay in it, each word ending in an ellipsis.
+for (const engine of ['chromium', 'firefox', 'webkit']) test(`${engine}: a sheet's bar word keeps its padding whatever width its author wrote`, async () => {
+  const browser = await launch(engine);
+  try {
+    const page = await browser.newPage({ viewport: { width: 400, height: 300 }, colorScheme: 'light' });
+    const word = (id, attributes) => `<button type="button" data-native data-button-style="bordered" aria-label="Cancel" id="${id}" ${attributes}><img data-symbol-source="symbol:sf/xmark" alt=""></button>`;
+    await page.setContent(`<!doctype html><style>${sheet()} #exact-root#exact-root .sized { width: 44px; height: 44px; display: flex; }</style><div id="exact-root">
+      <div navigationKey="1" navigationPresentation="modal"><header id="bar" style="display:flex;align-items:center"><div style="flex:1;min-width:0"><h2>Last Parked</h2></div>
+      ${word('inline', 'data-exact-said="width height" style="width:44px;height:44px;display:flex"')}${word('class', 'data-exact-said="width height" class="sized"')}${word('unsized', 'style="display:grid"')}</header></div>
+    </div><script>${helpers}</script>`);
+    // Its padding, the room its box gives beyond its word, its height, and whether it is inside the bar's padding.
+    const fit = (id) => page.evaluate((id) => {
+      const [x, , width, height] = box(id), [bar, , barWidth] = box('bar');
+      return [[css(id, 'paddingInlineStart'), css(id, 'paddingInlineEnd')], Math.round(width - parseFloat(css(id, 'width', '::after'))), height, x >= bar + 16 && x + width <= bar + barWidth - 16];
+    }, id);
+    // A pixel in each of its paddings, half way down.
+    const pixels = async (id) => {
+      const { width, height, data } = decodePng(await page.locator(`#${id}`).screenshot());
+      return [4, width - 5].map((x) => [...data.subarray((Math.floor(height / 2) * width + x) * 4, (Math.floor(height / 2) * width + x) * 4 + 3)]);
+    };
+    for (const dir of ['rtl', 'ltr']) {
+      await page.evaluate((dir) => { document.documentElement.dir = dir; }, dir);
+      for (const id of ['inline', 'class', 'unsized']) {
+        const at = [engine, dir, id];
+        expect([at, await fit(id)]).toEqual([at, [['16px', '16px'], 34, id === 'unsized' ? 36 : 44, true]]);
+        // The pointer's wash fills the padding on both sides: a pixel in each matches the other and not the ground.
+        const [ground] = await pixels(id);
+        await page.hover(`#${id}`);
+        const [start, end] = await pixels(id);
+        expect([at, start, end.join() === start.join(), start.join() !== ground.join()]).toEqual([at, start, true, true]);
+        await page.mouse.move(1, 299);
+      }
+    }
+    await page.evaluate(() => { const b = document.getElementById('class'); b.removeAttribute('data-exact-said'); b.setAttribute('data-exact-width', ''); b.setAttribute('data-exact-height', ''); });
+    expect([engine, 'bound width', await fit('class')]).toEqual([engine, 'bound width', [['16px', '16px'], 34, 44, true]]);
+    await page.setViewportSize({ width: 320, height: 300 });
+    await page.evaluate(() => { for (const [id, name] of [['inline', 'Abbrechen und verwerfen'], ['class', 'Speichern und schließen']]) document.getElementById(id).setAttribute('aria-label', name); document.getElementById('unsized').remove(); document.getElementById('inline').after(document.querySelector('#bar > div')); });
+    const narrow = [await fit('inline'), await fit('class'), await page.evaluate(() => [box('inline')[0] + box('inline')[2] <= box('class')[0], css('inline', 'textOverflow', '::after')])];
+    expect([engine, 'narrow', narrow]).toEqual([engine, 'narrow', [[['16px', '16px'], 34, 44, true], [['16px', '16px'], 34, 44, true], [true, 'ellipsis']]]);
+    // A button its author made a block keeps the word a block of its own, which `text-overflow` ends.
+    await page.evaluate(() => { document.getElementById('inline').style.display = 'block'; });
+    expect([engine, 'narrow block', await fit('inline'), await page.evaluate(() => css('inline', 'display', '::after'))]).toEqual([engine, 'narrow block', [['16px', '16px'], 34, 44, true], 'block']);
+  } finally { await browser.close(); }
+}, 90000);
+
 // A part colour's alpha is its only opacity. Removing it restores the look's default.
 for (const engine of ['chromium', 'firefox', 'webkit']) test(`${engine}: authored placeholder colour and reset in both schemes`, async () => {
   const browser = await launch(engine);
