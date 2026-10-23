@@ -567,7 +567,10 @@ component Tabs
           const content = await before.locator(`[data-testid="content-${tab}"]`).boundingBox();
           await before.mouse.move(content.x + content.width / 2, content.y + content.height / 2);
           await before.mouse.wheel(0, 300);
-          await before.waitForFunction(tab => document.querySelector(`[data-testid="content-${tab}"]`).scrollTop > 0, tab);
+          // Poll from the driver because JavaScript-disabled pages do not run the page's animation-frame poller
+          for (let i = 0; i < 50 && !(await before.evaluate(scroll, tab))[0]; i++) {
+            await before.waitForTimeout(50);
+          }
           expect([...at, ...(await before.evaluate(scroll, tab))]).toEqual([...at, true, 0, bar]);
           const after = await (await suite.newContext({ viewport: { width: 390, height: 844 } })).newPage();
           await after.goto(url);
@@ -609,7 +612,11 @@ component Page
             expect([how, engine, await page.evaluate(() => [document.documentElement, document.body].map(e => getComputedStyle(e).overscrollBehaviorY))]).toEqual([how, engine, ['auto', 'auto']]);
             await page.mouse.move(195, 400);
             await page.mouse.wheel(0, 300);
-            await page.waitForFunction(() => document.scrollingElement.scrollTop > 0);
+            const scrolled = () => page.evaluate(() => document.scrollingElement.scrollTop > 0);
+            for (let i = 0; i < 50 && !await scrolled(); i++) {
+              await page.waitForTimeout(50);
+            }
+            expect(await scrolled()).toBe(true);
           } finally { await browser.close(); }
         }
       } finally { server.stop(true); }
