@@ -4,7 +4,7 @@ import Foundation
 import ExactCore
 
 extension ExactSession {
-    /// @ref LLP 1027.000.000 — the date, against the clock `now()` reads.
+    /// Sends the date, zone, locale and preferences after a boot.
     func tellTime() {
         if launchPlace.epoch != nil {
             tellAgentOffset()
@@ -42,10 +42,9 @@ extension ExactSession {
         let zone = TimeZone(identifier: launchPlace.timeZone) ?? TimeZone(secondsFromGMT: 0)!
         return (epoch, Double(zone.secondsFromGMT(for: Date(timeIntervalSince1970: (epoch + now()) / 1000))) / 60)
     }
-    /// Under the agent, the drive's date at the clock's zero and its zone's
-    /// offset at the virtual instant the clock reads: told at boot and after
-    /// every `clock`, so a move across a DST change re-answers it (LLP
-    /// 1069.007 D2). An unchanged offset commits nothing.
+    /// Under the agent, sends the drive's date at clock zero and its zone's
+    /// offset at the current virtual time. Runs at boot and after every `clock`,
+    /// so crossing a DST change updates it (LLP 1069.007 D2).
     func tellAgentOffset() {
         guard launchPlace.epoch != nil else { return }
         let date = dateNow()

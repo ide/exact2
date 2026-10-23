@@ -9,6 +9,8 @@ host/web/dist/
 host/web/dist.*
 # The Apple package's SwiftPM build products.
 host/apple/.build/
+# Generated module launch-part targets.
+host/apple/.launch-parts/
 # The harness's subagent worktrees: never committed.
 .claude/worktrees/
 # llp-ship run state, an output root of the captured-source diagnostics.
