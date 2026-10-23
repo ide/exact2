@@ -39,6 +39,12 @@ const APP: &str = r##"component App
         text "Go"
       button appearance="auto" width=84 height=24 testId="sized"
         text "Go"
+      button appearance="auto" buttonStyle="plain" padding=0 testId="flush"
+        text "Go"
+      button appearance="auto" buttonStyle="plain" padding-top=0 testId="one-side"
+        text "Go"
+      button appearance="auto" padding=0 testId="outline"
+        text "Go"
       input type="checkbox" testId="check"
       input type="checkbox" checked=true testId="checked"
       input type="radio" testId="radio"
@@ -235,6 +241,9 @@ fn a_host_with_no_toolkit_under_it_draws_the_webs_neutral_look() {
     // A size the author wrote is the box: the look's floor and padding step
     // aside.
     assert_eq!(size(&mut p, "sized"), (84.0, 24.0));
+    assert_eq!(size(&mut p, "flush").1, 20.0);
+    assert_eq!(size(&mut p, "one-side").1, 27.0);
+    assert_eq!(size(&mut p, "outline").1, 22.0);
     // The look's lengths are of the control's font size, which a control
     // inherits as it does on a page.
     assert_eq!(size(&mut p, "large").1, 45.0);
