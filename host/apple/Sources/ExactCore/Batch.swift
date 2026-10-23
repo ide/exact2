@@ -120,6 +120,7 @@ public struct BatchOp {
         case sound // LLP 1096 D8: the voice table's ops, and a boot's files
         case roles // LLP 1095 D4: the roles the app's theme replaces
         case midi // LLP 1125 D7: the MIDI queue's sends, retractions, inputs to open and a request
+        case animate // a transition Core Animation plays (TransitionsIOS.swift)
     }
     package let op: Kind
     package var nodeID: UInt32?

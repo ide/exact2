@@ -49,6 +49,82 @@ pub fn rust_entry(data: &str, constructor: &str, mode: &str) -> Result<String, S
     }
 }
 
+/// A Linux app's whole `entry.rs`: [`rust_entry`], its `launch_parts()`, its
+/// `hatches` and a `main` that runs the parts before `host` (`exact_linux` or
+/// `exact_linux_update`) starts with `run` (both from
+/// `native::rust_hatch_entry`). Run from the app's Linux build script.
+pub fn linux_entry(
+    data: &str,
+    constructor: &str,
+    mode: &str,
+    host: &str,
+    hatches: &str,
+    run: &str,
+) -> Result<String, String> {
+    Ok(format!(
+        "{}\n{}\n{hatches}fn main() {{ launch_parts(); std::process::exit({host}::{run}); }}\n",
+        rust_entry(data, constructor, mode)?,
+        launch_parts()?
+    ))
+}
+
+/// Each `app.json` `launch` module with a `linux/launch.rs` (the app's
+/// `modules/` first, then exact2's) becomes a module of the executable,
+/// called with its `moduleConfig` before the host starts.
+fn launch_parts() -> Result<String, String> {
+    let crate_dir = std::env::var_os("CARGO_MANIFEST_DIR").ok_or("not run by cargo")?;
+    let app_dir = std::path::Path::new(&crate_dir).join("..");
+    let manifest = crate::Manifest::read(&app_dir)?;
+    let shared = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../modules");
+    let app = serde_json::json!({
+        "id": manifest.id,
+        "name": manifest.name,
+        "version": manifest.json["version"],
+    })
+    .to_string();
+    let (mut mods, mut calls) = (String::new(), String::new());
+    for name in manifest.json["launch"].as_array().into_iter().flatten() {
+        let name = name
+            .as_str()
+            .ok_or("app.json launch: a module name is a string")?;
+        // As `scripts/app.schema.json`: `^[a-z][a-z0-9]*$`.
+        if !name.starts_with(|c: char| c.is_ascii_lowercase())
+            || !name
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+        {
+            return Err(format!("app.json launch: invalid module name {name:?}"));
+        }
+        let Some(file) = [app_dir.join("modules"), shared.clone()]
+            .iter()
+            .map(|base| base.join(name).join("linux/launch.rs"))
+            .find(|f| f.exists())
+        else {
+            continue;
+        };
+        println!("cargo:rerun-if-changed={}", file.display());
+        let config = manifest.json["moduleConfig"]
+            .get(name)
+            .cloned()
+            .unwrap_or_else(|| serde_json::json!({}))
+            .to_string();
+        let ident = format!("launch_{name}");
+        mods.push_str(&format!(
+            "#[allow(missing_docs, dead_code)]\nmod {ident} {{ include!({:?}); }}\n",
+            file.canonicalize().map_err(|e| e.to_string())?
+        ));
+        calls.push_str(&format!(
+            "    {ident}::launch(exact_linux::journal::LaunchContext::new({name:?}, r####\"{config}\"####, r####\"{app}\"####, COMPAT));\n"
+        ));
+    }
+    if calls.is_empty() {
+        return Ok("fn launch_parts() {}\n".into());
+    }
+    Ok(format!(
+        "{mods}fn launch_parts() {{\n    let started = std::time::Instant::now();\n{calls}    exact_linux::journal::launch_parts_ran(started.elapsed());\n}}\n"
+    ))
+}
+
 /// The Rust executor a web entry links (LLP 1047 D3): the compatibility
 /// inputs' `rustMode`, or `off` when the manifest names no `rust.module`. A
 /// browser then has no Rust module to swap in (the dev loop builds one only

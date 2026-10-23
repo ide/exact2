@@ -54,11 +54,12 @@ import { appleImplementations } from '../../js/bake/src/typescript.mjs';
 import { writeDataKeys } from './data-keys.mjs';
 import { compileFixtures, iosTestRuns, macTests } from './xctest.mjs';
 import { appIcon, buildInfo, iosAssets, appleAssets, appleAssetCatalogInventory, copyMacResources, signingOrder, helperEntitlements, plistFile, wrapFramework, signedGpuProduct, assertArchiveFrameworks } from './assets.mjs';
+import { auditLaunchParts, launchServices, serviceArgs, writeLaunchParts } from './launch-parts.mjs';
 import { keptModules } from './modules.mjs';
 import { quiet, quietFor } from './quiet.mjs';
 import { keptCrates } from './crates.mjs';
 import { linkedPlanArgs, placeLinkedPlan } from '../../scripts/linked-plan.mjs';
-import { appleComposition, assertCapabilityFrameworks, assertLinkedSdk, linksByPlan } from './link.mjs';
+import { composedModule, appleComposition, assertCapabilityFrameworks, assertLinkedSdk, linksByPlan } from './link.mjs';
 export { appIcon, iosAssets, documentTypes, exportedTypes, importedTypes };
 import { IPAD_ORIENTATIONS, orientationKeys, allows, deviceLaunchArgs, developmentLaunchEnvironment, identity, installedBuild, macIdentity, phone, replacedNote, profile, showSimulator, simulator, simulators, useXcode } from './devices.mjs';
 const root = resolve(new URL('../..', import.meta.url).pathname);
@@ -431,7 +432,7 @@ export const infoPlist = (app, device = false, { executable = executableName(app
   const ios = app.manifest.host?.ios ?? {};
   // tvOS reuses the manifest's iOS section; Apple TV is device family 3.
   const families = tv ? [3] : (ios.deviceFamily ?? ['iphone', 'ipad']).map((f) => (f === 'ipad' ? 2 : 1));
-  const dict = {
+  const dict = { ...(app.manifest.moduleConfig ? { ExactModuleConfig: app.manifest.moduleConfig } : {}),
     CFBundleExecutable: executable,
     CFBundleIdentifier: id,
     CFBundleName: name,
@@ -554,7 +555,7 @@ export function stripForDistribution(executable, dsym) {
 
 /** The macOS `Info.plist` for a bundled build, from the same manifest. */
 export const macInfoPlist = (app, { development = null, icon = {}, reach = null, distributed = false } = {}) => plistFile({
-  ...icon,
+  ...icon, ...(app.manifest.moduleConfig ? { ExactModuleConfig: app.manifest.moduleConfig } : {}),
   CFBundleExecutable: executableName(app),
   CFBundleIdentifier: app.id,
   CFBundleName: app.displayName,
@@ -790,8 +791,9 @@ async function main(args, lockHeld = false) {
   // SwiftPM compiles Package.swift itself for macOS before applying the iOS
   // product triple; an iPhone SDKROOT in its environment breaks that host
   // manifest compile. The target SDK stays in the explicit Swift arguments.
+  const launchPartsDir = writeLaunchParts(pkg, app);
   const swiftEnv = (libDir, composition, link = 'all') => ({
-    ...process.env,
+    ...process.env, ...(launchPartsDir ? { EXACT_LAUNCH_PARTS: launchPartsDir.slice(pkg.length + 1) } : {}),
     EXACT_WIDGET_GALLERY: gallery ? '1' : '0',
     EXACT_APPLE_LINK: link, EXACT_UPDATE_TRUST: cargoEnv.EXACT_UPDATE_TRUST ?? 'development', // LLP 1047.001 D4 (link.mjs); a production build compiles no inspect mode (Package.swift)
     ...(tv ? { TVOS_DEPLOYMENT_TARGET: targets.ios } : ios ? { IPHONEOS_DEPLOYMENT_TARGET: targets.ios } : { MACOSX_DEPLOYMENT_TARGET: targets.macos }),
@@ -1102,7 +1104,7 @@ async function main(args, lockHeld = false) {
   if (composing) writeDataKeys(app, dataKeys, ios ? 'ios' : 'macos');
   // @ref LLP 1121 D12 — the token names `contract tamber gen swift` writes from the design (never committed).
   if (composing) (await import('../../scripts/tamber-names.mjs')).writeTamberNames(app, 'swift'); const tamberNames = resolve(app.dir, '.exact/tamber/tamber.swift');
-  const moduleSources = composing ? [resolve(root, 'host/apple/modules/ExactNativeModule.swift'), resolve(root, 'host/apple/modules/ExactTamber.swift'), resolve(root, 'host/apple/modules/ExactExtensions.swift'), composed, ...(existsSync(tamberNames) ? [tamberNames] : []), dataKeys, ...snapshot.copies] : [];
+  const moduleSources = composing ? [resolve(root, 'host/apple/modules/ExactNativeModule.swift'), resolve(root, 'host/apple/modules/ExactTamber.swift'), resolve(root, 'host/apple/modules/ExactExtensions.swift'), resolve(root, 'host/apple/modules/ExactServices.swift'), composed, ...(existsSync(tamberNames) ? [tamberNames] : []), dataKeys, ...snapshot.copies] : [];
   const modulesBuilt = moduleSources.length ? resolve(webBuildDir, modulesLoadName) : null;
   // The slice of each `modules/apple/*.xcframework` for this build, read
   // from the xcframework's own Info.plist (`AvailableLibraries`: platform,
@@ -1177,6 +1179,7 @@ async function main(args, lockHeld = false) {
     return arm(moduleArgs(on, [...target, probeMain], built, true, variant, macArch).filter(a => a !== '-emit-library'), [...moduleSources, ...packageSources, probeMain], built, frameworkStamp(true, variant, macArch) + packageStamp, true, true);
   };
   const firstRoute = routes.find(r => !r.lacking); if (firstRoute && !firstRoute.placed) try { firstRoute.placed = compileProbe(firstRoute); } catch (e) { firstRoute.placed = () => { throw e; }; }
+  const serviceDylibs = launchServices(app.launch, webBuildDir); for (const svc of serviceDylibs) arms.push(arm(['--sdk', sdkName, 'swiftc', '-module-cache-path', resolve(swiftBuildRoot, 'modules-module-cache'), ...serviceArgs(svc), ...(ios ? ['-target', device ? 'arm64-apple-ios17.0' : tv ? iosTripleFor(app, false, true) : iosTriple, '-sdk', sdk] : macTarget)], svc.sources, svc.built, '', true));
   await hostCompile?.done({ repeated: true });
   // The early build stands when it succeeded and the bake came out as it was expected to.
   const linkedEarly = early ? await early.step.done({ repeated: true }) && expected.capture === libDir && expected.composition === composition && expected.scratch === paths.scratch : false;
@@ -1231,7 +1234,7 @@ async function main(args, lockHeld = false) {
       const launchCapabilities = ios ? swiftCapabilities : swiftCapabilities.filter(name => name !== 'ExactNumerals');
       assertCapabilityFrameworks(executable, gallery ? [...launchCapabilities, 'ExactSnapshot'] : launchCapabilities, gallery ? ['SwiftUI', 'WidgetKit'] : []);
       if (ipa) stripped = stripForDistribution(executable, `${ipa.replace(/\.ipa$/, '')}.dSYM`);
-    }
+    } if (launchPartsDir) auditLaunchParts(resolve(swiftBinDir, 'ExactLaunchParts.o'), app.launch, read);
   } finally { releaseSwift(); }
   const tSwift = Date.now();
   for (const placed of arms) await placed();
@@ -1313,7 +1316,7 @@ async function main(args, lockHeld = false) {
 
   const bundleTools = {runApple,appleArtifacts, macInfoPlist, copyAppleStaticTrees, writeUsageStrings, receipt, shippedReceipt, assertAppleIdentity, placeAppleArtifact, infoPlist, distributionKeys, copyAppleGpuProducts, entitlements, appClip};
   if (!ios) {
-    const bundlePath = assembleMac({shared, macWidgets, triple: moduleTripleFor(app, ios, device, tv), appleReach, hasWeb, webLoadName, args, app, paths, binDir, libDir, bin, loadName, hasGpu, dylib, moduleDylibs, looseArms, hasSvg, svgLoadName, modulesLoadName, modulesBuilt, svgBuilt, canvasGpuLoadName, canvasGpuBuilt, sha1, linkRoot, swiftc, buildReceipt, development, bakedCompat, rosterKeys, production, distribution, stampSdk, products, composition, sdk, bakedPlan, cleanup}, bundleTools);
+    const bundlePath = assembleMac({shared, serviceDylibs, macWidgets, triple: moduleTripleFor(app, ios, device, tv), appleReach, hasWeb, webLoadName, args, app, paths, binDir, libDir, bin, loadName, hasGpu, dylib, moduleDylibs, looseArms, hasSvg, svgLoadName, modulesLoadName, modulesBuilt, svgBuilt, canvasGpuLoadName, canvasGpuBuilt, sha1, linkRoot, swiftc, buildReceipt, development, bakedCompat, rosterKeys, production, distribution, stampSdk, products, composition, sdk, bakedPlan, cleanup}, bundleTools);
     publishProducts();
     release();
     rmSync(webBuildDir, { recursive: true, force: true });
@@ -1325,7 +1328,7 @@ async function main(args, lockHeld = false) {
     return;
   }
 
-  const bundles = assembleIOS({shared, triple: iosTripleFor(app, device, tv), app, paths, binDir, bin, device, development, appleReach, tv, bakedCompat, bakedPlan, ipa, linkRoot, swiftc, buildReceipt, rosterKeys, sdkName, production, distribution, stampSdk, libDir, gpuArtifacts, looseArms, modulesBuilt, modulesLoadName, hasSvg, svgBuilt, svgLoadName, svgFilterBuilt, svgFilterLibraryName, canvasGpuBuilt, canvasGpuLoadName, args, unsigned, prof, ph, sha1, composition, destination, target, sdk, hasGpu, dylib}, bundleTools);
+  const bundles = assembleIOS({shared, serviceDylibs, triple: iosTripleFor(app, device, tv), app, paths, binDir, bin, device, development, appleReach, tv, bakedCompat, bakedPlan, ipa, linkRoot, swiftc, buildReceipt, rosterKeys, sdkName, production, distribution, stampSdk, libDir, gpuArtifacts, looseArms, modulesBuilt, modulesLoadName, hasSvg, svgBuilt, svgLoadName, svgFilterBuilt, svgFilterLibraryName, canvasGpuBuilt, canvasGpuLoadName, args, unsigned, prof, ph, sha1, composition, destination, target, sdk, hasGpu, dylib}, bundleTools);
   publishProducts();
   release();
   if (ipa) {
@@ -1445,7 +1448,7 @@ async function test(args) {
     writeFileSync(resolve(fixtureDir, 'ExactComposed.swift'), composedModule([], fixture.modules.apple.length > 0));
     runApple('xcrun', ['--sdk', 'iphonesimulator', 'swiftc', '-parse-as-library', '-emit-library', '-O', '-swift-version', '5', '-module-name', 'ExactAppModules',
       '-module-cache-path', resolve(fixtureDir, 'cache'), resolve(root, 'host/apple/modules/ExactNativeModule.swift'), resolve(root, 'host/apple/modules/ExactTamber.swift'),
-      resolve(root, 'host/apple/modules/ExactExtensions.swift'), resolve(fixtureDir, 'ExactComposed.swift'), resolve(fixtureDir, 'ExactDataKeys.swift'),
+      resolve(root, 'host/apple/modules/ExactExtensions.swift'), resolve(root, 'host/apple/modules/ExactServices.swift'), resolve(fixtureDir, 'ExactComposed.swift'), resolve(fixtureDir, 'ExactDataKeys.swift'),
       ...fixture.modules.apple, '-target', iosTriple, '-o', env.TEST_RUNNER_EXACT_FIXTURE_MODULE]);
     compileFixtures(root, run, env, fixtureDir, 'TEST_RUNNER_EXACT', app.id);
     if (process.env.EXACT_REQUIRED) env.TEST_RUNNER_EXACT_REQUIRED = process.env.EXACT_REQUIRED;
@@ -1477,22 +1480,4 @@ export function rebuildArgs(args, dir = process.env.EXACT_APP_DIR) {
   const ios = ['--ios', '--device', '--tvos'].some((flag) => args.includes(flag));
   const rest = args.filter((a) => a !== '--ios' && !(a.endsWith('-apple') && !a.startsWith('-')));
   return [`(cd ${quote(dir)} && bun exact.mjs ${ios ? 'ios' : 'mac'}`, ...rest.map(quote)].join(' ') + ')';
-}
-
-/** The app's module composed with its packages' implementations (LLP 1133.001 D5): an adapter over each package's
- * class (its shape, host/apple/modules/ExactExtensions.swift), the table that names them, and, for an app with no
- * module of its own, an empty one. */
-function composedModule(packages, ownModule) {
-  const lines = ['// Written by host/apple/build.mjs (LLP 1133.001 D5); never edited.', ...packages.map(p => `import ${p.module}`)];
-  for (const p of packages) lines.push(
-    `final class ExactAdapter_${p.module}: ExactExtensionAdapter {`,
-    `    let impl: ${p.className}`,
-    `    init(_ context: ExactModuleContext) { impl = ${p.className}(changed: { [weak context] topic in context?.changed(topic) }, agent: context.agent, log: { [weak context] line in context?.diagnostics.log(line) }) }`,
-    '    override func later(_ name: String, _ args: [String: Any], reply: ExactReply) { impl.later(name, args) { reply.send($0) } }',
-    '    override func call(_ name: String, _ args: [String: Any]) throws -> [String: Any] { try impl.call(name, args) }',
-    '    override func release(_ name: String) { impl.release(name) }',
-    '}');
-  lines.push(`let exactExtensions: [String: (ExactModuleContext) -> ExactExtensionAdapter] = [${packages.map(p => `${JSON.stringify(p.extension)}: { ExactAdapter_${p.module}($0) }`).join(', ') || ':'}]`);
-  if (!ownModule) lines.push('final class ExactComposedModule: ExactModule {}', 'let exactModule: ExactModule.Type = ExactComposedModule.self');
-  return lines.join('\n') + '\n';
 }

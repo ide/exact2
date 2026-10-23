@@ -294,7 +294,19 @@ impl Batch {
             }
             let _ = write!(s, "{id}");
         }
-        s.push_str("]}");
+        // The route pattern and params name the screen in navigation metrics.
+        s.push_str("],\"pattern\":");
+        quote(&change.pattern, &mut s);
+        s.push_str(",\"params\":{");
+        for (i, (k, v)) in change.params.iter().enumerate() {
+            if i > 0 {
+                s.push(',');
+            }
+            quote(k, &mut s);
+            s.push(':');
+            quote(v, &mut s);
+        }
+        s.push_str("}}");
         self.ops.push(s);
     }
 
@@ -762,6 +774,18 @@ impl Batch {
     pub fn present(&mut self, id: u32, property: &str, x: f64, y: f64) {
         self.ops.push(format!(
             "{{\"op\":\"present\",\"id\":{id},\"property\":\"{property}\",\"x\":{x},\"y\":{y}}}"
+        ));
+    }
+
+    /// `{"op":"animate","id":…,"property":"opacity","delay":…,"duration":…,
+    /// "values":[…]}`: a transition the presenter plays in Core Animation,
+    /// its values evenly spaced over `duration` seconds after `delay`,
+    /// linear between them (the engine's own curve, `play_transition`).
+    pub fn animate(&mut self, id: u32, property: &str, delay: f64, duration: f64, values: &[f64]) {
+        let values: Vec<String> = values.iter().map(|v| format!("{v}")).collect();
+        self.ops.push(format!(
+            "{{\"op\":\"animate\",\"id\":{id},\"property\":\"{property}\",\"delay\":{delay},\"duration\":{duration},\"values\":[{}]}}",
+            values.join(",")
         ));
     }
 
