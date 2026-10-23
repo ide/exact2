@@ -2,6 +2,7 @@
 // @ref LLP 1027 D4 — app logic loads after first pixel.
 // @ref LLP 1024 D3 — native views attach after the paint gate.
 import Foundation
+import QuartzCore
 import ExactCore
 
 extension ExactSession {
@@ -9,12 +10,16 @@ extension ExactSession {
         guard state != .destroyed, generation == drawnGeneration else { return }
         if firstDrawMs == nil { firstDrawMs = ExactEnv.wall() }
         app.sharedStore.firstPixel()
+        ExactLaunch.shared.drawn(self)
         guard activatedGeneration != drawnGeneration else { return }
         activatedGeneration = drawnGeneration
         DispatchQueue.main.async { [weak self] in
             guard let self, state != .destroyed, generation == drawnGeneration else { return }
             // Prepare before any source calls the module (LLP 1067.000 D8).
-            natives.prepareAppModule(); presenter.releaseLaunchAutofocus() // the next turn, never waiting on a loading source
+            let started = CACurrentMediaTime()
+            natives.prepareAppModule()
+            ExactLaunch.shared.modulePrepared(self, seconds: CACurrentMediaTime() - started)
+            presenter.releaseLaunchAutofocus() // the next turn, never waiting on a loading source
             restoreKeptDocuments() // before any answer reads a kept document (LLP 1069.010.000 D4)
             if preparedGeneration != drawnGeneration { prepareData(drawnGeneration, token: token) } else { activateData(drawnGeneration, token: token) }
         }
@@ -33,6 +38,7 @@ extension ExactSession {
     private func prepareData(_ drawnGeneration: Int, token: UInt64) {
         preparedGeneration = drawnGeneration
         dataPreparing = true
+        ExactLaunch.shared.waitingForData(self)
         openNativeViews(drawnGeneration)
         let runtime = runtime
         Owner.shared.post {
@@ -47,14 +53,20 @@ extension ExactSession {
     }
 
     private func activateData(_ drawnGeneration: Int, token: UInt64) {
+        let started = CACurrentMediaTime()
         let batch = runtime.dataReady()
+        ExactLaunch.shared.dataStep(self, appModule: 0, ready: CACurrentMediaTime() - started, pending: batch.pending)
         if batch.pending {
+            ExactLaunch.shared.waitingForData(self)
             pendingActivation = (drawnGeneration, token) // the generation stays activated: only the source's wake retries
             return
         }
         appFileRoots = AppFiles.learn(runtime) // the roots storage configured
+        let applying = CACurrentMediaTime()
         apply(batch)
+        ExactLaunch.shared.dataApplied(self, CACurrentMediaTime() - applying)
         dataGeneration = drawnGeneration
+        ExactLaunch.shared.activated(self, ok: batch.error == nil)
         activityOutput?.drain()
         storeRefresh.activated = { [weak self] in
             guard let self, state != .destroyed, generation == drawnGeneration else { return }

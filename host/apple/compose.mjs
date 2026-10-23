@@ -1,8 +1,8 @@
 // The Swift that composes an app's module with its packages' implementations (LLP 1133.001 D5), which
 // host/apple/build.mjs writes beside the module's sources and never commits.
 
-/** The module side's fixed Swift, in `root`: the table, its view entries, the hatch bindings and the extensions. */
-export const moduleSeam = (resolve, root) => ['ExactNativeModule.swift', 'ExactNativeViews.swift', 'ExactTamber.swift', 'ExactExtensions.swift']
+/** The module side's fixed Swift, in `root`: the table, its view entries, the hatch bindings, extensions and service query. */
+export const moduleSeam = (resolve, root) => ['ExactNativeModule.swift', 'ExactNativeViews.swift', 'ExactTamber.swift', 'ExactExtensions.swift', 'ExactServices.swift']
   .map(f => resolve(root, 'host/apple/modules', f));
 
 /** The app's module composed with its packages' implementations: an adapter over each package's class (its shape,

@@ -11,7 +11,7 @@
 //
 // The host's table, handed to the module once (`module_connect`):
 //
-//    0  u32 size                136
+//    0  u32 size                144
 //    8  resolve(host, routeKey, keyLen, id, idLen) → node (0: none)
 //   16  act(host, node, action) → 0 done   action 0 click, 1 focus, 2 blur
 //   24  log(host, text, len)
@@ -38,9 +38,13 @@
 //  120  audio_claim(host, mode, len, options, background, event, ctx) → claim
 //  128  audio_release(host, claim): a package capture's claim on the audio
 //        session (LLP 1133.009 D7, AudioSession.swift)
+//  136  service(host, module, moduleLen, json, len, ctx, reply): a module's
+//        service query (`ExactServices.query`); replies once on any thread,
+//        with len 0 for no answer
 //
 // `host` is the session's runtime handle, as for `changed` and `now`: a
-// destroyed session's is answered with nothing.
+// destroyed session's is answered with nothing. Service queries use the
+// process registry and do not require a live session.
 import CExact
 #if os(iOS) || os(tvOS)
 import AVFoundation
@@ -288,10 +292,21 @@ private let hatchDiagnosticsTable: UnsafeRawPointer = {
     return UnsafeRawPointer(t)
 }()
 
+/// Queries a loaded service and returns its JSON answer to the app module.
+private let hatchService: @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<UInt8>?, UInt32, UnsafePointer<UInt8>?, UInt32, UnsafeMutableRawPointer?,
+                                          @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<UInt8>?, UInt32) -> Void) -> Void = { _, module, moduleLength, json, length, context, reply in
+    let name = hatchText(module, moduleLength)
+    let request = json.flatMap { (try? JSONSerialization.jsonObject(with: Data(bytes: $0, count: Int(length)))) as? [String: Any] } ?? [:]
+    ExactServices.query(name, request) { answer in
+        guard let answer, let data = try? JSONSerialization.data(withJSONObject: answer) else { return reply(context, nil, 0) }
+        data.withUnsafeBytes { reply(context, $0.bindMemory(to: UInt8.self).baseAddress, UInt32(data.count)) }
+    }
+}
+
 /// The host's callbacks, one table for the process: each finds its session
 /// by the handle it is called with.
 private let hatchHostTable: UnsafeRawPointer = {
-    let size = 136
+    let size = 144
     let t = UnsafeMutableRawPointer.allocate(byteCount: size, alignment: 8)
     t.initializeMemory(as: UInt8.self, repeating: 0, count: size)
     t.storeBytes(of: UInt32(size), as: UInt32.self)
@@ -311,6 +326,7 @@ private let hatchHostTable: UnsafeRawPointer = {
     t.storeBytes(of: unsafeBitCast(hatchOnLine, to: UnsafeRawPointer.self), toByteOffset: 112, as: UnsafeRawPointer.self)
     t.storeBytes(of: unsafeBitCast(hatchAudioClaim, to: UnsafeRawPointer.self), toByteOffset: 120, as: UnsafeRawPointer.self)
     t.storeBytes(of: unsafeBitCast(hatchAudioRelease, to: UnsafeRawPointer.self), toByteOffset: 128, as: UnsafeRawPointer.self)
+    t.storeBytes(of: unsafeBitCast(hatchService, to: UnsafeRawPointer.self), toByteOffset: 136, as: UnsafeRawPointer.self)
     return UnsafeRawPointer(t)
 }()
 

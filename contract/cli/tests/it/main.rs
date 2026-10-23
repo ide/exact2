@@ -106,6 +106,7 @@ mod navigation_detent;
 mod navigation_split;
 mod negative_margin;
 mod notify;
+mod observe_commands;
 mod overlay;
 mod package_designs;
 mod package_icons;
