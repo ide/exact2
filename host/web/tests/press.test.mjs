@@ -64,7 +64,8 @@ const unsaid = sheet + `
   <button id="text" type="button" data-button-style="plain" data-native="" data-exact-on="press"><span id="text-face">text</span></button>
   <button id="translucent" type="button" data-button-style="filled" data-native="" style="--exact-accent:var(--exact-quaternary-fill)"><span id="translucent-face">translucent</span></button>
   <button id="glass" type="button" data-button-style="glass" data-native="" data-exact-on="press"><span id="glass-face">glass</span></button>
-  <button id="tinted" type="button" data-button-style="tinted" data-native=""><span>tinted</span></button>
+  <button id="tinted" type="button" data-button-style="tinted" data-native=""><span id="tinted-face">tinted</span></button>
+  <button id="bordered" type="button" data-button-style="bordered" data-native=""><span id="bordered-face">bordered</span></button>
   <button id="painting" type="button" data-button-style="filled" data-native="" style="--exact-press-opacity:0.5"><span id="painting-face">paints its own</span></button>
   <button id="action" type="button" data-action="jump">action</button>
   <button id="off" type="button" disabled data-exact-on="press">off</button>
@@ -123,7 +124,7 @@ const paint = sheet + `
   window.ready = true;
 </script>`;
 
-// One server and one Chrome over CDP for the file; each test opens a page of its own.
+// One server for the file, and one Chrome over CDP for its Chrome-only tests; each test opens a page of its own.
 let server, suite, cdp;
 beforeAll(async () => {
   server = createServer((req, res) => {
@@ -354,7 +355,7 @@ check('a pressable that declares no feedback dims while pressed; a row, a native
     // A plain button, a filled one on a translucent accent and a glass one show UIKit's highlight (neutral.css): the
     // button, and so its focus ring, keeps its opacity, and its face fades. A pressed paint the author wrote adds to
     // it, as on iOS, where UIKit highlights a native button whatever press is written (NativeButtonsIOS.swift).
-    // Let go, it eases out of the highlight (the test below).
+    // Released, it eases out of the highlight (the test below).
     const eased = () => evaluate(`document.getAnimations().forEach(a => a instanceof CSSTransition && a.finish())`);
     for (const id of ['text', 'translucent', 'glass']) {
       const down = await held(id, id, `${id}-face`);
@@ -484,51 +485,70 @@ check('a pressable that declares no feedback dims while pressed; a row, a native
   }
 }, 60000);
 
-// A native button eases out of UIKit's highlight as its press ends (neutral.css; on iOS 27 a quarter second,
-// ease-in-out), so a tap too quick to see held shows it, under a finger or the mouse, in each engine: a plain, a filled
-// and a glass button's face, and the filled one's fill. The highlight itself comes at once, and nothing else about the
-// button eases (a filled button enabled again takes its fill at once), nor does a release on the agent's clock.
-for (const engine of ['chromium', 'firefox', 'webkit']) test(`${engine}: a native button eases out of its highlight as the press ends`, async () => {
+// A native button eases out of its press as the press ends (neutral.css; UIKit's highlight on iOS 27, a quarter second,
+// ease-in-out), so even a quick tap shows, under a finger or the mouse, in each engine: a plain, a filled and a glass
+// button's face, the filled one's fill, and a glass, tinted or bordered button's wash. The press itself comes at once,
+// and nothing else about the button eases: a filled button enabled again takes its fill at once, and an authored
+// transition running in it is its own. A release on the agent's clock lands at once, and a pressable that is no native
+// button is never marked.
+for (const engine of ['chromium', 'firefox', 'webkit']) test(`${engine}: a native button eases out of its press as the press ends`, async () => {
   const browser = await suiteBrowser(engine);
+  const load = async (path, hasTouch = false) => {
+    const page = await browser.newPage({ viewport: { width: 600, height: 900 }, hasTouch });
+    await page.goto(`http://127.0.0.1:${server.address().port}${path}`);
+    await page.waitForFunction(() => window.ready);
+    return page;
+  };
+  // What each button's release eases: its face's opacity, its fill, its wash.
+  const EASES = { text: ['opacity'], translucent: ['background-color', 'opacity'], glass: ['--exact-wash', 'opacity'], tinted: ['--exact-wash'], bordered: ['--exact-wash'] };
   try {
     for (const finger of [true, false]) {
-      const page = await browser.newPage({ viewport: { width: 600, height: 900 }, hasTouch: finger });
-      await page.goto(`http://127.0.0.1:${server.address().port}/unsaid`);
-      await page.waitForFunction(() => window.ready);
-      for (const id of ['text', 'translucent', 'glass']) {
+      const page = await load('/unsaid', finger);
+      for (const [id, eased] of Object.entries(EASES)) {
         const at = [engine, finger ? 'finger' : 'mouse', id];
-        const box = await page.locator(`#${id}`).boundingBox(), x = box.x + box.width / 2, y = box.y + box.height / 2;
-        // The button's transitions (WebKit runs one on an `::after` that draws nothing too), and its face's opacity and
-        // its fill where they start and half way.
+        // The button's transitions (WebKit runs one on an `::after` that draws nothing too), and its face's opacity, its
+        // fill and its wash's alpha where they start and half way.
         const seen = () => page.evaluate((id) => {
-          const b = document.getElementById(id), face = document.getElementById(`${id}-face`);
-          const eases = b.getAnimations({ subtree: true }).filter((a) => a instanceof CSSTransition && (!a.effect.pseudoElement || getComputedStyle(b, a.effect.pseudoElement).content !== 'none'));
-          const when = (t) => { for (const a of eases) { a.pause(); a.currentTime = t; } return [getComputedStyle(face).opacity, getComputedStyle(b).backgroundColor]; };
+          const b = document.getElementById(id), face = document.getElementById(`${id}-face`), ink = document.createElement('canvas').getContext('2d', { willReadFrequently: true });
+          const alpha = (c) => { ink.clearRect(0, 0, 1, 1); ink.fillStyle = c; ink.fillRect(0, 0, 1, 1); return ink.getImageData(0, 0, 1, 1).data[3]; };
+          const eases = b.getAnimations({ subtree: true }).filter((a) => !a.effect.pseudoElement || getComputedStyle(b, a.effect.pseudoElement).content !== 'none');
+          const when = (t) => { for (const a of eases) { a.pause(); a.currentTime = t; } return [getComputedStyle(face).opacity, getComputedStyle(b).backgroundColor, alpha(getComputedStyle(b).getPropertyValue('--exact-wash'))]; };
           return [eases.map((a) => [a.transitionProperty, a.effect.getTiming().duration, a.effect.getTiming().easing]).sort(), when(0), when(125), b.hasAttribute('data-exact-released')];
         }, id);
         const rest = await page.evaluate((id) => getComputedStyle(document.getElementById(id)).backgroundColor, id);
-        if (finger) await page.touchscreen.tap(x, y);
+        if (finger) await page.tap(`#${id}`);
         else {
-          await page.mouse.move(x, y);
+          await page.hover(`#${id}`);
           await page.mouse.down();
           expect([at, (await seen())[0]]).toEqual([at, []]);
           await page.mouse.up();
         }
         const [eases, start, half, marked] = await seen();
-        const filled = id === 'translucent';
-        expect([at, eases, start[0], half[0], marked]).toEqual([at, [...(filled ? [['background-color', 250, 'ease-in-out']] : []), ['opacity', 250, 'ease-in-out']], '0.75', '0.875', true]);
-        if (filled) expect([at, start[1] !== rest, half[1] !== rest && half[1] !== start[1]]).toEqual([at, true, true]);
+        expect([at, eases, start[0], half[0], marked]).toEqual([at, eased.map((property) => [property, 250, 'ease-in-out']), ...(eased.includes('opacity') ? ['0.75', '0.875'] : ['1', '1']), true]);
+        if (eased.includes('background-color')) expect([at, start[1] !== rest, half[1] !== rest && half[1] !== start[1]]).toEqual([at, true, true]);
+        if (eased.includes('--exact-wash')) expect([at, start[2] > 0, half[2] > 0 && half[2] < start[2]]).toEqual([at, true, true]);
         // Once it ends the mark goes, and a change of state is the button's own again.
         await page.evaluate(() => document.getAnimations().forEach((a) => a.finish()));
         await page.waitForFunction((id) => !document.getElementById(id).hasAttribute('data-exact-released'), id);
         expect([at, await page.evaluate((id) => { const b = document.getElementById(id); b.disabled = true; getComputedStyle(b).backgroundColor; b.disabled = false; return [getComputedStyle(b).backgroundColor, b.getAnimations({ subtree: true }).length]; }, id)]).toEqual([at, [rest, 0]]);
       }
+      if (finger) {
+        // A pressable that is no native button is pressed under a finger but never marked released.
+        await page.evaluate(() => { window.marks = []; new MutationObserver((records) => marks.push(...records.map((r) => r.attributeName))).observe(document.getElementById('box'), { attributeFilter: ['data-pressed', 'data-exact-released'] }); });
+        await page.tap('#box');
+        expect([engine, 'box', await page.evaluate(() => marks)]).toEqual([engine, 'box', ['data-pressed', 'data-pressed']]);
+      } else {
+        // A transition the author started in the button is not the release's: the mark goes when the release's ease ends.
+        await page.evaluate(() => { const face = document.getElementById('translucent-face'); face.style.transition = 'color 3s linear'; getComputedStyle(face).color; face.style.color = 'rgb(255, 0, 0)'; });
+        await page.click('#translucent');
+        await page.evaluate(() => document.getAnimations().forEach((a) => a.transitionProperty !== 'color' && a.finish()));
+        await page.waitForFunction(() => !document.getElementById('translucent').hasAttribute('data-exact-released'), undefined, { timeout: 1000 });
+        expect([engine, 'authored', await page.evaluate(() => document.getElementById('translucent-face').getAnimations().map((a) => a.transitionProperty))]).toEqual([engine, 'authored', ['color']]);
+      }
       await page.close();
     }
     // On the agent's clock the release lands at once.
-    const page = await browser.newPage({ viewport: { width: 600, height: 900 } });
-    await page.goto(`http://127.0.0.1:${server.address().port}/unsaid?agent`);
-    await page.waitForFunction(() => window.ready);
+    const page = await load('/unsaid?agent');
     await page.click('#text');
     expect([engine, 'agent', await page.evaluate(() => [getComputedStyle(document.getElementById('text-face')).opacity, document.getElementById('text').getAnimations({ subtree: true }).length, document.getElementById('text').hasAttribute('data-exact-released')])]).toEqual([engine, 'agent', ['1', 0, false]]);
   } finally { await browser.close(); }

@@ -67,7 +67,7 @@ test('the neutral sheet\'s lengths and ratios are the metric table\'s neutral co
     'focus-ring-offset': ['outline-offset'],
     'mark-size': ['width', 'height', 'background'], 'mark-size-coarse': ['width', 'height'],
     'switch-width': ['width'], 'switch-height': ['height'], 'range-height': ['height'], 'range-track': ['height'], 'range-thumb-line': ['border'],
-    'button-padding-block': ['padding'], 'button-padding-inline': ['padding', 'padding-inline'], 'button-padding-inline-symbol': ['padding-inline'],
+    'button-padding-block': ['padding'], 'button-padding-inline': ['padding'], 'button-padding-inline-symbol': ['padding-inline'],
     'field-padding-block': ['padding'], 'field-padding-block-coarse': ['padding-block'], 'field-padding-inline': ['padding'],
     'file-padding-block': ['padding'], 'file-gap': ['margin-inline-end'],
     'segmented-padding': ['padding'], 'segment-padding-block': ['padding'], 'segment-padding-inline': ['padding'], 'segment-height-coarse': ['min-height'],
@@ -131,13 +131,13 @@ test('the neutral sheet\'s lengths and ratios are the metric table\'s neutral co
     'mark-dot': `radial-gradient(circle closest-side, currentColor ${percent('mark-dot')},`,
     'mark-disabled-alpha': `:disabled { opacity: ${alpha('mark-disabled-alpha')}; }`,
     'button-tint-alpha': `{ background-color: color-mix(in srgb, var(--exact-accent, AccentColor) ${percent('button-tint-alpha')}, transparent); }`,
-    'button-hover-tinted': `:hover { background-color: color-mix(in srgb, var(--exact-accent, AccentColor) ${percent('button-tint-alpha')}, transparent); background-image: linear-gradient(color-mix(in srgb, currentColor ${percent('button-hover-tinted')}, transparent) 0 0); }`,
+    'button-hover-tinted': `:hover { background-color: color-mix(in srgb, var(--exact-accent, AccentColor) ${percent('button-tint-alpha')}, transparent); background-image: linear-gradient(var(--exact-wash) 0 0); --exact-wash: color-mix(in srgb, var(--exact-accent, AccentColor) ${percent('button-hover-tinted')}, transparent); }`,
     'button-hover-filled': `:hover { background-color: var(--exact-accent, AccentColor); background-image: linear-gradient(color-mix(in srgb, currentColor ${percent('button-hover-filled')}, transparent) 0 0); }`,
-    'button-pressed-tinted': `[data-button-style="bordered-tinted"])[data-pressed]:not(:disabled) { background-image: linear-gradient(color-mix(in srgb, currentColor ${percent('button-pressed-tinted')}, transparent) 0 0); }`,
+    'button-pressed-tinted': `[data-button-style="bordered-tinted"])[data-pressed]:not(:disabled) { background-image: linear-gradient(var(--exact-wash) 0 0); --exact-wash: color-mix(in srgb, var(--exact-accent, AccentColor) ${percent('button-pressed-tinted')}, transparent); }`,
     'button-pressed-alpha': [`{ background-color: light-dark(color-mix(in srgb, var(--exact-accent, AccentColor) ${percent('button-pressed-alpha')}, transparent),`, `& > :not(img), &::after { opacity: ${alpha('button-pressed-alpha')}; }`, `& > img { --exact-tint: color-mix(in srgb, currentColor ${percent('button-pressed-alpha')}, transparent); }`],
-    'button-pressed-lighten': [`color-mix(in srgb, var(--exact-accent, AccentColor), #fff ${percent('button-pressed-lighten')})); background-image: none; }`, `{ background-image: linear-gradient(color-mix(in srgb, #fff ${percent('button-pressed-lighten')}, transparent) 0 0); }`],
+    'button-pressed-lighten': [`color-mix(in srgb, var(--exact-accent, AccentColor), #fff ${percent('button-pressed-lighten')})); background-image: none; }`, `{ background-image: linear-gradient(var(--exact-wash) 0 0); --exact-wash: color-mix(in srgb, #fff ${percent('button-pressed-lighten')}, transparent); }`],
     'bar-hover-alpha': `{ opacity: var(--exact-hover-dim, ${alpha('bar-hover-alpha')}); }`,
-    'select-line-height-coarse': `select:not([multiple]) { line-height: ${value.get('select-line-height-coarse')}; }`,
+    'select-line-height-coarse': `--exact-control-line-height: ${value.get('select-line-height-coarse')};`,
     'switch-thumb': `radial-gradient(circle closest-side, currentColor ${percent('switch-thumb')},`,
     'segment-shadow-alpha': `box-shadow: 0 1px 2px rgb(0 0 0 / ${alpha('segment-shadow-alpha')});`,
     'raised-shadow-alpha': `--exact-raised: 0 0 0 1px var(--exact-separator), 0 4px 12px rgb(0 0 0 / ${alpha('raised-shadow-alpha')});`,
@@ -392,11 +392,12 @@ for (const engine of ['chromium', 'firefox', 'webkit']) test(`${engine}: the neu
       // own keeps it.
       const OWN = [[52, 199, 89, 1], '1'], [inks, heldInks] = (await highlight('translucent')).map((seen) => seen[4]);
       expect([at('symbols'), inks, heldInks]).toEqual([at('symbols'), [[inks[0][0], '1'], OWN, OWN], [[[...inks[0][0].slice(0, 3), 0.75], '1'], OWN, OWN]]);
-      // Let go (the input glue marks the release), it eases out of the highlight over a quarter second: the fill, the
-      // face, a symbol in the button's ink and a sheet's word; a symbol in a colour of its own has nothing to ease.
+      // Released (the input glue marks it), a button eases out of its press over a quarter second: a filled button's
+      // fill, a face, a symbol in the button's ink, a sheet's word and a wash; a symbol in a colour of its own has
+      // nothing to ease.
       const released = (id) => page.evaluate((id) => {
         const b = document.getElementById(id);
-        b.toggleAttribute('data-pressed', true);
+        b.setAttribute('data-pressed', '');
         getComputedStyle(b).opacity;
         b.removeAttribute('data-pressed');
         b.setAttribute('data-exact-released', '');
@@ -407,8 +408,8 @@ for (const engine of ['chromium', 'firefox', 'webkit']) test(`${engine}: the neu
         b.removeAttribute('data-exact-released');
         return seen;
       }, id);
-      expect([at('released'), await released('translucent'), await released('sheet-cancel')]).toEqual([at('released'),
-        ['span opacity 250 ease-in-out', 'translucent background-color 250 ease-in-out', 'unsaid background-color 250 ease-in-out'], ['sheet-cancel::after opacity 250 ease-in-out']]);
+      const EASED = { translucent: ['span opacity', 'translucent background-color', 'unsaid background-color'], 'sheet-cancel': ['sheet-cancel::after opacity'], glass: ['glass --exact-wash', 'span opacity'], bordered: ['bordered --exact-wash'], gray: ['gray --exact-wash'], tinted: ['tinted --exact-wash'] };
+      for (const [id, eased] of Object.entries(EASED)) expect([at('released'), id, await released(id)]).toEqual([at('released'), id, eased.map((ease) => `${ease} 250 ease-in-out`)]);
       // A tinted button held shows its stronger wash under a pointer too.
       await page.hover('#tinted');
       expect([at('tinted hovered'), (await highlight('tinted')).map((seen) => seen[1][3])]).toEqual([at('tinted hovered'), [0.08, 0.16]]);
@@ -849,37 +850,47 @@ test('a size the author wrote on a platform button is its box, and an unsized bu
 
 // LLP 1116.020 D2: a sheet's bar says the name of a button whose face is only a symbol. A width its author wrote for
 // the symbol, inline (the wasm runtime) or in a class (the JS target), leaves the word its padding and its wash, as
-// UIKit sizes a bar item to its title: 16 px either side of the word, inside the bar, in either direction.
+// UIKit sizes a bar item to its title: 16 px either side of the word, inside the bar, in either direction. Two long
+// names in a narrow bar both stay in it, each word ending in an ellipsis.
 for (const engine of ['chromium', 'firefox', 'webkit']) test(`${engine}: a sheet's bar word keeps its padding whatever width its author wrote`, async () => {
   const browser = await launch(engine);
   try {
-    for (const dir of ['ltr', 'rtl']) {
-      const page = await browser.newPage({ viewport: { width: 400, height: 300 }, colorScheme: 'light' });
-      const word = (id, attributes) => `<button type="button" data-native data-button-style="bordered" aria-label="Cancel" id="${id}" ${attributes}><img data-symbol-source="symbol:sf/xmark" alt=""></button>`;
-      await page.setContent(`<!doctype html><html dir="${dir}"><style>${sheet()} #exact-root#exact-root .sized { width: 44px; height: 44px; display: flex; }</style><div id="exact-root">
-        <div navigationKey="1" navigationPresentation="modal"><header id="bar" style="display:flex;align-items:center"><div style="flex:1;min-width:0"><h2>Last Parked</h2></div>
-        ${word('inline', 'data-exact-said="width height" style="width:44px;height:44px;display:flex"')}${word('class', 'data-exact-said="width height" class="sized"')}${word('unsized', 'style="display:grid"')}</header></div>
-      </div><script>${helpers}</script>`);
+    const page = await browser.newPage({ viewport: { width: 400, height: 300 }, colorScheme: 'light' });
+    const word = (id, attributes) => `<button type="button" data-native data-button-style="bordered" aria-label="Cancel" id="${id}" ${attributes}><img data-symbol-source="symbol:sf/xmark" alt=""></button>`;
+    await page.setContent(`<!doctype html><style>${sheet()} #exact-root#exact-root .sized { width: 44px; height: 44px; display: flex; }</style><div id="exact-root">
+      <div navigationKey="1" navigationPresentation="modal"><header id="bar" style="display:flex;align-items:center"><div style="flex:1;min-width:0"><h2>Last Parked</h2></div>
+      ${word('inline', 'data-exact-said="width height" style="width:44px;height:44px;display:flex"')}${word('class', 'data-exact-said="width height" class="sized"')}${word('unsized', 'style="display:grid"')}</header></div>
+    </div><script>${helpers}</script>`);
+    // Its padding, the room its box gives beyond its word, its height, and whether it is inside the bar's padding.
+    const fit = (id) => page.evaluate((id) => {
+      const [x, , width, height] = box(id), [bar, , barWidth] = box('bar');
+      return [[css(id, 'paddingInlineStart'), css(id, 'paddingInlineEnd')], Math.round(width - parseFloat(css(id, 'width', '::after'))), height, x >= bar + 16 && x + width <= bar + barWidth - 16];
+    }, id);
+    // A pixel in each of its paddings, half way down.
+    const pixels = async (id) => {
+      const { width, height, data } = decodePng(await page.locator(`#${id}`).screenshot());
+      return [4, width - 5].map((x) => [...data.subarray((Math.floor(height / 2) * width + x) * 4, (Math.floor(height / 2) * width + x) * 4 + 3)]);
+    };
+    for (const dir of ['rtl', 'ltr']) {
+      await page.evaluate((dir) => { document.documentElement.dir = dir; }, dir);
       for (const id of ['inline', 'class', 'unsized']) {
         const at = [engine, dir, id];
-        const [padding, room, height, inside] = await page.evaluate((id) => {
-          const [x, , width, height] = box(id), [bar, , barWidth] = box('bar');
-          return [[css(id, 'paddingInlineStart'), css(id, 'paddingInlineEnd')], Math.round(width - parseFloat(css(id, 'width', '::after'))), height, x >= bar + 16 && x + width <= bar + barWidth - 16];
-        }, id);
-        expect([at, padding, room, height, inside]).toEqual([at, ['16px', '16px'], 34, id === 'unsized' ? 36 : 44, true]);
+        expect([at, await fit(id)]).toEqual([at, [['16px', '16px'], 34, id === 'unsized' ? 36 : 44, true]]);
         // The pointer's wash fills the padding on both sides: a pixel in each matches the other and not the ground.
-        const pixels = async () => {
-          const { width, height, data } = decodePng(await page.locator(`#${id}`).screenshot());
-          return [4, width - 5].map((x) => [...data.subarray((Math.floor(height / 2) * width + x) * 4, (Math.floor(height / 2) * width + x) * 4 + 3)]);
-        };
-        const [ground] = await pixels();
+        const [ground] = await pixels(id);
         await page.hover(`#${id}`);
-        const [start, end] = await pixels();
+        const [start, end] = await pixels(id);
         expect([at, start, end.join() === start.join(), start.join() !== ground.join()]).toEqual([at, start, true, true]);
         await page.mouse.move(1, 299);
       }
-      await page.close();
     }
+    await page.setViewportSize({ width: 320, height: 300 });
+    await page.evaluate(() => { for (const [id, name] of [['inline', 'Abbrechen und verwerfen'], ['class', 'Speichern und schließen']]) document.getElementById(id).setAttribute('aria-label', name); document.getElementById('unsized').remove(); document.getElementById('inline').after(document.querySelector('#bar > div')); });
+    const narrow = [await fit('inline'), await fit('class'), await page.evaluate(() => [box('inline')[0] + box('inline')[2] <= box('class')[0], css('inline', 'textOverflow', '::after')])];
+    expect([engine, 'narrow', narrow]).toEqual([engine, 'narrow', [[['16px', '16px'], 34, 44, true], [['16px', '16px'], 34, 44, true], [true, 'ellipsis']]]);
+    // A button its author made a block keeps the word a block of its own, which `text-overflow` ends.
+    await page.evaluate(() => { document.getElementById('inline').style.display = 'block'; });
+    expect([engine, 'narrow block', await fit('inline'), await page.evaluate(() => css('inline', 'display', '::after'))]).toEqual([engine, 'narrow block', [['16px', '16px'], 34, 44, true], 'block']);
   } finally { await browser.close(); }
 }, 90000);
 
