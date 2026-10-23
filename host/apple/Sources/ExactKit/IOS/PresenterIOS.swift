@@ -830,7 +830,7 @@ package final class Presenter {
             if outermost {
                 applying = false
                 reaimFixedGradients()
-                paintPresentedText()
+                ApplyProfile.time("pass.text") { paintPresentedText() }
                 paintChangedText()
                 if !boxFilters.isEmpty { boxFilters.render() }
                 videoVisibility?.changed()
@@ -838,7 +838,7 @@ package final class Presenter {
                 waiting = []
                 for (id, f) in q where id.map({ textHost($0) != nil }) ?? true { f() }
                 scrollPump.batchApplied()
-                leaves.batchApplied(moved: moved)
+                ApplyProfile.time("pass.leaves") { leaves.batchApplied(moved: moved) }
                 #if os(iOS)
                 resolveStatusBar()
                 textSelection.batchEnded()
@@ -982,7 +982,7 @@ package final class Presenter {
                 if let gone, !modals.retainsRemovedView(gone) { gone.removeFromSuperview() }
             case .roots:
                 root.subviews.forEach { $0.removeFromSuperview() }
-                accent.attach(op.ids.compactMap { views[UInt32($0)] }) { for r in $0 { root.addSubview(r); regrid(r) } }
+                ApplyProfile.time("roots.attach") { accent.attach(op.ids.compactMap { views[UInt32($0)] }) { for r in $0 { root.addSubview(r); regrid(r) } } }
             case .frame, .content, .fieldContent:
                 if flats.isFlat(id) {
                     if kind == .frame { flats.frame(id, CGRect(x: op.x, y: op.y, width: op.w, height: op.h)) }
@@ -992,6 +992,7 @@ package final class Presenter {
                 if kind == .frame { pool.framed(id) }
                 if flightFrame(op) { return }
                 if views[id] != nil { applyGeometry(op) }
+            case .animate: playTransition(op)
             case .present:
                 if flats.isFlat(id) {
                     if op.property == "opacity" { flats.opacity(id, Float(op.x)); return }
@@ -1014,6 +1015,8 @@ package final class Presenter {
         }
         for op in batch.ops {
             let kind = op.op
+            let opBegan = ApplyProfile.on ? CACurrentMediaTime() : 0
+            defer { if ApplyProfile.on { ApplyProfile.add("op.\(kind)", since: opBegan) } }
             switch kind {
             case .create, .props, .style, .children, .paragraph, .flow: touchedIDs.append(op.id); reshapedIDs.append(op.id); controls.faceChanged(op.id)
             case .frame: touchedIDs.append(op.id); controls.faceChanged(op.id)
@@ -1027,10 +1030,10 @@ package final class Presenter {
                 // content geometry lets UIKit settle its scroll relationship.
                 if let first = root.subviews.first as? NodeView {
                     for frame in batch.ops where frame.op == .frame && frame.id == first.id {
-                        applyGeometry(frame)
+                        ApplyProfile.time("geom.first") { applyGeometry(frame) }
                     }
                 }
-                navigation.installInitialOwner(batch)
+                ApplyProfile.time("nav.install") { navigation.installInitialOwner(batch) }
             }
             let id = op.id
             if kind == .children { touched(id, children: true) } else if ![.roots, .create, .fieldContent].contains(kind) {
@@ -1065,7 +1068,7 @@ package final class Presenter {
         menuKey.sync()
         playPauseKey.sync()
         #endif
-        segments.sync()
+        ApplyProfile.time("pass.segments") { segments.sync() }
         // A batch that changes a control's contents (a select's options, a
         // button's face) reads every control again. At or above a control,
         // only props and style reach it (a disabled box, a closing one), and
@@ -1073,13 +1076,13 @@ package final class Presenter {
         // whose rows a scroll replaced leave the controls of the rows it
         // kept as they were. Every checkbox in a list of tasks was
         // configured again each batch.
-        controls.sync(contents: false, changed: batch.controls ? nil : changed, touched: Set(restyledIDs + placedAnew[anewFrom...]))
+        ApplyProfile.time("pass.controls") { controls.sync(contents: false, changed: batch.controls ? nil : changed, touched: Set(restyledIDs + placedAnew[anewFrom...])) }
         #if os(tvOS)
         // A remembered node's replacement owns focus only after its native
         // control exists, so retarget guides in this same batch after sync.
         focusGuides.sync()
         #endif
-        menus.sync()
+        ApplyProfile.time("pass.menus") { menus.sync() }
         glassGroups.reconcile()
         positionContexts()
         // A view a `children` op moved within its parent keeps its ancestors.

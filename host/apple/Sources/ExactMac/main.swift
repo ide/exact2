@@ -10,6 +10,7 @@
 import AppKit
 import ExactKit
 import ExactComposition
+import ExactLaunchParts
 
 ProcessRelaunch.waitIfRequested()
 
@@ -193,6 +194,11 @@ func footprint() -> UInt64 {
 final class ExactWindow: NSWindow {
     override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect {
         agentMode ? frameRect : super.constrainFrameRect(frameRect, to: screen)
+    }
+    /// A navigation is timed from its input: a mouse-up or key press.
+    override func sendEvent(_ event: NSEvent) {
+        super.sendEvent(event)
+        if [.leftMouseUp, .keyDown].contains(event.type) { ExactLaunch.shared.input(at: event.timestamp) }
     }
 }
 
@@ -630,6 +636,11 @@ final class Delegate: NSObject, NSApplicationDelegate {
         ExactContentIndex.open(location)
         return true
     }
+    override init() {
+        ExactLaunch.shared.delegateInit()
+        ExactLaunch.shared.runLaunchParts(ExactLaunchParts.all)
+        super.init()
+    }
     /// A one-window app quits with its window; one whose documents each
     /// get a window (`navigate-new`, LLP 1069.010 D4) stays, as a Mac
     /// document app does, for File ▸ New Window, Open and the Dock (LLP 1115 D8).
@@ -702,6 +713,9 @@ final class Delegate: NSObject, NSApplicationDelegate {
     }
     func applicationDidFinishLaunching(_ notification: Notification) {
         ExactEnv.stamp("didFinishLaunching")
+        // The session already exists and AppKit boots it inside this
+        // callback, so launch is measured to this point.
+        ExactLaunch.shared.didFinishLaunching(hidden: NSApp.isHidden)
         finishLaunching()
     }
     /// Launch Services brought something: a development link, or documents —
@@ -878,6 +892,7 @@ func finishLaunching() {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
             print("painted \(session.firstDrawMs.map { String(format: "%.1f", $0) } ?? "?") ms")
             print("stamps: " + ExactEnv.stamps.map { "\($0.0) \(String(format: "%.1f", $0.1))" }.joined(separator: " · ") + " · first layout \(session.firstLayoutMs.map { String(format: "%.1f", $0) } ?? "?") · first draw \(session.firstDrawMs.map { String(format: "%.1f", $0) } ?? "?")")
+            print("observe: \(ExactLaunch.shared.smokeLine())")
             print("gpu: \(session.gpuStatus)")
             print("web: \(session.webStatus)")
             print("smoke ok")
