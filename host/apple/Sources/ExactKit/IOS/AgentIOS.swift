@@ -184,7 +184,7 @@ extension Agent {
                   let property = path.split(separator: ".").first else { return false }
             return ["bounds", "position", "transform", "sublayerTransform", "anchorPoint", "zPosition"].contains(String(property))
         }
-        var pending = [presenter.viewport, presenter.documentMount] + presenter.presentations(includingRetiring: true)
+        var pending = [presenter.viewport] + presenter.presentations(includingRetiring: true)
         let now = CACurrentMediaTime()
         var moving = false
         Agent.pruneUnbegun(now: now)
@@ -422,7 +422,7 @@ extension Agent {
         }
         // The viewport's scrolling, or none: a presentation's mount does not scroll (LLP 1123 D2)
         let popoverLayer = PopoverLayer.containing(host)
-        let inViewport = popoverLayer.map { $0.isDescendant(of: vp) || $0.isDescendant(of: presenter.documentMount) } ?? (presenter.port(of: host) === vp)
+        let inViewport = popoverLayer.map { $0.isDescendant(of: vp) } ?? (presenter.port(of: host) === vp)
         var scroll: [[String: Any]] = [inViewport ? ["viewport": true, "sx": Agent.r2(vp.contentOffset.x), "sy": Agent.r2(vp.contentOffset.y)].merging(Agent.range(of: vp)) { a, _ in a }
                                                   : ["presentation": true, "sx": 0.0, "sy": 0.0, "rx": 0.0, "ry": 0.0]]
         scroll.append(contentsOf: chain.reversed())
@@ -1252,10 +1252,7 @@ extension Agent {
             $0.window != nil && !$0.isHidden && $0.bounds.width > 0 && $0.bounds.height > 0
         }
         let png = UIGraphicsImageRenderer(size: size, format: format).pngData { _ in
-            let drawn = CGRect(origin: CGPoint(x: -margins.left, y: -margins.top), size: captureView.bounds.size)
-            captureView.drawHierarchy(in: drawn, afterScreenUpdates: true)
-            // The document standing beside the viewport, in its space (`mountDocument`)
-            if captureView === vp, presenter.documentPort !== vp { presenter.documentMount.drawHierarchy(in: drawn, afterScreenUpdates: true) }
+            captureView.drawHierarchy(in: CGRect(origin: CGPoint(x: -margins.left, y: -margins.top), size: captureView.bounds.size), afterScreenUpdates: true)
             UIColor.systemRed.setStroke()
             for node in unshown {
                 let r = node.convert(node.bounds, to: captureView).insetBy(dx: -1, dy: -1).offsetBy(dx: -captureView.bounds.minX - margins.left, dy: -captureView.bounds.minY - margins.top)

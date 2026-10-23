@@ -50,7 +50,7 @@ enum FocusSearch {
         }
     }
 }
-/// A session's viewport (`Presenter.viewport`), which answers the search.
+/// Answer UIKit's focus search for a document viewport.
 final class Viewport: ScrollView {
     /// Its bands past the page's area (`Presenter.pageMargins`, LLP 1130 D1).
     var pageMargins = UIEdgeInsets.zero
@@ -71,8 +71,9 @@ final class Viewport: ScrollView {
     override func focusItems(in rect: CGRect) -> [any UIFocusItem] { FocusSearch.items(self, in: rect) }
     #endif
 }
-/// A native document's or presentation's non-scrolling mount. Both answer
-/// the session's focus search as the viewport does (LLP 1123 D2).
+/// What a presentation mounts its navigation in (`ModalHost.present`): the
+/// other way into a session's views, which answers the search as the
+/// viewport does (LLP 1123 D2).
 final class PresentationMount: UIView {
     #if os(iOS)
     /// What the route's logical ancestors listen for (`MountRelay`).

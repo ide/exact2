@@ -798,7 +798,10 @@ uint32_t exact_intrinsics(ExactRuntime rt, size_t len);
 /* What native containers cover of boxes (LLP 1075.003 §3.5) under one
  * layout: LE records of (uint32 view, uint32 kind — 0 clears, 1 edges,
  * 2 whole — float top, right, bottom, left). Edges add to the box's
- * padding; a whole box is laid out as display: none. Kind 10 is a cells
+ * padding; a whole box is laid out as display: none. Kind 6 places a host
+ * block: float x, y, width, height, uint32 holding view, then float content
+ * scroll offsets x and y (36 bytes including view and kind). Kind 7 forgets
+ * its placement. Kind 10 is a cells
  * list's rows' cell margin (LLP 1138: float left, right, then two unused),
  * 11 clears it. */
 uint32_t exact_host_covers(ExactRuntime rt, size_t len);

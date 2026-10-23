@@ -11,8 +11,9 @@ impl<D: DataSource> Bridge<D> {
     /// or 2 for a content-fit limit that an authored size may exceed;
     /// kind 5 takes a block back. Kind 6 says where a block is shown in
     /// place (LLP 1123 D2): f32 x, y, width, height in the local
-    /// coordinates of a u32 view after them, which makes its record 28
-    /// bytes; kind 7 forgets it. Kind 8 is the margins UIKit's own list gives
+    /// coordinates of a u32 view after them, followed by f32 content scroll
+    /// offsets x and y (36 bytes total); kind 7 forgets it. Kind 8 is the
+    /// margins UIKit's own list gives
     /// a grouped list's cards and cells: f32 the card's left and right
     /// insets, then the cell's left and right margins; kind 9 clears them.
     /// Kind 12 reports scrollbar gutters in the right and bottom fields.
@@ -22,7 +23,7 @@ impl<D: DataSource> Bridge<D> {
         let mut rest = bytes;
         while rest.len() >= 8 {
             let size = if rest[4..8] == 6u32.to_le_bytes() {
-                28
+                36
             } else {
                 24
             };
@@ -59,7 +60,14 @@ impl<D: DataSource> Bridge<D> {
                     }
                     6 => {
                         let rect = [8, 12, 16, 20].map(|i| f64::from(edge(i)));
-                        placements.push((view, Some((rect, u32::from_le_bytes(word(24))))));
+                        placements.push((
+                            view,
+                            Some((
+                                rect,
+                                u32::from_le_bytes(word(24)),
+                                [f64::from(edge(28)), f64::from(edge(32))],
+                            )),
+                        ));
                     }
                     7 => placements.push((view, None)),
                     8 => margins.push((

@@ -7,9 +7,10 @@ use super::{DataSource, Runner};
 use crate::geometry::TopLayerFrame;
 use exact_kernel::ViewId;
 
-/// Where a host shows a block in place: its rectangle in the local
-/// coordinates of a view that holds it (`Scrolled::place`).
-pub type BlockPlacement = ([f64; 4], ViewId);
+/// A placement records the block's rectangle in its holding view's local
+/// coordinates and the content's scroll offset inside that allocation
+/// (`Scrolled::place`).
+pub type BlockPlacement = ([f64; 4], ViewId, [f64; 2]);
 
 impl<D: DataSource> Runner<D> {
     /// The open popovers and dialogs last shown by a native presenter.

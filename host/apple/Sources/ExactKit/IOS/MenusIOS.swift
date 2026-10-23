@@ -14,8 +14,7 @@ import UIKit
 
 final class MenuHost {
     private(set) weak var presenter: Presenter?
-    /// What hears a touch that dismisses a light popover (`observeTouches`).
-    var touchObserver: PopoverTouch?
+    private var touchObserver: PopoverTouch?
     private var overlays: [UInt32: UIButton] = [:]
     /// The target and press shape each overlay's menu was built for.
     private var menuShapes: [UInt32: String] = [:]
@@ -129,7 +128,12 @@ final class MenuHost {
         // Ordinary menus retain LLP 1021 D4's existing agent presentation.
         // Confirmations use the same UIKit owner under either input carrier.
         guard let presenter else { return }
-        observeTouches(on: presenter.modals.coordinateView ?? presenter.documentPort)
+        let surface = presenter.modals.coordinateView ?? presenter.viewport
+        if touchObserver?.view !== surface {
+            if let observer = touchObserver { observer.view?.removeGestureRecognizer(observer) }
+            let observer = PopoverTouch(host: self)
+            surface.addGestureRecognizer(observer); touchObserver = observer
+        }
         if let owner = confirmation, !owner.fields.isEmpty { followPrompt(owner) }
         if let owner = confirmation, !valid(owner) { resetConfirmation() }
         sheets.sync()

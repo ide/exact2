@@ -124,6 +124,14 @@ struct TopLayerBox {
     clip: Option<[f64; 4]>,
 }
 
+#[derive(Debug, Clone)]
+struct PlacedBlock {
+    key: NodeKey,
+    rect: [f64; 4],
+    within: NodeKey,
+    offset: [f64; 2],
+}
+
 /// Where the host last showed each scroll container, and the page, in CSS
 /// px (`scrollLeft`, `scrollTop`): what a native read subtracts from the
 /// kernel's scroll-free box (kanban diary F4: an app hand-tracked every
@@ -138,7 +146,7 @@ pub struct Scrolled {
     /// The index in `top_layer` of the frontmost modal presentation's
     /// first box, as its host reports it.
     modal: Option<usize>,
-    placed: Vec<(NodeKey, [f64; 4], NodeKey)>,
+    placed: Vec<PlacedBlock>,
     pub(crate) inline: Option<std::rc::Rc<dyn InlineGeometry>>,
 }
 
@@ -235,31 +243,46 @@ impl Scrolled {
     /// UIKit's tab container holds a tab's route beside its panel; the
     /// root is then shown in `within` directly, as the host's hierarchy
     /// shows it, and the boxes between move nothing of it.
+    /// The final pair is the content's scroll offset in block points: it
+    /// moves the root and its subtree while the allocation's clip stays put.
     /// `None` forgets it. The root keeps its place among its siblings, sits
     /// in the block by its own frame, and `within`'s and every ancestor's
     /// transform still apply above it. A non-finite or negative rectangle,
     /// or a `within` that names no live node, is ignored, and the placement
     /// it would replace kept.
-    pub fn place(&mut self, kernel: &Kernel, view: ViewId, placement: Option<([f64; 4], ViewId)>) {
+    pub fn place(
+        &mut self,
+        kernel: &Kernel,
+        view: ViewId,
+        placement: Option<crate::BlockPlacement>,
+    ) {
         let arena = kernel.arena();
-        self.placed.retain(|(key, _, within)| {
-            arena.resolve(*key).is_some() && arena.resolve(*within).is_some()
+        self.placed.retain(|entry| {
+            arena.resolve(entry.key).is_some() && arena.resolve(entry.within).is_some()
         });
         let Some(key) = arena.key_of(view) else {
             return;
         };
         let placement = match placement {
-            Some((rect, within)) => {
-                let Some(within) = arena.key_of(within).filter(|_| valid_rect(&rect)) else {
+            Some((rect, within, offset)) => {
+                let Some(within) = arena
+                    .key_of(within)
+                    .filter(|_| valid_rect(&rect) && offset.iter().all(|v| v.is_finite()))
+                else {
                     return;
                 };
-                Some((rect, within))
+                Some((rect, within, offset))
             }
             None => None,
         };
-        self.placed.retain(|(k, ..)| *k != key);
-        if let Some((rect, within)) = placement {
-            self.placed.push((key, rect, within));
+        self.placed.retain(|entry| entry.key != key);
+        if let Some((rect, within, offset)) = placement {
+            self.placed.push(PlacedBlock {
+                key,
+                rect,
+                within,
+                offset,
+            });
         }
     }
 
@@ -268,13 +291,26 @@ impl Scrolled {
     /// (`place`). `None` for a node that is no block's root, was given no
     /// placement, or whose `within` is not above it.
     fn placement(&self, kernel: &Kernel, slot: u32, frame: Frame) -> Option<(u32, Affine)> {
+        let (entry, within) = self.placed_block(kernel, slot)?;
+        Some((
+            within,
+            mul(
+                shown_at(kernel, slot, frame, entry.rect),
+                shift(-entry.offset[0], -entry.offset[1]),
+            ),
+        ))
+    }
+
+    fn placed_block(&self, kernel: &Kernel, slot: u32) -> Option<(&PlacedBlock, u32)> {
         let arena = kernel.arena();
-        let key = arena.key(slot);
-        let &(_, rect, within) = self.placed.iter().find(|(k, ..)| *k == key)?;
+        let entry = self
+            .placed
+            .iter()
+            .find(|entry| entry.key == arena.key(slot))?;
         kernel.host_block(arena.local_id(slot))?;
-        let within = arena.resolve(within)?;
+        let within = arena.resolve(entry.within)?;
         std::iter::successors(arena.parent(slot), |&p| arena.parent(p)).find(|&p| p == within)?;
-        Some((within, shown_at(kernel, slot, frame, rect)))
+        Some((entry, within))
     }
 
     fn is_open(&self, key: NodeKey) -> bool {
@@ -591,10 +627,21 @@ fn valid_rect(rect: &[f64; 4]) -> bool {
 /// A block's rectangle in its root's border-box coordinates, when `slot`
 /// is a block's root: the box its host shows the subtree in, which clips
 /// it, as a sheet or a pane clips what it shows.
-pub(crate) fn block_clip(kernel: &Kernel, slot: u32, frame: Frame) -> Option<[f64; 4]> {
+pub(crate) fn block_clip(
+    kernel: &Kernel,
+    scrolled: &Scrolled,
+    slot: u32,
+    frame: Frame,
+) -> Option<[f64; 4]> {
     let (w, h) = kernel.host_block_size(kernel.arena().local_id(slot))?;
-    let (x, y) = (f64::from(frame.x), f64::from(frame.y));
-    Some([-x, -y, f64::from(w) - x, f64::from(h) - y])
+    let offset = scrolled
+        .placed_block(kernel, slot)
+        .map_or([0.0; 2], |(entry, _)| entry.offset);
+    let (x, y) = (
+        offset[0] - f64::from(frame.x),
+        offset[1] - f64::from(frame.y),
+    );
+    Some([x, y, x + f64::from(w), y + f64::from(h)])
 }
 
 /// A top-layer box replaced whole by its host has no kernel layout. Its
@@ -1194,7 +1241,7 @@ impl Point<'_> {
         let f = native.unwrap_or_else(|| arena.frame(slot));
         // A block's root and its subtree are reached only inside the block
         // its host shows them in
-        if let Some(b) = block_clip(self.kernel, slot, f) {
+        if let Some(b) = block_clip(self.kernel, self.scrolled, slot, f) {
             let at = unmap(placed, self.at);
             if !at.is_some_and(|(x, y)| b[0] <= x && x < b[2] && b[1] <= y && y < b[3]) {
                 return;

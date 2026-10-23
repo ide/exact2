@@ -226,13 +226,17 @@ fn truncated_intrinsics_keeps_state() {
 
 #[test]
 fn truncated_covers_keeps_state() {
-    preserves_state(
-        |bridge, _| {
-            let len = bridge.input_write(&[0]);
-            bridge.covers(len)
-        },
-        "covers: truncated record",
-    );
+    let mut placement = vec![0; 28];
+    placement[4..8].copy_from_slice(&6u32.to_le_bytes());
+    for record in [vec![0], placement] {
+        preserves_state(
+            |bridge, _| {
+                let len = bridge.input_write(&record);
+                bridge.covers(len)
+            },
+            "covers: truncated record",
+        );
+    }
 }
 
 #[test]
