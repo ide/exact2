@@ -380,7 +380,7 @@ fn native_intersect_reads_a_block_where_its_host_shows_it() {
     // In place, at half size: the scroller shows 20 of the target's 100 points
     let (mut r, route) = boot();
     let page = id(&r, "page");
-    r.place_blocks(&[(route, Some(([0.0, 0.0, 150.0, 250.0], page)))]);
+    r.place_blocks(&[(route, Some(([0.0, 0.0, 150.0, 250.0], page, [0.0; 2])))]);
     let (inside, ratio) = first(&mut r);
     assert!(inside);
     assert!((ratio - 0.2).abs() < 1e-9, "{ratio}");

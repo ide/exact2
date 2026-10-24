@@ -88,7 +88,7 @@ pub(crate) fn intersection(
             }
             transform = mul(placed_transform(kernel, scrolled, slot), transform);
             // A block clips what its host shows in it, a sheet or a pane
-            if let Some(bounds) = block_clip(kernel, slot, f) {
+            if let Some(bounds) = block_clip(kernel, scrolled, slot, f) {
                 clipped = clip(map(transform, clipped), bounds)?;
                 transform = IDENTITY;
             }
@@ -130,7 +130,7 @@ fn to_viewport(
     loop {
         let f = arena.frame(slot);
         transform = mul(placed_transform(kernel, scrolled, slot), transform);
-        if let Some(bounds) = block_clip(kernel, slot, f) {
+        if let Some(bounds) = block_clip(kernel, scrolled, slot, f) {
             rect = clip(map(transform, rect), bounds)?;
             transform = IDENTITY;
         }
@@ -168,6 +168,12 @@ fn placed_transform(kernel: &Kernel, scrolled: &Scrolled, slot: u32) -> Affine {
     let scroll =
         if implicit || s.overflow_x != Overflow::Visible || s.overflow_y != Overflow::Visible {
             scrolled.offset(root)
+        } else if let Some((block, _)) = scrolled.placed_block(kernel, root.index) {
+            let frame = arena.frame(root.index);
+            (
+                (block.offset[0] - f64::from(frame.x)).max(0.0),
+                (block.offset[1] - f64::from(frame.y)).max(0.0),
+            )
         } else if arena.is_root(root.index) {
             let frame = arena.frame(root.index);
             (

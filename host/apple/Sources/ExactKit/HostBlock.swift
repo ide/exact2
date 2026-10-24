@@ -32,6 +32,8 @@ struct HostBlock: Equatable {
 struct BlockPlacement: Equatable {
     var rect: CGRect
     var within: UInt32
+    /// The allocation's content scrolls by this offset, in block points.
+    var contentOffset: CGPoint = .zero
 }
 
 extension Runtime {
@@ -42,7 +44,7 @@ extension Runtime {
     /// reads (LLP 1123 D2).
     func blocks(_ blocks: [(UInt32, HostBlock?)], placements: [(UInt32, BlockPlacement?)] = []) -> Batch {
         return on {
-            var bytes = Data(capacity: (blocks.count + placements.count) * 28)
+            var bytes = Data(capacity: (blocks.count + placements.count) * 36)
             let append = { (words: [UInt32]) in
                 for word in words { withUnsafeBytes(of: word.littleEndian) { bytes.append(contentsOf: $0) } }
             }
@@ -57,7 +59,7 @@ extension Runtime {
                     continue
                 }
                 let r = placement.rect
-                append([view, 6] + [r.minX, r.minY, r.width, r.height].map { Float($0).bitPattern } + [placement.within])
+                append([view, 6] + [r.minX, r.minY, r.width, r.height].map { Float($0).bitPattern } + [placement.within] + [placement.contentOffset.x, placement.contentOffset.y].map { Float($0).bitPattern })
             }
             return read(exact_host_covers(rt, write(bytes)))
         }
