@@ -10,8 +10,7 @@ fn resolved_manifest_is_the_only_reader_dialect() {
     ] {
         std::fs::write(
             dir.join("app.json"),
-            serde_json::json!({"id":"com.exact.beacons","name":"Beacons","game":game})
-                .to_string(),
+            serde_json::json!({"id":"com.exact.beacons","name":"Beacons","game":game}).to_string(),
         )
         .unwrap();
         assert!(Manifest::read(&dir).is_err());
@@ -576,8 +575,7 @@ fn rust_capability_receipts_bind_executor_abi_target_and_module() {
         ("wasm", Some("wasm32-unknown-unknown"), Some("wasmi")),
         ("off", None, None),
     ] {
-        manifest.json["rust"] =
-            serde_json::json!({"mode":mode,"module":{"package":"app-logic"}});
+        manifest.json["rust"] = serde_json::json!({"mode":mode,"module":{"package":"app-logic"}});
         let receipt = compatibility_with_trust(
             &dir,
             "macos",
@@ -630,8 +628,7 @@ fn a_replaceable_rust_module_keeps_its_source_out_of_the_cohort() {
         (receipt.id, receipt.inputs["dataCrate"].clone())
     };
     manifest.json["deploy"] = serde_json::json!({"signing":{"key":"k","keys":{"k":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="}}});
-    manifest.json["rust"] =
-        serde_json::json!({"mode":"native","module":{"package":"app-logic"}});
+    manifest.json["rust"] = serde_json::json!({"mode":"native","module":{"package":"app-logic"}});
     let (before, data) = id(&manifest, "pub const A: u8 = 1;");
     assert!(data.is_null(), "{data}");
     assert_eq!(id(&manifest, "pub const A: u8 = 2;").0, before);
@@ -654,8 +651,7 @@ fn web_receipts_name_the_linked_composition_and_refuse_an_unlinked_store() {
             manifest.json["deploy"]["store"] = serde_json::json!({"web":setting});
         }
         let plain =
-            compatibility_with_trust(&dir, "web", "wasm32", &manifest, None, "production")
-                .unwrap();
+            compatibility_with_trust(&dir, "web", "wasm32", &manifest, None, "production").unwrap();
         assert_eq!(plain.inputs["store"]["L"], "0");
         // No `rust.module`, so no Rust executor (LLP 1047.001 D7).
         assert_eq!(
@@ -678,9 +674,8 @@ fn web_receipts_name_the_linked_composition_and_refuse_an_unlinked_store() {
         serde_json::json!(0),
     ] {
         manifest.json["deploy"]["store"]["web"] = setting;
-        let error =
-            compatibility_with_trust(&dir, "web", "wasm32", &manifest, None, "production")
-                .unwrap_err();
+        let error = compatibility_with_trust(&dir, "web", "wasm32", &manifest, None, "production")
+            .unwrap_err();
         assert!(error.contains("web host links no updater"), "{error}");
     }
     let _ = std::fs::remove_dir_all(dir);
@@ -701,33 +696,23 @@ fn production_trust_requires_keys_and_has_a_distinct_cohort() {
         if let Some(keys) = keys {
             manifest.json["deploy"]["signing"]["keys"] = keys;
         }
-        assert!(compatibility_with_trust(
-            &dir,
-            "linux",
-            "aarch64",
-            &manifest,
-            None,
-            "production"
-        )
-        .is_err());
+        assert!(
+            compatibility_with_trust(&dir, "linux", "aarch64", &manifest, None, "production")
+                .is_err()
+        );
     }
     manifest.json["deploy"]["signing"] = serde_json::json!({});
     let dev =
-        compatibility_with_trust(&dir, "linux", "aarch64", &manifest, None, "development")
-            .unwrap();
+        compatibility_with_trust(&dir, "linux", "aarch64", &manifest, None, "development").unwrap();
     assert_eq!(dev.inputs["trust"], "development");
-    assert!(
-        compatibility_with_trust(&dir, "linux", "aarch64", &manifest, None, "dev").is_err()
-    );
+    assert!(compatibility_with_trust(&dir, "linux", "aarch64", &manifest, None, "dev").is_err());
     manifest.json["deploy"]["store"] = serde_json::json!({"linux":"0"});
     assert!(
-        compatibility_with_trust(&dir, "linux", "aarch64", &manifest, None, "production")
-            .is_ok()
+        compatibility_with_trust(&dir, "linux", "aarch64", &manifest, None, "production").is_ok()
     );
     manifest.json["app"]["origin"] = serde_json::json!("https://updates.example");
     let zero =
-        compatibility_with_trust(&dir, "linux", "aarch64", &manifest, None, "production")
-            .unwrap();
+        compatibility_with_trust(&dir, "linux", "aarch64", &manifest, None, "production").unwrap();
     assert!(zero.inputs["keys"].is_null());
     assert!(zero.inputs["trust"].is_null());
     assert_eq!(
@@ -740,8 +725,7 @@ fn production_trust_requires_keys_and_has_a_distinct_cohort() {
     manifest.json["deploy"]["signing"]["keys"] =
         serde_json::json!({"ignored":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="});
     let changed =
-        compatibility_with_trust(&dir, "linux", "aarch64", &manifest, None, "development")
-            .unwrap();
+        compatibility_with_trust(&dir, "linux", "aarch64", &manifest, None, "development").unwrap();
     assert_eq!(
         zero.id, changed.id,
         "a missing updater has no key or trust epoch"
@@ -751,11 +735,9 @@ fn production_trust_requires_keys_and_has_a_distinct_cohort() {
     manifest.json["deploy"]["signing"]["keys"] =
         serde_json::json!({"k":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="});
     let production =
-        compatibility_with_trust(&dir, "linux", "aarch64", &manifest, None, "production")
-            .unwrap();
+        compatibility_with_trust(&dir, "linux", "aarch64", &manifest, None, "production").unwrap();
     let development =
-        compatibility_with_trust(&dir, "linux", "aarch64", &manifest, None, "development")
-            .unwrap();
+        compatibility_with_trust(&dir, "linux", "aarch64", &manifest, None, "development").unwrap();
     assert_eq!(production.inputs["trust"], "production");
     assert_ne!(
         production.id, development.id,
@@ -796,4 +778,3 @@ fn a_stored_module_client_pins_its_module_into_the_id() {
         "the id digests the inputs it reports"
     );
 }
-

@@ -51,6 +51,7 @@
 //  168  service(host, module, moduleLen, json, len, ctx, reply): a module's
 //        service query (`ExactServices.query`); replies once on any thread,
 //        with len 0 for no answer
+//  176  arrangement(host, node, controller): arrange authored siblings, or restore their layout
 //
 // `host` is the session's runtime handle, as for `changed` and `now`: a
 // destroyed session's is answered with nothing. Service queries use the

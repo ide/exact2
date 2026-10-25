@@ -544,6 +544,7 @@ final class ExactHatches {
     let invokeFn: Invocations.InvokeFn?
     /// One of 176 or more: a module's service query (ExactServices.swift).
     let serviceFn: ServiceFn?
+    /// One of 184 or more: an authored content arrangement.
     typealias ArrangementFn = @convention(c) (UnsafeMutableRawPointer?, UInt32, UnsafeMutableRawPointer?) -> Int32
     let arrangementFn: ArrangementFn?
     #if os(iOS) || os(tvOS)

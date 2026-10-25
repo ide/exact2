@@ -1199,8 +1199,6 @@ extension ExactSession {
         #endif
         frames.run(frames.motion || frames.timerSoon || canvases.wantsFrames)
     }
-    /// The scene became active (iOS): the canvases follow.
-    public func becameActive() { frames.run(frames.motion || frames.timerSoon || canvases.wantsFrames) }
     #if os(iOS) || os(tvOS)
     /// A hardware keyboard's Tab (or Shift-Tab) when no node of this session
     /// holds the focus: an app's last responder forwards it here, as macOS's

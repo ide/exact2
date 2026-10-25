@@ -160,7 +160,6 @@ public final class ExactApp {
         lastModule = generation.module
         selectedToken = generation.token
     }
-
     func fallBackFromInitial(reason: String) -> Bool {
         guard selectedToken != 0, !sessions.contains(where: \.booted) else { return false }
         lifecycle?.initialGenerationRefused(self, token: selectedToken, reason: reason)
