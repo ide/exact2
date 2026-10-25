@@ -884,10 +884,10 @@ public final class ExactElement {
         if isLive { hatches?.owns(scope: scopeName, node: node, kind: 1, object: recognizer, what, surface: surface) }
     }
 
-    #if os(iOS) || os(tvOS)
+    #if os(iOS)
     /// Lay out this element's two authored children with UIKit, preserving their content.
     /// Pass nil to restore their authored layout. Navigation stays outside the arrangement.
-    @available(iOS 27.1, tvOS 27.1, *)
+    @available(iOS 27.1, *)
     @discardableResult
     public func arrange(using controller: UIArrangementViewController?) -> Bool {
         guard isLive, let hatches, let arrange = hatches.arrangementFn else { return false }

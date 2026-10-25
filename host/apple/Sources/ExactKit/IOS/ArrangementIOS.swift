@@ -1,8 +1,8 @@
-#if os(iOS) || os(tvOS)
+#if os(iOS)
 import UIKit
 
 /// Authored siblings laid out by UIKit without introducing navigation or another renderer.
-@available(iOS 27.1, tvOS 27.1, *)
+@available(iOS 27.1, *)
 final class ArrangementHost {
     private unowned let presenter: Presenter
     private var requests: [UInt32: UIArrangementViewController] = [:]

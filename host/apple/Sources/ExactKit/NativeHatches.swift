@@ -129,8 +129,8 @@ private let hatchAfter: HatchAfterFn = { host, token, ms in hatchSession(host)?.
 
 private typealias HatchArrangementFn = @convention(c) (UnsafeMutableRawPointer?, UInt32, UnsafeMutableRawPointer?) -> Int32
 private let hatchArrangement: HatchArrangementFn = { host, node, object in
-    #if os(iOS) || os(tvOS)
-    if #available(iOS 27.1, tvOS 27.1, *), let presenter = hatchSession(host)?.presenter {
+    #if os(iOS)
+    if #available(iOS 27.1, *), let presenter = hatchSession(host)?.presenter {
         let controller = object.map { Unmanaged<AnyObject>.fromOpaque($0).takeUnretainedValue() }
         guard object == nil || controller is UIArrangementViewController else { return 1 }
         return presenter.arrangements.set(node, controller: controller as? UIArrangementViewController) ? 0 : 1
