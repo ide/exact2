@@ -85,6 +85,12 @@ extension Presenter {
             let r = routes[ObjectIdentifier(c)]
             if c.bandedTop !== r?.top { c.bandedTop = r?.top; c.setContentScrollView(r?.top ?? c.collapseScrollView, for: .top) }
             if c.bandedBottom !== r?.bottom { c.bandedBottom = r?.bottom; c.setContentScrollView(r?.bottom ?? c.edgeScroll?.scrollView, for: .bottom) }
+            if #available(iOS 26.0, *), let viewport = c.contentViewport {
+                // Hide the document viewport's effect while a child owns that edge
+                let top = c.contentScrollView(for: .top), bottom = c.contentScrollView(for: .bottom)
+                viewport.topEdgeEffect.isHidden = top != nil && top !== viewport
+                viewport.bottomEdgeEffect.isHidden = bottom != nil && bottom !== viewport
+            }
         }
         #endif
         ControlBars.sync(bars, in: self)
