@@ -310,15 +310,20 @@ final class NavigationTabsIOSTests: XCTestCase {
         try authoredTabs(session, true)
         try tapNode(session, "toggle-choosing")
         until("CSS hides the authored tablist") { list.style["display"]?.string == "none" }
-        XCTAssertFalse(list.hiddenByHost, "CSS hiding is independent of native projection")
+        XCTAssertFalse(list.hiddenByHost, "only CSS hides the list before adoption")
         try authoredTabs(session, false)
-        XCTAssertTrue(p.navigation.adopts(tablist: list))
         try tapNode(session, "toggle-choosing")
         until("CSS shows the tablist again") { list.style["display"]?.string != "none" }
         XCTAssertTrue(list.isHidden, "the native bar keeps the authored labels out of the page")
         XCTAssertTrue(list.hiddenByHost)
         XCTAssertFalse(tabBarHidden(try XCTUnwrap(p.navigation.tabController)))
+        try tapNode(session, "toggle-choosing")
+        until("CSS hides the adopted tablist") { list.style["display"]?.string == "none" }
         try authoredTabs(session, true)
+        XCTAssertTrue(list.isHidden, "CSS hiding survives the end of native ownership")
+        XCTAssertFalse(list.hiddenByHost)
+        try tapNode(session, "toggle-choosing")
+        until("CSS reveals the authored tabs") { list.style["display"]?.string != "none" }
         XCTAssertFalse(list.isHidden, "returning ownership restores the authored tabs")
     }
 

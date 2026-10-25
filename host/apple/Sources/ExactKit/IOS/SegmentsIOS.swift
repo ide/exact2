@@ -497,7 +497,7 @@ final class SegmentHost: NSObject, UIGestureRecognizerDelegate, UITabBarDelegate
         }
         for list in presenter.carrying("role:tablist") {
             let adopted = presenter.navigation.adopts(tablist: list)
-            // Reassert projection when CSS hid the list before adoption
+            // Repeat the hide because a list hidden by CSS may ignore the host's first write
             guard adopted || adoptedLists.contains(list.id) else { continue }
             if adopted { adoptedLists.insert(list.id) } else { adoptedLists.remove(list.id) }
             list.isHidden = adopted
