@@ -1747,3 +1747,5 @@ and the Linux headless CPU renderer without claiming display frame timing.
   `IDWriteFontResource::CreateFontFace` with design-space values, obtained by
   un-normalizing Parley's coordinates (including `avar` and `fvar`) or carrying
   the requested values. Repeat the audit before admitting variable faces.
+
+- Apple cold secret reads: preserve unknown availability before activating the data source. A failed initial Keychain read currently becomes an empty snapshot. A retry must gate source readiness, survive reload, retain store-change and cache-retry metadata, and reconcile presence migration before publishing occupancy; peer snapshot adoption intentionally preserves presence metadata. Lexy logout after update remains unconfirmed.
