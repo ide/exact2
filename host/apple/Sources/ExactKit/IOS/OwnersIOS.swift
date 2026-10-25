@@ -318,6 +318,7 @@ final class OwnerBlocks {
             }
             now[id] = (.size(block.size), presented ? nil : placement(of: route, block: block, in: view))
         }
+        if #available(iOS 27.1, tvOS 27.1, *) { now.merge(presenter.arrangements.blocks) { _, pane in pane } }
         var blocks: [(UInt32, HostBlock?)] = [], placements: [(UInt32, BlockPlacement?)] = []
         for (id, entry) in now {
             if told[id]?.block != entry.block { blocks.append((id, entry.block)) }
