@@ -400,7 +400,6 @@ let Ticket = 0;
 const sameReq = (a, b) => a && b && a.storage === b.storage && a.method === b.method && a.url === b.url && a.body === b.body && JSON.stringify(a.headers) === JSON.stringify(b.headers) && a.http === b.http && JSON.stringify(a.longPoll) === JSON.stringify(b.longPoll);
 /** Requests in flight, for the agent's `clock settle`. */
 export const inflight = { n: 0 };
-/** Elements the app marks `aria-busy="true"` (still loading), by test id else id. */
 export const busy = () => [...document.querySelectorAll('[aria-busy="true"]')].map(el => el.getAttribute('data-testid') ?? el.id);
 function send(t, land) {
   Out.push(() => {
@@ -1385,8 +1384,6 @@ function slice() {
   if (LazyAt < Lazy.length) LazyTask = post(slice); else lazyDone();
 }
 const post = f => globalThis.scheduler?.postTask ? scheduler.postTask(f, { priority: "user-visible" }) : setTimeout(f);
-// ---------------------------------------------------------------- boot
-/** Build the view into `#exact-root` and start the clock. */
 export function mount(f) {
   const root = document.getElementById("exact-root");
   // A press on a `retainFocus` node keeps the focus where it is (an
@@ -1459,8 +1456,7 @@ const value_ = v => v === null || typeof v !== "object" ? v : Array.isArray(v) ?
 // tree reads it tracked, as of the last commit: an advance that fired nothing committed no new time.
 export const x_performanceNow = () => { NowRead = true; if (Listener) return read(Now); if (!Writes) time(); return clock.now; };
 export * from "./roster.js"; // the roster's pure entries
-// ---------------------------------------------------------------- localized strings (LLP 1060)
-// The plan's tables, base first: [name, rtl, {key: text}]. The locale slot
+// The plan's tables (LLP 1060), base first: [name, rtl, {key: text}]. The locale slot
 // holds the table the viewer's launch locale reads before state initializes;
 // `t` reads that table, else the base.
 let Texts = [];

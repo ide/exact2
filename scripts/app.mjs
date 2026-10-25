@@ -477,10 +477,8 @@ export function platformCrateKind(dir, kind) {
     ? (existsSync(resolve(dir, kind, 'Cargo.toml')) ? kind : 'apple') : kind;
 }
 
-/** The modules app.json `launch` names, in order, each from the app's
- * `modules/<name>/` else exact2's: `apple/launch/*.swift` links into the
- * executable, `apple/service/*.swift` builds its service dylib, and `web` is
- * its `web/service.js` or null. */
+/** Resolve launch modules in manifest order, from the app before Exact. Apple launch
+ * sources link into the executable, service sources form a dylib, and `web/service.js` supplies the web service. */
 export function launchModules(dir, manifest) {
   return (manifest.launch ?? []).map((name) => {
     const own = resolve(dir, 'modules', name), shared = resolve(ROOT, 'modules', name);
@@ -603,7 +601,6 @@ export function resolveApp(nameOrCrate) {
     get modules() {
       return { ...this.modulesFor('apple'), web: this.modulesFor('web').web };
     },
-    /** Module launch parts in `launch` order (launchModules). */
     get launch() { return launchModules(dir, manifest); },
     /** The manifest, validated; the derived defaults when the app has none. */
     manifest,

@@ -398,9 +398,7 @@ fn build_sources(
         composer,
         None,
     )?;
-    // Cargo says a build script's warnings (prefixed with the crate) as the
-    // script runs, which is when the plan's sources changed. The SF Symbols
-    // only the web draws blank are one line, as `contract build` says them.
+    // Report Cargo warnings together for SF Symbols that only the web leaves blank.
     let web: Vec<&String> = baked
         .warnings
         .iter()
@@ -431,12 +429,9 @@ fn build_sources(
     }
     let manifest = contract::Manifest::read(app)?;
     let target = std::env::var("TARGET").map_err(|e| e.to_string())?;
-    // Pin stored bundles to the binary's module hash: stores deliver plans
-    // and assets, and cannot replace the compiled module.
-    let module = meta["module"]["sha256"]
-        .as_str()
-        .ok_or("missing module hash")?;
-    let stored = manifest.store(platform) != "0";
+    // Pin stored plans and assets to the binary's compiled module.
+    let module = meta["module"]["sha256"].as_str();
+    let module = module.ok_or("missing module hash")?;
     let compat = exact_bake::compatibility_id_pinned(
         app,
         platform,
@@ -445,10 +440,9 @@ fn build_sources(
         meta["grants"].as_str(),
         mixed_grants(&meta, rust)?,
         Some(&baked.entries),
-        stored.then_some(module),
+        (manifest.store(platform) != "0").then_some(module),
     )?;
-    // A TypeScript app's update carries its module pair (`typescript/`); a
-    // mixed app's two modules travel as one generation, which no host takes yet.
+    // Refuse mixed-module delivery until hosts accept both as one generation.
     let updating = compat.inputs["store"]["L"] != "0";
     if updating && rust.is_some() {
         return Err("a TypeScript and Rust app currently requires deploy.store.<platform> = 0; signed delivery of both modules is not implemented".into());

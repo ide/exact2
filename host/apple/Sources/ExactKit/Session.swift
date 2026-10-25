@@ -169,7 +169,6 @@ public final class ExactApp {
         selectedToken = 0
         return true
     }
-
     func firstPixel(_ token: UInt64) {
         lifecycle?.firstPixel(self, token: token)
         WidgetContainer.publishAfterFirstPixel(resolver)
