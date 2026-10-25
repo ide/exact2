@@ -7,6 +7,12 @@ import Foundation
 import UniformTypeIdentifiers
 
 extension ExactSession {
+    /// @ref LLP 1038 D8/D11 — pre-boot URLs are launch facts; the adapter consumes development links first.
+    @discardableResult public func openURL(_ url: URL) -> Bool {
+        guard state != .destroyed else { return false }
+        return openIncoming(incomingLocation(url))
+    }
+
     /// The location the agent's `type <root> <text>` delivers: a path as
     /// written, and a URL with a scheme as the system's would arrive
     /// (`openURL`), so a drive opens a deep link without iOS's "Open in …?"

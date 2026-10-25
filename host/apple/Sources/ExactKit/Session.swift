@@ -1446,11 +1446,6 @@ public final class ExactSession {
               let batch = runtime.selection(node, json: json, now: now()) else { return }
         apply(batch)
     }
-    /// @ref LLP 1038 D8/D11 — pre-boot URLs are launch facts; the adapter consumes development links first.
-    @discardableResult public func openURL(_ url: URL) -> Bool {
-        guard state != .destroyed else { return false }
-        return openIncoming(incomingLocation(url))
-    }
     /// A link the reader followed — a `link href`, a text run's `href`, a
     /// Markdown link. A path naming one of the app's routes is a location
     /// for the navigation root, as the web's same-document link is (LLP 1038
