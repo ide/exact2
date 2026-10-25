@@ -304,6 +304,24 @@ final class NavigationTabsIOSTests: XCTestCase {
         until("cover leaves top protection to the author") { p.navigation.covers[list.id] == nil }
     }
 
+    func testAdoptingTabsWhileCSSHiddenKeepsTheirLabelsHiddenWhenShown() throws {
+        let session = try fixture("hidden-tabs-adoption")
+        let p = session.presenter, list = try node(session, "tabs")
+        try authoredTabs(session, true)
+        try tapNode(session, "toggle-choosing")
+        until("CSS hides the authored tablist") { list.style["display"]?.string == "none" }
+        XCTAssertFalse(list.hiddenByHost, "CSS hiding is independent of native projection")
+        try authoredTabs(session, false)
+        XCTAssertTrue(p.navigation.adopts(tablist: list))
+        try tapNode(session, "toggle-choosing")
+        until("CSS shows the tablist again") { list.style["display"]?.string != "none" }
+        XCTAssertTrue(list.isHidden, "the native bar keeps the authored labels out of the page")
+        XCTAssertTrue(list.hiddenByHost)
+        XCTAssertFalse(tabBarHidden(try XCTUnwrap(p.navigation.tabController)))
+        try authoredTabs(session, true)
+        XCTAssertFalse(list.isHidden, "returning ownership restores the authored tabs")
+    }
+
     func testHiddenAuthoredTabsRestoreTheWholeViewport() throws {
         let session = try fixture("hidden-authored-tabs")
         let p = session.presenter, view = try XCTUnwrap(session.view)
