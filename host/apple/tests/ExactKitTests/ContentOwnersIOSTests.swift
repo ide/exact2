@@ -11,6 +11,51 @@ import XCTest
 /// navigation; the document, the session's one viewport (D1), stays in the
 /// session's view at its own size.
 final class ContentOwnersIOSTests: XCTestCase {
+    func testAScreenKeepsItsMountAndFocusWhenABackendChanges() throws {
+        guard let scene = hostedWindowScene() else { throw missing("scene", "native focus needs the hosted responder chain") }
+        let session = try fixture("screen-route-backend", scene.coordinateSpace.bounds.size, plan: "EXACT_EDGE_EFFECT_PLAN")
+        let p = session.presenter
+        let route = try XCTUnwrap(p.navigation.primaryNavigation?.topViewController as? RouteController)
+        let content = try node(session, "content-large"), authored = content.style
+        let mount = route.node.superview
+        let field = UITextField(frame: CGRect(x: 16, y: 140, width: 200, height: 44))
+        route.node.container.addSubview(field)
+        defer { field.resignFirstResponder() }
+        XCTAssertTrue(field.becomeFirstResponder())
+        let focusMount = try XCTUnwrap(route.view as? PresentationMount)
+        XCTAssertTrue(focusMount.focusItems(in: focusMount.bounds).contains { ($0 as? UIView) === field })
+        var unscrolling = authored
+        unscrolling["overflow_x"] = .string("visible")
+        unscrolling["overflow_y"] = .string("visible")
+        content.applyStyle(unscrolling)
+        XCTAssertTrue(route.node.superview === mount)
+        XCTAssertNil(route.contentViewport)
+        XCTAssertTrue(field.isFirstResponder)
+        content.applyStyle(authored)
+        XCTAssertTrue(route.node.superview === mount)
+        XCTAssertNil(route.contentViewport)
+        XCTAssertTrue(field.isFirstResponder)
+    }
+
+    func testAMixedDocumentRevealsAFieldOutsideItsInnerScrollerAboveTheKeyboard() throws {
+        guard let scene = hostedWindowScene() else { throw missing("scene", "mixed-document keyboard reveal needs a native window") }
+        let session = try fixture("mixed-document-keyboard", scene.coordinateSpace.bounds.size, plan: "EXACT_EDGE_EFFECT_PLAN")
+        let p = session.presenter
+        XCTAssertNil(Agent(session: session).tap(["id": Int(try node(session, "tab-mixed").id)])["error"])
+        until("the mixed document settles") { p.navigation.activeRoute?.node.props["testId"] == "route-mixed" && !p.navigation.inTransition }
+        let route = try XCTUnwrap(p.navigation.activeRoute)
+        let document = try XCTUnwrap(try node(session, "document-mixed").scrollView)
+        XCTAssertNil(route.contentViewport)
+        let field = try XCTUnwrap(try node(session, "mixed-field").field)
+        defer { field.resignFirstResponder() }
+        XCTAssertTrue(field.becomeFirstResponder())
+        until("document scrolling lifts the field above the keyboard") {
+            guard let top = p.keyboardTop else { return false }
+            return document.contentOffset.y > 0 && field.convert(field.bounds, to: self.window).maxY <= top + 1
+        }
+        XCTAssertTrue(field.isFirstResponder)
+    }
+
     func testAnArrangementKeepsAuthoredChildrenAndRestoresTheirContainment() throws {
         guard #available(iOS 27.1, *) else { throw XCTSkip("arrangements require iOS 27.1") }
         let (presenter, root, controller, window) = try arrangementFixture()
@@ -370,7 +415,7 @@ final class ContentOwnersIOSTests: XCTestCase {
     /// ordinary route's placement is.
     private func local(_ session: ExactSession, _ view: UIView) -> BlockPlacement? {
         let owner = session.presenter.navigation.container
-        return owner.map { BlockPlacement(rect: view.convert(view.bounds, to: $0), within: $0.id, contentOffset: .zero) }
+        return owner.map { BlockPlacement(rect: view.convert(view.bounds, to: $0), within: $0.id, contentOffset: nil) }
     }
 
     /// Where a person sees `view`, in viewport points.

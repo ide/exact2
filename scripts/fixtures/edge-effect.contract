@@ -3,11 +3,13 @@
 // tab's route has a scroller with pull to refresh whose rows hold a native
 // button, under a large title in one tab and an inline title in the other;
 // the first also has a sticky child with a `z-index`, the second
-// `position: relative` cards (EdgeEffectIOSTests).
+// `position: relative` cards. The mixed tab scrolls beyond a smaller
+// nested scroller (EdgeEffectIOSTests).
 routes nav
   tab large "/"
   tab inline "/inline"
   tab panes "/panes"
+  tab mixed "/mixed"
 
 component EdgeEffect
   state pulls = 0
@@ -22,10 +24,18 @@ component EdgeEffect
         for t in nav.tabs key = t.name
           column role="tabpanel" id=`panel-${t.name}` position="absolute" inset=0
             for e in t.stack key = e.id
-              column navigationKey=`${e.id}` navigationScroll=(e.name == "panes" ? "pane-first" : `content-${e.name}`) testId=`route-${e.name}` position="absolute" inset=0 display="flex" flex-direction="column"
+              column navigationKey=`${e.id}` navigationScroll=(e.name == "panes" ? "pane-first" : (e.name == "mixed" ? "document-mixed" : `content-${e.name}`)) testId=`route-${e.name}` position="absolute" inset=0 display="flex" flex-direction="column"
                 header
-                  text (e.name == "large" ? "Large" : "Inline") role="heading" aria-level=(e.name == "inline" ? 2 : 1)
-                if e.name == "panes"
+                  text (e.name == "large" ? "Large" : (e.name == "mixed" ? "Mixed" : "Inline")) role="heading" aria-level=(e.name == "inline" ? 2 : 1)
+                if e.name == "mixed"
+                  scroll id="document-mixed" testId="document-mixed" -exact-scroll-edge-effect="soft" flex=1 min-height=0
+                    scroll id="content-mixed" testId="content-mixed" height=200 max-height=200
+                      text "An inner scroller"
+                      text "More inner content" margin-top=500
+                    column height=1400
+                      text "The document also scrolls"
+                    input type="text" value="" testId="mixed-field" height=44
+                else if e.name == "panes"
                   column flex=1 min-height=0 overflow="hidden"
                     column id="arrangement" testId="arrangement" display="flex" flex-direction="row" flex=1 min-height=0
                       for pane in ["first", "second"] key = pane
@@ -53,3 +63,6 @@ component EdgeEffect
         button role="tab" aria-controls="panel-panes" aria-selected=(nav.tab == "panes") press=pick("panes") testId="tab-panes" flex=1
           image "symbol:bookmark"
           text "Panes"
+        button role="tab" aria-controls="panel-mixed" aria-selected=(nav.tab == "mixed") press=pick("mixed") testId="tab-mixed" flex=1
+          image "symbol:bookmark"
+          text "Mixed"

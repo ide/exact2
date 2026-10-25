@@ -2195,10 +2195,11 @@ route stays mounted (its nodes are in `tree`, marked `inactive`), so a `testId`
 two screens share names two nodes: give each screen its own (`list-error`,
 `detail-error`).
 
-A route does not scroll by itself, as a `div` does not: content taller than it is
-never seen. A fixed shell (a map, a camera, a chat whose composer stays put) is
-fine; anything else puts its content in a `scroll` or `list` with `flex=1
-min-height=0` right after its `header`:
+A native route is a screen, not an implicit scroll container. Put scrolling
+content in a `scroll` or `list` with `flex=1 min-height=0` right after its `header`.
+Use an outer `scroll` for a document that also contains smaller scrollers;
+fields and content outside them then remain reachable. On iOS, `resizes-visual`
+retains a separate viewport for keyboard accommodation without layout reflow.
 
 ```text
 column navigationKey=`${e.id}` position="absolute" inset=0 display="flex" flex-direction="column"

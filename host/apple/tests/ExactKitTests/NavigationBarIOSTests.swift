@@ -178,6 +178,8 @@ final class NavigationBarIOSTests: XCTestCase {
         }
         let session = try fixture("keyboard-inset-contributions", module: false)
         let p = session.presenter
+        let root = try XCTUnwrap(p.root.subviews.first as? NodeView)
+        p.apply(wireBatch([["op": "props", "id": Int(root.id), "set": ["interactiveWidget": "resizes-visual"]]]))
         let nav = try XCTUnwrap(p.navigation.primaryNavigation)
         let shown = expectation(forNotification: UIResponder.keyboardDidShowNotification, object: nil)
         p.press(try node(session, "open-focused-plain").id)
@@ -187,6 +189,7 @@ final class NavigationBarIOSTests: XCTestCase {
         let route = try XCTUnwrap(nav.topViewController as? RouteController)
         let scroll = try XCTUnwrap(route.contentViewport)
         let keyboard = scroll.contentInset.bottom
+        XCTAssertGreaterThan(keyboard, 0, "the visual viewport contributes keyboard room without reflow")
         p.pinnedRoom.grow(scroll, by: 24)
         route.view.setNeedsLayout()
         route.view.layoutIfNeeded()
@@ -1033,13 +1036,13 @@ final class NavigationBarIOSTests: XCTestCase {
         XCTAssertEqual(phase(), "completed")
     }
 
-    func testHatchOwnershipAcceptsTheContentViewportAndDetectsARemovedRoute() throws {
+    func testHatchOwnershipAcceptsTheContentMountAndDetectsARemovedRoute() throws {
         let session = try fixture("hatch-content-mount", module: true)
         let navigation = session.presenter.navigation
         until("the route hatch is connected") { journal(session).contains("hatch route 0: built") }
         _ = Agent(session: session).clock(["settle": true])
         let route = try XCTUnwrap(navigation.primaryNavigation?.topViewController as? RouteController)
-        let mount = try XCTUnwrap(route.contentViewport)
+        let mount = route.contentMount
         XCTAssertTrue(route.node.superview === mount)
         let violation = "route 0: view changed outside Exact, which owns it"
         navigation.checkOwned()
