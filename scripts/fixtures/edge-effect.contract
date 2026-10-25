@@ -34,7 +34,7 @@ component EdgeEffect
                             row padding=16
                               text `${pane} row ${r}` testId=`${pane}-row-${r}`
                 else
-                  scroll id=`content-${e.name}` testId=`content-${e.name}` -exact-scroll-edge-effect="soft" flex=1 min-height=0 refresh=reload refreshing=false
+                  scroll id=`content-${e.name}` testId=`content-${e.name}` -exact-scroll-edge-effect=(e.name == "large" ? "soft" : none) flex=1 min-height=0 refresh=reload refreshing=false
                     if e.name == "large"
                       column position="sticky" top=0 z-index=1 padding="8px 16px"
                         text "Pinned"
