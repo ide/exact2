@@ -30,7 +30,7 @@ use crate::arena::NodeArena;
 use crate::error::{KernelError, LayoutError};
 use crate::id::ViewId;
 use crate::layout::LayoutMirror;
-use crate::style::{Dimension, Edge, Region};
+use crate::{AlignItems, AlignSelf, FlexDirection};
 
 /// A host container's claim on one box.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -89,10 +89,9 @@ impl Kernel {
         if let Some(r) = &mut self.region {
             r.intrinsic(slot);
         }
-        // A box replaced or given back changes what its parent's top cover
-        // takes from it (`header_inset`), and a scroller the platform
-        // insets at the bottom edge, or stops insetting, what the covered
-        // box it ends pads there (`scroller_insets_bottom`), however deep.
+        // A scroller the platform insets at the bottom edge, or stops
+        // insetting, changes what the covered box it ends pads there
+        // (`scroller_insets_bottom`), however deep.
         let whole = |c: Option<HostCover>| c == Some(HostCover::Whole);
         let bottom = |c: Option<HostCover>| matches!(c, Some(HostCover::Inset([_, b])) if b > 0.0);
         // A box replaced or given back also leaves the chain or joins it.
@@ -108,9 +107,6 @@ impl Kernel {
                 || edges(before) != edges(cover)))
         .then(|| covering(&self.arena, slot))
         .flatten();
-        let parent = (whole(before) != whole(cover))
-            .then(|| self.arena.parent(slot))
-            .flatten();
         // And a block under it is hidden or shown with it (`block::apply`).
         let blocks: Vec<u32> = if whole(before) != whole(cover) {
             let arena = &self.arena;
@@ -122,18 +118,16 @@ impl Kernel {
         };
         // And an absolutely positioned child is placed past the edges the
         // cover names (`apply`), so its engine style is derived again.
-        // A replaced first child's inset is part of its parent's top cover
-        // (`header_inset`), which the parent's absolute children start past.
         let mut positioned = if edges(before) || edges(cover) {
             positioned_children(&self.arena, slot)
         } else {
             Vec::new()
         };
-        if let Some(p) = parent {
-            positioned.extend(positioned_children(&self.arena, p));
+        // And a scroller that reaches past its sides, as far as they are covered (`side_reach`).
+        if edges(before) || edges(cover) {
+            positioned.extend(reaching(&self.arena, slot));
         }
         for slot in std::iter::once(slot)
-            .chain(parent)
             .chain(chain)
             .chain(blocks)
             .chain(positioned)
@@ -257,6 +251,17 @@ pub(crate) fn apply(arena: &NodeArena, slot: u32, s: &mut taffy::style::Style) {
         }
         None => {}
     }
+    // A scroller under the covered box's side controls, its content where it was.
+    let [right, left] = side_reach(arena, slot);
+    let across = crate::style::cells::COLUMN;
+    if right > 0.0 {
+        s.margin.right = taffy::style::LengthPercentageAuto::length(-right);
+        s.padding.right = style.padding_right.spaced(env, across).floor_lp(env, right);
+    }
+    if left > 0.0 {
+        s.margin.left = taffy::style::LengthPercentageAuto::length(-left);
+        s.padding.left = style.padding_left.spaced(env, across).floor_lp(env, left);
+    }
     // An absolutely positioned child is placed against its parent's padding
     // box (CSS), which the parent's cover padding does not shrink: a footer
     // at `bottom: 0` would sit under the tab bar. The bars cover the
@@ -317,6 +322,90 @@ fn scroller_insets_bottom(arena: &NodeArena, slot: u32) -> bool {
     }
 }
 
+/// How far a `scroll` reaches past the sides of the box a container's bars
+/// cover (`Edges`), right and left: that box's
+/// side cover, on each side where the scroller lies on the box's content box
+/// (LLP 1123 D3, "A scroller reaches an edge"). It lies there when it and
+/// every box between them fill their parents across, in flow and with no
+/// width or maximum width, and have no margin on that side, and the boxes above it no
+/// padding or border there, the covered box included. The scroller is laid
+/// out that much wider, and its content that much further in (`apply`), so
+/// the content keeps its place while the scroller's box, and the scroll
+/// indicator UIKit draws at its edge, run under the side controls (the
+/// iPhone Duo's side strip), as a hand-built screen's scroll view does. A
+/// list is left out: the platform's own list lays its rows out, and a
+/// covered box's own scroller is it.
+pub(crate) fn side_reach(arena: &NodeArena, slot: u32) -> [f32; 2] {
+    use crate::style::Dimension::{Auto, Points};
+    if arena.node_type(slot) != crate::NodeType::ScrollView
+        || matches!(arena.cover(slot), Some(HostCover::Edges(_)))
+    {
+        return [0.0; 2];
+    }
+    let (mut right, mut left) = (true, true);
+    let mut at = slot;
+    while let Some(p) = arena.parent(at) {
+        let (s, parent) = (arena.style(at), arena.style(p));
+        let fills = match parent.display {
+            crate::Display::Block => true,
+            crate::Display::Flex => {
+                matches!(
+                    parent.flex_direction,
+                    FlexDirection::Column | FlexDirection::ColumnReverse
+                ) && match s.align_self {
+                    AlignSelf::Auto => {
+                        matches!(parent.align_items, AlignItems::Normal | AlignItems::Stretch)
+                    }
+                    AlignSelf::Stretch => true,
+                    _ => false,
+                }
+            }
+            _ => false,
+        };
+        if !fills || positioned(arena, at) || s.width != Auto || s.max_width != Auto {
+            return [0.0; 2];
+        }
+        let [_, border_right, _, border_left] = parent.border_widths();
+        right &= s.margin_right == Points(0.0)
+            && parent.padding_right == Points(0.0)
+            && border_right == 0.0;
+        left &= s.margin_left == Points(0.0)
+            && parent.padding_left == Points(0.0)
+            && border_left == 0.0;
+        if matches!(arena.cover(p), Some(HostCover::Edges(_))) {
+            let [_, cover_right, _, cover_left] = added_padding(arena, p);
+            return [
+                if right { cover_right } else { 0.0 },
+                if left { cover_left } else { 0.0 },
+            ];
+        }
+        if scrolls(arena, p) {
+            return [0.0; 2];
+        }
+        at = p;
+    }
+    [0.0; 2]
+}
+
+/// The scrollers that may reach past `slot`'s sides when it is covered
+/// (`side_reach`): the first `scroll` on each path down from it, which
+/// `apply` derives again when the cover changes.
+fn reaching(arena: &NodeArena, slot: u32) -> Vec<u32> {
+    let mut out = Vec::new();
+    let mut stack: Vec<u32> = arena.children(slot).to_vec();
+    while let Some(c) = stack.pop() {
+        if positioned(arena, c) {
+            continue;
+        }
+        if arena.node_type(c) == crate::NodeType::ScrollView {
+            out.push(c);
+        } else if !scrolls(arena, c) {
+            stack.extend(arena.children(c).iter().copied());
+        }
+    }
+    out
+}
+
 /// Whether `slot` scrolls vertically, as its engine style says (`style.rs`).
 fn scrolls(arena: &NodeArena, slot: u32) -> bool {
     let s = arena.style(slot);
@@ -370,6 +459,30 @@ pub(crate) fn style_changed(
     .any(|&id| mask.has(id))
     {
         chain_changed(arena, layout, slot);
+    }
+    if [
+        StyleId::Display,
+        StyleId::FlexDirection,
+        StyleId::AlignItems,
+        StyleId::AlignSelf,
+        StyleId::PositionType,
+        StyleId::Width,
+        StyleId::MaxWidth,
+        StyleId::MarginLeft,
+        StyleId::MarginRight,
+        StyleId::PaddingLeft,
+        StyleId::PaddingRight,
+        StyleId::BorderWidthLeft,
+        StyleId::BorderWidthRight,
+        StyleId::BorderStyleLeft,
+        StyleId::BorderStyleRight,
+        StyleId::OverflowX,
+        StyleId::OverflowY,
+    ]
+    .iter()
+    .any(|&id| mask.has(id))
+    {
+        reach_changed(arena, layout, slot);
     }
     if arena.cover(slot) == Some(HostCover::Whole) {
         if let Some(p) = arena.parent(slot) {
@@ -431,9 +544,7 @@ pub(crate) fn applied_padding(arena: &NodeArena, slot: u32) -> [f32; 4] {
 /// right, bottom and left: the host's sizing, not the box's CSS padding.
 pub(crate) fn added_padding(arena: &NodeArena, slot: u32) -> [f32; 4] {
     match arena.cover(slot) {
-        Some(HostCover::Edges([top, right, bottom, left])) => {
-            [top + header_inset(arena, slot, top), right, bottom, left]
-        }
+        Some(HostCover::Edges(edges)) => edges,
         Some(HostCover::Inset([top, bottom])) => [0.0, 0.0, top + bottom, 0.0],
         _ => [0.0; 4],
     }
@@ -462,8 +573,9 @@ pub(crate) fn without_inset(arena: &NodeArena, slot: u32, s: &mut taffy::style::
     }
 }
 
-/// A box's children changed: a covered box's top cover may hold its first
-/// child's inset (`header_inset`), so its engine style is derived again.
+/// A box's children changed: a covered box pads its bottom edge by what the
+/// scroller there leaves (`scroller_insets_bottom`), so its engine style is
+/// derived again.
 pub(crate) fn children_changed(
     arena: &NodeArena,
     layout: &mut dyn LayoutMirror,
@@ -492,37 +604,27 @@ pub(crate) fn children_changed(
         if !matches!(arena.cover(slot), Some(HostCover::Edges(_))) && !scrolls(arena, slot) {
             chain_changed(arena, layout, slot);
         }
+        reach_changed(arena, layout, slot);
     }
     crate::rows::children_changed(arena, layout, slot, touched);
 }
 
-/// The top inset a box's replaced first child cleared for itself: that
-/// child is covered whole and pads its top by `env(safe-area-inset-top)`
-/// or the corner-adapted safe area's, which never lies above it (LLP 1123
-/// D10), or a `calc()` or comparison that reads one (LLP 1001 §2).
-/// It counts only while a bar covers the box's top (`top > 0`); a scroller
-/// that goes under the bar is inset by the platform instead.
-pub(crate) fn header_inset(arena: &NodeArena, slot: u32, top: f32) -> f32 {
-    let Some(&first) = arena.children(slot).first() else {
-        return 0.0;
-    };
-    match (
-        top > 0.0,
-        arena.cover(first),
-        arena.style(first).padding_top,
-    ) {
-        (true, Some(HostCover::Whole), Dimension::Env(Edge::Top, _))
-        | (
-            true,
-            Some(HostCover::Whole),
-            Dimension::Region(Region::SafeAreaCorners, Edge::Top, _),
-        ) => arena.env().inset(Edge::Top),
-        // `max(env(safe-area-inset-top), 12px)` clears the inset too.
-        (true, Some(HostCover::Whole), Dimension::Compare(c))
-            if c.reads(Edge::Top, arena.env()) =>
-        {
-            arena.env().inset(Edge::Top)
+/// A box at or under a covered one changed what decides how far a scroller
+/// reaches past the covered box's sides (`side_reach`): its fill, width,
+/// margins, padding, borders or children. The scrollers that may reach
+/// (`reaching`) are derived again.
+fn reach_changed(arena: &NodeArena, layout: &mut dyn LayoutMirror, slot: u32) {
+    let mut at = Some(slot);
+    while let Some(s) = at {
+        if matches!(arena.cover(s), Some(HostCover::Edges(_))) {
+            for r in reaching(arena, s) {
+                if let Some(node) = arena.taffy(r) {
+                    layout.restyle(arena, r, node);
+                    layout.mark_dirty(node);
+                }
+            }
+            return;
         }
-        _ => 0.0,
+        at = arena.parent(s);
     }
 }
