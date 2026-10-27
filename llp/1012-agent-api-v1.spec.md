@@ -205,9 +205,10 @@ responses; the public operations are unchanged.
 
 Public: what `scripts/agent.mjs` exposes as a session (`open({host, plan,
 size})`), and what the CLI runs one per argument. A target is a `testId`
-(first in preorder on a selected route of a selected tab; a covered screen's or
-an unselected tab's copy only when no active one carries it, flagged `inactive`
-in `tree`) or a view id; the driver resolves it through `tree`, so a
+(the first live node in preorder that carries it: on a selected route of a
+selected tab, or in a split's list column, live beside its detail; a covered
+screen's or an unselected tab's copy only when no live one carries it, flagged
+`inactive` in `tree`) or a view id; the driver resolves it through `tree`, so a
 host input path only ever sees a view id. Such a node is `hidden` too where
 the host does not show its route, which is every such route but one a sheet
 covers (LLP 1153 D8); on the web both flags are read from the page as its
