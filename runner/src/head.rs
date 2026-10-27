@@ -13,7 +13,7 @@
 //! is flagged, and resolves only when no active screen carries it.
 
 use crate::{DataSource, Runner};
-use exact_kernel::{Kernel, NodeType, PropId, PropList, PropValue, ViewId};
+use exact_kernel::{BlockShown, Kernel, NodeType, PropId, PropList, PropValue, ViewId};
 
 /// The active head's fields; `None` where no active head sets one.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -101,9 +101,18 @@ fn inactive_with(kernel: &Kernel, id: ViewId, covered_shows: bool) -> bool {
             .node(id)
             .map(|n| (n.node_type, n.props, n.children()))
     };
+    // A route its host shows under a pane over it (a split's detail under
+    // the list that overlays it) is not live, though shown (LLP 1127 D8).
+    let under = |id: ViewId| !covered_shows && kernel.host_block_shown(id) == BlockShown::Under;
+    if under(id) {
+        return true;
+    }
     let mut path = vec![id];
     let mut parent = kernel.node(id).and_then(|node| node.parent);
     while let Some(at) = parent.and_then(|id| kernel.node(id)) {
+        if under(at.id) {
+            return true;
+        }
         if let Some(n) = node(at.id) {
             let off = unselected(&node, &n);
             if let Some(route) = off.iter().find(|off| path.contains(off)) {
@@ -127,7 +136,8 @@ fn inactive_with(kernel: &Kernel, id: ViewId, covered_shows: bool) -> bool {
 /// shows the stack's list beside it, live (LLP 1115.002 D4); under a sheet,
 /// whose block is a maximum, the list is covered as before. A host that
 /// gives the list a block of its own too lays each route out in its own
-/// container (LLP 1123 D2): the route over it covers it.
+/// container (LLP 1123 D2): the route over it covers it, unless that host
+/// says it shows the route beside the stack's top (`Kernel::host_block_shown`).
 fn beside_a_pane(kernel: &Kernel, root: &HeadNode<'_>, route: ViewId) -> bool {
     use exact_kernel::BlockAxis;
     let Some(key) = root.1.str(PropId::NavigationKey) else {
@@ -147,6 +157,12 @@ fn beside_a_pane(kernel: &Kernel, root: &HeadNode<'_>, route: ViewId) -> bool {
         .into_iter()
         .filter(|id| key_of(*id).is_some())
         .collect();
+    // A host that lays a route out in a block of its own and shows it beside
+    // the stack's top says so: on iOS a split's list, and the detail beside
+    // its inspector (LLP 1127).
+    if kernel.host_block_shown(route) == BlockShown::Beside {
+        return true;
+    }
     stack.first() == Some(&route)
         && kernel.host_block(route).is_none()
         && stack

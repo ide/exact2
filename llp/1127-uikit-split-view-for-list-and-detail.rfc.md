@@ -1,7 +1,7 @@
 # LLP 1127: A list and its detail on iOS are UIKit's split view
 
-**Type:** RFC (a decision brief: each decision carries a proposed answer; nothing here is built until Charlie has read it)
-**Status:** Draft r30, 2026-10-25. Not in `llp/current/` (Q4). Accepting it accepts the edits made with it to LLP 1116.004 (D1.2), LLP 1115.002 (D4), LLP 1115.000 (D5.2) and LLP 1038 (D12).
+**Type:** RFC (a decision brief: each decision carries a proposed answer)
+**Status:** Draft r30, 2026-10-25. Not in `llp/current/` (Q4). Built in part ahead of acceptance, on iOS: a stack whose list rows push is a split, with UIKit's sidebar list beside the detail, a row selected while the detail shows the route its press opened, Back and the back swipe from a collapsed detail, the columns live as D8 says (beside, overlaid, the detail alone, collapsed), a stack that becomes a split when its rows come and a stack again when its root says `navigationSplit="none"`, the detail kept as the split expands or collapses, and D14's inspector on iOS 26. Not built: D3's detail selection (the selected entry and the base it sets; the detail is the stack past its first route) and its associations with incoming navigation, an authored width (D1) and a split in a tab (D10). Accepting it accepts the edits made with it to LLP 1116.004 (D1.2), LLP 1115.002 (D4), LLP 1115.000 (D5.2) and LLP 1038 (D12).
 **Systems:** the iOS host's navigation; the runner (the detail selection, `inactive`, point reads); the C ABI (`navigate`'s source) and the native module surface (`ExactTab.controller`); the agent; `apps/duo-lab` and `smoke duo`; docs; what every other host does (D13). Contract: `navigationInspector` (D14)
 **Author:** Claude (Opus 5.5) for ide
 **Implementer:** to be assigned on acceptance

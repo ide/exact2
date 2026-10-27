@@ -319,3 +319,37 @@ fn a_closed_dialog_holds_nothing_until_its_host_opens_it() {
     r.top_layer(&[]);
     assert!(super::holders(&r).is_empty(), "closed again");
 }
+
+/// A split's detail under the list that overlays it is shown but not live:
+/// its controls are inactive and the list over it is live (LLP 1127 D8),
+/// while what reads only whether a route shows still sees it.
+#[test]
+fn a_detail_under_the_list_over_it_is_shown_but_not_live() {
+    use exact_kernel::{BlockAxis, BlockShown, HostBlock};
+    let mut r = boot_source(STACK);
+    press(&mut r, "open");
+    let (back, open) = (view(&r, "back"), view(&r, "open"));
+    let detail = r.kernel().node(back).unwrap().parent.unwrap();
+    let list = r.kernel().node(open).unwrap().parent.unwrap();
+    let pane = HostBlock {
+        width: BlockAxis::Is(500.0),
+        height: BlockAxis::Is(400.0),
+    };
+    for route in [list, detail] {
+        r.kernel_mut().set_host_block(route, Some(pane)).unwrap();
+    }
+    r.kernel_mut()
+        .set_host_block_shown(list, BlockShown::Beside);
+    assert!(!r.inactive(back) && !r.inactive(open), "side by side");
+    r.kernel_mut()
+        .set_host_block_shown(detail, BlockShown::Under);
+    assert!(r.inactive(back), "the detail under the list");
+    assert!(!r.inactive(open), "the list over it");
+    assert!(
+        !crate::head::hidden_route(r.kernel(), back),
+        "shown all the same"
+    );
+    r.kernel_mut()
+        .set_host_block_shown(detail, BlockShown::InStack);
+    assert!(!r.inactive(back), "beside it again");
+}

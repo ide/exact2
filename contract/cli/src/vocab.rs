@@ -486,6 +486,9 @@ fn one_text(name: &str, shown: &mut Shown) -> bool {
         if name == "-exact-safe-area" {
             println!("  on a route's root (a `navigationKey`), the edges whose clearance the route turns off: `auto` (the default) keeps the platform's, `none` turns off all four, or a space-separated list of `top`, `right`, `bottom` and `left`. On iOS and tvOS the content reaches behind the bars, the home indicator, a side strip or the overscan on those edges, and the route's primary scrollers lose UIKit's inset there; the bars, authored padding, the keyboard's inset and a refreshing control's room stay. `var(--exact-safe-area-inset-<edge>)` reads the inset to pad by. Not inherited; refused on the session root and on descendants; a literal that is none of these is refused and a computed one is `auto`, journaled once. Other hosts keep their presentation (LLP 1123 D4)");
         }
+        if name == "navigationInspector" {
+            println!("  on a sheet route (`navigationPresentation=\"modal\"`): the sheet is an inspector, details beside the content they describe (SwiftUI's `inspector(isPresented:)`). Where iOS shows the stack as an expanded split (an iPad, the iPhone Duo open), the route is the split's inspector column at the trailing edge, beside the detail, which stays live; UIKit decides its width and whether the list stays beside it. A compact width and every other host keep the sheet. It opens with a push and closes with a Back, as the sheet does. iOS 26 and later (LLP 1127 D14)");
+        }
         if name == "navigationDetent" {
             println!("  {DETENT}");
         }

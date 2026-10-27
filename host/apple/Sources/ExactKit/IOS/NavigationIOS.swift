@@ -157,11 +157,24 @@ final class RouteController: UIViewController, UIScrollViewDelegate {
     func paintBackdrop() {
         guard isViewLoaded else { return }
         let modal = node.props["navigationPresentation"] == "modal"
-        let key = modal
+        // In a split's inspector UIKit's column shows behind the route (LLP
+        // 1127); in its sidebar, through the column's glass, the system
+        // background, as SwiftUI's sidebar paints it.
+        let column = host?.onColumnGround(view) == true, sidebar = column && host?.showsAsSidebar(view) == true
+        let key = column ? [sidebar ? [1] : [0]] : modal
             ? [ownBackdrop(dark: false), ownBackdrop(dark: true)]
             : [backdrop(dark: false), backdrop(dark: true)]
         guard view.backgroundColor == nil || key != backdropKey else { return }
         backdropKey = key
+        if column {
+            // tvOS has no split (`wantsSplit`) and no system backgrounds.
+            #if os(tvOS)
+            view.backgroundColor = .clear
+            #else
+            view.backgroundColor = sidebar ? .systemBackground : .clear
+            #endif
+            return
+        }
         #if os(tvOS)
         // tvOS has no system backgrounds; white stands in, as the viewport's.
         let system = UIColor.white
@@ -321,12 +334,17 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
         }
     }
     var primaryRoutes: [RouteController] { primaryStacks.flatMap(\.stackRoutes).compactMap { $0 as? RouteController } }
+    /// A list beside its detail: the primary stack as UIKit's split (SplitIOS.swift).
+    var split: SplitIOS?
     private(set) var presentedNavigations: [UINavigationController] = []
     /// The theme's title ink each bar was last given (`titleInk`), held no
     /// longer than its bar.
     let titleInks = NSMapTable<UINavigationBar, UIColor>.weakToStrongObjects()
     var modalNavigation: UINavigationController? { presentedNavigations.last }
-    private var navigation: UINavigationController? { modalNavigation ?? primaryNavigation }
+    private var navigation: UINavigationController? { modalNavigation ?? split?.front ?? primaryNavigation }
+    /// Whether a stack's pushes and pops are the router's: the one in front,
+    /// and with a split, either column's.
+    private func follows(_ nav: UINavigationController) -> Bool { nav === navigation || (modalNavigation == nil && split?.holds(nav) == true) }
     /// The route on top of the stack in front: the one the person sees.
     var activeRoute: RouteController? { (navigation?.topViewController ?? primaryHeld?.route) as? RouteController }
     private(set) var syncing = false
@@ -576,6 +594,7 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
             installTabs(p, tabs, first: first, in: parent)
             return
         }
+        if wantsSplit(first.first) { return installSplit(p, first: first, in: parent) }
         // The stack holds its first routes before its view enters the window,
         // as the tabs' stacks do (`installTabs`): UIKit shows a root's large
         // title collapsed when the stack was laid out in the window before it
@@ -686,9 +705,14 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
         // hides is not presented, nor is any above it: its sheet is out of
         // the document's tree, which no longer hides it (LLP 1123 D2)
         let segments = NavigationRules.segments(presentations: p.routes[...p.selected].map { $0.props["navigationPresentation"] })
-        let parts = Array(segments.enumerated().prefix { $0.offset == 0 || !logicallyHidden(wanted[$0.element.lowerBound].node) }.map(\.element))
-        reshape(p)
+        var parts = Array(segments.enumerated().prefix { $0.offset == 0 || !logicallyHidden(wanted[$0.element.lowerBound].node) }.map(\.element))
+        // A sheet that is an inspector shows in an expanded split's column instead (LLP 1127).
+        let inspecting = inspectorRoute(parts, wanted)
+        if inspecting != nil { parts = Array(parts.prefix(1)) }
+        let rebuilt = reshape(p)
         installPrimary(p, first: Array(wanted[parts[0]]))
+        // A list the split held is a list again, or the other way (its sidebar look).
+        if rebuilt { presenter.groupedLists?.sync(changed: nil) }
         // The other tabs' stacks, the selected tab and its items (LLP 1075.003 §3.7).
         if p.tabs != nil { syncTabs(p) }
         // Initial content draws before a presentation covers it.
@@ -730,6 +754,12 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
         // dismissal, so its editor can accept the batch's focus handoff.
         let owners: [UINavigationController?] = (primaryHeld != nil ? [nil] : [primaryNavigation].compactMap { $0 }) + presentedNavigations
         for index in 0...common where index < owners.count {
+            if index == 0, let split, primaryHeld == nil {
+                let animated = owners.count == 1 && mounted.count == boundaries.count && !ExactEnv.agentFreezes && !unanimated && split.controller.view.window != nil
+                syncSplit(split, Array(wanted[parts[0]]), animated: animated)
+                split.controller.view.layoutIfNeeded()
+                continue
+            }
             guard let nav = owners[index] else { continue }
             let stack = Array(wanted[parts[index]])
             prepareRoutes(stack, in: nav)
@@ -759,6 +789,14 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
             pendingSync = true
             presenter.modals.closeTop()
             return
+        }
+        if let split {
+            let nav = inspecting.map { split.inspector ?? makeNavigation(first: $0.node) }
+            if let nav, let inspecting { prepareRoutes([inspecting], in: nav) }
+            let was = split.inspecting
+            split.inspect(inspecting, in: nav)
+            if let nav { recordOwned(nav) }
+            for route in [was, inspecting].compactMap({ $0 }) where was !== inspecting { repaintGrounds(route) }
         }
         if boundaries.count > mounted.count, let background = modalNavigation ?? primaryOwner, let owner {
             let part = parts[mounted.count + 1], route = wanted[part.lowerBound].node
@@ -868,7 +906,7 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
     var owner: UIViewController? { presenter.modals.owner ?? primaryOwner?.parent }
     /// The controller Exact installed under the root: the tab container, or
     /// the one stack.
-    var primaryOwner: UIViewController? { tabOwner ?? primaryNavigation }
+    var primaryOwner: UIViewController? { tabOwner ?? split?.controller ?? primaryNavigation }
 
     func willMount() { mounting = true }
 
@@ -980,12 +1018,13 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
     func observation() -> [String: Any] {
         // Scope Back to its container: Duo places the control outside the navigation bar
         let nativeBack: String? = {
-            guard let nav = navigation, nav.viewIfLoaded?.window != nil, !nav.isNavigationBarHidden,
-                  nav.viewControllers.count > 1, canInvokeBack else { return nil }
-            let owner: UIViewController? = nav === primaryNavigation ? primaryOwner : nav
+            guard let bar = backBar, bar.nav.viewIfLoaded?.window != nil, !bar.nav.isNavigationBarHidden,
+                  bar.depth > 1, canInvokeBack else { return nil }
+            let owner: UIViewController? = split == nil && bar.nav === primaryNavigation ? primaryOwner : bar.nav
             return owner?.view.accessibilityIdentifier
         }()
-        let stack = (navigation?.viewControllers ?? primaryHeld?.stackRoutes ?? []).compactMap { ($0 as? RouteController)?.key }
+        let routes: [UIViewController]? = modalNavigation == nil ? split?.shown : nil
+        let stack = (routes ?? navigation?.viewControllers ?? primaryHeld?.stackRoutes ?? []).compactMap { ($0 as? RouteController)?.key }
         let transition: [String: Any] = ["interactive": navigation?.transitionCoordinator?.isInteractive ?? false,
                                          "phase": changing || pendingSync || presenter.modals.inTransition ? "in-progress" : lastTransition]
         let root = container ?? presenter.root.subviews.first as? NodeView
@@ -1010,12 +1049,20 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
     /// Whether the platform's Back goes from the selected route (LLP 1115 D5).
     var canInvokeBack: Bool { back != nil }
 
+    /// The controller whose bar holds Back for the stack in front, and how
+    /// many routes that bar goes back through: in a split, the list's while
+    /// collapsed, else the detail's over its own routes.
+    private var backBar: (nav: UINavigationController, depth: Int)? {
+        guard modalNavigation == nil, let split else { return navigation.map { ($0, $0.viewControllers.count) } }
+        return split.controller.isCollapsed ? (split.list, split.shown.count) : (split.detail, split.shown.count - 1)
+    }
+
     /// The agent's `back` from a pushed route (LLP 1116.006 D4): UIKit's
     /// Back button, ending where its pop ends (`goBack`), as tvOS's Menu
     /// does. nil when the stack in front has nothing beneath its top (a
     /// sheet's own root is the sheet's); "" when it went, else why not.
     func agentBack() -> String? {
-        guard (navigation?.viewControllers.count ?? 0) > 1 else { return nil }
+        guard (backBar?.depth ?? 0) > 1 else { return nil }
         guard back != nil else { return backRefusal }
         goBack()
         return ""
@@ -1023,7 +1070,7 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
 
     /// The platform's Back, completed: the authored control pressed, else
     /// the root's `navigate` with the location beneath (LLP 1115 D5).
-    private func goBack() {
+    func goBack() {
         switch back {
         case .press(let id)?: presenter.press(id)
         case .navigate(let location)?:
@@ -1062,6 +1109,10 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
     func isInactiveRoute(containing view: UIView) -> Bool {
         guard let selected = selectedKey,
               let key = routeKey(containing: view) else { return false }
+        // A split's list shows beside its detail, live (LLP 1127 D8), as does the detail beside its
+        // inspector; the detail under the list that overlays it shows, not live.
+        if let split, split.beside.contains(where: { $0.key == key }) { return false }
+        if let split, split.under.contains(where: { $0.key == key }) { return true }
         return key != selected
     }
 
@@ -1076,7 +1127,7 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
                                            inAnyRoute: { control in routes.contains { control === $0 || control.isDescendant(of: $0) } })
     }
 
-    private var selectedRoute: NodeView? {
+    var selectedRoute: NodeView? {
         guard let key = selectedKey else { return nil }
         return routeIDs.compactMap({ presenter.views[$0] }).first(where: { $0.props["navigationKey"] == key })
     }
@@ -1147,14 +1198,19 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
         #if os(tvOS)
         let owner: UINavigationController? = nil
         #else
-        let owner = allNavigations.first { nav in
+        let owner = (allNavigations + (split.map { [$0.list, $0.detail] } ?? [])).first { nav in
             if nav.interactivePopGestureRecognizer === gestureRecognizer { return true }
             if #available(iOS 26.0, *) { return nav.interactiveContentPopGestureRecognizer === gestureRecognizer }
             return false
         }
         #endif
-        if let owner, owner !== navigation { return false }
-        let depth = navigation?.viewControllers.count ?? 0
+        if let owner, !follows(owner) { return false }
+        // Of a split's two stacks, one pops: the detail's while it has a route
+        // beneath its top, else (collapsed) the list's, which holds the
+        // detail's stack. The other, under the same finger, would take the swipe.
+        if let owner, let split, split.holds(owner),
+           owner !== (split.controller.isCollapsed && split.detail.viewControllers.count < 2 ? split.list : split.detail) { return false }
+        let depth = backBar?.depth ?? 0
         let goes = back != nil
         guard NavigationRules.popMayBegin(depth: depth, changing: changing, modalActive: presenter.modals.inTransition,
                                           hasBackControl: goes,
@@ -1188,7 +1244,7 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
     }
 
     func navigationController(_ navigationController: UINavigationController, willShow viewController: UIViewController, animated: Bool) {
-        guard navigationController === navigation else { return }
+        guard follows(navigationController) else { return }
         HostLog.note(presenter.session, {
             let by = navigationController.transitionCoordinator?.isInteractive == true ? "the edge swipe" : nativePopPending(on: navigationController) ? "UIKit's Back" : "the app"
             return "navigation: willShow \((viewController as? RouteController)?.key ?? "?") (\(animated ? "animated" : "unanimated"), by \(by))"
@@ -1231,7 +1287,7 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
     }
 
     func navigationController(_ navigationController: UINavigationController, didShow viewController: UIViewController, animated: Bool) {
-        guard navigationController === navigation, navigationController.topViewController === viewController else {
+        guard follows(navigationController), navigationController.topViewController === viewController else {
             recordPop(navigationController)
             return
         }
@@ -1251,7 +1307,7 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
     private func transitionEnded(_ navigationController: UINavigationController,
                                  swipe: Swipe?, cancelled: Bool) {
         // Finish the departed search field while its authored handlers still exist
-        if !cancelled, navigationController === navigation,
+        if !cancelled, follows(navigationController),
            let written = stacks[ObjectIdentifier(navigationController)]?.written {
             let departed = Set(written).subtracting(navigationController.viewControllers.map(ObjectIdentifier.init))
             for route in controllers.values where departed.contains(ObjectIdentifier(route)) {
@@ -1269,10 +1325,15 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
         // Identify the visit UIKit removed before recording its shorter stack
         let departed = stacks[ObjectIdentifier(navigationController)]?.written.last.flatMap { id in
             controllers.values.first { ObjectIdentifier($0) == id && !navigationController.viewControllers.contains($0) }
+        } ?? split.flatMap { split in
+            // Collapsed, UIKit's Back took the detail's controller off the list's while the router selects its top;
+            // an expansion takes it off too, for its column, and is no Back.
+            split.list === navigationController && split.controller.isCollapsed && !split.expanding && !split.nested
+                ? (split.detail.topViewController as? RouteController).flatMap { $0.key == selectedKey ? $0 : nil } : nil
         }
         let source = swipe.map { (node: $0.node, key: $0.key) } ?? departed.map { (node: $0.node, key: $0.key) }
         recordPop(navigationController)
-        guard navigationController === navigation, let viewController = navigationController.topViewController else { return }
+        guard follows(navigationController), let viewController = navigationController.topViewController else { return }
         nativeMoved = true
         stopRevealing()
         // The route a pop took away keeps its block until it leaves the stack (LLP 1123 D2)
@@ -1343,6 +1404,7 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
         for c in controllers.values { end(c) }
         retireTabs()
         if let primaryNavigation { retireStack(primaryNavigation) }
+        retireSplit()
         if !covers.isEmpty || !delivered.isEmpty || !deliveredOwners.isEmpty {
             let cleared = Set(covers.keys).union(delivered.keys).filter { presenter.views[$0] != nil }
             let owners = deliveredOwners.keys.filter { presenter.views[$0] != nil }
