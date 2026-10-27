@@ -491,46 +491,71 @@ extension NodeView {
     }
 
     /// The paragraph's ink in the lines layer inside its text's box
-    /// (`makeTextBox`, `placeTextRaster`), the box made now if it has none.
-    /// The box is inside a vibrancy view when the ink draws in a system colour
-    /// over a blur (`VibrancyIOS.swift`).
+    /// (`makeTextBox`, `placeTextRaster`), a box of the kind it wants
+    /// (`textBoxWantsView`): one made now, or one the ink moves into when the
+    /// kind changes, takes its place at once. The box is inside a vibrancy
+    /// view when the ink draws in a system colour over a blur
+    /// (`VibrancyIOS.swift`).
     func hostText(_ ink: CALayer) {
+        let asView = textBoxWantsView(ink), old = textBoxLayer
+        if old != nil, (specs?.rasterBoxView != nil) != asView { removeTextBox() }
         let made = textBoxLayer == nil
         if made { CATransaction.begin(); CATransaction.setDisableActions(true) }
         defer { if made { CATransaction.commit() } }
-        let box = textBoxLayer ?? makeTextBox()
+        let box = textBoxLayer ?? makeTextBox(asView: asView)
         if let lines = box.lines, ink.superlayer !== lines { lines.addSublayer(ink) }
+        if let cast = ink.textCast, let lines = box.lines, cast.superlayer !== lines { lines.insertSublayer(cast, below: ink) }
         textRasterLayer = ink
         if box.superlayer == nil, syncVibrancy() == nil { mountTextBox() }
         placeTextRaster()
+        // A box of the other kind takes over the one it replaces' motion: UIKit's animation in flight.
+        if let old, old !== box { for key in old.animationKeys() ?? [] { if let motion = old.animation(forKey: key) { box.add(motion, forKey: key) } } }
+    }
+
+    /// The text's box again, of the kind the ground under it now asks for
+    /// (`NavigationHost.repaintGrounds`), its pixels kept.
+    func rehostText() { if let ink = textRasterLayer { hostText(ink) } }
+
+    /// Whether the text's box is a view (`TextBoxView`): its ink is one
+    /// system colour (a tint, `TextRasterImage.tint`, of a `system_colors`
+    /// row) on the ground of a split's sidebar or inspector, where UIKit
+    /// draws such a view's content vibrantly when the view is its own. A
+    /// view costs about seven times what a layer does to make, so every
+    /// other box is a layer.
+    private func textBoxWantsView(_ ink: CALayer) -> Bool {
+        ink is TintInk && systemColor("text_color") != nil && presenter?.onColumnGround(self) == true
     }
 
     /// The box, placed and sized as the paragraph's content box, moving and
     /// resizing in UIKit's animation (`BoxPartLayer`), with its lines at its
-    /// origin, which never move in it. The lines are a layer of their own for
-    /// a fade (`TextBoxLayer`): a transition was seen to render the old state of
-    /// the layer it is on with that layer's geometry before the change, so a
-    /// fade on the box itself, moved in the same transaction, left the old
-    /// lines where it was; and a fade on the ink alone left out a one-colour
-    /// ink's coverage mask (both states showed the new one).
-    private func makeTextBox() -> TextBoxLayer {
-        let box = TextBoxLayer(), lines = InkLayer()
+    /// origin, which never move in it; a view's layer when `asView`. The lines
+    /// are a layer of their own for a fade (`TextBoxLayer`): a transition was
+    /// seen to render the old state of the layer it is on with that layer's
+    /// geometry before the change, so a fade on the box itself, moved in the
+    /// same transaction, left the old lines where it was; and a fade on the
+    /// ink alone left out a one-colour ink's coverage mask (both states showed
+    /// the new one).
+    private func makeTextBox(asView: Bool) -> TextBoxLayer {
+        let view = asView ? TextBoxView() : nil
+        let box = view?.box ?? TextBoxLayer(), lines = InkLayer()
         box.anchorPoint = .zero
         lines.anchorPoint = .zero
         box.addSublayer(lines)
         box.lines = lines
-        textBoxLayer = box
+        textBoxLayer = box; textMore.rasterBoxView = view
         return box
     }
 
     /// The text's box above the box's border (`applyBoxLayer`), under everything else.
     func mountTextBox() {
-        if let box = textBoxLayer { insertBoxSublayer(box) }
+        guard let box = textBoxLayer else { return }
+        if let view = specs?.rasterBoxView, view.superview !== self { insertSubview(view, at: 0) }
+        insertBoxSublayer(box)
     }
 
     func removeTextBox() {
-        textBoxLayer?.removeFromSuperlayer()
-        textBoxLayer = nil
+        if let view = specs?.rasterBoxView { view.removeFromSuperview() } else { textBoxLayer?.removeFromSuperlayer() }
+        textBoxLayer = nil; specs?.rasterBoxView = nil
     }
 
     /// Where the paragraph's box is drawn in this view: its content box
@@ -560,6 +585,19 @@ extension NodeView {
         let rows = specs.rasterBand ? CGRect(x: room.minX, y: covered.minY, width: room.width, height: covered.height) : room
         textRasterFrame = covered.isNull ? .zero : covered.union(rows)
     }
+}
+
+/// A paragraph's text box as a view (`NodeView.makeTextBox`). It takes no
+/// touches and is no accessibility element: the paragraph is.
+final class TextBoxView: UIView {
+    override class var layerClass: AnyClass { TextBoxLayer.self }
+    var box: TextBoxLayer { layer as! TextBoxLayer }
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        isUserInteractionEnabled = false
+        accessibilityElementsHidden = true
+    }
+    required init?(coder: NSCoder) { nil }
 }
 
 /// A paragraph's worker-rendered pixels (`showTextRaster`): its changes show
@@ -798,3 +836,4 @@ extension Presenter {
     }
 }
 #endif
+

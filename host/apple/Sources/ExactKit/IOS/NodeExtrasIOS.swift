@@ -28,8 +28,9 @@ final class TextSpecs {
     var raster: CGImage?
     var rasterLayer: CALayer?
     /// The layer at the paragraph's place (`NodeView.placeTextRaster`), whose
-    /// lines hold `rasterLayer` (`NodeView.makeTextBox`).
-    var rasterBox: TextBoxLayer?
+    /// lines hold `rasterLayer`, and the view it is the layer of when it is
+    /// one (`NodeView.makeTextBox`).
+    var rasterBox: TextBoxLayer?, rasterBoxView: TextBoxView?
     /// What the shown pixels answer for in the paragraph's box, whether they
     /// are a band of it, the ink they were painted from (`TextRasterImage.ink`)
     /// and the room they serve (`TextRasterKey.room`).
@@ -474,6 +475,25 @@ extension NodeView {
         #else
         return false
         #endif
+    }
+    /// Whether this is, in a split's sidebar or inspector, a grouped list or
+    /// its route on the ground the platform or the compiler gave it, its
+    /// author having said none, or a box on the page's ground
+    /// (`-exact-background` or `-exact-grouped-background`): there UIKit's
+    /// column paints that ground, as behind the rows (LLP 1127), where a
+    /// sheet is the system background.
+    var groundIsColumns: Bool {
+        #if os(iOS)
+        guard (kind == "list" || props["navigationKey"] != nil) && !wrote("background_color") || paintsPageGround else { return false }
+        return presenter?.onColumnGround(self) == true
+        #else
+        false
+        #endif
+    }
+    /// Whether this box's background is the page's ground, plain or grouped.
+    var paintsPageGround: Bool {
+        guard case .object(let o)? = style["background_color"], let role = o["sys"]?.string else { return false }
+        return role == "systemBackgroundColor" || role == "systemGroupedBackgroundColor"
     }
     /// LLP 1115.000 D2: whether the author wrote the row `key` on this node,
     /// as an attribute or a row of its class. The style says so row by row
