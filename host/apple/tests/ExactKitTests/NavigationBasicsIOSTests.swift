@@ -553,7 +553,7 @@ final class NavigationBasicsIOSTests: XCTestCase {
         let tap = Agent(session: session).tap(["id": Int(try node(session, "readout-text").id)])
         XCTAssertNil(tap["error"], "\(tap)")
         XCTAssertEqual(tap["native"] as? String, "bar-readout")
-        try tapNode(session, "compose-plain")
+        XCTAssertNil(Agent(session: session).tap(["id": Int(try node(session, "compose-plain").id)])["error"], "a hit in the bar is the bar's")
         until("the readout follows the count") { labels().first?.text == "1 sent" }
         XCTAssertTrue(plain.navigationItem.rightBarButtonItems?.first === item, "the same item")
         XCTAssertTrue(item.customView === view, "the same view")

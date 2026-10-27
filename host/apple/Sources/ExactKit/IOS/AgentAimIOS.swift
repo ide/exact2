@@ -150,15 +150,38 @@ extension Agent {
     /// `node`'s place (a sheet over it, the keyboard), or nil: the tap that
     /// activates either is refused as a covered node's is.
     func drawnCovered(_ node: NodeView) -> String? {
-        let target: UIView, region: CGRect
-        if let (control, segment) = presenter.segments.drawn(node) { (target, region) = (control, segment) }
-        else if case .success(let (bar, frame))? = barItem(node) { (target, region) = (bar, frame) }
+        let target: UIView, region: CGRect, inBar: Bool
+        if let (control, segment) = presenter.segments.drawn(node) { (target, region, inBar) = (control, segment, false) }
+        else if case .success(let (bar, frame))? = barItem(node) { (target, region, inBar) = (bar, frame, true) }
         else { return nil }
         guard let win = target.window else { return nil }
         let p = target.convert(CGPoint(x: region.midX, y: region.midY), to: nil)
         awaitAppOverlay(at: p, in: win)
         guard let hit = win.hitTest(p, with: nil) else { return "its middle is off the window" }
+        // In the bar, its own hit test routes a touch to the item. UIKit can
+        // also draw an item's control outside UINavigationBar (the iPhone Duo's
+        // vertical bar, in a floating bar container that a split or tab bar
+        // controller holding the bar may own), and the control has no name of
+        // the item's: it is the shown control that fills the item's box,
+        // within a point on each edge, in the views of the controllers that
+        // hold the bar, outside every node. Two such controls that are not
+        // nested name no control, and the item is covered.
+        if inBar, !hit.isDescendant(of: target), let nav = sequence(first: target as UIResponder, next: { $0.next }).lazy.compactMap({ $0 as? UINavigationController }).first {
+            var holder: UIViewController = nav
+            while let up = holder.parent, up is UISplitViewController || up is UITabBarController { holder = up }
+            let found = Self.controls(in: holder.view, filling: target.convert(region, to: nil))
+            if let outer = found.first, found.allSatisfy({ $0.isDescendant(of: outer) }) { return obscured(outer, at: p, hit: hit) }
+        }
         return obscured(target, at: p, hit: hit)
+    }
+
+    /// The shown controls in `view`'s subtree, outside every node, whose box
+    /// is `box` (in the window) within a point on each edge, outermost first.
+    private static func controls(in view: UIView, filling box: CGRect) -> [UIControl] {
+        guard !(view is NodeView), !view.isHidden, view.alpha > 0.01 else { return [] }
+        let b = view.convert(view.bounds, to: nil)
+        let fills = [b.minX - box.minX, b.minY - box.minY, b.maxX - box.maxX, b.maxY - box.maxY].allSatisfy { abs($0) < 1 }
+        return (fills ? [view as? UIControl].compactMap { $0 } : []) + view.subviews.flatMap { controls(in: $0, filling: box) }
     }
 
     /// Whether `view` is in what `session` shows: its viewport, its view, or

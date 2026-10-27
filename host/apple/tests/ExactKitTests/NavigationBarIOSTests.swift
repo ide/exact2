@@ -942,6 +942,51 @@ final class NavigationBarIOSTests: XCTestCase {
         XCTAssertEqual(backs(session), 0, "nothing named, nothing pressed")
     }
 
+    /// The agent finds a bar item's own control where UIKit draws it, and
+    /// another control at the item's box covers it: in the window over the
+    /// bar, or beside the bar in the navigation controller's chrome.
+    func testAControlOverABarItemCoversItWhereTheItemsOwnDoesNot() throws {
+        let session = try fixture("bar-test-ids", module: false)
+        let nav = try XCTUnwrap(session.presenter.navigation.primaryNavigation)
+        nav.view.layoutIfNeeded()
+        let agent = Agent(session: session), compose = try node(session, "compose-home")
+        XCTAssertNil(agent.drawnCovered(compose), "the item's own control")
+        let item = try XCTUnwrap(nav.topViewController?.navigationItem.rightBarButtonItems?.first { $0.accessibilityIdentifier == "compose-home" })
+        let window = try XCTUnwrap(nav.view.window), chrome = try XCTUnwrap(nav.navigationBar.superview)
+        for over in [window, chrome] {
+            let cover = UIButton(frame: try XCTUnwrap(item.frame(in: over)))
+            over.addSubview(cover)
+            defer { cover.removeFromSuperview() }
+            XCTAssertNotNil(agent.drawnCovered(compose), "a control at the item's box that is not its own, in \(type(of: over))")
+        }
+    }
+
+    /// The iPhone Duo's case on any iPhone: with the bar's own control hidden,
+    /// a control drawn at the item's box beside the bar is the item's, and a
+    /// second one there names none.
+    func testAControlBesideTheBarAtTheItemsBoxIsTheItems() throws {
+        let session = try fixture("bar-test-ids", module: false)
+        let nav = try XCTUnwrap(session.presenter.navigation.primaryNavigation)
+        nav.view.layoutIfNeeded()
+        let agent = Agent(session: session), compose = try node(session, "compose-home")
+        let item = try XCTUnwrap(nav.topViewController?.navigationItem.rightBarButtonItems?.first { $0.accessibilityIdentifier == "compose-home" })
+        let box = try XCTUnwrap(item.frame(in: nav.view)), inWindow = nav.view.convert(box, to: nil)
+        func controls(_ v: UIView) -> [UIControl] { [v as? UIControl].compactMap { $0 } + v.subviews.flatMap(controls) }
+        let own = controls(nav.navigationBar).filter { c in
+            let b = c.convert(c.bounds, to: nil)
+            return abs(b.minX - inWindow.minX) < 1 && abs(b.minY - inWindow.minY) < 1 && abs(b.width - inWindow.width) < 1 && abs(b.height - inWindow.height) < 1
+        }
+        XCTAssertFalse(own.isEmpty, "the bar draws the item's control")
+        own.forEach { $0.isHidden = true }
+        defer { own.forEach { $0.isHidden = false } }
+        let drawn = UIButton(frame: box), other = UIButton(frame: box)
+        nav.view.addSubview(drawn)
+        defer { drawn.removeFromSuperview(); other.removeFromSuperview() }
+        XCTAssertNil(agent.drawnCovered(compose), "the item's control, drawn beside the bar")
+        nav.view.addSubview(other)
+        XCTAssertNotNil(agent.drawnCovered(compose), "two controls at the item's box that are not nested")
+    }
+
     /// LLP 1116 D2: a bar item's, the search field's, a title segment's and
     /// a tab bar item's `accessibilityIdentifier` is its authored `testId`,
     /// so XCUITest and Maestro address them as any other node.
