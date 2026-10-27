@@ -769,6 +769,13 @@ package final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, U
         #endif
     }
 
+    /// UIKit's inset changed as a bar or the safe area did: a route that turns
+    /// an edge off corrects it now, before the next batch's cover report.
+    package func scrollViewDidChangeAdjustedContentInset(_ scrollView: UIScrollView) {
+        guard scrollView === self.scrollView else { return }
+        presenter?.navigation.adjustedInsetChanged(self)
+    }
+
     /// A scroll under a canvas repaints it (LLP 1014 D4 c).
     package func scrollViewDidScroll(_ scrollView: UIScrollView) {
         guard scrollView === self.scrollView else { return }
