@@ -21,8 +21,10 @@ use crate::id::{NodeFlags, NodeKey, ViewId};
 use crate::layout::LayoutMirror;
 use crate::selector::SelectorIndex;
 use crate::wire::Op;
+mod children;
 mod defaults;
 mod text_style;
+use children::sync_children;
 
 /// The deepest a node may sit below the top of its tree (a root is 0). Layout
 /// recurses once per level: a release build uses up to ~3.5 KiB of stack a
@@ -1138,33 +1140,6 @@ fn leaving_with(arena: &NodeArena, slot: u32) -> Option<&exact_motion::Animation
         Some(_) => return None,
     };
     Some(&arena.style(own).rare.exit_animation).filter(|a| !a.0.is_empty())
-}
-
-/// Push the arena's child list for `parent` into the layout engine. A `Text`
-/// parent's children are inline runs: they are measured with it, not laid out.
-fn sync_children(arena: &NodeArena, layout: &mut dyn LayoutMirror, parent: u32) {
-    let Some(node) = arena.taffy(parent) else {
-        return;
-    };
-    let _entries = layout.sync_children(arena, parent, node);
-    // An alert's defaults read its children: whether it is grouped or a part
-    // box empty (its own and, for its actions' margin, its siblings'), and a
-    // row's place among them (arena/alert.rs)
-    if arena.neutral_alert(parent) || arena.alert_group(parent) {
-        layout.restyle(arena, parent, node);
-        let siblings = match arena.parent(parent) {
-            Some(alert) if arena.alert_group(parent) => arena.children(alert),
-            _ => &[],
-        };
-        for child in arena.children(parent).iter().chain(siblings) {
-            if let Some(node) = arena.taffy(*child) {
-                layout.restyle(arena, *child, node);
-                layout.mark_dirty(node);
-            }
-        }
-    }
-    #[cfg(test)]
-    count(_entries, 0);
 }
 
 /// A run of `DestroyView`s detaches lazily. Each op records its parent once

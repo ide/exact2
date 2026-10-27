@@ -47,7 +47,7 @@ pub(crate) fn lifted(arena: &NodeArena, slot: u32) -> bool {
 pub(crate) fn apply(arena: &NodeArena, slot: u32, s: &mut taffy::style::Style) {
     if layout_position(arena, slot) == PositionType::Absolute {
         s.position = taffy::style::Position::Absolute;
-        let (style, env) = (arena.effective_style(slot), arena.env());
+        let (style, env) = (arena.effective_style(slot), arena.env_for(slot));
         s.inset = taffy::geometry::Rect {
             top: style.top.to_lpa(env),
             right: style.right.to_lpa(env),

@@ -349,8 +349,8 @@ impl<D: DataSource> Host<D> {
         if let Some(size) = self.face_box_size(id) {
             props.insert("faceBoxSize", size);
         }
-        let env = self.runner.kernel().env();
-        let (style, _skipped) = style::style_json_for(&node, &env);
+        let env = self.runner.kernel().arena().env_for(node.key.index);
+        let (style, _skipped) = style::style_json_for(&node, env);
         let handlers: Vec<&str> = events.iter().copied().filter_map(handler_name).collect();
         if handlers.contains(&"heightrelease") {
             self.track_height_handle(id);
@@ -409,8 +409,8 @@ impl<D: DataSource> Host<D> {
         if let Some(size) = self.face_box_size(id) {
             props.insert("faceBoxSize", size);
         }
-        let env = self.runner.kernel().env();
-        let (style, _skipped) = style::style_json_for(&node, &env);
+        let env = self.runner.kernel().arena().env_for(node.key.index);
+        let (style, _skipped) = style::style_json_for(&node, env);
         if self.mirror.get(&id).and_then(|m| m.props.get("spellcheck")) != props.get("spellcheck") {
             self.queue_layout_subtree(id);
         }
