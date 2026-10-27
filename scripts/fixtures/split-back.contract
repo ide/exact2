@@ -31,5 +31,5 @@ component App
             button press=openNotes(e.params.id) testId=`notes-${e.params.id}`
               text "Notes"
         if e.name == "notes"
-          column navigationKey=`${e.id}` position="absolute" inset=0
+          column navigationKey=`${e.id}` position="absolute" inset=0 testId="notes-page"
             text "Notes on the book"

@@ -135,9 +135,12 @@ final class SplitIOSTests: XCTestCase {
         }
     }
     /// LLP 1127 §1, item 2: UIKit takes the detail's controller out of the
-    /// list's as the split expands (an iPhone Duo unfolded on a book), and
-    /// nests it again as it collapses. Neither is a Back: the book stays
-    /// shown and live, and Back from it, collapsed, returns to the list.
+    /// list's as the split expands (an iPhone Duo unfolded on a book's
+    /// notes), and nests it again as it collapses. Neither is a Back: the
+    /// book and its notes stay shown, and Back from them, collapsed, returns
+    /// to the book and then the list. The size class changes on the window,
+    /// as an unfolding display changes it: the split still reads compact
+    /// when UIKit moves the detail out.
     func testExpandingAndCollapsingKeepTheDetail() throws {
         let session = try boot()
         let navigation = session.presenter.navigation, agent = Agent(session: session)
@@ -147,19 +150,68 @@ final class SplitIOSTests: XCTestCase {
         XCTAssertTrue(split.controller.isCollapsed, "an iPhone's width collapses it")
         XCTAssertNil(agent.tap(["id": Int(try node(session, "row-a").id)])["error"])
         until("the book is pushed") { split.shown.count == 2 && !agent.nativeInFlight() }
+        XCTAssertNil(agent.tap(["id": Int(try node(session, "notes-a").id)])["error"])
+        until("its notes are pushed") { split.shown.count == 3 && !agent.nativeInFlight() }
         let window = try XCTUnwrap(self.window)
         window.frame = CGRect(x: 0, y: 0, width: 1100, height: 800)
         window.rootViewController?.view.subviews.first?.frame = window.bounds
-        split.controller.traitOverrides.horizontalSizeClass = .regular
+        window.traitOverrides.horizontalSizeClass = .regular
         until("expanded") { !split.controller.isCollapsed && !agent.nativeInFlight() }
-        until("the book shows beside the list") { split.shown.count == 2 && has("notes-a") }
-        XCTAssertFalse(try inactive(session, "notes-a"), "expanded, the book is live")
-        split.controller.traitOverrides.horizontalSizeClass = .compact
+        until("the book and its notes show beside the list") { split.shown.count == 3 && has("notes-a") }
+        XCTAssertTrue(try inactive(session, "notes-a"), "expanded, the notes cover the book")
+        window.traitOverrides.horizontalSizeClass = .compact
         until("collapsed") { split.controller.isCollapsed && !agent.nativeInFlight() }
-        until("the book is on top") { split.nested && split.shown.count == 2 && has("notes-a") }
+        until("the notes are on top") { split.nested && split.shown.count == 3 && has("notes-a") }
+        XCTAssertNil(agent.back()["error"])
+        until("back at the book") { split.shown.count == 2 && !agent.nativeInFlight() }
         XCTAssertFalse(try inactive(session, "notes-a"), "collapsed, the book is live")
         XCTAssertNil(agent.back()["error"])
         until("back at the list") { split.shown.count == 1 && !has("notes-a") && !agent.nativeInFlight() }
+    }
+
+    /// An iPhone Duo unfolding: UIKit asks which display mode to expand to
+    /// while the split still reads compact, then takes the detail's
+    /// controller out of the list's, its `didShow` arriving before the split
+    /// says it expanded. That is no Back: the router keeps the book and its
+    /// notes. The order is UIKit's on the Duo simulator, replayed here.
+    func testTheDetailLeavingTheListAsUIKitExpandsIsNoBack() throws {
+        let session = try boot()
+        let navigation = session.presenter.navigation, agent = Agent(session: session)
+        let has = { (testId: String) in session.presenter.views.values.contains { $0.props["testId"] == testId } }
+        until("a split") { navigation.split != nil && !agent.nativeInFlight() }
+        let split = try XCTUnwrap(navigation.split)
+        XCTAssertNil(agent.tap(["id": Int(try node(session, "row-a").id)])["error"])
+        until("the book is pushed") { split.shown.count == 2 && !agent.nativeInFlight() }
+        XCTAssertNil(agent.tap(["id": Int(try node(session, "notes-a").id)])["error"])
+        until("its notes are pushed") { split.shown.count == 3 && has("notes-page") && !agent.nativeInFlight() }
+        XCTAssertTrue(split.nested)
+        XCTAssertEqual(split.controller.traitCollection.horizontalSizeClass, .compact)
+        _ = split.splitViewController(split.controller, displayModeForExpandingToProposedDisplayMode: .oneBesideSecondary)
+        split.list.setViewControllers(Array(split.list.viewControllers.prefix(1)), animated: false)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+        XCTAssertTrue(has("notes-page") && has("notes-a"), "the router keeps the book and its notes")
+    }
+
+    /// As UIKit collapses the split it puts the detail's controller in the
+    /// list's while the split still reads expanded. A sync meanwhile leaves
+    /// the list's stack to UIKit: reset to its root, UIKit pushed the detail
+    /// twice and asserted (an iPhone Duo folded on a book). The order is
+    /// UIKit's on the Duo simulator, replayed here.
+    func testASyncWhileUIKitCollapsesLeavesTheListsStackToIt() throws {
+        let session = try boot(size: CGSize(width: 1100, height: 800))
+        let navigation = session.presenter.navigation, agent = Agent(session: session)
+        until("a split") { navigation.split != nil && !agent.nativeInFlight() }
+        let split = try XCTUnwrap(navigation.split)
+        split.controller.traitOverrides.horizontalSizeClass = .regular
+        until("expanded") { !split.controller.isCollapsed && !agent.nativeInFlight() }
+        XCTAssertNil(agent.tap(["id": Int(try node(session, "row-a").id)])["error"])
+        until("the book is in the detail") { split.shown.count == 2 && !agent.nativeInFlight() }
+        let stack = split.shown
+        _ = split.splitViewController(split.controller, topColumnForCollapsingToProposedTopColumn: .primary)
+        let moving = UIViewController()
+        split.list.setViewControllers(split.list.viewControllers + [moving], animated: false)
+        split.show(stack, animated: false)
+        XCTAssertTrue(split.list.viewControllers.last === moving, "the list's stack is UIKit's while it collapses")
     }
 }
 #endif
