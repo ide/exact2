@@ -1,4 +1,4 @@
-use super::{compatibility_with_trust, Manifest};
+use super::{compatibility_with_trust, stored_module, Manifest};
 use std::path::{Path, PathBuf};
 
 #[test]
@@ -925,4 +925,28 @@ fn a_stored_module_client_pins_its_module_into_the_id() {
         super::compatibility_digest(&a.inputs),
         "the id digests the inputs it reports"
     );
+}
+
+#[test]
+fn a_store_pins_the_compiled_module_and_its_hash_is_required_without_one_too() {
+    let dir = app("stored-module");
+    let mut manifest = Manifest::read(&dir).unwrap();
+    let meta = serde_json::json!({"module": {"sha256": "abc"}});
+    // A native platform has an update store by default; the web has none
+    assert_eq!(stored_module(&meta, &manifest, "ios"), Ok(Some("abc")));
+    assert_eq!(stored_module(&meta, &manifest, "web"), Ok(None));
+    for bad in [
+        serde_json::json!({}),
+        serde_json::json!({"module": {"sha256": 7}}),
+    ] {
+        for platform in ["ios", "web"] {
+            assert_eq!(
+                stored_module(&bad, &manifest, platform),
+                Err("missing module hash".to_string())
+            );
+        }
+    }
+    manifest.json["deploy"] = serde_json::json!({"store": {"ios": "0"}});
+    assert_eq!(stored_module(&meta, &manifest, "ios"), Ok(None));
+    std::fs::remove_dir_all(dir).unwrap();
 }

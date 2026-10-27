@@ -1040,13 +1040,11 @@ package final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, U
         ])
     }
 
-    // A hidden or host-replaced box retains its scroll position while native layout
-    // collapses its extent. Restore it and resume scroll events when the box returns.
+    // A hidden or host-replaced box retains its scroll position while native layout collapses its extent. Restore it and resume scroll events when the box returns.
     var hasScrollLayoutBox: Bool {
         var ancestor: UIView? = self
         while let current = ancestor {
-            if let node = current as? NodeView,
-               node.style["display"]?.string == "none" || node.presenter?.navigation.covers[node.id] == .whole { return false }
+            if let node = current as? NodeView, node.style["display"]?.string == "none" || node.presenter?.navigation.covers[node.id] == .whole { return false }
             ancestor = current.superview
         }
         return true
