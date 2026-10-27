@@ -1,5 +1,6 @@
 import { asyncContext, bundleOptions, developmentLocalNetwork, lowered, packageConfig, webImplementations } from '../../js/bake/src/typescript.mjs';
-import { hatchWords, launchModules, moduleDirectory, webAppManifest } from '../../scripts/app.mjs';
+import { hatchWords, moduleDirectory, webAppManifest } from '../../scripts/app.mjs';
+import { launchModules } from '../../scripts/launch-modules.mjs';
 // The web build's JS target: `bun host/web-js/build.mjs <app> [--plan <baked app.plan>] [--out <dir>]`.
 //
 // 1. `exact-web-js js` compiles the plan (the app's Contract, or a baked

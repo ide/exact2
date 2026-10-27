@@ -412,3 +412,25 @@ final class ArrangementHost {
     }
 }
 #endif
+
+#if os(iOS) || os(tvOS)
+import UIKit
+
+/// The route's arranged peers that UIKit insets under its bars, by edge.
+extension NavigationHost {
+    func arrangementScrollers(in route: RouteController, top: Bool) -> [NodeView] {
+        #if os(iOS)
+        if #available(iOS 27.1, *), !Self.transparentBar(route.node) { return presenter.arrangements.scrollers(in: route.node, top: top) }
+        #endif
+        return []
+    }
+
+    func arrangementInsets(_ scroll: UIScrollView, in route: RouteController) -> Bool {
+        arrangementPeers(in: route).contains { $0.scrollView === scroll }
+    }
+
+    func arrangementPeers(in route: RouteController) -> [NodeView] {
+        arrangementScrollers(in: route, top: true) + arrangementScrollers(in: route, top: false)
+    }
+}
+#endif

@@ -73,10 +73,9 @@ const run = (cmd, args, opts = {}) => {
   return r;
 };
 const read = (cmd, args, opts = {}) => spawnSync(cmd, args, { cwd: root, encoding: 'utf8', ...opts });
-// Every Apple toolchain invocation goes through here — cargo, swift build, and
-// the webarm swiftc alike: a mixed deployment target or an incompatible sysroot
-// is a warning the toolchain prints and then links anyway, so the build fails on
-// it here instead. @ref LLP 1008
+// Every Apple toolchain invocation goes through here — cargo, swift build, and the webarm swiftc
+// alike: a mixed deployment target or an incompatible sysroot is a warning the toolchain prints and
+// then links anyway, so the build fails on it here instead. @ref LLP 1008
 const runApple = (cmd, args, opts = {}) => {
   const { cargoMessages = false, ...spawnOptions } = opts;
   const r = spawnSync(cmd, args, { cwd: root, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024, ...spawnOptions });
@@ -792,11 +791,9 @@ async function main(args, lockHeld = false) {
     // `-platform_version` wins over the driver's.
     if (designCompatible(app, 'macos')) swiftArgs.push('-Xlinker', '-platform_version', '-Xlinker', 'macos', '-Xlinker', targets.macos, '-Xlinker', COMPATIBLE_SDK.macos);
   }
-  // SwiftPM compiles Package.swift itself for macOS before applying the iOS
-  // product triple; an iPhone SDKROOT in its environment breaks that host
-  // manifest compile. The target SDK stays in the explicit Swift arguments.
-  const launchPartsDir = writeLaunchParts(pkg, app);
-  const swiftEnv = (libDir, composition, link = 'all') => ({
+  // SwiftPM compiles Package.swift itself for macOS before applying the iOS product triple; an iPhone
+  // SDKROOT in its environment breaks that host manifest compile. The target SDK stays in the explicit Swift arguments.
+  const launchPartsDir = writeLaunchParts(pkg, app), swiftEnv = (libDir, composition, link = 'all') => ({
     ...process.env, ...(launchPartsDir ? { EXACT_LAUNCH_PARTS: launchPartsDir.slice(pkg.length + 1) } : {}),
     EXACT_WIDGET_GALLERY: gallery ? '1' : '0',
     EXACT_APPLE_LINK: link, EXACT_UPDATE_TRUST: cargoEnv.EXACT_UPDATE_TRUST ?? 'development', // LLP 1047.001 D4 (link.mjs); a production build compiles no inspect mode (Package.swift)

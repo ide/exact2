@@ -1284,21 +1284,6 @@ extension NavigationHost {
         controllers.values.contains { $0.collapseScroll === node || $0.edgeScroll === node || arrangementPeers(in: $0).contains { $0 === node } }
     }
 
-    func arrangementScrollers(in route: RouteController, top: Bool) -> [NodeView] {
-        #if os(iOS)
-        if #available(iOS 27.1, *), !Self.transparentBar(route.node) { return presenter.arrangements.scrollers(in: route.node, top: top) }
-        #endif
-        return []
-    }
-
-    private func arrangementInsets(_ scroll: UIScrollView, in route: RouteController) -> Bool {
-        arrangementPeers(in: route).contains { $0.scrollView === scroll }
-    }
-
-    private func arrangementPeers(in route: RouteController) -> [NodeView] {
-        arrangementScrollers(in: route, top: true) + arrangementScrollers(in: route, top: false)
-    }
-
     /// UIKit's zero-width fixed space splits shared glass without authored metrics.
     func barItems(_ items: [HeaderShape.Item], _ route: RouteController) -> [UIBarButtonItem] {
         var result: [UIBarButtonItem] = []
