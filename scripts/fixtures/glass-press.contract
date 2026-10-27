@@ -1,0 +1,14 @@
+// A glass a press adds to a group in the window materializes on iOS 26
+// (GlassGroupIOSTests). Compiled by build.mjs --test.
+component GlassPress
+  state shown = false
+  action show
+    shown = true
+  view
+    main testId="glass-press" width="100%" height="100%"
+      row testId="group" glassGroup=12 gap=8 margin-top=100 margin-left=20
+        box width=56 height=56 border-radius=28 backgroundMaterial="glass" testId="first"
+        if shown
+          box width=56 height=56 border-radius=28 backgroundMaterial="glass" testId="added"
+      button press=show testId="add"
+        text "Add"
