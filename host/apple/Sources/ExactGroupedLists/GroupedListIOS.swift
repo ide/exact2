@@ -1021,7 +1021,7 @@ final class GroupedListView: NSObject, UICollectionViewDelegate {
             guard let cell = cell(id) as? UICollectionViewListCell else { return nil }
             func control(_ v: UIView) -> UIControl? {
                 if v === cell.contentView { return nil }
-                return (v as? UIControl) ?? v.subviews.lazy.compactMap(control).first
+                return (v as? UIControl) ?? v.subviews.reduce(nil) { $0 ?? control($1) }
             }
             return control(cell)
         default: return nil
