@@ -1762,6 +1762,12 @@
       "name": "paragraphDirs",
       "kind": "str",
       "_comment": "@ref LLP 1045 D11: a Markdown editor's base direction, one word per source line: HTML's `dir` words (`ltr`, `rtl`, `auto`) separated by white space, the first word the first line's; a line past the last word takes the last. Read where the editor draws its lines (markup-editor.js, Apple's MarkupDirections). Not measured: a base direction changes no line's length."
+    },
+    {
+      "id": 294,
+      "name": "safeArea",
+      "kind": "str",
+      "_comment": "@ref LLP 1123 D4: -exact-safe-area on a route's authored root: auto (default), none, or the top/right/bottom/left edges whose local clearance is off. Not inherited. On iOS and tvOS the route's covers drop those edges and its primary scrollers cancel UIKit's automatic inset there."
     }
   ],
   "_enums": "Wire discriminant is the 0-based index. An unknown discriminant is a typed decode rejection, never a fallback.",
