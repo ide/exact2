@@ -354,6 +354,34 @@ extension Presenter {
     }
 }
 
+#if os(iOS)
+extension Presenter {
+    /// Where a drag begins to take the keys down: at the top of the bar the
+    /// field being edited rides on, as UIKit asks of an app with a bar above
+    /// its keys (`UIKeyboardLayoutGuide.keyboardDismissPadding`), so the
+    /// finger that reaches the bar carries it and the keys down together. The bar is the outermost box around
+    /// the field that rests on the keys and holds no scroller; a field with
+    /// none, or one in a scroller, leaves the keys' own edge.
+    func updateKeyboardDismissPadding() {
+        // Keys a drag carries below the screen report no top: the reach they
+        // began with stands until they settle
+        guard let view = session?.view, view.hasKeyboardGuide, let top = keyboardTop else { return }
+        var padding: CGFloat = 0
+        if keyboardPolicy == "resizes-content", let window = view.window,
+           let editor = editing, editor.window === window {
+            let scrolling = scrollers.compactMap { views[$0] }
+            var at: UIView? = editor
+            while let box = at, box !== view, !(box is UIScrollView), !scrolling.contains(where: { $0.isDescendant(of: box) }) {
+                let frame = box.convert(box.bounds, to: window)
+                if abs(frame.maxY - top) < 0.5 { padding = max(0, top - frame.minY) }
+                at = box.superview
+            }
+        }
+        if view.keyboardLayoutGuide.keyboardDismissPadding != padding { view.keyboardLayoutGuide.keyboardDismissPadding = padding }
+    }
+}
+#endif
+
 extension NavigationHost {
     /// The primary controller keeps its native bounds while route content avoids the keyboard.
     func ownerFrame(_ owner: UIViewController, in root: UIView) -> CGRect {

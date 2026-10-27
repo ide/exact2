@@ -40,6 +40,8 @@ public final class ExactView: UIView {
     private var lastDisplayScale: CGFloat = 0
     private var keyboardProbe: UIView?
     var hasKeyboardGuide: Bool { keyboardProbe != nil }
+    /// Whether the last `fit` let the keys end the view (`resizes-content`).
+    private var keysEndView = false
     /// What this view adds beside the viewport, for `layout agree` (LLP 1080.001 D3).
     var inspectionOwned: [UIView] { keyboardProbe.map { [$0] } ?? [] }
     private var editingObservers: [NSObjectProtocol] = []
@@ -167,6 +169,11 @@ public final class ExactView: UIView {
         ])
     }
     #endif
+
+    /// The software keyboard's motion as it shows and as it ends an
+    /// interactive dismissal: a critically damped spring of this response,
+    /// measured against its frames on the iOS 27 simulator (ω₀ 23.55 rad/s)
+    static let keyboardSpringResponse = 2 * Double.pi / 23.55
 
     /// The first root's `viewport-fit` prop (`"cover"` or nothing).
     public var viewportFit: String? { session.presenter.viewportFit }
@@ -362,10 +369,26 @@ public final class ExactView: UIView {
         var frame = whole ? bounds : bounds.inset(by: safe)
         var insets = cover ? safe : .zero
         let keyboard = fitKeyboard(in: frame)
-        if presenter.keyboardPolicy == "resizes-content", !presenter.navigation.wantsWholeView,
-           let top = keyboard.top, top < frame.maxY, presenter.menus.sheets.top == nil {
-            frame.size.height = max(0, top - frame.minY)
-            insets.bottom = 0
+        // The keys end the page, which then has no bottom safe area: the home
+        // indicator is under them, as it is for content on UIKit's keyboard
+        // layout guide. Under a native container they end the editing route's
+        // block instead (`OwnersIOS.block`), whose own values say so (LLP 1123
+        // D9), and the document's `env()` stays the window's for the other
+        // routes. This layout runs in the keyboard's animation
+        // (`Presenter.refitKeyboard`). Keys a drag carries below the screen
+        // still end it until the field lets them go, so a composer stays
+        // raised under the finger.
+        let keysEnded = keysEndView
+        keysEndView = false
+        if presenter.keyboardPolicy == "resizes-content", presenter.menus.sheets.top == nil {
+            let page = !presenter.navigation.wantsWholeView
+            if let top = keyboard.top, top < frame.maxY {
+                if page { frame.size.height = max(0, top - frame.minY); insets.bottom = 0 }
+                keysEndView = true
+            } else if keyboard.top == nil, presenter.hasKeyboardEditor, presenter.interactiveKeyboardDrag {
+                if page { insets.bottom = 0 }
+                keysEndView = true
+            }
         }
         guard frame.width > 0, frame.height > 0 else { return }
         // A page with no container keeps its area (`frame`) and is drawn in a
@@ -504,7 +527,24 @@ public final class ExactView: UIView {
         if segments != lastFold, (segments.posture, segments.cols, segments.rows) == (lastFold.posture, lastFold.cols, lastFold.rows) {
             keyed = segments; lastFold = segments
         }
-        session.view(change, fold: keyed)
+        // At the end of an interactive dismissal UIKit lays the view out in
+        // an animation of its own before the keys' notification arrives
+        // (`Presenter.refitKeyboard`). What the keys move takes their spring
+        // instead of that animation's curve, as a layout on their guide does;
+        // under a native container that is the editing route's block and
+        // values (LLP 1123 D9), set in the same animation.
+        if keysEnded, !keysEndView, UIView.inheritedAnimationDuration > 0 {
+            UIView.animate(springDuration: Self.keyboardSpringResponse, bounce: 0, initialSpringVelocity: 0, delay: 0,
+                           options: [.overrideInheritedCurve, .overrideInheritedDuration, .beginFromCurrentState, .allowUserInteraction]) {
+                self.session.view(change, fold: keyed)
+                if presenter.navigation.wantsWholeView {
+                    presenter.owners.publish()
+                    presenter.navigation.reportCovers()
+                }
+            }
+        } else {
+            session.view(change, fold: keyed)
+        }
         if change.insets != nil || resized { session.natives.scopesChanged() }
         if resized {
             // The keys came or went: the tab bar stays under them, and the
@@ -522,6 +562,9 @@ public final class ExactView: UIView {
         if keyboard.changed || resized {
             presenter.menus.rehostPopovers()
             presenter.revealEditorAsTheKeysMove()
+            #if os(iOS)
+            presenter.updateKeyboardDismissPadding()
+            #endif
         }
         paintUnderKeys()
     }

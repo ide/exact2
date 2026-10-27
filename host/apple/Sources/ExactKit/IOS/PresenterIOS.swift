@@ -800,6 +800,9 @@ package final class Presenter {
                 textSelection.batchEnded()
                 #endif
                 if moved { session?.natives.refreshWorldGeometry() }
+                #if os(iOS)
+                if moved { updateKeyboardDismissPadding() }
+                #endif
                 flushPendingFocus(); elementScrolls.flush()
                 #if os(iOS)
                 session?.view?.syncKeyboardFocus()

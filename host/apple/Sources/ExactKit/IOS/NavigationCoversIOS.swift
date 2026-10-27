@@ -100,7 +100,10 @@ extension NavigationHost {
                 // The route's end with its page unscrolled: scrolling moves the route, not the bars.
                 // A route the keyboard shortens can end above the bars, with no bottom cover.
                 let end = c.node.convert(c.node.bounds, to: c.contentMount).maxY + (c.contentViewport?.frame.minY ?? 0)
-                let reached = end - (c.view.bounds.maxY - safe.bottom)
+                // Nor one the keys end: they cover the home indicator, so a
+                // route following them down past the safe area has none to clear
+                let keyed = keyEnds(c)
+                let reached = keyed ? 0 : end - (c.view.bounds.maxY - safe.bottom)
                 edges = Self.routeEdges(safe: safe, edges: whole,
                                         collapses: c.collapseScroll != nil || !c.ridingBars.isEmpty, reached: reached)
                 c.bottomClearance = edges?.bottom ?? 0
@@ -216,13 +219,23 @@ extension NavigationHost {
         let content = c.node.convert(c.node.bounds, to: view).inset(by: UIEdgeInsets(top: e.top, left: e.left, bottom: e.bottom, right: e.right))
         guard content.width > 0, content.height > 0 else { return nil }
         let safe = view.bounds.inset(by: view.safeAreaInsets)
-        let inset = [safe.minY - content.minY, content.maxX - safe.maxX, content.maxY - safe.maxY, safe.minX - content.minX].map { max(0, $0) }
+        // The keys end an editing route even while a drag carries them below
+        // the screen, until the field lets them go: its content stays above them
+        let bottom = keyEnds(c) ? 0 : content.maxY - safe.maxY
+        let inset = [safe.minY - content.minY, content.maxX - safe.maxX, bottom, safe.minX - content.minX].map { max(0, $0) }
         let vp = presenter.viewport, document = presenter.fold
         let parts = (document.cols * document.rows > 1 ? document.rects : []).map {
             vp.convert($0.offsetBy(dx: vp.pageOrigin.x, dy: vp.pageOrigin.y), to: view).intersection(content)
         }
         let fold = ViewportFold.grid(parts.filter { !$0.isNull && $0.width > 0 && $0.height > 0 }.map { $0.offsetBy(dx: -content.minX, dy: -content.minY) })
         return OwnerValues(safe: inset, regions: LayoutRegionsIOS.insets(of: view, viewport: content), fold: fold, size: content.size)
+    }
+
+    /// Whether the keys end `c`'s block (`resizes-content` with its editor
+    /// focused): they cover the home indicator, so it has no bottom safe area.
+    func keyEnds(_ c: RouteController) -> Bool {
+        presenter.keyboardPolicy == "resizes-content" && presenter.edits(in: c.view)
+            && (presenter.keyboardTop != nil || presenter.interactiveKeyboardDrag)
     }
 
     // MARK: The development check (LLP 1075.003 §3.5)
