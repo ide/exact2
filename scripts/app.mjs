@@ -27,6 +27,7 @@ import { macResourceMappings, macResourceInventory, appleAssetCatalogInventory, 
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { basename, delimiter, dirname, isAbsolute, relative, resolve, sep, toNamespacedPath } from 'node:path';
+import { launchModules } from './launch-modules.mjs';
 import { homedir, tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { gzipSync } from 'node:zlib';
@@ -481,21 +482,6 @@ export function assertOwnTarget(target, workspace) {
 export function platformCrateKind(dir, kind) {
   return ['ios', 'macos', 'tvos'].includes(kind)
     ? (existsSync(resolve(dir, kind, 'Cargo.toml')) ? kind : 'apple') : kind;
-}
-
-/** The modules app.json `launch` names, in order, each from the app's
- * `modules/<name>/` else exact2's: `apple/launch/*.swift` links into the
- * executable, `apple/service/*.swift` builds its service dylib, and `web` is
- * its `web/service.js` or null. */
-export function launchModules(dir, manifest) {
-  return (manifest.launch ?? []).map((name) => {
-    const own = resolve(dir, 'modules', name), shared = resolve(ROOT, 'modules', name);
-    const base = existsSync(own) ? own : shared;
-    if (!existsSync(base)) throw new Error(`app.json launch: no module ${name} (neither ${own} nor ${shared})`);
-    const swift = (sub) => { const d = resolve(base, sub); return existsSync(d) ? readdirSync(d).filter(f => f.endsWith('.swift')).sort().map(f => resolve(d, f)) : []; };
-    const web = resolve(base, 'web/service.js');
-    return { name, launch: swift('apple/launch'), service: swift('apple/service'), web: existsSync(web) ? web : null };
-  });
 }
 
 /** Platform-specific source folder; shared Apple modules remain valid for existing apps. */
@@ -1252,6 +1238,9 @@ export function bakeSelection(graph, part) {
 export function wholeProgram(kind, profile) {
   return ['apple','ios','macos','tvos','android'].includes(kind) && profile === 'release' ? ['--config','profile.release.lto="fat"'] : [];
 }
+
+/** `env` for a bake whose build scripts compile Objective-C++ for the Mac while SDKROOT names the phone's SDK, which cc-rs inherits: those units take the Mac SDK, as host/apple/build.mjs gives them. */
+export const macHostUnits = (env, ios) => ios ? { ...env, HOST_CXXFLAGS: `${process.env.HOST_CXXFLAGS ?? ''} -isysroot ${spawnSync('xcrun', ['--sdk', 'macosx', '--show-sdk-path'], { encoding: 'utf8' }).stdout.trim()}` } : env;
 
 /** One actual target build, including the optional GPU artifact. Consumers
  * classify its completed receipt; compatibility is never recomputed in JS.
