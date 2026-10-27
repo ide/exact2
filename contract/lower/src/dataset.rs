@@ -113,6 +113,7 @@ const HOST_WORDS: [&str; 123] = [
     "refreshing",
     "reorderfor",
     "reordergroup",
+    "safearea",
     "scroll",
     "scrolldocument",
     "scrolllocked",
