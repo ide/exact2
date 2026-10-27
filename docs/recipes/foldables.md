@@ -1,12 +1,12 @@
 # Recipe: foldables
 
-A foldable (the iPhone Duo) splits its inner display at the hinge when partially folded.
-`exactViewport()` says how, in the web's names: `devicePosture` is `"folded"`, and
-`horizontalViewportSegments` (side by side, a book) or `verticalViewportSegments` (one
-above the other, a laptop) is 2. `env(viewport-segment-<left|top|width|height> <x> <y>)`
-places a box on segment `x, y` (LLP 1078). Every iPhone Duo runs iOS 27.1 or later, so
-native code that runs only on the Duo needs no path for earlier systems: behind
-`#available(iOS 27.1, *)` it uses iOS 27.1's APIs, such as `UIHinge`.
+A partially folded iPhone Duo splits its inner display at the hinge.
+`exactViewport()` reports `devicePosture="folded"` with
+`horizontalViewportSegments=2` (side by side, a book) or
+`verticalViewportSegments=2` (stacked, a laptop).
+`env(viewport-segment-<left|top|width|height> <x> <y>)` places a box in segment `x, y` (LLP 1078).
+Every iPhone Duo runs iOS 27.1 or later, so native code that runs only on the Duo needs no path
+for earlier systems: behind `#available(iOS 27.1, *)` it uses iOS 27.1's APIs, such as `UIHinge`.
 
 ```contract
 shape Viewport
@@ -38,8 +38,9 @@ On a fold ([HIG](https://developer.apple.com/design/human-interface-guidelines/d
 - **A pane that does not scroll moves** and keeps its width: centred (full width on a
   narrow screen); the trailing segment on a book fold, where the talk moves an alert.
 - **A list and its detail** is a split view (`pattern list-detail`; iOS pushes until
-  LLP 1127). **Two peer panes** are an arrangement: place them by segment (duo-lab's
-  Fold tab).
+  LLP 1127). **Peer panes** are an arrangement: an iOS 27.1
+  [hatch](../contract-for-agents.md#arranged-panes), or by segment elsewhere
+  (duo-lab's Fold tab).
 - A route that is itself the pane on the trailing segment keeps its title with
   `navigationBar=(book ? "none" : "auto")`: on a book fold its first-child `header`
   paints in it as written, with its own Back if pushed; otherwise it is UIKit's bar.
