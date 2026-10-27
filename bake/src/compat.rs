@@ -233,6 +233,21 @@ pub fn compatibility_id_sources_with_entries(
     )
 }
 
+/// The module a platform's stored bundles are pinned to: the compiled module's
+/// sha256 from a bake's metadata (`module.sha256`) when the platform has a
+/// store, since stores deliver plans and assets and cannot replace the compiled
+/// module; none without one. Metadata without the hash is refused either way.
+pub fn stored_module<'a>(
+    meta: &'a serde_json::Value,
+    manifest: &Manifest,
+    platform: &str,
+) -> Result<Option<&'a str>, String> {
+    let module = meta["module"]["sha256"]
+        .as_str()
+        .ok_or("missing module hash")?;
+    Ok((manifest.store(platform) != "0").then_some(module))
+}
+
 /// As [`compatibility_id_sources_with_entries`], for a module client (its
 /// logic compiled into the binary, LLP 1027) whose binary has an update store.
 /// Bundles carry plan and assets, never code, so a bundle is safe only on a
