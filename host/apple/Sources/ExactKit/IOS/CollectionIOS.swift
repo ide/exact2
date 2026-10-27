@@ -71,7 +71,8 @@ extension CollectionHost {
         let start = max(0, node.padding("top")) + band.top, end = max(0, node.padding("bottom")) + band.bottom
         return CollectionFacts(offset: Double(max(-start, at.y + insets.top - band.top - content.minY)),
             portMain: Double(portHeight), portCross: Double(portWidth), cross: Double(width),
-            measurements: [], focus: nil, interaction: nil, paddingStart: Double(start), paddingEnd: Double(end))
+            measurements: [], focus: nil, interaction: nil, paddingStart: Double(start), paddingEnd: Double(end),
+            obscuredStart: Double(band.top), obscuredEnd: Double(band.bottom))
     }
     /// A smooth correction's native targets move with a page band's inset
     /// (LLP 1130 D3), as the offset itself does (`NodeView.setPageBand`), and

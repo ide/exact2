@@ -110,6 +110,9 @@ pub(crate) struct SizeIndex {
     /// And before its first row: the range starts this far before the
     /// rows' start, so a short list's end can be there.
     leading: f64,
+    /// How much of the port's start bars drawn over it cover: an anchor is
+    /// a row the reader sees below them.
+    obscured: f64,
     #[cfg(test)]
     rebuilds: usize,
     #[cfg(test)]
@@ -139,6 +142,7 @@ impl SizeIndex {
             next_generation: 0,
             trailing: 0.0,
             leading: 0.0,
+            obscured: 0.0,
             #[cfg(test)]
             rebuilds: 0,
             #[cfg(test)]
@@ -392,6 +396,14 @@ impl SizeIndex {
         self.leading
     }
 
+    pub(crate) fn set_obscured(&mut self, obscured: f64) {
+        self.obscured = if obscured.is_finite() {
+            obscured.max(0.0)
+        } else {
+            0.0
+        };
+    }
+
     /// First row whose bottom is strictly after `offset`; zero-height prefixes
     /// are skipped in O(log N). At/past total height there is no containing row.
     pub(crate) fn row_at(&self, offset: f64) -> Result<Option<usize>, IndexError> {
@@ -622,20 +634,29 @@ impl SizeIndex {
         let max = self.max_offset(viewport);
         let at = raw.min(max).max(-self.leading);
         let follows_end = follow_end && viewport > 0.0 && max - at < END_SLACK;
-        // An end it follows wins: a short transcript is at both edges.
-        let mut row = if offset <= 0.0 && !follows_end {
+        // Anchor nothing only at `scrollTop` 0, the top of the padding
+        // before the first row (CSS Scroll Anchoring §2.2, LLP 1010 §6.9).
+        // Otherwise anchor the first row the reader sees, in the port below
+        // the bars over its start, as CSS anchors in the optimal viewing
+        // region: a row under a bar that changes height moves nothing in
+        // sight. `within` is the port's start from the row's, negative when
+        // the row is below it. An end it follows wins: a short transcript is
+        // at both edges.
+        let mut row = if at <= -self.leading && !follows_end {
             None
         } else {
-            self.tree.find(offset, false)
+            self.tree
+                .find((at + self.obscured).max(0.0), false)
+                .or_else(|| self.tree.find(offset, false))
         };
-        let mut within = row.map_or(0.0, |i| (offset - self.tree.prefix(i)).max(0.0));
+        let mut within = row.map_or(0.0, |i| at - self.tree.prefix(i));
         if !follows_end && row.is_some_and(|i| self.key(i) == excluded) {
             let next = self.tree.prefix(row.unwrap() + 1);
             row = self
                 .tree
                 .find(next, false)
-                .filter(|&i| self.tree.prefix(i) < offset + viewport);
-            within = row.map_or(offset, |i| offset - self.tree.prefix(i));
+                .filter(|&i| self.tree.prefix(i) < at + viewport);
+            within = row.map_or(at, |i| at - self.tree.prefix(i));
         }
         Ok(Anchor {
             order: Rc::clone(&self.order),

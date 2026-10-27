@@ -151,17 +151,19 @@ impl Collection {
         (number(a) - start, number(b) - end)
     }
     /// The list's `scroll-padding` at each end along its axis, as its
-    /// committed style resolves it now: CSSOM View reads it when
-    /// `scrollIntoView` runs.
+    /// committed style resolves it now (CSSOM View reads it when
+    /// `scrollIntoView` runs), and past it what bars drawn over the port
+    /// cover there: a row aligned at an end shows clear of them.
     fn scroll_padding(&self, u: &Update<'_>) -> [f64; 2] {
+        let [start, end] = self.obscured;
         let Some(resolve) = u.scroll_padding else {
-            return [0.0; 2];
+            return [start, end];
         };
         let [top, right, bottom, left] =
             resolve(self.view).map(|n| if n.is_finite() { n.max(0.0) } else { 0.0 });
         match self.axis {
-            ListAxis::Vertical => [top, bottom],
-            ListAxis::Horizontal => [left, right],
+            ListAxis::Vertical => [top + start, bottom + end],
+            ListAxis::Horizontal => [left + start, right + end],
         }
     }
     /// The offset that aligns row `position` by `align`, from the index,

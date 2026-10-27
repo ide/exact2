@@ -69,6 +69,10 @@ pub struct CollectionFill {
     /// optional row, retires within `limit` as a slice does, and runs edge
     /// actions. The immediate report after a build-only one.
     pub no_build: bool,
+    /// How far bars drawn over the port cover its start and its end along
+    /// the list's axis (LLP 1131 D2's bands): `scrollIntoView` aligns rows
+    /// clear of them, as it does of `scroll-padding`. Version 5 of the wire.
+    pub obscured: [f64; 2],
     /// With a velocity, the window keeps half a viewport behind its
     /// travel instead of a whole one. For a host that leads its window far
     /// and waits for its passes (the rows behind then pile up to two and a
@@ -187,14 +191,20 @@ impl CollectionFeedback {
     /// focus and interaction (zero means none), f64 velocity, u32 limit
     /// (`u32::MAX` means none), u32 flags (bit 0: an ancestor list is
     /// moving; bit 1: build only; bit 2: retire only; bit 3: lean), u32 count, then count × (u32 wrapper, u64 epoch, f64 size).
+    /// Version 5 adds f64 obscured start/end after the flags; a report with
+    /// none is written as version 4.
     /// Main and cross are the list's axes. No keys, strings, or JSON parsing.
     pub fn encode_with(&self, fill: CollectionFill) -> Result<Vec<u8>, FeedbackError> {
         self.validate()?;
         if !fill.velocity.is_finite() || fill.limit == Some(u32::MAX) {
             return Err(FeedbackError);
         }
+        if fill.obscured.iter().any(|n| !n.is_finite() || *n < 0.0) {
+            return Err(FeedbackError);
+        }
+        let obscured = fill.obscured != [0.0; 2];
         let mut w = Writer::default();
-        w.u32(4);
+        w.u32(if obscured { 5 } else { 4 });
         w.u32(self.view);
         w.u64(self.revision);
         w.u64(self.scroll_sequence);
@@ -216,6 +226,10 @@ impl CollectionFeedback {
                 | u32::from(fill.no_build) << 2
                 | u32::from(fill.lean) << 3,
         );
+        if obscured {
+            w.f64(fill.obscured[0]);
+            w.f64(fill.obscured[1]);
+        }
         w.u32(
             self.measurements
                 .len()
@@ -238,7 +252,8 @@ impl CollectionFeedback {
     pub fn decode_with_fill(bytes: &[u8]) -> Result<(Self, CollectionFill), FeedbackError> {
         let mut r = Reader::new(bytes);
         let out = (|| -> Result<(Self, CollectionFill), exact_plan::PlanError> {
-            if r.u32()? != 4 {
+            let version = r.u32()?;
+            if version != 4 && version != 5 {
                 return Err(exact_plan::PlanError::BadCount(0));
             }
             let view = r.u32()?;
@@ -257,6 +272,14 @@ impl CollectionFeedback {
             if flags > 15 || flags & 6 == 6 {
                 return Err(exact_plan::PlanError::BadCount(flags));
             }
+            let obscured = if version == 5 {
+                [r.f64()?, r.f64()?]
+            } else {
+                [0.0; 2]
+            };
+            if obscured.iter().any(|n| !n.is_finite() || *n < 0.0) {
+                return Err(exact_plan::PlanError::BadCount(0));
+            }
             let fill = CollectionFill {
                 velocity,
                 limit: (limit != u32::MAX).then_some(limit),
@@ -264,6 +287,7 @@ impl CollectionFeedback {
                 create_only: flags & 2 != 0,
                 no_build: flags & 4 != 0,
                 lean: flags & 8 != 0,
+                obscured,
             };
             let count = r.u32()? as usize;
             if count.checked_mul(20) != Some(r.remaining()) {

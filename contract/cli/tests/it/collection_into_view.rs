@@ -3,7 +3,8 @@
 use exact_kernel::Kernel;
 use exact_plan::Value;
 use exact_runner::{
-    CollectionFeedback, CollectionSnapshot, DataError, DataSource, RowMeasurement, Runner,
+    CollectionFeedback, CollectionFill, CollectionSnapshot, DataError, DataSource, RowMeasurement,
+    Runner,
 };
 
 const APP: &str = r#"shape Post
@@ -152,9 +153,20 @@ fn list(r: &Runner<Data>, horizontal: bool) -> Option<CollectionSnapshot> {
 fn host(
     r: &mut Runner<Data>,
     view: u32,
+    offset: f64,
+    port: f64,
+    size: impl Fn(usize) -> f64,
+) -> f64 {
+    host_filled(r, view, offset, port, size, CollectionFill::default())
+}
+/// [`host`] with each report's fill: what bars cover of the port.
+fn host_filled(
+    r: &mut Runner<Data>,
+    view: u32,
     mut offset: f64,
     port: f64,
     size: impl Fn(usize) -> f64,
+    fill: CollectionFill,
 ) -> f64 {
     let mut sequence = 0;
     for _ in 0..8 {
@@ -168,27 +180,30 @@ fn host(
         }
         sequence = sequence.max(c.scroll_sequence);
         let changed = r
-            .collection_feedback(CollectionFeedback {
-                view,
-                revision: c.revision,
-                scroll_sequence: sequence,
-                offset,
-                port_main: port,
-                port_cross: 400.0,
-                cross: 400.0,
-                padding: [0.0; 2],
-                measurements: c
-                    .rows
-                    .iter()
-                    .map(|row| RowMeasurement {
-                        view: row.view,
-                        epoch: row.epoch,
-                        size: size(row.index),
-                    })
-                    .collect(),
-                focus_view: None,
-                interaction_view: None,
-            })
+            .collection_feedback_filled(
+                CollectionFeedback {
+                    view,
+                    revision: c.revision,
+                    scroll_sequence: sequence,
+                    offset,
+                    port_main: port,
+                    port_cross: 400.0,
+                    cross: 400.0,
+                    padding: [0.0; 2],
+                    measurements: c
+                        .rows
+                        .iter()
+                        .map(|row| RowMeasurement {
+                            view: row.view,
+                            epoch: row.epoch,
+                            size: size(row.index),
+                        })
+                        .collect(),
+                    focus_view: None,
+                    interaction_view: None,
+                },
+                fill,
+            )
             .unwrap();
         let after = r
             .collections()
@@ -261,6 +276,28 @@ fn the_last_row_clamps_to_the_end_and_a_missing_key_is_refused() {
     r.act("go", vec![Value::Number(5000.0)]).unwrap();
     let s = state(&r);
     assert!(s.contains("refused: no row keyed n:5000"), "{s}");
+}
+
+#[test]
+fn a_row_aligned_at_the_end_shows_clear_of_the_bar_over_it() {
+    // A composer over the port's foot (LLP 1131's band): the row ends at its top
+    let mut r = boot();
+    let feed = list(&r, false).unwrap().view;
+    let covered = CollectionFill {
+        obscured: [0.0, 80.0],
+        ..CollectionFill::default()
+    };
+    host_filled(&mut r, feed, 0.0, 600.0, feed_size, covered);
+    r.act("goEnd", vec![Value::Number(503.0)]).unwrap();
+    let offset = host_filled(&mut r, feed, 0.0, 600.0, feed_size, covered);
+    let c = list(&r, false).unwrap();
+    let row = c.rows.iter().find(|row| row.index == 503).unwrap();
+    assert!(
+        (row.start + row.size - offset - 520.0).abs() <= 0.5,
+        "its end at the bar's top: start {} size {} offset {offset}",
+        row.start,
+        row.size
+    );
 }
 
 #[test]

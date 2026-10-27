@@ -595,3 +595,44 @@ fn aggregate_preview_matches_binary_sums_and_both_padding_orders() {
         }
     }
 }
+
+#[test]
+fn what_bars_cover_crosses_the_wire_as_version_5_and_none_as_version_4() {
+    let facts = CollectionFeedback {
+        view: 7,
+        revision: 1,
+        scroll_sequence: 2,
+        offset: 10.0,
+        port_main: 600.0,
+        port_cross: 400.0,
+        cross: 400.0,
+        padding: [0.0; 2],
+        measurements: vec![],
+        focus_view: None,
+        interaction_view: None,
+    };
+    let covered = CollectionFill {
+        obscured: [136.0, 57.0],
+        ..CollectionFill::default()
+    };
+    let bytes = facts.encode_with(covered).unwrap();
+    assert_eq!(bytes[..4], 5u32.to_le_bytes());
+    assert_eq!(
+        CollectionFeedback::decode_with_fill(&bytes).unwrap(),
+        (facts.clone(), covered)
+    );
+    let plain = facts.encode().unwrap();
+    assert_eq!(plain[..4], 4u32.to_le_bytes());
+    assert_eq!(
+        CollectionFeedback::decode_with_fill(&plain)
+            .unwrap()
+            .1
+            .obscured,
+        [0.0; 2]
+    );
+    let negative = CollectionFill {
+        obscured: [-1.0, 0.0],
+        ..CollectionFill::default()
+    };
+    assert!(facts.encode_with(negative).is_err());
+}

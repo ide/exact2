@@ -176,6 +176,9 @@ pub(crate) struct Collection {
     next_epoch: u64,
     zero_heights: std::collections::BTreeSet<String>,
     geometry: Option<CollectionFeedback>,
+    /// What bars cover of the port's start and end, as last reported
+    /// ([`CollectionFill::obscured`]).
+    obscured: [f64; 2],
     correction: Option<AnchorCorrection>,
     follow_end: bool,
     /// The list's `scroll-behavior: smooth`: its end-follow and its smooth
@@ -473,6 +476,7 @@ impl Collection {
             next_epoch: 0,
             zero_heights: Default::default(),
             geometry: None,
+            obscured: [0.0; 2],
             correction: None,
             follow_end,
             smooth,
@@ -1305,6 +1309,8 @@ impl Collection {
         // that the report is accepted. A new padding (a rotation's safe area)
         // is no travel: the anchor is taken on the old range and restored on
         // the new, so a followed end follows it.
+        self.obscured = fill.obscured;
+        self.index.set_obscured(fill.obscured[0]);
         let padding = feedback.padding;
         let padding_changed = padding != self.padding();
         if !padding_changed {

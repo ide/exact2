@@ -23,8 +23,13 @@ package struct CollectionFacts: Equatable {
     /// the room `offset` counts past (LLP 1010 §6.9).
     var paddingStart = 0.0
     var paddingEnd = 0.0
+    /// What bars drawn over the port cover of its start and end (LLP 1131's
+    /// bands), which `scrollIntoView` aligns rows clear of.
+    var obscuredStart = 0.0
+    var obscuredEnd = 0.0
 
-    /// Wire version 4: `velocity` (points/s, positive toward the end),
+    /// Wire version 4, or 5 with the obscured lengths after the flags:
+    /// `velocity` (points/s, positive toward the end),
     /// `limit`, the rows past what it owes this report may build (nil: any),
     /// and whether an enclosing list is moving (LLP 1070 F2).
     /// `createOnly` and `noBuild` split a moving list's report around the
@@ -35,11 +40,13 @@ package struct CollectionFacts: Equatable {
             var le = value.littleEndian
             withUnsafeBytes(of: &le) { bytes.append(contentsOf: $0) }
         }
-        integer(UInt32(4)); integer(view); integer(revision); integer(sequence)
+        let obscured = obscuredStart != 0 || obscuredEnd != 0
+        integer(UInt32(obscured ? 5 : 4)); integer(view); integer(revision); integer(sequence)
         for value in [offset, portMain, portCross, cross, paddingStart, paddingEnd] { integer(value.bitPattern) }
         integer(focus ?? 0); integer(interaction ?? 0)
         integer((velocity.isFinite ? velocity : 0).bitPattern); integer(limit.map { Swift.min($0, UInt32.max - 1) } ?? UInt32.max)
         integer(UInt32(ancestorMoving ? 1 : 0) | UInt32(createOnly ? 2 : 0) | UInt32(noBuild ? 4 : 0))
+        if obscured { for value in [obscuredStart, obscuredEnd] { integer(max(0, value).bitPattern) } }
         integer(UInt32(measurements.count))
         for row in measurements { integer(row.view); integer(row.epoch); integer(row.size.bitPattern) }
         return bytes

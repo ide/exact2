@@ -1068,6 +1068,24 @@ fn a_short_list_ends_in_the_padding_before_its_rows() {
 }
 
 #[test]
+fn reorder_anchor_past_an_excluded_row_keeps_a_port_in_the_leading_padding() {
+    for (moved, expected) in [(false, -60.), (true, -80.)] {
+        let mut i = index(&[20.; 30]);
+        i.set_leading(150.);
+        let a = i
+            .capture_anchor_excluding(-60., 100., false, Some("k0"))
+            .unwrap();
+        let mut order = keys(30);
+        if moved {
+            let source = order.remove(0);
+            order.insert(1, source);
+        }
+        i.replace_keys(order).unwrap();
+        assert_eq!(i.restore_anchor(&a, 100.).unwrap(), expected);
+    }
+}
+
+#[test]
 fn reorder_anchor_keeps_signed_offsets_and_clamps_when_no_other_row_is_visible() {
     for (offset, port, expected) in [
         (200., 100., 180.),
@@ -1168,6 +1186,43 @@ fn relative_anchor_corrections_include_boundaries_but_exclude_clamping() {
     }
     let end = i.capture_anchor(500., 100., true).unwrap();
     assert!(!i.kept_row(&end, 100.));
-    let start = i.capture_anchor(0., 100., false).unwrap();
+    let start = i.capture_anchor(-20., 100., false).unwrap();
     assert!(!i.kept_row(&start, 100.));
+}
+
+/// Only `scrollTop` 0 is the start (LLP 1010 §6.9): a port partway into the
+/// padding before the first row anchors that row, so rows inserted before
+/// it leave it where the reader sees it.
+#[test]
+fn a_port_in_the_padding_before_the_rows_keeps_the_first_row_in_place() {
+    let mut i = index(&[20.; 30]);
+    i.set_leading(150.);
+    let anchor = i.capture_anchor(-60., 100., false).unwrap();
+    assert!(i.kept_row(&anchor, 100.));
+    // Ten rows at the 10 pt estimate put the first row 100 pt down
+    let earlier = (0..10)
+        .map(|n| (Rc::from(format!("h{n}").as_str()), None))
+        .collect();
+    i.splice_keys(0, 0, earlier).unwrap();
+    near(i.restore_anchor(&anchor, 100.).unwrap(), 40.);
+    let start = i.capture_anchor(-150., 100., false).unwrap();
+    let corrected = i.restore_anchor(&start, 100.).unwrap();
+    assert!(super::super::start::at_target(&start, corrected, -150., 0.));
+}
+
+/// A row under a bar drawn over the port's start is not in sight: the anchor
+/// is the first row below the bar, so the hidden one growing moves the port
+/// with it.
+#[test]
+fn a_row_under_a_bar_over_the_port_moves_nothing_in_sight() {
+    let mut i = index(&[20.; 30]);
+    i.set_obscured(136.);
+    // The port starts at 100, in k5; the reader sees from 236, in k11
+    let anchor = i.capture_anchor(100., 300., false).unwrap();
+    let token = i.measurement_token("k6").unwrap();
+    assert!(i.set_measured_height("k6", token, 31.).unwrap());
+    near(i.restore_anchor(&anchor, 300.).unwrap(), 111.);
+    let token = i.measurement_token("k12").unwrap();
+    assert!(i.set_measured_height("k12", token, 40.).unwrap());
+    near(i.restore_anchor(&anchor, 300.).unwrap(), 111.);
 }
