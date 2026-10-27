@@ -42,6 +42,8 @@ extension Presenter {
         guard root.superview !== host else { return }
         host.addSubview(root)
         viewport.isScrollEnabled = !fixed
+        // Left empty, the viewport would still give VoiceOver its two scroll bars.
+        viewport.accessibilityElementsHidden = fixed
         placeDocumentMount()
         // A fixed document takes no keyboard range; a scrolling one does again.
         setKeyboardInset(keyboardInset)

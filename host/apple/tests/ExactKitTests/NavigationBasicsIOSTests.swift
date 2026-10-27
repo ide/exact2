@@ -150,6 +150,7 @@ final class NavigationBasicsIOSTests: XCTestCase {
         let hearsTouches = { (host: UIView) in host.gestureRecognizers?.contains { $0 is PopoverTouch } == true }
         XCTAssertTrue(p.documentFixed)
         XCTAssertTrue(hearsTouches(p.documentMount))
+        XCTAssertTrue(p.viewport.accessibilityElementsHidden, "the empty viewport is hidden from accessibility")
         let frame = p.viewport.frame
         // Every route leaves the root, which retires the container
         p.apply(wireBatch([["op": "children", "id": Int(app.id), "ids": []]]))
@@ -157,7 +158,7 @@ final class NavigationBasicsIOSTests: XCTestCase {
         XCTAssertNil(p.navigation.primaryOwner)
         XCTAssertEqual(p.viewport.frame, frame, "under cover the session's area is the same without the container")
         XCTAssertFalse(p.documentFixed, "the document leaves its mount with the container")
-        XCTAssertTrue(p.viewport.isScrollEnabled)
+        XCTAssertTrue(p.viewport.isScrollEnabled && !p.viewport.accessibilityElementsHidden)
         XCTAssertTrue(hearsTouches(p.viewport) && !hearsTouches(p.documentMount), "light dismissal hears the document where it is")
     }
 
