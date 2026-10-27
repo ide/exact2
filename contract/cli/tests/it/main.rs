@@ -14,6 +14,7 @@ mod aria;
 mod at;
 mod attestation_age_tracking;
 mod auth;
+mod background_extension;
 mod baked_release;
 mod blocks;
 mod borders;

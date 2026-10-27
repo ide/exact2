@@ -615,7 +615,7 @@ package final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, U
         raster = nil
         imageSource = nil
         clearSymbol()
-        image = nil
+        image = nil; removeBackgroundExtension()
         video?.invalidate(); video = nil
         destroyEmbedded()
         web = nil
@@ -675,7 +675,7 @@ package final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, U
 
     package override func didMoveToWindow() {
         super.didMoveToWindow()
-        if window == nil { pressEpoch &+= 1 }
+        if window == nil { pressEpoch &+= 1; removeBackgroundExtension() }
         // Focused by its autofocus and moved out of the window in the same
         // turn, which resigned it: a sheet's route going into the controller
         // UIKit presents, a grouped list's row into its cell. Its autofocus
