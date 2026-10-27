@@ -466,6 +466,9 @@ extension NodeView {
         // `layoutManager`: that would irreversibly switch back to TextKit 1.
         let f = TextArea(frame: .zero)
         f.owner = self
+        // Draw the placeholder and decorations again when the size changes:
+        // UIKit's default stretches the old raster
+        f.contentMode = .redraw
         #if !os(tvOS)
         // A CGColor does not retain UIColor's semantic appearance. The
         // native textarea's drawn separator follows UIKit's trait change.
@@ -550,14 +553,19 @@ extension NodeView {
         #if os(tvOS)
         area.frame = contentBox() // tvOS keeps its read-only presentation.
         #else
-        if isNativeTextControl {
+        // Span the border box, as a browser's textarea takes a tap anywhere
+        // in it: a tap in the padding focuses it, and its text scrolls under
+        // the padding. The
+        // Markdown editor keeps the content box its decorations are laid in.
+        if props["markup"] != "markdown" {
             area.frame = bounds
-            if let r = kernelContentBox {
-                // Layout's inset less what the drawn box lost to the pixel
-                // grid, so the text keeps layout's width (`PixelGridIOS.swift`).
-                area.textContainerInset = UIEdgeInsets(top: r.minY, left: r.minX, bottom: max(0, layoutBounds.height - r.maxY) + bounds.height - layoutBounds.height,
-                                                       right: max(0, layoutBounds.width - r.maxX) + bounds.width - layoutBounds.width)
-            }
+            // Layout's inset less what the drawn box lost to the pixel grid,
+            // so the text keeps layout's width (`PixelGridIOS.swift`); a box
+            // sent no content box has no padding or border
+            area.textContainerInset = kernelContentBox.map { r in
+                UIEdgeInsets(top: r.minY, left: r.minX, bottom: max(0, layoutBounds.height - r.maxY) + bounds.height - layoutBounds.height,
+                             right: max(0, layoutBounds.width - r.maxX) + bounds.width - layoutBounds.width)
+            } ?? .zero
         } else { area.frame = contentBox() }
         #endif
     }
