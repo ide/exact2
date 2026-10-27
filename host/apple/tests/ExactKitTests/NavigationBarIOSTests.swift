@@ -631,6 +631,13 @@ final class NavigationBarIOSTests: XCTestCase {
         let invoker = try XCTUnwrap(session.presenter.views.values.first { $0.props["testId"] == "menu-item" })
         let refusal = session.presenter.navigation.activateChrome(invoker)?["error"] as? String
         XCTAssertTrue(refusal?.hasPrefix("unsupported: bar item") == true, "\(refusal ?? "nil")")
+        // A change to the invoker keeps its item and makes its menu again,
+        // whose rows read through the button's view as it is now.
+        session.presenter.apply(wireBatch([["op": "props", "id": Int(invoker.id), "set": ["accessibilityDisabled": "true"]]]))
+        let kept = try XCTUnwrap((top.navigationItem.leftBarButtonItems ?? []).first { $0.accessibilityLabel == "More" })
+        XCTAssertTrue(kept === more, "the item is kept")
+        XCTAssertFalse(kept.menu === menu, "its menu is made again")
+        XCTAssertNil(kept.action, "UIKit still opens the menu on a tap")
     }
 
     /// LLP 1021 D3: only a menu-shaped popover is a bar item's pull-down. An
@@ -838,6 +845,25 @@ final class NavigationBarIOSTests: XCTestCase {
         session.presenter.apply(wireBatch([["op": "props", "id": Int(button.id), "set": ["accessibilityDisabled": "false"]]]))
         let restored = try XCTUnwrap(top.navigationItem.rightBarButtonItems?.first { $0.accessibilityLabel == "Compose" })
         XCTAssertFalse(restored.accessibilityTraits.contains(.notEnabled))
+        XCTAssertTrue(restored === item, "the control keeps its item, changed in place, so its glass animates the change")
+    }
+
+    /// A share pressed from a bar item presents from that item, so the sheet
+    /// grows out of the button (iOS 26's zoom transition).
+    func testAShareFromABarItemPresentsFromTheItem() throws {
+        guard hostedWindowScene() != nil else { throw missing("scene", "a share sheet presents from a scene's window") }
+        let session = try fixture("bar-share", module: false)
+        let nav = try XCTUnwrap(session.presenter.navigation.primaryNavigation)
+        nav.view.layoutIfNeeded()
+        let compose = try node(session, "compose-home")
+        let item = try XCTUnwrap(nav.topViewController?.navigationItem.rightBarButtonItems?.first { $0.accessibilityIdentifier == "compose-home" })
+        XCTAssertTrue(session.presenter.navigation.shownBarItem(compose.id) === item, "the control's item in the bar that shows")
+        let (view, rect) = session.presenter.shareAnchor(compose.id)
+        let shown = ShareSheet.present(["A"], title: nil, from: try XCTUnwrap(view), at: rect, barItem: item, outcome: { _ in })
+        let sheet = try XCTUnwrap(shown as? UIActivityViewController)
+        defer { sheet.dismiss(animated: false) }
+        XCTAssertTrue((sheet.popoverPresentationController?.sourceItem as AnyObject?) === item)
+        if #available(iOS 26.0, *) { XCTAssertNotNil(sheet.preferredTransition, "it grows out of the button") }
     }
 
     func testARIAUnavailableHeaderTabCarriesStateToTitleSegment() throws {

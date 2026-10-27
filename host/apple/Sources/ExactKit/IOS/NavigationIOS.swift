@@ -58,6 +58,11 @@ final class RouteController: UIViewController, UIScrollViewDelegate {
     var bottomClearance: CGFloat = 0
     /// The targets of the bar items projected from its header.
     var barPresses: [BarPress] = []
+    /// The bar items last made, by node: one whose kind is unchanged is
+    /// updated in place, so UIKit's glass keeps its animation (`barItemMade`).
+    var barItemsMade: [UInt32: (item: HeaderShape.Item, bar: UIBarButtonItem, press: BarPress, menuFrom: UInt64?)] = [:]
+    /// The space before each group, by the item that follows it.
+    var barSpaces: [UInt32: UIBarButtonItem] = [:]
     /// The bar items of its header's readouts, by node, kept across
     /// projections so a readout's view changes in place (§9.15).
     var readouts: [UInt32: UIBarButtonItem] = [:]

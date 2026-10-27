@@ -839,6 +839,7 @@ extension NavigationHost {
         guard shows else {
             // No stale items: the agent aims at a bar item by its press.
             c.barPresses = []
+            c.barItemsMade = [:]; c.barSpaces = [:]
             item.leftBarButtonItems = nil
             item.rightBarButtonItems = nil
             return
@@ -859,8 +860,16 @@ extension NavigationHost {
         item.leftItemsSupplementBackButton = true
         #endif
         c.barPresses = []
-        item.leftBarButtonItems = shape.map { barItems($0.leading, c) }
-        item.rightBarButtonItems = shape.map { barItems(Array($0.trailing.reversed()), c) }
+        let before = !c.barItemsMade.isEmpty
+        let leading = shape.map { barItems($0.leading, c) }, trailing = shape.map { barItems(Array($0.trailing.reversed()), c) }
+        let ids = Set(((shape?.leading ?? []) + (shape?.trailing ?? [])).map(\.id))
+        c.barItemsMade = c.barItemsMade.filter { ids.contains($0.key) }
+        c.barSpaces = c.barSpaces.filter { ids.contains($0.key) }
+        // Items that come or go on a route that shows and had items animate,
+        // as UIKit's own do; a route's first items appear with it.
+        let animated = before && c.viewIfLoaded?.window != nil && !ExactEnv.agentFreezes
+        if !Self.same(item.leftBarButtonItems, leading) { item.setLeftBarButtonItems(leading, animated: animated) }
+        if !Self.same(item.rightBarButtonItems, trailing) { item.setRightBarButtonItems(trailing, animated: animated) }
         if let shape {
             if shape.authored.isEmpty {
                 shape.header.isHidden = true
@@ -1229,6 +1238,16 @@ extension NavigationHost {
         controllers.values.contains { $0.collapseScroll === node || $0.edgeScroll === node }
     }
 
+    /// Whether two item lists are the same items, in order.
+    static func same(_ a: [UIBarButtonItem]?, _ b: [UIBarButtonItem]?) -> Bool {
+        (a ?? []).count == (b ?? []).count && zip(a ?? [], b ?? []).allSatisfy { $0 === $1 }
+    }
+
+    /// The item a header's control is drawn as in a bar that shows, if it is one.
+    func shownBarItem(_ id: UInt32) -> UIBarButtonItem? {
+        controllers.values.lazy.filter { $0.viewIfLoaded?.window != nil }.compactMap { $0.barItemsMade[id]?.bar }.first
+    }
+
     /// UIKit's zero-width fixed space splits shared glass without authored metrics.
     func barItems(_ items: [HeaderShape.Item], _ route: RouteController) -> [UIBarButtonItem] {
         var result: [UIBarButtonItem] = []
@@ -1236,7 +1255,10 @@ extension NavigationHost {
         for (index, item) in items.enumerated() {
             #if !os(tvOS)
             if #available(iOS 26.0, *), index > 0, previous != item.toolbarGroup {
-                result.append(UIBarButtonItem(barButtonSystemItem: .fixedSpace, target: nil, action: nil))
+                // The space before a group stays the same space.
+                let space = route.barSpaces[item.id] ?? UIBarButtonItem(barButtonSystemItem: .fixedSpace, target: nil, action: nil)
+                route.barSpaces[item.id] = space
+                result.append(space)
             }
             #endif
             result.append(barItem(item, route))
@@ -1261,11 +1283,43 @@ extension NavigationHost {
     }
 
     private func barItemMade(_ i: HeaderShape.Item, _ c: RouteController) -> UIBarButtonItem {
-        if i.readout != nil { return readoutItem(i, c) }
+        if i.readout != nil { c.barItemsMade[i.id] = nil; return readoutItem(i, c) }
+        // A menu reads its rows through the button's view: a new view, a new menu.
+        // Before iOS 26 a chip's picture follows the bar's tint, which the item
+        // does not hold; from iOS 26 it is drawn in the label colour.
+        let button = i.menu ? presenter.views[i.id] : nil
+        var tinted = i.chip != nil
+        if #available(iOS 26.0, tvOS 26.0, *) { tinted = false }
+        if let made = c.barItemsMade[i.id], made.item == i, !tinted, button?.incarnation == made.menuFrom {
+            c.barPresses.append(made.press)
+            return made.bar
+        }
+        let image = i.badge?.image ?? i.chip?.image(tint: presenter.viewport.tintColor) ?? i.symbol.flatMap { FaceSymbol.image($0, points: FaceSymbol.barItemPoints) }
+        // The same control as last time, still a menu or not and still a
+        // picture or words: its item is kept and changed, as a hand-built
+        // bar's is, so the glass animates what changed (a heart filling).
+        if let made = c.barItemsMade[i.id], made.item.menu == i.menu, (made.bar.image != nil) == (image != nil) {
+            c.barPresses.append(made.press)
+            if let image, tinted || made.item.chip != i.chip || made.item.symbol != i.symbol || made.item.badge != i.badge {
+                if #available(iOS 17.0, tvOS 17.0, *), image.isSymbolImage {
+                    made.bar.setSymbolImage(image, contentTransition: .replace)
+                } else { made.bar.image = image }
+            }
+            if image == nil { made.bar.title = i.title }
+            if let button {
+                // The menu reads its rows through this incarnation of the
+                // button's view, so it is made again; an item made before the
+                // view existed had a press, and a tap now opens the menu.
+                made.bar.menu = presenter.menus.pullDown(of: button, titled: i.menuTitle, inBar: true)
+                made.bar.target = nil
+                made.bar.action = nil
+            }
+            c.barItemsMade[i.id] = (i, made.bar, made.press, button?.incarnation)
+            return configure(made.bar, i, image: image)
+        }
         let press = BarPress(i.id, self)
         c.barPresses.append(press)
         let action = #selector(BarPress.press)
-        let image = i.badge?.image ?? i.chip?.image(tint: presenter.viewport.tintColor) ?? i.symbol.flatMap { FaceSymbol.image($0, points: FaceSymbol.barItemPoints) }
         let item: UIBarButtonItem
         if i.menu, let button = presenter.views[i.id] {
             // A pull-down: UIKit opens it on tap (`MenuHost.pullDown`).
@@ -1275,6 +1329,12 @@ extension NavigationHost {
             item = image.map { UIBarButtonItem(image: $0, style: .plain, target: press, action: action) }
                 ?? UIBarButtonItem(title: i.title, style: .plain, target: press, action: action)
         }
+        c.barItemsMade[i.id] = (i, item, press, i.menu ? presenter.views[i.id]?.incarnation : nil)
+        return configure(item, i, image: image)
+    }
+
+    /// What a bar item says of its control besides its face.
+    private func configure(_ item: UIBarButtonItem, _ i: HeaderShape.Item, image: UIImage?) -> UIBarButtonItem {
         item.accessibilityLabel = i.label ?? (i.title.isEmpty ? nil : i.title)
         item.accessibilityIdentifier = i.testId
         item.isEnabled = !i.disabled
@@ -1284,18 +1344,20 @@ extension NavigationHost {
         // tint is its fill, which `color` is not.
         if let tint = i.tint, !i.prominent, i.badge == nil, i.chip == nil {
             item.tintColor = UIColor { TextEngine.color(tint[$0.userInterfaceStyle == .dark ? 1 : 0]) }
-        }
-        if let font = i.font, image == nil {
+        } else { item.tintColor = nil }
+        // UIKit's font where none is written, also once a kept item's author removes theirs.
+        let font = image == nil ? i.font : nil
+        if item.titleTextAttributes(for: .normal)?[.font] as? UIFont != font {
             for state: UIControl.State in [.normal, .highlighted, .disabled, .selected, .focused] {
-                item.setTitleTextAttributes([.font: font], for: state)
+                item.setTitleTextAttributes(font.map { [.font: $0] }, for: state)
             }
         }
         if #available(iOS 26.0, tvOS 26.0, *) {
-            if i.prominent { item.style = .prominent }
+            item.style = i.prominent ? .prominent : .plain
             // A drawn face is its own shape: no glass capsule around it.
             #if !os(tvOS)
-            if i.badge != nil { item.hidesSharedBackground = true }
-            else if i.ownGlass { item.sharesBackground = false }
+            item.hidesSharedBackground = i.badge != nil
+            item.sharesBackground = i.badge != nil || !i.ownGlass
             #endif
         }
         return item
