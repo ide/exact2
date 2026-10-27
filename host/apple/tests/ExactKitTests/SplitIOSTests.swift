@@ -89,6 +89,8 @@ final class SplitIOSTests: XCTestCase {
         XCTAssertNil(agent.tap(["id": Int(try node(session, "fill").id)])["error"])
         until("the rows came: a split") { navigation.split != nil && !agent.nativeInFlight() }
         XCTAssertTrue(navigation.split?.list.viewControllers.first === root, "the same route, in the list's column")
+        let unavailable = navigation.split?.empty.contentUnavailableConfiguration as? UIContentUnavailableConfiguration
+        XCTAssertEqual(unavailable?.text, "No Selection", "nothing selected, the detail says so (LLP 1127 D7)")
         XCTAssertNil(agent.tap(["id": Int(try node(session, "row-a").id)])["error"])
         until("the book is in the detail") { navigation.split?.shown.count == 2 && !agent.nativeInFlight() }
         XCTAssertNil(agent.back()["error"])

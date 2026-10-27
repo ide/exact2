@@ -28,8 +28,8 @@ final class SplitIOS: NSObject, UISplitViewControllerDelegate {
     let list: UINavigationController
     /// The detail's column: the routes above the root.
     let detail: UINavigationController
-    /// The detail while the stack is at its root: the platform's empty page
-    /// (LLP 1127 Q2).
+    /// The detail while the stack is at its root: the platform's empty page,
+    /// saying "No Selection" (LLP 1127 D7, Q2).
     let empty = UIViewController()
     /// UIKit collapsed or expanded the columns, or showed or hid one.
     var changed: () -> Void = {}
@@ -51,6 +51,10 @@ final class SplitIOS: NSObject, UISplitViewControllerDelegate {
         super.init()
         #if os(iOS)
         empty.view.backgroundColor = .systemBackground
+        // English until the host has a strings table for its own words (LLP 1127 D7)
+        var unavailable = UIContentUnavailableConfiguration.empty()
+        unavailable.text = "No Selection"
+        empty.contentUnavailableConfiguration = unavailable
         #endif
         controller.delegate = self
         #if os(iOS)
