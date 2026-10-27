@@ -774,6 +774,8 @@ package final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, U
         guard scrollView === self.scrollView else { return }
         let post = Presenter.signposts.beginInterval("scrolled"), phase = HostPhases.shared.begin(.scroll)
         defer { Presenter.signposts.endInterval("scrolled", post); HostPhases.shared.end(phase) }
+        // A scroll is visible: its frames are measured, UIKit's deceleration's too.
+        presenter?.session?.sampler?.activity()
         // The kernel's authored frames already include this content room.
         // Keep the physical UI inset basis, but do not count native padding twice.
         let room = extras?.nativeScrollContentInsets ?? .zero
