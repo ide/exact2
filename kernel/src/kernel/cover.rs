@@ -332,14 +332,10 @@ fn scroller_insets_bottom(arena: &NodeArena, slot: u32) -> bool {
 /// out that much wider, and its content that much further in (`apply`), so
 /// the content keeps its place while the scroller's box, and the scroll
 /// indicator UIKit draws at its edge, run under the side controls (the
-/// iPhone Duo's side strip), as a hand-built screen's scroll view does. A
-/// list is left out: the platform's own list lays its rows out, and a
-/// covered box's own scroller is it.
+/// iPhone Duo's side strip), as a hand-built screen's scroll view does.
 pub(crate) fn side_reach(arena: &NodeArena, slot: u32) -> [f32; 2] {
     use crate::style::Dimension::{Auto, Points};
-    if arena.node_type(slot) != crate::NodeType::ScrollView
-        || matches!(arena.cover(slot), Some(HostCover::Edges(_)))
-    {
+    if !reaches_sides(arena, slot) || matches!(arena.cover(slot), Some(HostCover::Edges(_))) {
         return [0.0; 2];
     }
     let (mut right, mut left) = (true, true);
@@ -387,9 +383,20 @@ pub(crate) fn side_reach(arena: &NodeArena, slot: u32) -> [f32; 2] {
     [0.0; 2]
 }
 
+/// Whether `slot` is a scroller whose content Exact lays out: a `scroll`, or a
+/// list drawn as written (`appearance="none"`). Any other list is the
+/// platform's, which lays its rows out itself.
+fn reaches_sides(arena: &NodeArena, slot: u32) -> bool {
+    match arena.node_type(slot) {
+        crate::NodeType::ScrollView => true,
+        crate::NodeType::List => arena.style(slot).appearance == crate::Appearance::None,
+        _ => false,
+    }
+}
+
 /// The scrollers that may reach past `slot`'s sides when it is covered
-/// (`side_reach`): the first `scroll` on each path down from it, which
-/// `apply` derives again when the cover changes.
+/// (`side_reach`): the first one on each path down from it
+/// (`reaches_sides`), which `apply` derives again when the cover changes.
 fn reaching(arena: &NodeArena, slot: u32) -> Vec<u32> {
     let mut out = Vec::new();
     let mut stack: Vec<u32> = arena.children(slot).to_vec();
@@ -397,7 +404,7 @@ fn reaching(arena: &NodeArena, slot: u32) -> Vec<u32> {
         if positioned(arena, c) {
             continue;
         }
-        if arena.node_type(c) == crate::NodeType::ScrollView {
+        if reaches_sides(arena, c) {
             out.push(c);
         } else if !scrolls(arena, c) {
             stack.extend(arena.children(c).iter().copied());

@@ -766,12 +766,14 @@ fn a_top_only_inset_down_the_chain_said_or_cleared_re_derives_the_route() {
 /// `route()` with a `scroll` (10) in its list's place, holding a column (11)
 /// that fills it, and `rows` on the scroll.
 fn side_scroll(rows: &[(StyleId, StyleValue<'static>)]) -> Kernel {
+    side_scroller(NodeType::ScrollView, rows)
+}
+
+/// `side_scroll` with a scroller of `node_type`.
+fn side_scroller(node_type: NodeType, rows: &[(StyleId, StyleValue<'static>)]) -> Kernel {
     let mut kernel = route();
     let ops = vec![
-        Op::CreateView {
-            id: 10,
-            node_type: NodeType::ScrollView,
-        },
+        Op::CreateView { id: 10, node_type },
         Op::SetStyle {
             id: 10,
             patch: Box::new(style(
@@ -844,6 +846,28 @@ fn a_scroll_on_a_covered_side_reaches_under_the_side_controls() {
         (0.0, 390.0),
         "uncovered, as authored"
     );
+}
+
+#[test]
+fn a_list_drawn_as_written_reaches_under_the_side_controls_and_the_platforms_does_not() {
+    let drawn = [(StyleId::Appearance, StyleValue::Text("none".into()))];
+    for (rows, width) in [(&drawn[..], 390.0), (&[][..], 306.0)] {
+        let mut kernel = side_scroller(NodeType::List, rows);
+        kernel
+            .set_host_cover(2, Some(HostCover::Edges([0.0, 84.0, 0.0, 0.0])))
+            .unwrap();
+        assert_eq!(
+            frame(&mut kernel, 10).2,
+            width,
+            "drawn: {}",
+            !rows.is_empty()
+        );
+        assert_eq!(
+            (frame(&mut kernel, 11).0, frame(&mut kernel, 11).2),
+            (0.0, 306.0),
+            "its rows keep their place"
+        );
+    }
 }
 
 #[test]
