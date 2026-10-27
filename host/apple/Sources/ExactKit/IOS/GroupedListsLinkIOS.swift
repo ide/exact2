@@ -38,6 +38,9 @@ package protocol GroupedLists: AnyObject {
     func shown(_ node: NodeView) -> GroupedAim?
     /// The agent's `tap` on a row UIKit draws.
     func activate(_ node: NodeView, before: (CGPoint?) -> Bool) -> [String: Any]?
+    /// A finger's press on a custom row's own view: selects its cell and
+    /// runs `press` as the cell's selection; false when no cell carries it.
+    func select(carried node: NodeView, press: @escaping () -> Void) -> Bool
     /// `layout <id>`'s native fields for a list or a row it draws.
     func observation(_ node: NodeView) -> [String: Any]?
     // LLP 1080.001 D3: what the inspection walk accounts for.

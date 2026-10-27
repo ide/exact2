@@ -483,16 +483,19 @@ extension NodeView {
             return
         }
         let lands = inside && pressContact === contact && incarnation == contact.incarnation && (!contact.cancelled || movedByFocus) && presenter?.views[id] === self
+        let activate: () -> Void = { [self] in
+            presenter?.menus.activating(from: touched, pressing: self) {
+                presenter?.press(id, held: KeyCodes.held(event?.modifierFlags ?? []), bubbled: contact.bubbled)
+            }
+        }
+        // A grouped list's custom row is its cell's: the cell's selection runs the press
+        if lands, presenter?.groupedLists?.select(carried: self, press: activate) == true { pressed = overlayHoldsPress; return }
         // A tap on a list's row selects its cell before the press runs, and
         // the cell stays selected under a screen the press pushed (LLP 1115.000 D16).
         let cells = presenter?.rowCells, screen = cells?.screen(of: self)
         let row = lands ? cells?.select(self) : nil
         pressed = overlayHoldsPress
-        if lands {
-            presenter?.menus.activating(from: touched, pressing: self) {
-                presenter?.press(id, held: KeyCodes.held(event?.modifierFlags ?? []), bubbled: contact.bubbled)
-            }
-        }
+        if lands { activate() }
         if let row { cells?.ran(row, on: screen) }
     }
     package override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {

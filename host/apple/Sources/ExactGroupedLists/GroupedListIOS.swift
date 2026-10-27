@@ -284,6 +284,14 @@ final class GroupedListHost: GroupedLists {
         return nil
     }
 
+    /// A finger's press on a custom row's own view, as its cell's selection,
+    /// which runs it: the row stays selected under the screen it pushed or
+    /// beside the detail it opened (LLP 1115.000 D11.3, LLP 1127 D7).
+    func select(carried node: NodeView, press: @escaping () -> Void) -> Bool {
+        list(carrying: node)?.select(node.id, press: press) ?? false
+    }
+    func list(carrying node: NodeView) -> GroupedListView? { lists.values.first { $0.rows[node.id]?.custom == true } }
+
     /// The collection view a wheel on `id` scrolls: the list's own, or the
     /// one drawing that row or any carried view in it.
     func scroller(for id: UInt32) -> UIScrollView? {
@@ -1373,10 +1381,10 @@ final class GroupedListView: NSObject, UICollectionViewDelegate {
     }
 
     /// A tap: UIKit's highlight, then the row's press.
-    func select(_ id: UInt32) -> Bool {
+    func select(_ id: UInt32, press: (() -> Void)? = nil) -> Bool {
         guard pressable(id), let path = source.indexPath(for: id) else { return false }
         collection.selectItem(at: path, animated: false, scrollPosition: [])
-        collectionView(collection, didSelectItemAt: path)
+        if let press { chose(path, endingEdits: false) { _ in press() } } else { collectionView(collection, didSelectItemAt: path) }
         return true
     }
 

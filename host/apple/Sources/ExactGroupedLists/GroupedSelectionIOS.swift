@@ -15,9 +15,16 @@ extension GroupedListView {
     /// (`clearsSelectionOnViewWillAppear`; LLP 1115.000 D11.3). A row that
     /// pushed nothing, or opened a sheet, lets go once its press has run.
     func collectionView(_ view: UICollectionView, didSelectItemAt path: IndexPath) {
+        chose(path, endingEdits: true) { host.presenter.press($0) }
+    }
+    /// The row at `path` was chosen. A carried row passes a press of its own
+    /// view, which keeps its focus and popover handling (`select(_:press:)`);
+    /// a row UIKit draws ends editing first.
+    func chose(_ path: IndexPath, endingEdits: Bool, press: (UInt32) -> Void) {
+        let view = collection
         let letGo = { for selected in view.indexPathsForSelectedItems ?? [] { view.deselectItem(at: selected, animated: !ExactEnv.agentFreezes) } }
         guard let id = source.itemIdentifier(for: path), pressable(id) else { return letGo() }
-        host.presenter.endEditing()
+        if endingEdits { host.presenter.endEditing() }
         // The screen the list is on, read before the press can change it.
         let screen = sequence(first: owner as UIResponder, next: { $0.next }).lazy.compactMap { $0 as? UIViewController }.first
         // A radio's row checks its radio, as a click on the radio does:
@@ -27,7 +34,7 @@ extension GroupedListView {
         guard rows[id]?.pressable == true else { return letGo() }
         // Before the press, which can push the detail at once
         if sidebar { pressedSidebarRow = id }
-        host.presenter.press(id)
+        press(id)
         if let screen, let stack = screen.navigationController, stack.viewControllers.contains(screen), stack.topViewController !== screen { return }
         #if os(iOS)
         // UIKit has selected it: the list's next update checks it against the detail
