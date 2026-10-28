@@ -694,6 +694,42 @@ final class FrameSamplerTests: XCTestCase {
         XCTAssertTrue(session.agent(#"{"op":"logs","since":0}"#).contains("ms past its deadline"))
     }
 
+    /// A frame keeps how long its UI update's commit took, and a late commit
+    /// in an update that sampled no frame goes to the next frame with its
+    /// time, unless that frame's own commit was later: `commit` belongs to
+    /// the commit `overrun` measures.
+    func testAFrameKeepsHowLongTheCommitThatMadeItLateTook() throws {
+        let session = ExactApp.shared.makeSession()
+        defer { session.destroy() }
+        XCTAssertNil(session.boot(size: CGSize(width: 390, height: 844)).error)
+        let sampler = try XCTUnwrap(session.sampler)
+        sampler.byDeadline = true
+        let p = 1.0 / 120, t = ExactEnv.t0 + 30
+        sampler.observe(now: t, target: t + p)
+        // On time after a 1 ms commit
+        sampler.observe(now: t + p, target: t + 2 * p)
+        sampler.commitBegins(at: t + p + 0.003)
+        sampler.committed(at: t + p + 0.004, deadline: t + p + 0.006)
+        // 3 ms late after a 7 ms commit
+        sampler.observe(now: t + 2 * p, target: t + 3 * p)
+        sampler.commitBegins(at: t + 2 * p + 0.002)
+        sampler.committed(at: t + 2 * p + 0.009, deadline: t + 2 * p + 0.006)
+        // An update that sampled no frame commits 5 ms late after 6 ms; the next frame's own commit is on time
+        sampler.commitBegins(at: t + 3 * p + 0.006)
+        sampler.committed(at: t + 3 * p + 0.012, deadline: t + 3 * p + 0.007)
+        sampler.observe(now: t + 4 * p, target: t + 5 * p)
+        sampler.commitBegins(at: t + 4 * p + 0.001)
+        sampler.committed(at: t + 4 * p + 0.002, deadline: t + 4 * p + 0.006)
+        // A commit whose start went untimed
+        sampler.observe(now: t + 5 * p, target: t + 6 * p)
+        sampler.committed(at: t + 5 * p + 0.002, deadline: t + 5 * p + 0.006)
+        sampler.observe(now: t + 6 * p, target: t + 7 * p)
+        sampler.stop()
+        let records = try XCTUnwrap(sampler.reply(all: true)["records"] as? [[String: Any]])
+        XCTAssertEqual(records.map { $0["overrun"] as? Double }, [0, 3, 5, 0, 0])
+        XCTAssertEqual(records.map { $0["commit"] as? Double }, [1, 7, 6, nil, nil])
+    }
+
     /// A late commit is a frame shown a whole period late, or more for each
     /// further period it is late, and a frame both shown again and late in
     /// its commit counts once in the hitch estimate and in the late frames.
@@ -759,6 +795,29 @@ final class FrameSamplerTests: XCTestCase {
         let columns = try XCTUnwrap(compact["lateColumns"] as? [String]), rows = try XCTUnwrap(compact["late"] as? [[Any]])
         let at = try XCTUnwrap(columns.firstIndex(of: "t"))
         XCTAssertEqual(rows.map { $0[at] as? Double }, [10, 60, 50, 40])
+    }
+
+    /// A late frame in a scroll carries its scroller's offset and its
+    /// commit time, in the report and in its compact copy; the offset alone,
+    /// as `phase` names the scroll's phase.
+    func testALateFrameCarriesItsOffsetAndCommitTime() throws {
+        let recording = FrameSampler.Recording()
+        for (i, overrun) in [0.0, 4].enumerated() {
+            var r = FrameSampler.Record(t: Double(i + 1) * 10, interval: 10, missed: 0, seq: nil, batches: 0, apply: 0)
+            r.period = 10; r.overrun = overrun; r.ownOverrun = overrun; r.commit = 6
+            r.scroll = (120.5 + Double(i), "d")
+            recording.keep(r)
+        }
+        let report = FrameSampler.report(recording, identity: [:])
+        let late = try XCTUnwrap(report["late"] as? [[String: Any]])
+        XCTAssertEqual(late.count, 1)
+        XCTAssertEqual(late.first?["offset"] as? Double, 121.5)
+        XCTAssertEqual(late.first?["commit"] as? Double, 6)
+        XCTAssertNil(late.first?["scroll"])
+        let compact = try XCTUnwrap(try JSONSerialization.jsonObject(with: FrameSampler.compact(report, file: nil, bytes: 1, maxBytes: 8000)) as? [String: Any])
+        let columns = try XCTUnwrap(compact["lateColumns"] as? [String]), row = try XCTUnwrap((compact["late"] as? [[Any]])?.first)
+        XCTAssertEqual(row[try XCTUnwrap(columns.firstIndex(of: "offset"))] as? Double, 121.5)
+        XCTAssertEqual(row[try XCTUnwrap(columns.firstIndex(of: "commit"))] as? Double, 6)
     }
 
     /// The presentation probe's reports (`Recording.shown`): a frame shown
@@ -1068,6 +1127,20 @@ final class FrameSamplerTests: XCTestCase {
         XCTAssertNil(sampler.recording?.awaiting[Int.max], "with the waits for its drawables")
         window.rootViewController?.view.addSubview(viewport)
         until("a probe presents again in the view's window") { sampler.probe.map { $0.isIn(window) && $0.presentations >= 4 } ?? false }
+    }
+
+    /// Two UI updates in a row each present a drawable, one from each of the
+    /// probe's layers, where one layer's next would still be fetching.
+    func testTwoUpdatesInARowEachPresentAProbeDrawable() throws {
+        guard hostedWindowScene() != nil else { throw missing("scene", "the presentation probe presents in a window scene's window") }
+        let (session, window) = try windowed()
+        defer { session.destroy(); window.isHidden = true }
+        let probe = try XCTUnwrap(PresentationProbe(in: window))
+        defer { probe.remove() }
+        until("both layers have a drawable ready") { probe.readyCount == 2 }
+        XCTAssertNotNil(probe.present())
+        XCTAssertNotNil(probe.present(), "the other layer's")
+        XCTAssertEqual(probe.presentations, 2)
     }
 
     /// The probe leaves the window with its recording, and when the sampler

@@ -3,26 +3,30 @@ import Metal
 import QuartzCore
 import UIKit
 
-/// A recording's presentation probe: a transparent Metal layer of one
-/// point in the session's window that presents a drawable, cleared off the
-/// main thread, with the transaction of each UI update one is ready for, so
-/// its drawable's `presentedTime` says when the frame holding it reached
+/// A recording's presentation probe: transparent Metal layers of one point
+/// in the session's window, one of which presents a drawable, cleared off
+/// the main thread, with the transaction of each UI update one is ready for,
+/// so its drawable's `presentedTime` says when the frame holding it reached
 /// the screen, whatever made it late: a commit past its deadline or the
-/// render server missing its own. A plain layer, not a view, it takes no
-/// touches, is no accessibility element and changes no layout or safe
+/// render server missing its own. Plain layers, not views, they take no
+/// touches, are no accessibility elements and change no layout or safe
 /// area. On the simulator, whose Metal has no `presentedTime` or
 /// `addPresentedHandler` (MTLDrawable.h in its SDKs), it presents but hears
 /// nothing, and its frames wait until it goes.
 final class PresentationProbe {
-    private let layer = CAMetalLayer()
+    /// Two layers: with one, the probe heard from about seven in ten frames
+    /// of a 120 Hz scroll on an iPhone, as its three drawables, each held
+    /// until a later one of the layer's reaches the screen, were often all
+    /// in use when an update came
+    private let layers = [CAMetalLayer(), CAMetalLayer()]
     private let commands: MTLCommandQueue
     private let fetching = DispatchQueue(label: "exact.presentation-probe")
     private let lock = NSLock()
-    /// The drawable fetched and cleared for the next update, whether a
-    /// fetch is under way, and the reports waiting for the main thread: each
-    /// drawable's number (`presentations` when it was presented) and when
-    /// it was shown (0: never).
-    private var ready: CAMetalDrawable?, fetchRunning = false
+    /// Each layer's drawable fetched and cleared for the next update, and
+    /// whether a fetch is under way; the reports waiting for the main
+    /// thread: each drawable's number (`presentations` when it was
+    /// presented) and when it was shown (0: never).
+    private var ready: [CAMetalDrawable?] = [nil, nil], fetchRunning = [false, false]
     private var reports: [(drawable: Int, presented: CFTimeInterval)] = []
     /// The drawables it presented.
     private(set) var presentations = 0
@@ -30,43 +34,49 @@ final class PresentationProbe {
     init?(in window: UIWindow) {
         guard let device = MTLCreateSystemDefaultDevice(), let commands = device.makeCommandQueue() else { return nil }
         self.commands = commands
-        layer.device = device
-        layer.pixelFormat = .bgra8Unorm
-        layer.framebufferOnly = true
-        layer.isOpaque = false
-        layer.presentsWithTransaction = true
-        layer.allowsNextDrawableTimeout = true
-        layer.drawableSize = CGSize(width: 1, height: 1)
-        layer.frame = CGRect(x: 0, y: 0, width: 1, height: 1)
-        // Above the window's content, which could otherwise cover it from the compositor
-        layer.zPosition = .greatestFiniteMagnitude
-        window.layer.addSublayer(layer)
-        fetch()
+        for layer in layers {
+            layer.device = device
+            layer.pixelFormat = .bgra8Unorm
+            layer.framebufferOnly = true
+            layer.isOpaque = false
+            layer.presentsWithTransaction = true
+            layer.allowsNextDrawableTimeout = true
+            layer.drawableSize = CGSize(width: 1, height: 1)
+            layer.frame = CGRect(x: 0, y: 0, width: 1, height: 1)
+            // Above the window's content, which could otherwise cover it from the compositor
+            layer.zPosition = .greatestFiniteMagnitude
+            window.layer.addSublayer(layer)
+        }
+        for i in layers.indices { fetch(i) }
     }
 
-    var isInstalled: Bool { layer.superlayer != nil }
+    var isInstalled: Bool { layers[0].superlayer != nil }
 
-    func isIn(_ window: UIWindow) -> Bool { layer.superlayer === window.layer }
+    /// How many of its layers have a drawable ready for the next update.
+    var readyCount: Int { lock.withLock { ready.filter { $0 != nil }.count } }
 
-    /// Take the layer out of its window, which its owner does before it lets
-    /// the probe go: a fetch under way can hold the probe until it returns.
-    func remove() { layer.removeFromSuperlayer() }
+    func isIn(_ window: UIWindow) -> Bool { layers[0].superlayer === window.layer }
+
+    /// Take the layers out of their window, which the probe's owner does
+    /// before it lets the probe go: a fetch under way can hold the probe
+    /// until it returns.
+    func remove() { for layer in layers { layer.removeFromSuperlayer() } }
 
     /// Fetch and clear the next drawable off the main thread, where
     /// `nextDrawable` can wait for frames while every drawable is queued or
     /// on screen (UIKit's advice in UIUpdateActionPhase.h), and the clear
     /// waits until it is scheduled, as a layer that presents with its
     /// transaction needs before `present`.
-    private func fetch() {
+    private func fetch(_ i: Int) {
         guard lock.withLock({ () -> Bool in
-            guard !fetchRunning, ready == nil else { return false }
-            fetchRunning = true
+            guard !fetchRunning[i], ready[i] == nil else { return false }
+            fetchRunning[i] = true
             return true
         }) else { return }
-        fetching.async { [layer, commands, weak self] in
+        fetching.async { [layer = layers[i], commands, weak self] in
             let drawable = layer.nextDrawable().flatMap { Self.cleared($0, by: commands) }
             guard let self else { return }
-            self.lock.withLock { self.ready = drawable; self.fetchRunning = false }
+            self.lock.withLock { self.ready[i] = drawable; self.fetchRunning[i] = false }
         }
     }
 
@@ -83,12 +93,17 @@ final class PresentationProbe {
         return drawable
     }
 
-    /// Present the drawable made ready with the UI update now committing;
-    /// the number its report will carry, or nil when no drawable was ready
-    /// (the main thread never waits for one).
+    /// Present a drawable made ready with the UI update now committing,
+    /// the first layer's when both have one; the number its report will
+    /// carry, or nil when no drawable was ready (the main thread never waits
+    /// for one).
     func present() -> Int? {
-        defer { fetch() }
-        guard let drawable = lock.withLock({ () -> CAMetalDrawable? in defer { ready = nil }; return ready }) else { return nil }
+        defer { for i in layers.indices { fetch(i) } }
+        guard let drawable = lock.withLock({ () -> CAMetalDrawable? in
+            guard let i = ready.firstIndex(where: { $0 != nil }) else { return nil }
+            defer { ready[i] = nil }
+            return ready[i]
+        }) else { return nil }
         presentations += 1
         let number = presentations
         #if !targetEnvironment(simulator)
