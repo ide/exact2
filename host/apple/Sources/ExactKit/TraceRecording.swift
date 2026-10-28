@@ -64,7 +64,7 @@ extension ExactSession {
         releaseSampler()
         recording.work["after"] = traceWork()
         let report = FrameSampler.report(recording, identity: traceIdentity())
-        guard let data = try? JSONSerialization.data(withJSONObject: report, options: [.sortedKeys]) else {
+        guard let data = FrameSampler.traceJSON(report) else {
             log("stopTrace_EXPERIMENTAL refused: the trace did not serialize")
             return nil
         }
@@ -266,6 +266,21 @@ extension FrameSampler {
     static let compactSegments = ["phase", "scroller", "from", "ms", "frames", "missed", "lateFrames", "hitchMsPerS", "worstIntervalMs", "meanMainMs", "maxMainMs", "scrolledPt"]
     static let compactLate = ["t", "phase", "hitchMs", "interval", "period", "missed", "overrun", "commit", "screenLate", "unshown", "main", "batches", "apply", "unattributed", "phases", "hatches", "phasesCoverage", "coverage", "scroller", "offset"]
 
+    /// A trace as JSON with sorted keys and each number in its shortest form:
+    /// `JSONSerialization` writes a `Double` with 17 significant digits (8.33
+    /// as 8.3300000000000001), a third of a trace's bytes.
+    static func traceJSON(_ object: Any) -> Data? {
+        func shortest(_ value: Any) -> Any {
+            switch value {
+            case let d as Double where type(of: value) == Double.self && d.isFinite: return NSDecimalNumber(string: "\(d)")
+            case let a as [Any]: return a.map(shortest)
+            case let o as [String: Any]: return o.mapValues(shortest)
+            default: return value
+            }
+        }
+        return try? JSONSerialization.data(withJSONObject: shortest(object), options: [.sortedKeys])
+    }
+
     /// `report` in at most `maxBytes` of JSON, for a conversation that limits
     /// a message: its totals and segments as rows under their columns, the
     /// periods at rest left out, and as many late frames as fit, those late
@@ -305,7 +320,7 @@ extension FrameSampler {
                 "shown": "\(segments.count) of \(allSegments.count) scroll segments, \(min(n, late.count)) of \(lateFrames) late frames",
                 "full": file.map { "\($0) in the app's temporary directory, \(bytes) bytes" } ?? "not saved",
             ]
-            return (try? JSONSerialization.data(withJSONObject: out, options: [.sortedKeys])) ?? Data()
+            return traceJSON(out) ?? Data()
         }
         // The most of `count` that fits, each one more making the report larger
         func most(_ count: Int, _ size: (Int) -> Int) -> Int {
@@ -320,7 +335,7 @@ extension FrameSampler {
         guard smallest <= maxBytes else {
             let note: [String: Any] = ["exactTrace": "recording, compact", "error": "maxBytes \(maxBytes) is less than the \(smallest) bytes of the smallest compact trace, its totals with no segment or late frame; ask for at least that",
                                        "full": file.map { "\($0) in the app's temporary directory, \(bytes) bytes" } ?? "not saved"]
-            return (try? JSONSerialization.data(withJSONObject: note, options: [.sortedKeys])) ?? Data()
+            return traceJSON(note) ?? Data()
         }
         // Every segment that fits, then the most late frames
         let m = most(allSegments.count) { build(segments: $0, late: 0).count }

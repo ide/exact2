@@ -820,6 +820,13 @@ final class FrameSamplerTests: XCTestCase {
         XCTAssertEqual(row[try XCTUnwrap(columns.firstIndex(of: "commit"))] as? Double, 6)
     }
 
+    /// A trace writes each number in its shortest form, the values unchanged.
+    func testATraceWritesEachNumberInItsShortestForm() throws {
+        let report: [String: Any] = ["periodMs": 8.33, "rows": [[1391.11, -0.67, 3, true]], "nested": ["ms": 58.31]]
+        let data = try XCTUnwrap(FrameSampler.traceJSON(report))
+        XCTAssertEqual(String(decoding: data, as: UTF8.self), #"{"nested":{"ms":58.31},"periodMs":8.33,"rows":[[1391.11,-0.67,3,true]]}"#)
+    }
+
     /// The presentation probe's reports (`Recording.shown`): a frame shown
     /// within half a period of when UIKit expected it is probed and on time,
     /// one shown later is late on screen, one never shown is unshown and late
