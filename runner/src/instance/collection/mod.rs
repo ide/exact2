@@ -98,7 +98,8 @@ pub fn set_lead_scale(scale: f64) {
 
 /// The provisional extent (px along the axis) a list with no port yet
 /// realizes rows for: by default sixteen 32 px rows' worth; a host that knows
-/// its viewport sets it ([`set_bootstrap_extent`]).
+/// its viewport sets it for the process ([`set_bootstrap_extent`]) or for one
+/// runner ([`crate::Runner::set_bootstrap_extent`]).
 static BOOTSTRAP_EXTENT: std::sync::atomic::AtomicU64 =
     std::sync::atomic::AtomicU64::new((BOOTSTRAP_ROWS as f64 * ESTIMATED_HEIGHT).to_bits());
 
@@ -453,8 +454,9 @@ impl Collection {
             // sixteen rows, unless the list says how many (`initial-item-count`).
             // Actual nested-scrollport feedback determines the real window.
             bootstrap_rows: initial.unwrap_or(
-                ((f64::from_bits(BOOTSTRAP_EXTENT.load(std::sync::atomic::Ordering::Relaxed))
-                    / estimated_height)
+                ((u.ids.bootstrap_extent.unwrap_or_else(|| {
+                    f64::from_bits(BOOTSTRAP_EXTENT.load(std::sync::atomic::Ordering::Relaxed))
+                }) / estimated_height)
                     .ceil()
                     .min(
                         port.filter(|_| in_collection_row(plan, frames))

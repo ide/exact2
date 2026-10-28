@@ -4,6 +4,15 @@ use crate::compare::{equivalent, equivalent_all};
 use crate::instance::collection::{CollectionFeedback, CollectionFill, CollectionSnapshot};
 
 impl<D: DataSource> Runner<D> {
+    /// How far this runner's new lists reach before their port is reported,
+    /// in place of the process's [`crate::set_bootstrap_extent`]: a host with
+    /// a runner per window passes its own window's extent.
+    pub fn set_bootstrap_extent(&mut self, px: f64) {
+        if px.is_finite() && px > 0.0 {
+            self.ids.bootstrap_extent = Some(px);
+        }
+    }
+
     /// Mounted collection metadata for a host's post-commit layout/measurement.
     pub fn collections(&self) -> Vec<CollectionSnapshot> {
         self.tree

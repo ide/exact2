@@ -91,6 +91,13 @@ impl<D: DataSource> Host<D> {
         segments: Option<Vec<exact_kernel::Rect>>,
         batch: &mut Batch,
     ) -> Result<bool, String> {
+        // A list made later builds the estimated rows the window can show (at
+        // most sixteen, unless its `initial-item-count` says) before its first
+        // layout, not in a second commit after it
+        if let Some((width, height)) = env.screen {
+            self.runner
+                .set_bootstrap_extent(f64::from(width.max(height)));
+        }
         let _roles = self.runner.bind_roles(); // Its own (LLP 1121 stage 5).
         let kernel = self.runner.kernel_mut();
         let moved = match segments {

@@ -259,6 +259,8 @@ pub struct Ids {
     /// Every row that read a theme token (LLP 1121 D7).
     pub theme: theme::ThemeIndex,
     pub(crate) tabs: tabs::Tabs, // tab panels waiting for their first selection (tabs.rs)
+    /// This runner's own bootstrap extent ([`crate::Runner::set_bootstrap_extent`]).
+    pub(crate) bootstrap_extent: Option<f64>,
 }
 
 impl Ids {
