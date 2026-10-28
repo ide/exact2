@@ -92,6 +92,11 @@ extension CollectionHost {
         node.layoutIfNeeded()
         return [Double(scroll.adjustedContentInset.top - node.pageBand.top), Double(scroll.adjustedContentInset.left)]
     }
+    /// A fling the finger has left stops where it is.
+    func stopMomentum(_ id: UInt32) {
+        guard let scroll = presenter?.views[id]?.scroll, scroll.isDecelerating, !scroll.isTracking else { return }
+        scroll.setContentOffset(scroll.contentOffset, animated: false)
+    }
     /// The port back at `top` (`geometry`'s offset), within what it can
     /// reach, unless the reader or a smooth correction is moving it.
     func keepStart(_ id: UInt32, at top: Double) {
@@ -274,8 +279,9 @@ extension CollectionHost {
         fit(node, scroll, extent: extent)
         // UIKit owns dragging/deceleration. An authored position is not
         // permission to interrupt that animation with setContentOffset (an
-        // anchor's correction moves with it instead: `shift`). The next
-        // native offset notification supplies the continuing intent.
+        // anchor's correction moves with it instead: `shift`); an intent
+        // stops a fling first (`stopMomentum`). The next native offset
+        // notification supplies the continuing intent.
         guard !scroll.isTracking, !scroll.isDragging, !scroll.isDecelerating else { return }
         var target: CGPoint
         if horizontal {

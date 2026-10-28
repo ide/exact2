@@ -62,8 +62,13 @@ struct CollectionCursor {
     /// it is stale, as an absolute one is.
     private(set) var jumpedAt: UInt64 = 0
     mutating func jump() { advance(); jumpedAt = sequence }
+    /// The sequence at which the reader's last drag or wheel began.
+    private(set) var touchedAt: UInt64 = 0
+    mutating func touch() { advance(); touchedAt = sequence }
+    /// Whether a correction of `revision` is still to land.
+    func owes(revision: UInt64) -> Bool { correctedRevision.map { revision > $0 } ?? true }
     mutating func takeCorrection(revision: UInt64, sequence: UInt64) -> Bool {
-        guard sequence == self.sequence, correctedRevision.map({ revision > $0 }) ?? true else { return false }
+        guard sequence == self.sequence, owes(revision: revision) else { return false }
         correctedRevision = revision
         return true
     }
@@ -431,6 +436,15 @@ package final class CollectionHost {
                 correcting = false
             }
             entry.batchInsets = nil
+            // An absolute correction planned since the reader's drag began is
+            // an intent (a scroll into view, the end a list follows): it stops
+            // the fling the drag left, whose travel would otherwise cancel it,
+            // as a browser's scroll stops momentum. It lands from the next
+            // report. One planned before the drag is the reader's to override.
+            if let correction = entry.snapshot.correction, correction.from == nil, correction.sequence >= entry.cursor.touchedAt,
+               entry.cursor.owes(revision: entry.snapshot.revision) {
+                stopMomentum(view)
+            }
             if let correction = entry.snapshot.correction, correction.from != nil {
                 // Rows before the anchor changed size in this batch: the
                 // offset moves with them before this frame displays, even
@@ -493,7 +507,7 @@ package final class CollectionHost {
     /// wheel beginning) or to an authored offset.
     func userIntent(_ view: UInt32, travel: Bool = false) {
         guard let entry = entries[view], !correcting else { return }
-        if travel { entry.cursor.advance() } else { entry.cursor.jump() }
+        if travel { entry.cursor.touch() } else { entry.cursor.jump() }
         dirty.insert(view)
         schedule()
     }
