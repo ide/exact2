@@ -1,6 +1,7 @@
 # Recipe: a chat thread
 
-A transcript open at its newest message, over Messages' composer.
+A transcript open at its newest message, over a composer on glass
+(`contract vocab glass`).
 
 ```contract
 routes nav
@@ -40,8 +41,8 @@ component Chat
                 text m.body padding="8px 12px" border-radius=18 max-width="75%" overflow-wrap="anywhere"
                   background-color=(m.mine ? "AccentColor" : "-exact-fill") color=(m.mine ? "AccentColorText" : "-exact-label")
                   testId=`message-${m.id}`
-          row align-items="flex-end" margin="6px 12px" padding="4px 4px 4px 12px" border-radius=20
-            border="1px solid -exact-separator"
+          row backgroundMaterial="glass" align-items="flex-end" margin="6px 16px 16px"
+            padding="4px 4px 4px 12px" border-radius=20
             textarea id="composer" value=draft input=edit rows=1 field-sizing="content" max-height=140
               placeholder="Message" aria-label="Message" testId="composer" flex=1 min-width=0
               border="none" background-color="transparent"
@@ -75,5 +76,5 @@ test "a sent message lands; the composer clears"
 
 - Bubbles are not cells (`appearance="none"`); `interactive-widget` keeps the composer over
   the keyboard; Send keeps it up.
-- `anywhere` breaks a long word (a URL) whichever box bounds the bubble, as UIKit does.
+- `anywhere` breaks a long word (a URL), as UIKit does.
 - Yours: the accent under `AccentColorText`, no name; a group names others'.

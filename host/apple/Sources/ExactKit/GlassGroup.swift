@@ -264,6 +264,37 @@ extension NodeView {
     /// overlay, a glass's content view, the clip box, or the node.
     var baseContainer: UIView { scroll ?? overlay ?? (Materials.glass(materialKind) || blurHostsChildren ? materialView?.contentView : nil) ?? clipBox ?? self }
 
+    /// Whether this glass answers a finger: a pressable one or an invoker,
+    /// as a glass button does, and one framing a single text field, which
+    /// is that field's surface, as the glass of UIKit's own fields is
+    /// (`UIGlassEffect.isInteractive`).
+    var glassAnswersTouch: Bool {
+        guard Materials.glass(materialRequest), !disabled else { return false }
+        if handlers.contains("press") || props["popovertarget"] != nil || props["commandfor"] != nil { return true }
+        var fields = 0, stack: [UIView] = [container], seen = 0
+        // A panel of many boxes is no field's surface: the walk stops early.
+        while seen < 64, let view = stack.popLast() {
+            seen += 1
+            guard let node = view as? NodeView else { stack.append(contentsOf: view.subviews); continue }
+            if node.kind == "textarea" || node.kind == "input" { fields += 1; if fields > 1 { return false }; continue }
+            stack.append(contentsOf: node.container.subviews)
+        }
+        return fields == 1 && stack.isEmpty
+    }
+
+    /// A text field came into the window: the glass around it may now frame
+    /// it (`glassAnswersTouch`).
+    func fieldJoined() {
+        var at = superview
+        while let view = at {
+            if let node = view as? NodeView, Materials.glass(node.materialRequest) {
+                if node.materialInteractive != node.glassAnswersTouch { node.updateMaterial() }
+                return
+            }
+            at = view.superview
+        }
+    }
+
     /// The group view's place and spacing, or its absence (D2, D6).
     func syncGlassGroup() {
         let conflict = glassGroupConflict

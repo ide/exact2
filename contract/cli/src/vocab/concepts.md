@@ -1047,6 +1047,9 @@ component App
   `backgroundMaterial`, which wins when both are written.
 - A navigation bar's buttons share one glass capsule on iOS 26; `buttonStyle="glass"` on
   each gives it a capsule of its own (`contract vocab bar-buttons`).
+- Glass swells and lights under a finger on a box with `press`, on one that opens a
+  popover, and on one framing a single text field (a composer's pill, the field's surface).
+  Two such boxes in one `glassGroup` merge as a press brings them close.
 
 ## bar-buttons: the navigation bar's buttons, grouped or each in its own capsule
 names: bar button, bar-button, barbuttons, UIBarButtonItem, sharesBackground, headerRight, headerLeft, toolbarItem, ToolbarItem, ToolbarItemGroup

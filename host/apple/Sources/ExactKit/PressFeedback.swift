@@ -423,6 +423,10 @@ extension NodeView {
         guard !authorsPress, !isNativeButton, !isSurfaceControl,
               handlers.contains("press") || pressContact?.invokerLook == true || overlayHoldsPress,
               !handlers.contains("pointerdown"), !handlers.contains("pointerup") else { return false }
+        #if os(iOS) || os(tvOS)
+        // Interactive glass swells and lights under the finger itself (`glassAnswersTouch`)
+        if materialInteractive { return false }
+        #endif
         if let w = window {
             let r = convert(bounds, to: w)
             if r.width >= w.bounds.width, r.height >= w.bounds.height * 0.9 { return false }

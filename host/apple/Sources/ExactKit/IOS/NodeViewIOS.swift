@@ -676,6 +676,7 @@ package final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, U
     package override func didMoveToWindow() {
         super.didMoveToWindow()
         if window == nil { pressEpoch &+= 1; removeBackgroundExtension() }
+        else if kind == "textarea" || kind == "input" { fieldJoined() }
         // Focused by its autofocus and moved out of the window in the same
         // turn, which resigned it: a sheet's route going into the controller
         // UIKit presents, a grouped list's row into its cell. Its autofocus
@@ -1060,7 +1061,7 @@ package final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, U
         defer { syncGlassSlot(); syncGlassGroup(); settleVibrancy(); syncDefaultSurfaceScroll() }
         let kind = materialRequest
         let supported = kind != nil
-        let interactive = Materials.glass(kind) && handlers.contains("press") && !disabled
+        let interactive = glassAnswersTouch
         if materialKind != (supported ? kind : nil) {
             let children = container.subviews.compactMap { $0 as? NodeView }
             let old = materialView
