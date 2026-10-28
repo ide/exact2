@@ -9,8 +9,9 @@
 // (UIScrollView's `isDragging`) and a glide (`isDecelerating`), each its own
 // segment, with an estimate of the hitch time ratio Apple's scroll metrics
 // report (XCTOSSignpostMetric's scroll dragging and deceleration metrics:
-// milliseconds late per second) from the display link's callbacks and UIKit's
-// commit deadlines. A
+// milliseconds late per second) from the display link's callbacks, UIKit's
+// commit deadlines and, on iOS and tvOS 18 and later, a presentation probe
+// that sees when each frame reached the screen (`PresentationProbe`). A
 // scroller that moves with no finger on it (an animation, the app's own
 // scroll) is moving. A Mac recording follows no scroller: its frames are at rest.
 import Foundation
@@ -155,7 +156,7 @@ extension FrameSampler {
     }
 
     /// Whether a recorded frame was late by any measure
-    static func isLate(_ r: Record) -> Bool { r.missed > 0 || r.overrun > 0 }
+    static func isLate(_ r: Record) -> Bool { r.missed > 0 || r.overrun > 0 || r.screenLate != nil || r.unshown }
 
     /// A recording as an agent reads it: its segments by scroll phase and
     /// scroller, totals by phase, and its late frames with what the main
@@ -178,9 +179,10 @@ extension FrameSampler {
             guard i > 0, scrollers[i] == scrollers[i - 1], let then = records[i - 1].scroll?.0 else { return taken[i]?.moved == true ? "moving" : p }
             return now != then ? "moving" : p
         }
-        // Each frame's hitch: the later of a callback the display link saw shown again (`interval −
-        // period`; the link's jitter adds none) and a late commit. A late commit of a frame's own update
-        // stalls the next callback too, so the gap of the frame right after it counts only what that
+        // Each frame's hitch: the latest of a callback the display link saw shown again (`interval −
+        // period`; the link's jitter adds none), a late commit and how late it reached the screen, a period
+        // when it never did, as the frame before stayed shown in its place. A late commit of a frame's own
+        // update stalls the next callback too, so the gap of the frame right after it counts only what that
         // commit's delay did not. A commit counts in full: it is late against its own update's deadline,
         // which a stall before the update does not leave in the past
         var hitch: [Double] = [], carried = 0.0
@@ -188,21 +190,23 @@ extension FrameSampler {
             if i > 0, abs(r.t - r.interval - records[i - 1].t) > 0.5 { carried = 0 }
             let commit = FrameSampler.commitDelay(overrun: r.overrun, period: r.period)
             let shownAgain = r.missed > 0 ? max(0, r.interval - r.period - carried) : 0
-            hitch.append(max(shownAgain, commit))
+            hitch.append(max(shownAgain, commit, r.unshown ? r.period : r.screenLate ?? 0))
             carried = FrameSampler.commitDelay(overrun: r.ownOverrun, period: r.period)
         }
 
-        struct Totals { var ms = 0.0, frames = 0, missed = 0, late = 0, hitch = 0.0, main = 0.0, worst = 0.0, maxMain = 0.0 }
+        struct Totals { var ms = 0.0, frames = 0, missed = 0, late = 0, hitch = 0.0, main = 0.0, worst = 0.0, maxMain = 0.0, probed = 0, unshown = 0 }
         func add(_ t: inout Totals, _ i: Int) {
             let r = records[i]
             t.ms += r.interval; t.frames += 1; t.missed += r.missed; t.hitch += hitch[i]
             if FrameSampler.isLate(r) { t.late += 1 }
+            if r.probed { t.probed += 1 }
+            if r.unshown { t.unshown += 1 }
             t.main += r.main ?? 0; t.worst = max(t.worst, r.interval); t.maxMain = max(t.maxMain, r.main ?? 0)
         }
         func json(_ t: Totals) -> [String: Any] {
             ["ms": r2(t.ms), "frames": t.frames, "missed": t.missed, "lateFrames": t.late, "hitchMs": r2(t.hitch),
              "hitchMsPerS": t.ms > 0 ? r2(t.hitch / (t.ms / 1000)) : 0, "worstIntervalMs": r2(t.worst),
-             "meanMainMs": t.frames > 0 ? r2(t.main / Double(t.frames)) : 0, "maxMainMs": r2(t.maxMain)]
+             "meanMainMs": t.frames > 0 ? r2(t.main / Double(t.frames)) : 0, "maxMainMs": r2(t.maxMain), "probed": t.probed, "unshown": t.unshown]
         }
 
         // Segments: runs of one phase on one scroller
@@ -256,9 +260,9 @@ extension FrameSampler {
 }
 
 extension FrameSampler {
-    static let compactTotals = ["frames", "ms", "missed", "lateFrames", "hitchMsPerS", "worstIntervalMs", "meanMainMs", "maxMainMs"]
+    static let compactTotals = ["frames", "ms", "missed", "lateFrames", "hitchMsPerS", "worstIntervalMs", "meanMainMs", "maxMainMs", "probed", "unshown"]
     static let compactSegments = ["phase", "scroller", "from", "ms", "frames", "missed", "lateFrames", "hitchMsPerS", "worstIntervalMs", "meanMainMs", "maxMainMs", "scrolledPt"]
-    static let compactLate = ["t", "phase", "hitchMs", "interval", "period", "missed", "overrun", "main", "batches", "apply", "unattributed", "phases", "hatches", "phasesCoverage", "coverage", "scroller"]
+    static let compactLate = ["t", "phase", "hitchMs", "interval", "period", "missed", "overrun", "screenLate", "unshown", "main", "batches", "apply", "unattributed", "phases", "hatches", "phasesCoverage", "coverage", "scroller"]
 
     /// `report` in at most `maxBytes` of JSON, for a conversation that limits
     /// a message: its totals and segments as rows under their columns, the
