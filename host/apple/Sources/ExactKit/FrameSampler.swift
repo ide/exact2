@@ -71,6 +71,11 @@ final class FrameSampler: NSObject {
         /// In a recording: which of its taken scrollers (`Recording.scrollers`)
         /// `scroll` was read from, as the turn committed it.
         var taken: Int?
+        /// In a recording with a presentation probe: whether the probe
+        /// reported this frame, how much later than UIKit expected it
+        /// reached the screen when that was over half a period, ms, and
+        /// whether it never did.
+        var probed = false, screenLate: Double?, unshown = false
         /// How late the commit of the UI update this frame was sampled in
         /// was, ms, which ran after it: a stall the next callback's gap may
         /// hold again. `overrun` also holds a commit from an update that
@@ -80,6 +85,8 @@ final class FrameSampler: NSObject {
             var o: [String: Any] = ["t": t, "target": t + period, "period": period, "interval": interval, "missed": missed, "batches": batches, "apply": apply, "overrun": overrun]
             o["seq"] = seq.map { [$0.0, $0.1] } ?? NSNull()
             if let main { o["main"] = main }
+            if let screenLate { o["screenLate"] = screenLate }
+            if unshown { o["unshown"] = true }
             if let scroll { o["scroll"] = [scroll.0, scroll.1] }
             if let hatches { o.merge(hatches) { a, _ in a } }
             if let phases {
@@ -149,8 +156,35 @@ final class FrameSampler: NSObject {
         /// them, and which taken scroller it was then: one taken since is not
         /// the one this offset is from.
         var committed: (offset: Double, phase: String, taken: Int)?
-        func keep(_ record: Record) {
-            if records.count < FrameSampler.recordingKept { records.append(record) } else { dropped += 1 }
+        /// The kept frames whose presentation the probe has yet to report,
+        /// by the number of the probe's drawable each holds: the frame's
+        /// index, and when UIKit expected it on screen.
+        var awaiting: [Int: (frame: Int, expected: CFTimeInterval)] = [:]
+        @discardableResult func keep(_ record: Record) -> Bool {
+            guard records.count < FrameSampler.recordingKept else { dropped += 1; return false }
+            records.append(record)
+            return true
+        }
+        /// The probe's report for the frame that holds drawable `drawable`:
+        /// shown at `presented`, or never (0). A frame it finds late, and
+        /// late by nothing else, gets what ran in its interval then from
+        /// `timings`, as a frame late when it was sampled got it.
+        func shown(drawable: Int, presented: CFTimeInterval,
+                   timings: (_ from: CFTimeInterval, _ to: CFTimeInterval) -> (phases: [String: Any]?, hatches: [String: Any]?)) {
+            guard let entry = awaiting.removeValue(forKey: drawable) else { return }
+            let i = entry.frame, expected = entry.expected
+            let wasLate = records[i].missed > 0 || records[i].overrun > 0
+            records[i].probed = true
+            if presented > 0 {
+                let late = ((presented - expected) * 1000 * 100).rounded() / 100
+                if late > records[i].period / 2 { records[i].screenLate = late }
+            } else {
+                records[i].unshown = true
+            }
+            guard !wasLate, records[i].screenLate != nil || records[i].unshown else { return }
+            let to = ExactEnv.t0 + records[i].t / 1000, ran = timings(to - records[i].interval / 1000, to)
+            records[i].phases = ran.phases
+            records[i].hatches = ran.hatches
         }
     }
     /// Five minutes at 120 Hz.
@@ -177,11 +211,16 @@ final class FrameSampler: NSObject {
     /// (`watchUpdates`), not from the run loop's turns.
     var byDeadline = false
     private var updateLink: AnyObject?
+    #if (os(iOS) || os(tvOS)) && !targetEnvironment(macCatalyst)
+    /// A recording's presentation probe, while its update link runs and the
+    /// session's view is in a window.
+    private(set) var probe: PresentationProbe?
+    #endif
     /// The frame sampled in the UI update now running, with when and the
     /// recording's scroller as it stood then, until that update's commit
     /// says whether it was late: UIKit runs the update's display-link
     /// callbacks before it commits.
-    private var open: (record: Record, at: CFTimeInterval, scrolled: Scrolled?)?
+    private var open: (record: Record, at: CFTimeInterval, scrolled: Scrolled?, drawable: (number: Int, expected: CFTimeInterval)?)?
     typealias Scrolled = (offset: Double, phase: String, taken: Int)
 
     init(session: ExactSession) {
@@ -258,6 +297,7 @@ final class FrameSampler: NSObject {
         observationStopped = nil
         concludeOpen()
         #if (os(iOS) || os(tvOS)) && !targetEnvironment(macCatalyst)
+        endProbe()
         if #available(iOS 18.0, tvOS 18.0, *) { (updateLink as? UIUpdateLink)?.isEnabled = false }
         #endif
         updateLink = nil; byDeadline = false
@@ -306,14 +346,61 @@ final class FrameSampler: NSObject {
         #if (os(iOS) || os(tvOS)) && !targetEnvironment(macCatalyst)
         guard updateLink == nil, #available(iOS 18.0, tvOS 18.0, *), let view = session?.presenter.viewport, view.window?.windowScene != nil else { return }
         let link = UIUpdateLink(view: view)
+        link.addAction(to: .beforeCATransactionCommit) { [weak self] _, info in self?.presentProbe(expected: info.estimatedPresentationTime) }
         link.addAction(to: .afterCATransactionCommit) { [weak self] _, info in
             self?.committed(at: CACurrentMediaTime(), deadline: info.completionDeadlineTime)
         }
         link.isEnabled = true
         updateLink = link
         byDeadline = true
+        startProbe()
         #endif
     }
+
+    #if (os(iOS) || os(tvOS)) && !targetEnvironment(macCatalyst)
+    /// A recording with an update link probes when each frame reached the
+    /// screen (`PresentationProbe`).
+    private func startProbe() {
+        guard probe == nil, recording != nil, byDeadline, let window = session?.presenter.viewport.window else { return }
+        probe = PresentationProbe(in: window)
+    }
+
+    /// The probe follows the session's view: it goes when the view leaves
+    /// its window, and a new one starts in the window the view is in.
+    private func followProbe() {
+        if let probe, session?.presenter.viewport.window.map(probe.isIn) != true { endProbe() }
+        startProbe()
+    }
+
+    /// The update about to commit presents a drawable of the probe, and the
+    /// frame sampled in it, if any, awaits that drawable's report, with the
+    /// time UIKit expects it shown.
+    func presentProbe(expected: CFTimeInterval) {
+        followProbe()
+        guard let probe else { return }
+        drainProbe()
+        if let number = probe.present() { open?.drawable = (number, expected) }
+    }
+
+    private func drainProbe() {
+        for report in probe?.take() ?? [] {
+            recording?.shown(drawable: report.drawable, presented: report.presented) { from, to in
+                (HostPhases.shared.window(from: from, to: to), session?.hatchDiagnostics.window(from: from, to: to))
+            }
+        }
+    }
+
+    /// Remove the probe once its reports so far are in. The frames still
+    /// waiting will hear nothing more, and a new probe numbers its drawables
+    /// from 1 again: one it presents in an update that sampled no frame would
+    /// otherwise report to an old frame awaiting that number.
+    private func endProbe() {
+        drainProbe()
+        probe?.remove()
+        probe = nil
+        recording?.awaiting.removeAll()
+    }
+    #endif
 
     /// A UI update finished its commit at `now`, against its completion
     /// deadline: the frame sampled in that update is late by as much as it
@@ -325,13 +412,13 @@ final class FrameSampler: NSObject {
         open = nil
         frame.record.overrun = max(frame.record.overrun, past)
         frame.record.ownOverrun = past
-        conclude(frame.record, at: frame.at, scrolled: frame.scrolled)
+        conclude(frame.record, at: frame.at, scrolled: frame.scrolled, drawable: frame.drawable)
     }
 
     private func concludeOpen() {
         guard let frame = open else { return }
         open = nil
-        conclude(frame.record, at: frame.at, scrolled: frame.scrolled)
+        conclude(frame.record, at: frame.at, scrolled: frame.scrolled, drawable: frame.drawable)
     }
 
     func turnBegan(at now: CFTimeInterval) { turnBegan = now }
@@ -355,6 +442,10 @@ final class FrameSampler: NSObject {
         // The session's own frame source running is activity too.
         if session?.frames.link != nil || held { active = CACurrentMediaTime() }
         if !observing && CACurrentMediaTime() - active > Self.quiet { stop() }
+        #if (os(iOS) || os(tvOS)) && !targetEnvironment(macCatalyst)
+        // A view's update link stops while the view is in no window, and the display link goes on
+        followProbe()
+        #endif
     }
 
     /// One display callback: its time and the next frame's target, seconds;
@@ -387,26 +478,26 @@ final class FrameSampler: NSObject {
         overrun = 0
         pending = (nil, nil, 0, 0)
         // Its commit is still to come in this update
-        if byDeadline { concludeOpen(); open = (record, now, recording?.committed); return }
+        if byDeadline { concludeOpen(); open = (record, now, recording?.committed, nil); return }
         conclude(record, at: now, scrolled: recording?.committed)
     }
 
     /// A sampled frame, once whether it was late is known: kept, counted
     /// and, if late, journaled with what ran in it.
-    private func conclude(_ sampled: Record, at now: CFTimeInterval, scrolled: Scrolled?) {
+    private func conclude(_ sampled: Record, at now: CFTimeInterval, scrolled: Scrolled?, drawable: (number: Int, expected: CFTimeInterval)? = nil) {
         var record = sampled
         records.append(record)
         if records.count > Self.ring { records.removeFirst(); dropped += 1 }
         presented += 1
         if record.overrun > 0 { overruns += 1 }
-        guard record.missed > 0 || record.overrun > 0 else { keepRecorded(record, scrolled); return }
+        guard record.missed > 0 || record.overrun > 0 else { keepRecorded(record, scrolled, drawable); return }
         lateCount += 1
         missed += record.missed
         // The hatches that ran in it: the sample's own interval, `(now − interval, now]`.
         record.hatches = session?.hatchDiagnostics.window(from: now - record.interval / 1000, to: now)
         record.phases = HostPhases.shared.window(from: now - record.interval / 1000, to: now)
         if record.hatches != nil || record.phases != nil { records[records.count - 1] = record }
-        keepRecorded(record, scrolled)
+        keepRecorded(record, scrolled, drawable)
         late.append(record)
         if late.count > Self.lateKept { late.removeFirst() }
         let range = record.seq.map { " seq \($0.0)..\($0.1)" } ?? ""
@@ -416,12 +507,12 @@ final class FrameSampler: NSObject {
 
     /// A recording keeps the frame with its own scroller's offset and phase
     /// as they stood when it was sampled.
-    private func keepRecorded(_ record: Record, _ scrolled: Scrolled?) {
+    private func keepRecorded(_ record: Record, _ scrolled: Scrolled?, _ drawable: (number: Int, expected: CFTimeInterval)?) {
         guard let recording else { return }
         var r = record
         r.scroll = scrolled.map { (($0.offset * 100).rounded() / 100, $0.phase) }
         r.taken = scrolled?.taken
-        recording.keep(r)
+        if recording.keep(r), let drawable { recording.awaiting[drawable.number] = (recording.records.count - 1, drawable.expected) }
     }
 
     /// Keep every frame from now, at rest too, until `endRecording`. False
@@ -430,6 +521,9 @@ final class FrameSampler: NSObject {
         guard recording == nil, beginObservation() else { return false }
         concludeOpen()
         recording = Recording()
+        #if (os(iOS) || os(tvOS)) && !targetEnvironment(macCatalyst)
+        startProbe()
+        #endif
         followDisplay()
         // The first frame is the recording's own, not what waited since the last segment
         busy = 0; overrun = 0
@@ -440,6 +534,9 @@ final class FrameSampler: NSObject {
     func endRecording() -> Recording? {
         guard let done = recording else { return nil }
         concludeOpen()
+        #if (os(iOS) || os(tvOS)) && !targetEnvironment(macCatalyst)
+        endProbe()
+        #endif
         recording = nil
         followDisplay()
         endObservation()

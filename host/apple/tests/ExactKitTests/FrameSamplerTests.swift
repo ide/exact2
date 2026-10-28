@@ -746,18 +746,73 @@ final class FrameSamplerTests: XCTestCase {
     /// commit's stall left counts nothing of its own.
     func testACompactCopyOrdersLateFramesByTheirHitch() throws {
         let recording = FrameSampler.Recording()
-        for (t, interval, overrun, own) in [(10.0, 10.0, 21.0, 21.0), (40.0, 30.0, 0.0, 0.0), (50.0, 10.0, 5.0, 0.0)] {
+        for (t, interval, overrun, own, screen) in [(10.0, 10.0, 21.0, 21.0, 0.0), (40.0, 30.0, 0.0, 0.0, 0.0), (50.0, 10.0, 5.0, 0.0, 0.0), (60.0, 10.0, 0.0, 0.0, 20.0)] {
             var r = FrameSampler.Record(t: t, interval: interval, missed: Int(interval / 10) - 1, seq: nil, batches: 0, apply: 0)
             r.period = 10; r.overrun = overrun; r.ownOverrun = own
+            if screen > 0 { r.screenLate = screen; r.probed = true }
             recording.keep(r)
         }
         let report = FrameSampler.report(recording, identity: [:])
         let late = try XCTUnwrap(report["late"] as? [[String: Any]])
-        XCTAssertEqual(late.map { $0["hitchMs"] as? Double }, [30, 0, 10])
+        XCTAssertEqual(late.map { $0["hitchMs"] as? Double }, [30, 0, 10, 20])
         let compact = try XCTUnwrap(try JSONSerialization.jsonObject(with: FrameSampler.compact(report, file: nil, bytes: 1, maxBytes: 8000)) as? [String: Any])
         let columns = try XCTUnwrap(compact["lateColumns"] as? [String]), rows = try XCTUnwrap(compact["late"] as? [[Any]])
         let at = try XCTUnwrap(columns.firstIndex(of: "t"))
-        XCTAssertEqual(rows.map { $0[at] as? Double }, [10, 50, 40])
+        XCTAssertEqual(rows.map { $0[at] as? Double }, [10, 60, 50, 40])
+    }
+
+    /// The presentation probe's reports (`Recording.shown`): a frame shown
+    /// within half a period of when UIKit expected it is probed and on time,
+    /// one shown later is late on screen, one never shown is unshown and late
+    /// by a period, and a frame late both in its commit and on screen counts
+    /// once. A frame late only by the probe gets what ran in its interval
+    /// then.
+    func testTheProbesReportsMarkFramesLateOnScreen() throws {
+        let recording = FrameSampler.Recording()
+        let p = 1000.0 / 120
+        for (i, overrun) in [0.0, 0, 3, 0].enumerated() {
+            var r = FrameSampler.Record(t: Double(i + 1) * p, interval: p, missed: 0, seq: nil, batches: 0, apply: 0)
+            r.period = p; r.overrun = overrun; r.main = 1
+            recording.keep(r)
+            recording.awaiting[i + 1] = (i, 100 + Double(i))
+        }
+        var asked: [(Double, Double)] = []
+        let timings = { (from: CFTimeInterval, to: CFTimeInterval) -> (phases: [String: Any]?, hatches: [String: Any]?) in
+            asked.append((from, to))
+            return (["phases": [["phase": "apply", "ms": 2.0]]], nil)
+        }
+        recording.shown(drawable: 1, presented: 100.003, timings: timings)
+        recording.shown(drawable: 2, presented: 101.010, timings: timings)
+        recording.shown(drawable: 3, presented: 102.0085, timings: timings)
+        recording.shown(drawable: 4, presented: 0, timings: timings)
+        recording.shown(drawable: 5, presented: 104, timings: timings)
+        let records = recording.records
+        XCTAssertEqual(asked.count, 2, "the frames late on screen or unshown and late by nothing else")
+        XCTAssertEqual(try XCTUnwrap(asked.first?.1), ExactEnv.t0 + 2 * p / 1000, accuracy: 1e-9)
+        XCTAssertEqual(try XCTUnwrap(asked.first?.0), ExactEnv.t0 + p / 1000, accuracy: 1e-9)
+        XCTAssertNotNil(records[1].phases)
+        XCTAssertNil(records[2].phases, "a late commit's frame kept what it had when it was sampled")
+        XCTAssertEqual(records.map(\.probed), [true, true, true, true])
+        XCTAssertEqual(records.map(\.screenLate), [nil, 10, 8.5, nil])
+        XCTAssertEqual(records.map(\.unshown), [false, false, false, true])
+        XCTAssertTrue(recording.awaiting.isEmpty)
+        let totals = try XCTUnwrap(FrameSampler.report(recording, identity: [:])["recording"] as? [String: Any])
+        XCTAssertEqual(totals["probed"] as? Int, 4)
+        XCTAssertEqual(totals["unshown"] as? Int, 1)
+        XCTAssertEqual(totals["lateFrames"] as? Int, 3)
+        // 10 ms late on screen, then 8.5 ms, which outweighs the late commit's one period, then a period unshown
+        XCTAssertEqual(try XCTUnwrap(totals["hitchMs"] as? Double), 18.5 + p, accuracy: 0.01)
+        // Two frames UIKit expects on screen at the same time each hear of their own drawable
+        let same = FrameSampler.Recording()
+        for i in 0..<2 {
+            var r = FrameSampler.Record(t: Double(i + 1) * p, interval: p, missed: 0, seq: nil, batches: 0, apply: 0)
+            r.period = p
+            same.keep(r)
+            same.awaiting[i + 1] = (i, 200)
+        }
+        same.shown(drawable: 2, presented: 200.020, timings: timings)
+        same.shown(drawable: 1, presented: 200.001, timings: timings)
+        XCTAssertEqual(same.records.map(\.screenLate), [nil, 20])
     }
 
     /// A trace carries data without explanations: neither copy has a legend
@@ -848,11 +903,6 @@ final class FrameSamplerTests: XCTestCase {
         driver.requiresContinuousUpdates = true
         driver.isEnabled = true
         defer { driver.isEnabled = false }
-        func until(_ what: String, _ done: () -> Bool) {
-            let deadline = Date().addingTimeInterval(5)
-            while !done(), Date() < deadline { RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.02)) }
-            XCTAssertTrue(done(), what)
-        }
         func overrun(after count: Int, _ index: Int) throws -> Double {
             let records = try XCTUnwrap(sampler.observation(from: 0, before: 0)["records"] as? [[String: Any]])
             return try XCTUnwrap(records[count + index]["overrun"] as? Double)
@@ -872,6 +922,174 @@ final class FrameSamplerTests: XCTestCase {
         XCTAssertEqual(try overrun(after: awake, 0), 0, "its commit was on time, however long the turn ran after it")
     }
 
+    /// Run the main run loop until `done`, for at most five seconds.
+    private func until(_ what: String, _ done: () -> Bool) {
+        let deadline = Date().addingTimeInterval(5)
+        while !done(), Date() < deadline { RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.02)) }
+        XCTAssertTrue(done(), what)
+    }
+
+    /// A session's viewport in a window of the hosted scene, and the window.
+    private func windowed() throws -> (ExactSession, UIWindow) {
+        let window = UIWindow(windowScene: try XCTUnwrap(hostedWindowScene()))
+        window.frame = CGRect(x: 0, y: 0, width: 390, height: 844)
+        window.rootViewController = UIViewController()
+        window.makeKeyAndVisible()
+        let session = ExactApp.shared.makeSession()
+        XCTAssertNil(session.boot(size: CGSize(width: 390, height: 844)).error)
+        session.presenter.viewport.frame = window.bounds
+        window.rootViewController?.view.addSubview(session.presenter.viewport)
+        return (session, window)
+    }
+
+    /// On iOS 18 a recording's presentation probe presents in the UI updates
+    /// its own display link makes and, on an iPhone or iPad, hears when its
+    /// frames reached the screen; the simulator's Metal has no
+    /// `presentedTime`, so there it only presents.
+    func testARecordingsProbeHearsWhenFramesReachTheScreen() throws {
+        guard #available(iOS 18.0, *) else { throw XCTSkip("n/a: UIUpdateLink is iOS 18") }
+        guard hostedWindowScene() != nil else { throw missing("scene", "the presentation probe presents in a window scene's window") }
+        let (session, window) = try windowed()
+        defer { _ = session.sampler?.endRecording(); session.destroy(); window.isHidden = true }
+        let sampler = try XCTUnwrap(session.sampler)
+        XCTAssertTrue(sampler.beginRecording())
+        XCTAssertNotNil(sampler.probe, "a recording in a window scene probes its frames")
+        let probe = try XCTUnwrap(sampler.probe)
+        let probed = { sampler.recording?.records.filter(\.probed).count ?? 0 }
+        #if targetEnvironment(simulator)
+        until("the probe presents a drawable with its updates") { probe.presentations >= 4 }
+        XCTAssertEqual(probed(), 0, "and hears nothing here")
+        #else
+        until("the probe's drawables were shown and reported") { probed() >= 4 }
+        #endif
+    }
+
+    /// A recording whose view moves into another window takes its probe
+    /// there, and still hears when its frames reached the screen: a drawable
+    /// number the new probe gives again answers only the new frame.
+    func testTheProbeFollowsItsViewIntoAnotherWindow() throws {
+        guard #available(iOS 18.0, *) else { throw XCTSkip("n/a: UIUpdateLink is iOS 18") }
+        guard hostedWindowScene() != nil else { throw missing("scene", "the presentation probe presents in a window scene's window") }
+        let scene = try XCTUnwrap(hostedWindowScene())
+        let (session, window) = try windowed()
+        let other = UIWindow(windowScene: scene)
+        other.frame = window.frame
+        other.rootViewController = UIViewController()
+        other.makeKeyAndVisible()
+        defer { _ = session.sampler?.endRecording(); session.destroy(); window.isHidden = true; other.isHidden = true }
+        let sampler = try XCTUnwrap(session.sampler)
+        XCTAssertTrue(sampler.beginRecording())
+        let first = try XCTUnwrap(sampler.probe)
+        #if targetEnvironment(simulator)
+        until("a frame waits for the first probe's drawable") { sampler.recording?.awaiting.isEmpty == false }
+        #endif
+        // A wait for a drawable the first probe presented, which a report from the second must not answer
+        sampler.recording?.awaiting[Int.max] = (0, 0)
+        other.rootViewController?.view.addSubview(session.presenter.viewport)
+        until("the probe is in the view's new window") { sampler.probe.map { $0 !== first && $0.isIn(other) } ?? false }
+        XCTAssertFalse(first.isInstalled, "and gone from the old one")
+        XCTAssertNil(sampler.recording?.awaiting[Int.max], "with the waits for its drawables")
+        // The numbers the first probe gave, and the frames kept before the second's
+        let given = first.presentations, kept = sampler.recording?.records.count ?? 0
+        let second = try XCTUnwrap(sampler.probe)
+        #if targetEnvironment(simulator)
+        until("it presents in the new window") { second.presentations >= 4 }
+        // The second probe numbers its drawables from 1 again: a number the first gave answers only the new frame
+        let reuses = { (wait: (key: Int, value: (frame: Int, expected: CFTimeInterval))) in wait.key <= given && wait.value.frame >= kept }
+        until("a new frame waits for a number the first probe gave") { sampler.recording?.awaiting.contains(where: reuses) == true }
+        let reused = try XCTUnwrap(sampler.recording?.awaiting.first(where: reuses))
+        second.heard(reused.key, at: reused.value.expected)
+        until("its report reaches the new frame") { sampler.recording?.records[reused.value.frame].probed == true }
+        XCTAssertEqual(sampler.recording?.records.filter(\.probed).count, 1, "and no other frame")
+        #else
+        let probed = { sampler.recording?.records.filter(\.probed).count ?? 0 }, before = probed()
+        until("its frames there are heard from") { probed() >= before + 4 }
+        #endif
+    }
+
+    /// A probe's reports reach, through the sampler, the frames whose UI
+    /// updates presented their drawables, in whatever order they come: on
+    /// time, late or never shown; the report of a drawable an update that
+    /// sampled no frame presented reaches none. On the simulator, whose
+    /// Metal reports nothing, the test stands in for it; on a device Metal's
+    /// own reports would race the test's.
+    func testAProbesReportsReachTheFramesThatPresentedTheirDrawables() throws {
+        guard #available(iOS 18.0, *) else { throw XCTSkip("n/a: UIUpdateLink is iOS 18") }
+        guard hostedWindowScene() != nil else { throw missing("scene", "the presentation probe presents in a window scene's window") }
+        #if !targetEnvironment(simulator)
+        throw XCTSkip("n/a: a device's Metal reports for itself (testARecordingsProbeHearsWhenFramesReachTheScreen)")
+        #else
+        let (session, window) = try windowed()
+        defer { _ = session.sampler?.endRecording(); session.destroy(); window.isHidden = true }
+        let sampler = try XCTUnwrap(session.sampler)
+        XCTAssertTrue(sampler.beginRecording())
+        let probe = try XCTUnwrap(sampler.probe), recording = try XCTUnwrap(sampler.recording)
+        until("frames wait for their drawables' reports") { recording.awaiting.count >= 3 }
+        guard recording.awaiting.count >= 3 else { return }
+        let waits = recording.awaiting.sorted { $0.key < $1.key }.prefix(3).map { (number: $0.key, frame: $0.value.frame, expected: $0.value.expected) }
+        let period = recording.records[waits[1].frame].period
+        probe.heard(waits[2].number, at: 0)
+        probe.heard(waits[1].number, at: waits[1].expected + 2 * period / 1000)
+        probe.heard(waits[0].number, at: waits[0].expected)
+        // Between updates no frame is open, as in an update that sampled none
+        let before = probe.presentations
+        sampler.presentProbe(expected: 0)
+        let unsampled = probe.presentations
+        XCTAssertEqual(unsampled, before + 1, "a drawable was ready")
+        XCTAssertNil(recording.awaiting[unsampled], "no frame waits for a drawable an update without one presented")
+        probe.heard(unsampled, at: 1)
+        // Each presentation takes the reports in first
+        until("the next update takes that report in") { probe.presentations > unsampled }
+        let frames = waits.map(\.frame)
+        XCTAssertEqual(frames.map { recording.records[$0].probed }, [true, true, true], "the reports reached their frames")
+        XCTAssertNil(recording.records[frames[0]].screenLate)
+        XCTAssertEqual(try XCTUnwrap(recording.records[frames[1]].screenLate), 2 * period, accuracy: 0.01)
+        XCTAssertEqual(frames.map { recording.records[$0].unshown }, [false, false, true])
+        XCTAssertEqual(recording.records.filter(\.probed).count, 3, "and no other frame")
+        #endif
+    }
+
+    /// A recording whose view leaves its window takes the probe out of it,
+    /// though the view's update link stops there, and probes again once the
+    /// view is back in a window.
+    func testTheProbeLeavesWithItsViewAndComesBack() throws {
+        guard #available(iOS 18.0, *) else { throw XCTSkip("n/a: UIUpdateLink is iOS 18") }
+        guard hostedWindowScene() != nil else { throw missing("scene", "the presentation probe presents in a window scene's window") }
+        let (session, window) = try windowed()
+        defer { _ = session.sampler?.endRecording(); session.destroy(); window.isHidden = true }
+        let sampler = try XCTUnwrap(session.sampler)
+        XCTAssertTrue(sampler.beginRecording())
+        let first = try XCTUnwrap(sampler.probe)
+        sampler.recording?.awaiting[Int.max] = (0, 0)
+        let viewport = session.presenter.viewport
+        viewport.removeFromSuperview()
+        until("the probe leaves with the view") { sampler.probe == nil }
+        XCTAssertFalse(first.isInstalled)
+        XCTAssertNil(sampler.recording?.awaiting[Int.max], "with the waits for its drawables")
+        window.rootViewController?.view.addSubview(viewport)
+        until("a probe presents again in the view's window") { sampler.probe.map { $0.isIn(window) && $0.presentations >= 4 } ?? false }
+    }
+
+    /// The probe leaves the window with its recording, and when the sampler
+    /// stops, as a destroyed session's does.
+    func testTheProbeLeavesWithItsRecording() throws {
+        guard #available(iOS 18.0, *) else { throw XCTSkip("n/a: UIUpdateLink is iOS 18") }
+        guard hostedWindowScene() != nil else { throw missing("scene", "the presentation probe presents in a window scene's window") }
+        let (session, window) = try windowed()
+        defer { session.destroy(); window.isHidden = true }
+        let sampler = try XCTUnwrap(session.sampler)
+        XCTAssertTrue(sampler.beginRecording())
+        let first = try XCTUnwrap(sampler.probe)
+        XCTAssertTrue(first.isInstalled)
+        XCTAssertNotNil(sampler.endRecording())
+        XCTAssertFalse(first.isInstalled, "the recording's end removes it")
+        XCTAssertNil(sampler.probe)
+        XCTAssertTrue(sampler.beginRecording())
+        let second = try XCTUnwrap(sampler.probe)
+        sampler.stop()
+        XCTAssertFalse(second.isInstalled, "a stopped sampler removes it")
+        _ = sampler.endRecording()
+    }
     #endif
 
     /// LLP 1075.003.000.001 §3.1: a late frame names the hatch calls that
