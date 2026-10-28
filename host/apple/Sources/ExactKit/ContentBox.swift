@@ -18,14 +18,24 @@ extension NodeView {
     /// The bounds at the size layout gave: a box drawn on the pixel grid
     /// can be up to a device pixel smaller or larger (`PixelGridIOS.swift`,
     /// `PixelGridMac.swift`), and its text wraps at layout's width, not the
-    /// drawn one.
-    package var layoutBounds: CGRect { CGRect(origin: bounds.origin, size: grid?.layout.size ?? bounds.size) }
+    /// drawn one. On iOS and tvOS it is the box less what reaches past it.
+    package var layoutBounds: CGRect {
+        #if os(iOS) || os(tvOS)
+        CGRect(origin: boxBounds.origin, size: grid?.layout.size ?? boxBounds.size)
+        #else
+        CGRect(origin: bounds.origin, size: grid?.layout.size ?? bounds.size)
+        #endif
+    }
     /// The frame layout sent, where the drawn one is on the pixel grid.
     package var laidOutFrame: CGRect { grid?.layout ?? frame }
 
     package func contentBox() -> CGRect {
         if !isNativeTextControl {
+            #if os(iOS) || os(tvOS)
+            return kernelContentBox?.offsetBy(dx: boxBounds.minX, dy: boxBounds.minY) ?? layoutBounds
+            #else
             return kernelContentBox?.offsetBy(dx: bounds.minX, dy: bounds.minY) ?? layoutBounds
+            #endif
         }
         let uniform = number("border_width")
         return layoutBounds.insetBy(
