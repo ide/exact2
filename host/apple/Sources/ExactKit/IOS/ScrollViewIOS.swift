@@ -28,6 +28,27 @@ package final class PlainView: UIView {
 /// (`AgentIOS.swift`).
 package class ScrollView: UIScrollView {
     var scrollingNode: NodeView? { (superview as? NodeView) ?? (self as? Viewport)?.documentNode }
+    package override var contentOffset: CGPoint {
+        didSet { if adjustedContentInset == settledInset { settledY = contentOffset.y } }
+    }
+    /// The offset the last move under unchanged insets left, and those insets.
+    private var settledY: CGFloat = 0, settledInset = UIEdgeInsets.zero
+    // UIKit moves the offset by an overlay inset that comes or goes (the bar
+    // a push brings) so the content stays where it was on screen. Outside a
+    // batch the runner would take that for the reader leaving the end, so a
+    // list at its end stays there, as a batch keeps it (`CollectionHost.endBatch`).
+    package override func adjustedContentInsetDidChange() {
+        super.adjustedContentInsetDidChange()
+        let old = settledInset, inset = adjustedContentInset
+        settledInset = inset
+        defer { settledY = contentOffset.y }
+        guard let node = superview as? NodeView, let presenter = node.presenter, !presenter.applying,
+              node.props["scrollFollowEnd"] == "true" || presenter.collections.entries[node.id] != nil,
+              !isTracking, !isDecelerating,
+              settledY >= max(-old.top, contentSize.height + old.bottom - bounds.height) - 1 else { return }
+        let end = max(-inset.top, contentSize.height + inset.bottom - bounds.height)
+        if contentOffset.y != end { contentOffset.y = end }
+    }
     package override func layoutSubviews() {
         super.layoutSubviews()
         keepPlatformViewsOver()
