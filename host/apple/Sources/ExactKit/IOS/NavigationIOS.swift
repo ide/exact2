@@ -157,22 +157,16 @@ final class RouteController: UIViewController, UIScrollViewDelegate {
     func paintBackdrop() {
         guard isViewLoaded else { return }
         let modal = node.props["navigationPresentation"] == "modal"
-        // In a split's inspector UIKit's column shows behind the route (LLP
-        // 1127); in its sidebar, through the column's glass, the system
-        // background, as SwiftUI's sidebar paints it.
-        let column = host?.onColumnGround(view) == true, sidebar = column && host?.showsAsSidebar(view) == true
-        let key = column ? [sidebar ? [1] : [0]] : modal
+        // In a split's sidebar or inspector the route is clear, so UIKit's
+        // column shows behind it (LLP 1127 D7)
+        let column = host?.onColumnGround(view) == true
+        let key = column ? [[0]] : modal
             ? [ownBackdrop(dark: false), ownBackdrop(dark: true)]
             : [backdrop(dark: false), backdrop(dark: true)]
         guard view.backgroundColor == nil || key != backdropKey else { return }
         backdropKey = key
         if column {
-            // tvOS has no split (`wantsSplit`) and no system backgrounds.
-            #if os(tvOS)
             view.backgroundColor = .clear
-            #else
-            view.backgroundColor = sidebar ? .systemBackground : .clear
-            #endif
             return
         }
         #if os(tvOS)
