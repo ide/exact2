@@ -51,7 +51,13 @@ extension NodeView {
                     view = pixels
                 } else {
                     let g = (effect.mask as? GradientMaskView) ?? GradientMaskView()
-                    if g.frame != effect.bounds { g.frame = effect.bounds }
+                    if g.frame != effect.bounds {
+                        // Inside a layout's animation (the keyboard's) the mask
+                        // moves with the effect it masks
+                        if UIView.inheritedAnimationDuration > 0 { CATransaction.setDisableActions(false) }
+                        g.frame = effect.bounds
+                        CATransaction.setDisableActions(true)
+                    }
                     gradient.apply(g.gradient, bounds: g.bounds, box: g.bounds, dark: drawsDark)
                     view = g
                 }
