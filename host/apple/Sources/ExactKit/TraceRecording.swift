@@ -239,7 +239,9 @@ extension FrameSampler {
             var o = records[i].json
             o["hitchMs"] = r2(hitch[i])
             o["phase"] = phases[i]
-            if phases[i] != "rest" { o["scroller"] = scrollers[i] }
+            // Its scroller and that scroller's offset, whose phase `phase` names
+            if phases[i] != "rest" { o["scroller"] = scrollers[i]; o["offset"] = records[i].scroll?.0 }
+            o["scroll"] = nil
             o["target"] = nil
             return o
         }
@@ -262,7 +264,7 @@ extension FrameSampler {
 extension FrameSampler {
     static let compactTotals = ["frames", "ms", "missed", "lateFrames", "hitchMsPerS", "worstIntervalMs", "meanMainMs", "maxMainMs", "probed", "unshown"]
     static let compactSegments = ["phase", "scroller", "from", "ms", "frames", "missed", "lateFrames", "hitchMsPerS", "worstIntervalMs", "meanMainMs", "maxMainMs", "scrolledPt"]
-    static let compactLate = ["t", "phase", "hitchMs", "interval", "period", "missed", "overrun", "screenLate", "unshown", "main", "batches", "apply", "unattributed", "phases", "hatches", "phasesCoverage", "coverage", "scroller"]
+    static let compactLate = ["t", "phase", "hitchMs", "interval", "period", "missed", "overrun", "commit", "screenLate", "unshown", "main", "batches", "apply", "unattributed", "phases", "hatches", "phasesCoverage", "coverage", "scroller", "offset"]
 
     /// `report` in at most `maxBytes` of JSON, for a conversation that limits
     /// a message: its totals and segments as rows under their columns, the
