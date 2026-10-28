@@ -41,6 +41,9 @@ package protocol GroupedLists: AnyObject {
     /// A finger's press on a custom row's own view: selects its cell and
     /// runs `press` as the cell's selection; false when no cell carries it.
     func select(carried node: NodeView, press: @escaping () -> Void) -> Bool
+    /// Sets the highlight of the cell carrying a custom row to `down`; false
+    /// when no pressable cell carries it.
+    func highlight(carried node: NodeView, _ down: Bool) -> Bool
     /// `layout <id>`'s native fields for a list or a row it draws.
     func observation(_ node: NodeView) -> [String: Any]?
     // LLP 1080.001 D3: what the inspection walk accounts for.

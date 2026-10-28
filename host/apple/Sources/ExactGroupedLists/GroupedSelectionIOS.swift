@@ -5,7 +5,38 @@
 import ExactKit
 import UIKit
 
+extension GroupedListHost {
+    func highlight(carried node: NodeView, _ down: Bool) -> Bool {
+        list(carrying: node)?.highlight(node.id, down) ?? false
+    }
+}
+
 extension GroupedListView {
+    /// A pressed custom row is its cell pressed, as UIKit draws a row it
+    /// owns: the cell's pressed ground, with the list's lines beside it
+    /// hidden.
+    func highlight(_ id: UInt32, _ down: Bool) -> Bool {
+        // Only a pressable row takes a highlight; any row lets one go
+        guard !down || pressable(id), let path = source.indexPath(for: id), let cell = collection.cellForItem(at: path) else { return false }
+        if cell.isHighlighted != down { cell.isHighlighted = down }
+        return true
+    }
+    /// Draws a custom row in the dark appearance while its cell's ground is
+    /// dark (the accent under a sidebar's selected row), so its label colours
+    /// turn light as UIKit's own cell content does.
+    var groundFollower: UICollectionViewListCell.ConfigurationUpdateHandler? {
+        #if os(iOS)
+        return { cell, state in
+            let fill = cell.defaultBackgroundConfiguration().updated(for: state).resolvedBackgroundColor(for: cell.tintColor)
+            var r: CGFloat = 1, g: CGFloat = 1, b: CGFloat = 1, a: CGFloat = 0
+            let dark = fill.getRed(&r, green: &g, blue: &b, alpha: &a) && a > 0.5 && 0.2126 * r + 0.7152 * g + 0.0722 * b < 0.5
+            let wanted: UIUserInterfaceStyle = dark ? .dark : .unspecified
+            if cell.contentView.overrideUserInterfaceStyle != wanted { cell.contentView.overrideUserInterfaceStyle = wanted }
+        }
+        #else
+        return nil
+        #endif
+    }
     func collectionView(_ view: UICollectionView, shouldSelectItemAt path: IndexPath) -> Bool {
         collectionView(view, shouldHighlightItemAt: path)
     }

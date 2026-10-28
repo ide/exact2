@@ -616,7 +616,7 @@ final class GroupedListView: NSObject, UICollectionViewDelegate {
         UICollectionViewCompositionalLayout { [weak self] index, environment in
             guard let self else { return nil }
             #if os(iOS)
-            var c = UICollectionLayoutListConfiguration(appearance: sidebar ? .sidebar : model.appearance)
+            var c = UICollectionLayoutListConfiguration(appearance: sidebar ? (model.appearance == .plain ? .sidebarPlain : .sidebar) : model.appearance)
             #else
             var c = UICollectionLayoutListConfiguration(appearance: model.appearance)
             #endif
@@ -627,8 +627,8 @@ final class GroupedListView: NSObject, UICollectionViewDelegate {
             c.headerMode = s?.header == nil ? .none : .supplementary
             c.footerMode = s?.footer == nil ? .none : .supplementary
             #if !os(tvOS)
-            // A sidebar's rows have none, as UIKit's sidebar list draws them.
-            c.showsSeparators = !sidebar && (s?.card ?? true)
+            // A grouped sidebar's rows have none, as UIKit's sidebar list draws them.
+            c.showsSeparators = (!sidebar || model.appearance == .plain) && (s?.card ?? true)
             // Where a row's author wrote the edge under it, a carried row
             // shows that edge instead of UIKit's line (LLP 1084 D7), as a
             // hand-built cell hides its separator. A standard cell draws no
@@ -1069,10 +1069,11 @@ final class GroupedListView: NSObject, UICollectionViewDelegate {
         cell.target = rows[id]?.target
         guard let row = rows[id] else { return }
         interact(cell, id)
+        cell.contentView.overrideUserInterfaceStyle = .unspecified // what `groundFollower` set for a row this cell drew
         // A card-less section's rows sit on the list's background; a
         // pressable standard row still shows UIKit's highlight while pressed.
         if card(of: id) {
-            cell.configurationUpdateHandler = nil
+            cell.configurationUpdateHandler = row.custom ? groundFollower : nil
             var card = cell.defaultBackgroundConfiguration()
             if let fill = ThemeRoles.color("secondary-grouped-background", in: host.presenter.root) { card.backgroundColor = fill }
             cell.backgroundConfiguration = card

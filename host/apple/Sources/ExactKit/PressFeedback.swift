@@ -116,6 +116,13 @@ extension NodeView {
     /// the platform's own. A held press (HeldState.swift) shows it as a
     /// real press does, with no haptic.
     func showPress(_ down: Bool) {
+        #if os(iOS)
+        // A grouped list's custom row with no press look of its own shows its
+        // press as its cell's highlight (LLP 1084 §4); a release clears the
+        // highlight whatever the style says by then
+        let highlights = down && !authorsPress
+        if presenter?.groupedLists?.highlight(carried: self, highlights) == true, highlights { return }
+        #endif
         let down = down && defaultLink == nil
         // What a press shows goes at its release whatever the style says now:
         // an authored look the style dropped while held included.
@@ -138,6 +145,9 @@ extension NodeView {
     /// held stays as it is).
     func pressFollows(inside: Bool) {
         guard pressed else { return }
+        #if os(iOS)
+        if !authorsPress, presenter?.groupedLists?.highlight(carried: self, inside) == true { return }
+        #endif
         pressPaint.outside = !inside
         if defaultLink != nil { showPress(false); return }
         if holds("active") { return }
