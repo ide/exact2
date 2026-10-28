@@ -55,6 +55,11 @@ final class FrameSampler: NSObject {
         /// (`committed`); elsewhere, how long past the frame's target the
         /// main thread's turn ended.
         var overrun = 0.0
+        /// How long Core Animation's commit of the UI update whose lateness
+        /// `overrun` holds took, ms, the layout and drawing of the layers that
+        /// needed it included: on iOS and tvOS 18 and later, from the update
+        /// link's `beforeCATransactionCommit` to its `afterCATransactionCommit`.
+        var commit: Double?
         /// A late frame's hatch calls (LLP 1075.003.000.001 §3.1): those that
         /// overlapped its interval, each charged its overlap, with `coverage`.
         var hatches: [String: Any]?
@@ -84,6 +89,7 @@ final class FrameSampler: NSObject {
         var json: [String: Any] {
             var o: [String: Any] = ["t": t, "target": t + period, "period": period, "interval": interval, "missed": missed, "batches": batches, "apply": apply, "overrun": overrun]
             o["seq"] = seq.map { [$0.0, $0.1] } ?? NSNull()
+            if let commit { o["commit"] = commit }
             if let main { o["main"] = main }
             if let screenLate { o["screenLate"] = screenLate }
             if unshown { o["unshown"] = true }
@@ -206,6 +212,10 @@ final class FrameSampler: NSObject {
     private var turnBegan: CFTimeInterval?
     private var overrun = 0.0
     private var overruns = 0
+    /// When the UI update now committing began its commit, and how long the
+    /// commit of the update whose late commit `overrun` holds took.
+    private var commitBegan: CFTimeInterval?
+    private var overrunCommit: Double?
     private(set) var turnObservers: [CFRunLoopObserver] = []
     /// Whether a frame's lateness comes from UIKit's commit deadline
     /// (`watchUpdates`), not from the run loop's turns.
@@ -286,7 +296,7 @@ final class FrameSampler: NSObject {
     func reset() {
         stop()
         records = []; late = []
-        dropped = 0; presented = 0; lateCount = 0; missed = 0; segments = 0; overruns = 0; overrun = 0
+        dropped = 0; presented = 0; lateCount = 0; missed = 0; segments = 0; overruns = 0; overrun = 0; overrunCommit = nil
         pending = (nil, nil, 0, 0)
         period = nil
         replyMain = []; replyCount = 0; replyTotal = 0
@@ -308,7 +318,7 @@ final class FrameSampler: NSObject {
         turnObservers = []
         // A segment's timing is its own: an overrun not yet sampled goes
         // with it, not onto the next segment's first frame.
-        target = nil; turnBegan = nil; overrun = 0
+        target = nil; turnBegan = nil; overrun = 0; overrunCommit = nil; commitBegan = nil
         interrupted?("display observation stopped")
     }
 
@@ -346,7 +356,10 @@ final class FrameSampler: NSObject {
         #if (os(iOS) || os(tvOS)) && !targetEnvironment(macCatalyst)
         guard updateLink == nil, #available(iOS 18.0, tvOS 18.0, *), let view = session?.presenter.viewport, view.window?.windowScene != nil else { return }
         let link = UIUpdateLink(view: view)
-        link.addAction(to: .beforeCATransactionCommit) { [weak self] _, info in self?.presentProbe(expected: info.estimatedPresentationTime) }
+        link.addAction(to: .beforeCATransactionCommit) { [weak self] _, info in
+            self?.presentProbe(expected: info.estimatedPresentationTime)
+            self?.commitBegins(at: CACurrentMediaTime())
+        }
         link.addAction(to: .afterCATransactionCommit) { [weak self] _, info in
             self?.committed(at: CACurrentMediaTime(), deadline: info.completionDeadlineTime)
         }
@@ -402,14 +415,25 @@ final class FrameSampler: NSObject {
     }
     #endif
 
+    /// A UI update begins its commit at `now`.
+    func commitBegins(at now: CFTimeInterval) { commitBegan = now }
+
     /// A UI update finished its commit at `now`, against its completion
     /// deadline: the frame sampled in that update is late by as much as it
-    /// was past it. A commit in an update that sampled none goes to the
-    /// next frame.
+    /// was past it, and keeps how long the commit took. A late commit in an
+    /// update that sampled none goes to the next frame with its time.
     func committed(at now: CFTimeInterval, deadline: CFTimeInterval) {
         let past = max(0, ((now - deadline) * 1000 * 100).rounded() / 100)
-        guard var frame = open else { overrun = max(overrun, past); return }
+        let took = commitBegan.map { max(0, ((now - $0) * 1000 * 100).rounded() / 100) }
+        commitBegan = nil
+        guard var frame = open else {
+            if past > 0, past >= overrun { overrunCommit = took }
+            overrun = max(overrun, past)
+            return
+        }
         open = nil
+        // The commit that made the frame late, or its own when none did
+        if past >= frame.record.overrun { frame.record.commit = took }
         frame.record.overrun = max(frame.record.overrun, past)
         frame.record.ownOverrun = past
         conclude(frame.record, at: frame.at, scrolled: frame.scrolled, drawable: frame.drawable)
@@ -473,9 +497,10 @@ final class FrameSampler: NSObject {
         var record = Record(t: r2((now - ExactEnv.t0) * 1000), interval: r2(interval), missed: missedHere, seq: seq, batches: pending.batches, apply: r2(pending.apply))
         record.period = r2(p)
         record.overrun = r2(overrun)
+        record.commit = overrunCommit
         if tracked != nil, let c = committed { record.scroll = (r2(c.0), c.1) }
         if recording != nil { record.main = r2(busy * 1000); busy = 0 }
-        overrun = 0
+        overrun = 0; overrunCommit = nil
         pending = (nil, nil, 0, 0)
         // Its commit is still to come in this update
         if byDeadline { concludeOpen(); open = (record, now, recording?.committed, nil); return }
@@ -526,7 +551,7 @@ final class FrameSampler: NSObject {
         #endif
         followDisplay()
         // The first frame is the recording's own, not what waited since the last segment
-        busy = 0; overrun = 0
+        busy = 0; overrun = 0; overrunCommit = nil
         pending = (nil, nil, 0, 0)
         return true
     }
