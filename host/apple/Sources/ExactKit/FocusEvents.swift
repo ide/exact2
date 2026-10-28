@@ -24,6 +24,14 @@ extension Presenter {
         set { focusEvents.onEvent = newValue }
     }
     func focus(_ id: UInt32) {
+        #if os(iOS)
+        // A field whose keys stand down for a card keeps its focus (PopoverCardIOS.swift);
+        // another field taking it ends the stand-down, which blurs the first
+        if let held = heldKeys {
+            if keysNode?.id == id { return }
+            held.finish()
+        }
+        #endif
         #if os(macOS)
         tabStart = nil
         #endif
@@ -36,6 +44,9 @@ extension Presenter {
     func blur(_ id: UInt32) {
         #if os(iOS) || os(tvOS)
         if menus.preservesFocus(id) { return }
+        #endif
+        #if os(iOS)
+        if keysNode?.id == id { return }
         #endif
         focusEvents.blur(id)
         #if os(iOS)

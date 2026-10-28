@@ -179,7 +179,24 @@ package final class Presenter {
     let pinnedRoom = PinnedRoom()
     /// A native prompt outside the session's mounts, associated by its creator.
     package weak var keyboardPrompt: UITextField?
+    #if os(iOS)
+    /// The keys stood down behind a picture of themselves while a popover
+    /// card lies over them (PopoverCardIOS.swift): their editor keeps the
+    /// editing route's room as the keys did.
+    var heldKeys: StoodDownKeys?
+    #endif
+    /// Whether the keys are a picture under a card, not a window over the app.
+    var keysStoodDown: Bool {
+        #if os(iOS)
+        heldKeys != nil
+        #else
+        false
+        #endif
+    }
     var keyboardEditor: UIView? {
+        #if os(iOS)
+        if let editor = heldKeys?.editor, editor.window != nil, mounts(editor) { return editor }
+        #endif
         guard let responder = FirstResponder.current as? UIView, responder is UIKeyInput,
               mounts(responder) || responder === keyboardPrompt else { return nil }
         return responder
@@ -201,6 +218,7 @@ package final class Presenter {
         return nil
         #else
         guard container.window != nil, hasKeyboardEditor else { return nil }
+        if let held = heldKeys { return container.convert(CGPoint(x: 0, y: held.top), from: nil).y }
         if let view = container as? ExactView, !view.hasKeyboardGuide { return nil }
         let guide = container.keyboardLayoutGuide.layoutFrame
         return guide.height > 0 ? guide.minY : nil
@@ -229,6 +247,7 @@ package final class Presenter {
         let c = NotificationCenter.default
         c.addObserver(self, selector: #selector(keyboardChanged(_:)), name: UIResponder.keyboardWillChangeFrameNotification, object: nil)
         c.addObserver(self, selector: #selector(keyboardSettled(_:)), name: UIResponder.keyboardDidChangeFrameNotification, object: nil)
+        StoodDownKeys.watch()
         #endif
     }
 
@@ -481,6 +500,12 @@ package final class Presenter {
     /// The node an action's `focus()` last named, delivered yet or not: a field's Return reads it to learn whether its `submit` asked for the keyboard back (LLP 1115.000 D9.2).
     weak var focusAsked: NodeView?
     private func focus(_ target: NodeView, selectText: Bool) {
+        #if os(iOS)
+        // Keys stood down for a card: their editor takes them back as the
+        // card closes, despite a blur asked before. Another field that takes
+        // the focus ends the stand-down then (`focus(_ id:)`).
+        if let held = heldKeys, keysNode === target { held.blurred = false; return }
+        #endif
         focusAsked = target
         let name = target.props["id"] ?? "#\(target.id)"
         let shown: UIView = target.headerField ?? target
@@ -537,6 +562,12 @@ package final class Presenter {
     /// waiting to be delivered; blur(html-id) only when that node holds it.
     func blurElement(_ args: [Any]) {
         pendingFocus = nil
+        #if os(iOS)
+        if let held = heldKeys, args.isEmpty || keysNode?.props["id"] == args.first as? String {
+            held.blurred = true
+            return
+        }
+        #endif
         if let name = args.first as? String {
             guard let target = views.values.sorted(by: { $0.id < $1.id }).first(where: { $0.props["id"] == name }) else { return }
             let responder: UIView = target.headerField ?? target.textArea ?? target.field ?? target

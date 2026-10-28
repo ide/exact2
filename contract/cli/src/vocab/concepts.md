@@ -1050,6 +1050,10 @@ component App
 - Glass swells and lights under a finger on a box with `press`, on one that opens a
   popover, and on one framing a single text field (a composer's pill, the field's surface).
   Two such boxes in one `glassGroup` merge as a press brings them close.
+- A popover that isn't a menu, opened from a box with `backgroundMaterial="glass"` (not
+  `buttonStyle="glass"`), is UIKit's popover on iOS 26: it grows out of the box's glass, its
+  platter is its default surface, and with the keyboard up it lies over the keys. A
+  `popover="manual"` stays in the page.
 
 ## bar-buttons: the navigation bar's buttons, grouped or each in its own capsule
 names: bar button, bar-button, barbuttons, UIBarButtonItem, sharesBackground, headerRight, headerLeft, toolbarItem, ToolbarItem, ToolbarItemGroup

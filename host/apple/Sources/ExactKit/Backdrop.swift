@@ -167,6 +167,8 @@ extension NodeView {
               let radius = props["defaultSurfaceRadius"].flatMap(Double.init) else { return nil }
         #if os(iOS)
         if let id = props["id"], presenter?.carrying("contextPopover").contains(where: { $0.props["contextPopover"] == id }) == true { return nil }
+        // In UIKit's popover the platter is the surface (PopoverCardIOS.swift).
+        if PopoverLayer.containing(self)?.card != nil { return nil }
         #endif
         return CGFloat(radius)
     }

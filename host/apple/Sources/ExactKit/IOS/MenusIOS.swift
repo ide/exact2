@@ -44,8 +44,8 @@ final class MenuHost {
     /// and the web's are, out of its parent and back at its index after.
     private var agentOpen: [String: Lifted] = [:]
     var presented: [NodeView] { agentOpen.values.sorted { $0.order < $1.order }.compactMap(\.popover) }
-    /// The layers lifted over a dialog's sheet: outside the viewport and the route mounts.
-    var sheetLayers: [UIView] { agentOpen.values.sorted { $0.order < $1.order }.map(\.layer).filter { $0.sheet != nil && $0.superview != nil } }
+    /// The layers lifted over a dialog's sheet or into a card: outside the viewport and the route mounts.
+    var sheetLayers: [UIView] { agentOpen.values.sorted { $0.order < $1.order }.map(\.layer).filter { ($0.sheet != nil || $0.cardView != nil) && $0.superview != nil } }
     func logicalParent(of view: UIView) -> UIView? {
         #if os(iOS)
         if let parent = context.logicalParent(of: view) { return parent }
@@ -733,6 +733,7 @@ final class MenuHost {
         guard let presenter, let pop = entry.popover else { return }
         #if os(iOS)
         if entry.relay == nil { entry.relay = MountRelay(presenter, mount: entry.layer) }
+        if showsCard(pop, in: entry.layer, from: entry.source) { return }
         #endif
         entry.layer.mount(in: presenter)
         if pop.superview !== entry.layer { entry.layer.addSubview(pop) }
@@ -777,6 +778,9 @@ final class MenuHost {
         if let pop = entry.popover { presenter?.tellRegion(pop.id, nil, told: &entry.block) }
         coverClosed()
         entry.popover?.endEditing(true)
+        #if os(iOS)
+        entry.layer.card?.close()
+        #endif
         entry.layer.removeFromSuperview()
         guard let pop = entry.popover else { return }
         presenter?.popoverEvents.changed(pop, open: false)
@@ -910,7 +914,8 @@ final class MenuHost {
         guard ExactEnv.agentMode, let presenter else { return false }
         if node.isNativeButton { return false } // Native invokers and outside buttons take real UIKit touches.
         if !agentOpen.isEmpty {
-            return agentOpen.values.contains { entry in entry.source.flatMap { presenter.views[$0] }?.isNativeButton != true }
+            // A card is UIKit's popover, which a real touch reaches (PopoverCardIOS.swift).
+            return agentOpen.values.contains { entry in entry.layer.cardView == nil && entry.source.flatMap { presenter.views[$0] }?.isNativeButton != true }
         }
         // Under native presentation a closed popover is UIKit's to open.
         if !ExactEnv.agentPaints { return false }
@@ -973,7 +978,9 @@ final class MenuHost {
         }
         return nil
     }
-    func unmounted() { focus.reset(); resetConfirmation(); sheets.reset() }
+    /// A card, presented from the window rather than the view, closes with it
+    /// and gives back the keys it stood down (PopoverCardIOS.swift).
+    func unmounted() { focus.reset(); resetConfirmation(); sheets.reset(); for (name, entry) in agentOpen where entry.layer.cardView != nil { drop(name) } }
     var inTransition: Bool {
         if sheets.inTransition || pendingConfirmation != nil { return true }
         guard let owner = confirmation else { return false }

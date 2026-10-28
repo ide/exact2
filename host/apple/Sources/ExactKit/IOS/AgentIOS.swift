@@ -912,7 +912,7 @@ extension Agent {
     /// none itself. `v` may be a native view standing for a node (a
     /// grouped list's cell or accessory).
     func obscured(_ v: UIView, at p: CGPoint, hit: UIView) -> String? {
-        if let container = presenter.keyboardContainer,
+        if !presenter.keysStoodDown, let container = presenter.keyboardContainer,
            let top = presenter.keyboardGuideTop(in: container), p.y >= container.convert(CGPoint(x: 0, y: top), to: nil).y {
             return "its middle is under the software keyboard; dismiss it or scroll the target above it first (state shows keyboard.top)"
         }
