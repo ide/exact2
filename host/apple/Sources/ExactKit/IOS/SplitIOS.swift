@@ -178,6 +178,7 @@ final class SplitIOS: NSObject, UISplitViewControllerDelegate {
         if let route, let nav = made, !controller.isCollapsed, !collapsing {
             // A close still in its transition is superseded: its end must not empty the column.
             closing = nil
+            endSlide()
             inspector = nav
             // The column is the split's again after a collapse took it (`topColumnForCollapsing`).
             if controller.viewController(for: .inspector) !== nav { controller.setViewController(nav, for: .inspector) }
@@ -196,12 +197,18 @@ final class SplitIOS: NSObject, UISplitViewControllerDelegate {
             }
             return
         }
-        guard let nav = inspector, !nav.viewControllers.isEmpty else { return }
+        guard let nav = inspector, !nav.viewControllers.isEmpty else { return endSlide() }
         // Collapsing, the column goes with the split (`topColumnForCollapsing`).
-        if controller.isCollapsed || collapsing || controller.viewController(for: .inspector) !== nav { return nav.setViewControllers([], animated: false) }
-        // A close in its transition keeps the route's last pixels until it ends.
+        if controller.isCollapsed || collapsing || controller.viewController(for: .inspector) !== nav {
+            nav.setViewControllers([], animated: false)
+            return endSlide()
+        }
+        // A close in its transition keeps its route until it ends.
         guard closing == nil else { return }
-        if !controller.isShowing(.inspector) { return nav.setViewControllers([], animated: false) }
+        if !controller.isShowing(.inspector) {
+            nav.setViewControllers([], animated: false)
+            return endSlide()
+        }
         closes += 1
         let close = closes
         closing = close
@@ -211,6 +218,7 @@ final class SplitIOS: NSObject, UISplitViewControllerDelegate {
             guard let self, let nav, closing == close else { return }
             closing = nil
             nav.setViewControllers([], animated: false)
+            endSlide()
         }
         if let coordinator = controller.transitionCoordinator { coordinator.animate(alongsideTransition: nil) { _ in empty() } } else { empty() }
         #endif
@@ -229,6 +237,17 @@ final class SplitIOS: NSObject, UISplitViewControllerDelegate {
     /// so that an opening or a later close supersedes it.
     private var closing: Int?
     private var closes = 0
+
+    /// The views of the inspector's route a batch destroyed, live while its
+    /// column slides out (`NavigationHost.slideOutInspector`).
+    var sliding: Leaving?
+    /// The sliding route's views go: its column let it go.
+    func endSlide() {
+        guard let ended = sliding else { return }
+        sliding = nil
+        for member in ended.members { member.forget() }
+        ended.view.removeFromSuperview()
+    }
 
     private func same(_ next: [UIViewController]) -> Bool {
         detail.viewControllers.count == next.count && zip(detail.viewControllers, next).allSatisfy { $0 === $1 }
@@ -284,6 +303,8 @@ extension Presenter {
     package func sidebarSelection(_ list: UIView) -> UInt32? { navigation.sidebarSelection(list) }
     /// Whether a view is in a split's column whose ground is UIKit's: the sidebar or the inspector.
     package func onColumnGround(_ view: UIView) -> Bool { navigation.onColumnGround(view) }
+    /// Whether `id`'s view is the inspector's route's, or in it, live while its column slides out.
+    package func slidesOut(_ id: UInt32) -> Bool { navigation.split?.sliding?.members.contains { $0.id == id } == true }
 }
 
 extension NavigationHost {
@@ -400,6 +421,20 @@ extension NavigationHost {
         tell(a.filter { unshown[$0.0] == nil }, b.filter { unshown[$0.0] == nil })
     }
 
+    /// A batch destroys the route the inspector's column shows: its views
+    /// stay live while the column slides out, as UIKit keeps a hidden
+    /// column's, retired from the presenter as an exit retires a view
+    /// (`retire`). They go once the column has let the route go
+    /// (`SplitIOS.endSlide`): closed, emptied, or showing another route. A
+    /// snapshot of them lacked what UIKit draws live: the segmented
+    /// control's glass and the grouped rows' cards.
+    func slideOutInspector(_ batch: Batch) {
+        guard let split, let route = split.inspector?.topViewController as? RouteController,
+              batch.ops.contains(where: { $0.op == .destroy && $0.id == route.node.id }) else { return }
+        split.endSlide()
+        split.sliding = presenter.retire(route.node.id)
+    }
+
     /// The person closed the inspector's column: Back from its route, as a
     /// swipe down that closes its sheet is.
     func inspectorClosed() {
@@ -429,9 +464,10 @@ extension NavigationHost {
     }
 
     /// Whether `view` is in a split's column whose ground is UIKit's: the
-    /// list beside its detail (the sidebar), or the inspector.
+    /// list beside its detail (the sidebar), or the inspector, sliding out too.
     func onColumnGround(_ view: UIView) -> Bool {
         if showsAsSidebar(view) { return true }
+        if let sliding = split?.sliding?.view, view.isDescendant(of: sliding) { return true }
         guard let route = split?.inspecting?.viewIfLoaded else { return false }
         return view.isDescendant(of: route)
     }
@@ -461,6 +497,7 @@ extension NavigationHost {
     /// the containers that take them next (`reshape`).
     func retireSplit(releasing: Bool = false) {
         guard let split else { return }
+        split.endSlide()
         for nav in [split.list, split.detail] + [split.inspector].compactMap({ $0 }) {
             retireStack(nav)
             if releasing { nav.delegate = nil; nav.setViewControllers([], animated: false) }

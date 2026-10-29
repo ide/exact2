@@ -532,9 +532,9 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
     func prepare(_ batch: Batch) {
         checkOwned()
         presenter.elements.checkOwned()
-        for case let route as RouteController in [navigation?.topViewController, split?.inspector?.topViewController]
-        where batch.ops.contains(where: { $0.op == .destroy && $0.id == route.node.id }) {
-            route.freeze()
+        guard let top = navigation?.topViewController as? RouteController else { return }
+        if batch.ops.contains(where: { $0.op == .destroy && $0.id == top.node.id }) {
+            top.freeze()
         }
     }
 

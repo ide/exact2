@@ -220,8 +220,10 @@ final class GroupedListHost: GroupedLists {
         #endif
     }
 
-    /// Before a batch: every carried row back where the presenter put it.
-    func prepare() { for list in lists.values { list.restore() } }
+    /// Before a batch: every carried row back where the presenter put it,
+    /// but a list a split's inspector column slides out, which keeps its
+    /// cells as they were until it goes (`Presenter.slidesOut`).
+    func prepare() { for (id, list) in lists where !presenter.slidesOut(id) { list.restore() } }
 
     /// After a batch. `changed` is the touched views and their ancestors; a
     /// list outside it keeps its model and only carries its rows again.
@@ -243,7 +245,7 @@ final class GroupedListHost: GroupedLists {
             lists[owner.id] = list
             list.update(model)
         }
-        for id in Array(lists.keys) where !live.contains(id) { lists.removeValue(forKey: id)?.remove(); reads[id] = nil }
+        for id in Array(lists.keys) where !live.contains(id) && !presenter.slidesOut(id) { lists.removeValue(forKey: id)?.remove(); reads[id] = nil }
         tell()
     }
 
