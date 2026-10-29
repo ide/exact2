@@ -1358,7 +1358,7 @@ package final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, U
         guard let sv = scroll else { return }
         // Ending where its last edge is drawn, from this box's place on the
         // pixel grid, so the furthest offset is a whole pixel and reaches it (`PixelGridIOS.swift`).
-        let s = presenter?.gridScale ?? 1, o = grid?.origin ?? .zero
+        let s = presenter?.gridScale ?? 1, o = grid?.origin ?? .zero, content = presenter?.collections.scrollContent(self) ?? self.content
         let size = CGSize(width: sv.scrollsX ? max(PixelGrid.length(content.width, from: o, vertical: false, scale: s), sv.bounds.width) : sv.bounds.width,
                           height: sv.scrollsY ? max(PixelGrid.length(content.height, from: o, vertical: true, scale: s), scrollFloor(sv)) : sv.bounds.height)
         if sv.contentSize != size { sv.contentSize = size }

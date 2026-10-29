@@ -439,11 +439,12 @@ package final class CollectionHost {
             // An absolute correction planned since the reader's drag began is
             // an intent (a scroll into view, the end a list follows): it stops
             // the fling the drag left, whose travel would otherwise cancel it,
-            // as a browser's scroll stops momentum. It lands from the next
-            // report. One planned before the drag is the reader's to override.
+            // as a browser's scroll stops momentum, though not a rubber band
+            // already headed where it goes. It lands from the next report.
+            // One planned before the drag is the reader's to override.
             if let correction = entry.snapshot.correction, correction.from == nil, correction.sequence >= entry.cursor.touchedAt,
                entry.cursor.owes(revision: entry.snapshot.revision) {
-                stopMomentum(view)
+                stopMomentum(view, toward: correction.offset)
             }
             if let correction = entry.snapshot.correction, correction.from != nil {
                 // Rows before the anchor changed size in this batch: the

@@ -92,9 +92,17 @@ extension CollectionHost {
         node.layoutIfNeeded()
         return [Double(scroll.adjustedContentInset.top - node.pageBand.top), Double(scroll.adjustedContentInset.left)]
     }
-    /// A fling the finger has left stops where it is.
-    func stopMomentum(_ id: UInt32) {
-        guard let scroll = presenter?.views[id]?.scroll, scroll.isDecelerating, !scroll.isTracking else { return }
+    /// A fling the finger has left stops where it is, for a correction to
+    /// `top`. UIKit's spring back from past an edge to that same edge goes
+    /// on: a reader who pulled past the end a list follows is brought back
+    /// by the platform's rubber band, which lands where the correction does.
+    func stopMomentum(_ id: UInt32, toward top: Double) {
+        guard let node = presenter?.views[id], let scroll = node.scroll, scroll.isDecelerating, !scroll.isTracking else { return }
+        let horizontal = entries[id]?.snapshot.horizontal ?? false
+        let (target, reach) = destination(node, scroll, top: top, content: node.contentBox(), insets: scroll.adjustedContentInset, horizontal: horizontal)
+        let at = horizontal ? scroll.contentOffset.x : scroll.contentOffset.y, to = horizontal ? target.x : target.y
+        if at > reach.upperBound, to >= reach.upperBound - 0.5 { return }
+        if at < reach.lowerBound, to <= reach.lowerBound + 0.5 { return }
         scroll.setContentOffset(scroll.contentOffset, animated: false)
     }
     /// The port back at `top` (`geometry`'s offset), within what it can
@@ -172,16 +180,30 @@ extension CollectionHost {
     }
     /// The content size the list's extent needs.
     private func fit(_ node: NodeView, _ scroll: UIScrollView, extent: Double) {
-        let content = node.contentBox()
-        if entries[node.id]?.snapshot.horizontal ?? false {
-            let right = node.layoutBounds.width - content.maxX
-            let width = max(scroll.bounds.width, PixelGrid.length(max(CGFloat(extent) + content.minX + right, node.content.width), from: node.grid?.origin ?? .zero, vertical: false, scale: presenter?.gridScale ?? 1))
+        let horizontal = entries[node.id]?.snapshot.horizontal ?? false
+        let along = length(node, extent: extent, horizontal: horizontal)
+        if horizontal {
+            let width = max(scroll.bounds.width, PixelGrid.length(along, from: node.grid?.origin ?? .zero, vertical: false, scale: presenter?.gridScale ?? 1))
             if scroll.contentSize.width != width { scroll.contentSize.width = width }
         } else {
-            let bottom = node.layoutBounds.height - content.maxY
-            let height = max(node.scrollFloor(scroll), PixelGrid.length(max(CGFloat(extent) + content.minY + bottom, node.content.height), from: node.grid?.origin ?? .zero, vertical: true, scale: presenter?.gridScale ?? 1))
+            let height = max(node.scrollFloor(scroll), PixelGrid.length(along, from: node.grid?.origin ?? .zero, vertical: true, scale: presenter?.gridScale ?? 1))
             if scroll.contentSize.height != height { scroll.contentSize.height = height }
         }
+    }
+    /// A list's scroll content along its axis: its rows' extent inside the
+    /// content box's padding, or what is laid out where that is longer.
+    private func length(_ node: NodeView, extent: Double, horizontal: Bool) -> CGFloat {
+        let content = node.contentBox()
+        if horizontal { return max(CGFloat(extent) + content.minX + node.layoutBounds.width - content.maxX, node.content.width) }
+        return max(CGFloat(extent) + content.minY + node.layoutBounds.height - content.maxY, node.content.height)
+    }
+    /// The content a list's scroller is sized by (`NodeView.fitScroll`), as
+    /// long as `fit` makes it: a geometry replay's shorter laid-out content
+    /// would otherwise cut the list's end, and the cut clamps a rubber band.
+    func scrollContent(_ node: NodeView) -> CGSize? {
+        guard let entry = entries[node.id] else { return nil }
+        let horizontal = entry.snapshot.horizontal, along = length(node, extent: entry.snapshot.extent, horizontal: horizontal)
+        return horizontal ? CGSize(width: along, height: node.content.height) : CGSize(width: node.content.width, height: along)
     }
     /// A smooth correction's target that arrived while one was animating.
     func landAnimation(_ id: UInt32) {
@@ -283,17 +305,7 @@ extension CollectionHost {
         // stops a fling first (`stopMomentum`). The next native offset
         // notification supplies the continuing intent.
         guard !scroll.isTracking, !scroll.isDragging, !scroll.isDecelerating else { return }
-        var target: CGPoint
-        if horizontal {
-            let maximum = max(-insets.left, scroll.contentSize.width + insets.right - scroll.bounds.width)
-            target = CGPoint(x: min(maximum, max(-insets.left, CGFloat(top) + content.minX - insets.left)),
-                y: scroll.contentOffset.y)
-        } else {
-            let maximum = max(-insets.top, scroll.contentSize.height + insets.bottom - scroll.bounds.height)
-            target = CGPoint(x: scroll.contentOffset.x,
-                y: min(maximum, max(-insets.top, CGFloat(top) + content.minY - insets.top + node.pageBand.top)))
-        }
-        target = Self.reachable(target, in: scroll)
+        let target = destination(node, scroll, top: top, content: content, insets: insets, horizontal: horizontal).target
         // A smooth correction is UIKit's scroll animation (LLP 1070.000
         // §6.2): the window is already built at the destination; rows in
         // between are not (§11 declares it). Under the agent's frozen clock
@@ -319,6 +331,19 @@ extension CollectionHost {
         }
         guard scroll.contentOffset != target else { return }
         scroll.setContentOffset(target, animated: false)
+    }
+    /// Where a correction to `top` puts the port, and the offsets along the
+    /// list's axis it is clamped to.
+    private func destination(_ node: NodeView, _ scroll: UIScrollView, top: Double, content: CGRect, insets: UIEdgeInsets,
+                             horizontal: Bool) -> (target: CGPoint, reach: ClosedRange<CGFloat>) {
+        if horizontal {
+            let reach = -insets.left...max(-insets.left, scroll.contentSize.width + insets.right - scroll.bounds.width)
+            let x = min(reach.upperBound, max(reach.lowerBound, CGFloat(top) + content.minX - insets.left))
+            return (Self.reachable(CGPoint(x: x, y: scroll.contentOffset.y), in: scroll), reach)
+        }
+        let reach = -insets.top...max(-insets.top, scroll.contentSize.height + insets.bottom - scroll.bounds.height)
+        let y = min(reach.upperBound, max(reach.lowerBound, CGFloat(top) + content.minY - insets.top + node.pageBand.top))
+        return (Self.reachable(CGPoint(x: scroll.contentOffset.x, y: y), in: scroll), reach)
     }
     /// A row's frame in the scroll view, as a range along the list's axis.
     private func span(_ view: UIView, in scroll: UIScrollView, horizontal: Bool) -> ClosedRange<CGFloat> {
