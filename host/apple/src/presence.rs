@@ -346,9 +346,10 @@ impl<D: DataSource> Host<D> {
 
     /// Every presentation value the engine changed, as `present` ops, and the
     /// exits that ended. At boot, and for a view the batch creates, only
-    /// values that are not the property's identity: the presenter starts
-    /// every view at identity (a reused one is reset to it), and the four
-    /// motion rows are never in the style dictionary. A list row's views were
+    /// values that are not the property's identity, or that put back one the
+    /// batch already presented: the presenter starts every view at identity
+    /// (a reused one is reset to it), and the four motion rows are never in
+    /// the style dictionary. A list row's views were
     /// four identity ops each, about half of what a fill batch carried.
     pub(super) fn present(&mut self, batch: &mut Batch, boot: bool) {
         self.start_frame();
@@ -449,7 +450,7 @@ impl<D: DataSource> Host<D> {
             Some(identity) => identity == value,
             None => values == [0.0; 4],
         };
-        if (boot && identity) || (identity && batch.creates(view)) {
+        if identity && (boot || batch.creates(view)) && !batch.presents(view, property.name()) {
             return;
         }
         if self.inline_runs.contains_key(&view) || self.svg.presented(view) {
@@ -479,3 +480,7 @@ fn layout_step<D: DataSource>(runner: &exact_runner::Runner<D>, to: f64) -> f64 
     let due = runner.timer_due_ms().unwrap_or(to);
     due.max(runner.now_ms()).min(to)
 }
+
+#[cfg(test)]
+#[path = "presence_tests.rs"]
+mod tests;

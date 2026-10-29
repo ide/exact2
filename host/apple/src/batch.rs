@@ -27,6 +27,9 @@ pub struct Batch {
     /// The views this batch creates: each starts at its presentation's
     /// identity (`Host::present`).
     created: std::collections::HashSet<u32>,
+    /// The properties this batch presents of a view it creates, which a
+    /// later identity value must restore (`presents`).
+    presented: std::collections::HashSet<(u32, &'static str)>,
     /// What moves changes place or size (`Engine::spatial`): the display
     /// link asks for the panel's full rate (LLP 1061 D4).
     pub spatial: bool,
@@ -792,7 +795,8 @@ impl Batch {
 
     /// `{"op":"present","id":…,"property":…,"x":…,"y":…}` — a motion
     /// property's presentation value this frame (`y` only for `translate`).
-    pub fn present(&mut self, id: u32, property: &str, x: f64, y: f64) {
+    pub fn present(&mut self, id: u32, property: &'static str, x: f64, y: f64) {
+        self.note_present(id, property);
         self.ops.push(format!(
             "{{\"op\":\"present\",\"id\":{id},\"property\":\"{property}\",\"x\":{x},\"y\":{y}}}"
         ));
@@ -801,10 +805,24 @@ impl Batch {
     /// `{"op":"present","id":…,"property":"layout","x":…,"y":…,"w":…,"h":…}`
     /// — a layout transition's offset from the laid-out box and its size's
     /// difference from it (LLP 1063).
-    pub fn present4(&mut self, id: u32, property: &str, [x, y, w, h]: [f64; 4]) {
+    pub fn present4(&mut self, id: u32, property: &'static str, [x, y, w, h]: [f64; 4]) {
+        self.note_present(id, property);
         self.ops.push(format!(
             "{{\"op\":\"present\",\"id\":{id},\"property\":\"{property}\",\"x\":{x},\"y\":{y},\"w\":{w},\"h\":{h}}}"
         ));
+    }
+
+    fn note_present(&mut self, id: u32, property: &'static str) {
+        if self.created.contains(&id) {
+            self.presented.insert((id, property));
+        }
+    }
+
+    /// Whether this batch already presents `property` of `id`, a view it
+    /// creates: a value set and then put back in one batch (a resize
+    /// round's commit after the one that made the view) is sent back too.
+    pub fn presents(&self, id: u32, property: &'static str) -> bool {
+        self.presented.contains(&(id, property))
     }
 
     /// `{"op":"svg","id":…,"scene":{…}}`: an `svg`'s whole scene (LLP 1055 D4).
