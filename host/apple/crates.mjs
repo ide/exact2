@@ -11,14 +11,17 @@
  * Nothing here decides whether a unit may be used: Cargo does, by the unit's
  * own fingerprint (compiler, profile, features, target, every crate under it)
  * and the order of its files' times, as it would had the directory been
- * moved. So what is kept is always one target directory's units, whole and
- * with their times (a generation), never units of two directories together:
- * two builds of one unit are not interchangeable to the units compiled
- * against them (a crate that includes a file from its build script's
- * directory has that directory in its hash), and only the times say which
- * were built together. A directory that started from a generation, or made
- * the first one, makes the next when it has compiled a registry unit the
- * newest lacks; any other directory keeps nothing.
+ * moved. The fingerprint does not see the Apple deployment targets, which
+ * reach rustc in the environment, and a unit compiled for iOS 26 links into
+ * an app for iOS 17 only with a warning `build.mjs` refuses, so each set of
+ * targets keeps its own store. What is kept is always one target directory's
+ * units, whole and with their times (a generation), never units of two
+ * directories together: two builds of one unit are not interchangeable to
+ * the units compiled against them (a crate that includes a file from its
+ * build script's directory has that directory in its hash), and only the
+ * times say which were built together. A directory that started from a
+ * generation, or made the first one, makes the next when it has compiled a
+ * registry unit the newest lacks; any other directory keeps nothing.
  *
  * A kept unit is of a registry package no version of which is a path crate
  * or has one under it: a path crate's unit names its checkout, so it and all
@@ -90,7 +93,9 @@ export function keptCrates({ root, env, profile }) {
   if (typeof Bun === 'undefined') return idle;
   const channel = env.RUSTUP_TOOLCHAIN ?? /channel\s*=\s*"([^"]+)"/.exec(text(resolve(root, 'rust-toolchain.toml')) ?? '')?.[1];
   if (!channel || !/^[\w.+-]+$/.test(channel)) return idle;
-  const store = resolve(env.HOME ?? homedir(), '.cache/exact/apple-crates', `${channel}-${profile}`);
+  const targets = ['MACOSX_DEPLOYMENT_TARGET', 'IPHONEOS_DEPLOYMENT_TARGET', 'TVOS_DEPLOYMENT_TARGET'].map((name) => env[name] ?? '').join('-');
+  if (!/^[\d.-]*$/.test(targets)) return idle;
+  const store = resolve(env.HOME ?? homedir(), '.cache/exact/apple-crates', `${channel}-${profile}-${targets}`);
   const generations = (kind) => names(resolve(store, kind)).filter(name => name.startsWith('gen-')).sort();
   // The host's profile directory, and each Apple triple's beside it.
   const profileDirs = (dir) => [profile, ...names(dir).filter(name => /^[a-z0-9_]+-apple-[a-z0-9-]+$/.test(name)).map(triple => `${triple}/${profile}`)].filter(d => existsSync(resolve(dir, d, '.fingerprint')));
