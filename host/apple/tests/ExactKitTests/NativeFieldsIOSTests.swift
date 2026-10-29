@@ -297,6 +297,28 @@ final class NativeFieldsIOSTests: XCTestCase {
         markdown.applyFieldContent(["rect": [12.0, 6.0, 300.0, 28.0]])
         XCTAssertEqual(try XCTUnwrap(markdown.textArea).frame, markdown.contentBox(), "the Markdown editor's content box")
     }
+    /// UIKit rounds a text view's content height up to a whole point: one line filling a chat composer's growing field
+    /// (40.333 points with its padding) measured 41, so a finger dragged its text, rubber-banding, in a field it
+    /// fitted. Content within a point of the box fits it, its text at the top; text past the box still scrolls.
+    func testATextareaWhoseTextFitsItsBoxDoesNotScroll() throws {
+        let session = ExactApp.shared.makeSession(label: "textarea-fit")
+        defer { session.destroy() }
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 400, height: 400))
+        defer { window.isHidden = true }
+        let area = NodeView(id: 1, kind: "textarea", presenter: session.presenter)
+        window.addSubview(area)
+        area.frame = CGRect(x: 0, y: 0, width: 300, height: 121.0 / 3)
+        area.applyStyle(["appearance": .string("none"), "font_size": .number(17), "line_height": .string("20.287px")])
+        area.applyFieldContent(["rect": [16.0, 10.0231, 279.0, 20.287]])
+        let view = try XCTUnwrap(area.textArea)
+        view.text = "Hello"
+        view.layoutIfNeeded()
+        XCTAssertLessThanOrEqual(view.contentSize.height, view.bounds.height + 0.001, "one line fits its box: \(view.contentSize) in \(view.bounds)")
+        XCTAssertEqual(view.contentOffset.y, -view.adjustedContentInset.top, "its text at the top")
+        view.text = (1...12).map { "Line \($0)" }.joined(separator: "\n")
+        view.layoutIfNeeded()
+        XCTAssertGreaterThan(view.contentSize.height, view.bounds.height + 100, "text past the box still scrolls")
+    }
     func testRegisteredFontIsThePreferredBodyFontAndChangesWithDynamicType() {
         let cache = FieldChromeCache()
         let engine = TextEngine.pair(resolve: { _ in nil })

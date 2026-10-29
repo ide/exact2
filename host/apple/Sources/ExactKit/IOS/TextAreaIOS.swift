@@ -188,6 +188,31 @@ package final class TextArea: UITextView {
     var atomElements: [AtomElement] = []
     var atomTap: (AnyObject, UITapGestureRecognizer)?
     var atomLook: (any UITraitChangeRegistration)?
+    /// UIKit rounds a text view's content height up to a whole point, so text
+    /// that fills its box (a growing field's line, 40.333 points with its
+    /// padding) measured 41 and the field scrolled by the difference. Content
+    /// within a point of the box is the box: as a browser's textarea, it
+    /// scrolls only once its text overflows (a `field-sizing: content` field
+    /// at its `max-height`).
+    package override var contentSize: CGSize {
+        get { super.contentSize }
+        set { super.contentSize = fitted(newValue) }
+    }
+    package override func layoutSubviews() {
+        super.layoutSubviews()
+        // The box grew or shrank under content UIKit had already measured
+        let fit = fitted(contentSize)
+        if fit != contentSize { super.contentSize = fit }
+        // Text that fits sits where layout put it, not where a scroll left it
+        let top = -adjustedContentInset.top
+        if fit.height <= bounds.height, contentOffset.y != top, !isTracking, !isDecelerating {
+            contentOffset.y = top
+        }
+    }
+    private func fitted(_ size: CGSize) -> CGSize {
+        guard size.height > bounds.height, size.height < bounds.height + 1 else { return size }
+        return CGSize(width: size.width, height: bounds.height)
+    }
     // Typed text never takes a link's marks from the character before the
     // caret (its closing parenthesis, or its `[`).
     package override var typingAttributes: [NSAttributedString.Key: Any] {
