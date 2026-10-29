@@ -4,15 +4,19 @@ import QuartzCore
 import UIKit
 
 /// A recording's presentation probe: transparent Metal layers of one point
-/// in the session's window, one of which presents a drawable, cleared off
-/// the main thread, with the transaction of each UI update one is ready for,
-/// so its drawable's `presentedTime` says when the frame holding it reached
-/// the screen, whatever made it late: a commit past its deadline or the
-/// render server missing its own. Plain layers, not views, they take no
-/// touches, are no accessibility elements and change no layout or safe
-/// area. On the simulator, whose Metal has no `presentedTime` or
-/// `addPresentedHandler` (MTLDrawable.h in its SDKs), it presents but hears
-/// nothing, and its frames wait until it goes.
+/// in the session's window, one of which presents a drawable just before
+/// each UI update it has one ready for commits, so its `presentedTime` says
+/// when the composite holding that update reached the screen: late or never
+/// when the render server missed its frame. The drawable is cleared and its
+/// clear completed off the main thread, and it presents on its own, not with
+/// the transaction (`presentsWithTransaction`), which made every commit wait
+/// on Metal: on an iPhone Duo simulator a commit took 1.5 ms with it and
+/// 0.12 ms without, and presenting this way takes 0.03 ms. A commit past its
+/// deadline can reach the screen after the drawable; `overrun` sees that. Plain layers, not views, they take no touches, are no
+/// accessibility elements and change no layout or safe area. On the
+/// simulator, whose Metal has no `presentedTime` or `addPresentedHandler`
+/// (MTLDrawable.h in its SDKs), it presents but hears nothing, and its
+/// frames wait until it goes.
 final class PresentationProbe {
     /// Two layers: with one, the probe heard from about seven in ten frames
     /// of a 120 Hz scroll on an iPhone, as its three drawables, each held
@@ -39,7 +43,6 @@ final class PresentationProbe {
             layer.pixelFormat = .bgra8Unorm
             layer.framebufferOnly = true
             layer.isOpaque = false
-            layer.presentsWithTransaction = true
             layer.allowsNextDrawableTimeout = true
             layer.drawableSize = CGSize(width: 1, height: 1)
             layer.frame = CGRect(x: 0, y: 0, width: 1, height: 1)
@@ -64,9 +67,8 @@ final class PresentationProbe {
 
     /// Fetch and clear the next drawable off the main thread, where
     /// `nextDrawable` can wait for frames while every drawable is queued or
-    /// on screen (UIKit's advice in UIUpdateActionPhase.h), and the clear
-    /// waits until it is scheduled, as a layer that presents with its
-    /// transaction needs before `present`.
+    /// on screen (UIKit's advice in UIUpdateActionPhase.h), until its clear
+    /// is complete, so the render server waits on no GPU work of the probe's.
     private func fetch(_ i: Int) {
         guard lock.withLock({ () -> Bool in
             guard !fetchRunning[i], ready[i] == nil else { return false }
@@ -89,11 +91,11 @@ final class PresentationProbe {
         pass.colorAttachments[0].storeAction = .store
         buffer.makeRenderCommandEncoder(descriptor: pass)?.endEncoding()
         buffer.commit()
-        buffer.waitUntilScheduled()
+        buffer.waitUntilCompleted()
         return drawable
     }
 
-    /// Present a drawable made ready with the UI update now committing,
+    /// Present a drawable as the UI update now committing begins its commit,
     /// the first layer's when both have one; the number its report will
     /// carry, or nil when no drawable was ready (the main thread never waits
     /// for one).
