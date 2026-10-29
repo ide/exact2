@@ -273,6 +273,30 @@ final class NativeFieldsIOSTests: XCTestCase {
         area.applyFieldContent(["rect": [12.0, 18.0, 312.0, 62.0]])
         XCTAssertEqual(view.layer.cornerRadius, FieldChromeCache.textareaRadius, "out of the row, the extended field look")
     }
+    /// A textarea's editor spans its border box, its padding the text's inset, as a browser's textarea takes a tap
+    /// anywhere in its box: a tap in the padding (the edge of a chat composer's pill) is the editor's, so it focuses.
+    /// The Markdown editor keeps the content box its decorations are laid in.
+    func testATextareasEditorSpansItsBorderBoxSoATapInItsPaddingIsItsOwn() throws {
+        let session = ExactApp.shared.makeSession(label: "textarea-padding")
+        defer { session.destroy() }
+        let area = NodeView(id: 1, kind: "textarea", presenter: session.presenter)
+        area.bounds = CGRect(x: 0, y: 0, width: 324, height: 40)
+        area.applyStyle(["appearance": .string("none")])
+        area.applyFieldContent(["rect": [12.0, 6.0, 300.0, 28.0]])
+        let view = try XCTUnwrap(area.textArea)
+        XCTAssertEqual(view.frame, area.bounds, "the border box")
+        XCTAssertEqual(view.textContainerInset, UIEdgeInsets(top: 6, left: 12, bottom: 6, right: 12), "the padding, the text where layout put it")
+        for point in [CGPoint(x: 4, y: 20), CGPoint(x: 320, y: 3)] {
+            let hit = try XCTUnwrap(area.hitTest(point, with: nil), "a point in the padding, \(point)")
+            XCTAssertTrue(hit === view || hit.isDescendant(of: view), "the editor's, not \(type(of: hit)), at \(point)")
+        }
+        let markdown = NodeView(id: 2, kind: "textarea", presenter: session.presenter)
+        markdown.bounds = CGRect(x: 0, y: 0, width: 324, height: 40)
+        markdown.applyProps(set: ["markup": "markdown"], clear: [])
+        markdown.applyStyle(["appearance": .string("none")])
+        markdown.applyFieldContent(["rect": [12.0, 6.0, 300.0, 28.0]])
+        XCTAssertEqual(try XCTUnwrap(markdown.textArea).frame, markdown.contentBox(), "the Markdown editor's content box")
+    }
     func testRegisteredFontIsThePreferredBodyFontAndChangesWithDynamicType() {
         let cache = FieldChromeCache()
         let engine = TextEngine.pair(resolve: { _ in nil })

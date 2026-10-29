@@ -183,6 +183,28 @@ final class SplitIOSTests: XCTestCase {
         }
     }
 
+    /// LLP 1127 D7: a plain list beside the detail is UIKit's plain sidebar list (`.sidebarPlain`), with lines
+    /// between its rows, where a grouped one is the sidebar list, which draws none.
+    func testASidebarsPlainListHasLinesBetweenItsRows() throws {
+        ExactGroupedLists.install()
+        let session = try boot("SPLIT_ROWS", size: CGSize(width: 1100, height: 800))
+        let navigation = session.presenter.navigation, agent = Agent(session: session)
+        until("a split") { navigation.split != nil && !agent.nativeInFlight() }
+        let split = try XCTUnwrap(navigation.split)
+        split.controller.traitOverrides.horizontalSizeClass = .regular
+        until("expanded") { !split.controller.isCollapsed && !agent.nativeInFlight() }
+        let host = try XCTUnwrap(session.presenter.groupedLists as? GroupedListHost)
+        let list = try XCTUnwrap(host.lists[try node(session, "books").id])
+        until("the list is in the sidebar") { list.sidebar }
+        func lines(_ v: UIView) -> [UIView] {
+            (String(describing: type(of: v)).contains("Separator") && !v.isHidden && v.alpha > 0 ? [v] : []) + v.subviews.flatMap(lines)
+        }
+        until("a line between its rows") {
+            list.collection.layoutIfNeeded()
+            return !lines(list.collection).isEmpty
+        }
+    }
+
     private final class RowTouch: UITouch {
         let target: UIView, point: CGPoint
         init(_ target: UIView, at point: CGPoint) { self.target = target; self.point = point; super.init() }
