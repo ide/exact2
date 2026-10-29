@@ -109,6 +109,11 @@ extension Agent {
             var r = b, at = v.superview
             while let cur = at, !r.isNull {
                 if cur.clipsToBounds || cur.layer.masksToBounds { r = r.intersection(cur.convert(cur.bounds, to: nil)) }
+                // What a scroller carries into its page band (LLP 1130 D3, LLP 1131 D2), under the app's control bars (a
+                // chat's composer) or the screen's edge past its box, is covered there, as under UIKit's bars below
+                if let sv = cur as? UIScrollView, let owner = sv.superview as? NodeView, owner.scrollView === sv, owner.pageBand != .zero {
+                    r = r.intersection(sv.convert(sv.bounds, to: nil).inset(by: owner.pageBand))
+                }
                 at = cur.superview
             }
             for bar in bars where !r.isNull && !v.isDescendant(of: bar.view) {

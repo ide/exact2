@@ -183,6 +183,29 @@ final class PageEdgesIOSTests: XCTestCase {
                        "the newest message ends at the composer's margin")
     }
 
+    /// What a list carries under its composer, its band past its box (LLP 1131 D2), is covered there, as under UIKit's
+    /// bars: `check` presents none of it, so the composer's field overlaps no card scrolled under it (`verify ios` at the
+    /// largest text size reported the chat template's balloons under its composer).
+    func testCheckPresentsNothingAListCarriesUnderItsComposer() throws {
+        guard UIApplication.shared.connectedScenes.first is UIWindowScene else { throw missing("scene", "the bars and the safe area are a scene window's") }
+        guard #available(iOS 26.0, *) else { throw XCTSkip("control bars are iOS 26's, where UIKit draws the edge effect over them") }
+        let (session, _) = try fixture("CONTROL_BARS")
+        session.presenter.press(try node(session, "pick-chat").id)
+        let list = try node(session, "list")
+        until("the composer is a bar over the list") { list.pageBand.bottom > 0 && (try? node(session, "composer")) != nil }
+        let edge = list.convert(list.bounds, to: nil).maxY
+        let items = try XCTUnwrap(Agent(session: session).check([:])["items"] as? [[String: Any]])
+        let cards = items.filter { ($0["text"] as? String)?.hasPrefix("Card ") == true }
+        let box = { (item: [String: Any]) in (y: item["y"] as? Double ?? 0, h: item["h"] as? Double ?? 0) }
+        let under = cards.filter { box($0).y >= edge - 0.5 }, across = cards.filter { box($0).y < edge - 0.5 && box($0).y + box($0).h > edge + 0.5 }
+        XCTAssertFalse(under.isEmpty, "a card lies under the composer, below the list's box at \(edge): \(cards)")
+        for card in under { XCTAssertEqual((card["vis"] as? [String: Any])?["h"] as? Double, 0, "nothing of it is presented: \(card)") }
+        for card in across {
+            let vis = try XCTUnwrap(card["vis"] as? [String: Any], "\(card)")
+            XCTAssertEqual((vis["y"] as? Double ?? 0) + (vis["h"] as? Double ?? 0), edge, accuracy: 0.5, "presented down to the band: \(card)")
+        }
+    }
+
     func testScrollTopIsKeptWhenTheBandGoes() throws {
         guard UIApplication.shared.connectedScenes.first is UIWindowScene else { throw missing("scene", "the status bar and the safe area are a scene window's") }
         let (session, view) = try fixture()
