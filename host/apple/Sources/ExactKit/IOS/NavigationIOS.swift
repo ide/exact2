@@ -794,6 +794,9 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
         let owners: [UINavigationController?] = (primaryHeld != nil ? [nil] : [primaryNavigation].compactMap { $0 }) + presentedNavigations
         for index in 0...common where index < owners.count {
             if index == 0, let split, primaryHeld == nil {
+                // An inspector's column the stack no longer shows closes first: UIKit lays the
+                // detail out once, where the columns end, not beside the column and again as it goes.
+                if inspecting == nil, split.inspecting != nil, mounted.count <= common { placeInspector(nil) }
                 let animated = owners.count == 1 && mounted.count == boundaries.count && !ExactEnv.agentFreezes && !unanimated && split.controller.view.window != nil
                 syncSplit(split, Array(wanted[parts[0]]), animated: animated)
                 split.controller.view.layoutIfNeeded()

@@ -234,7 +234,7 @@ extension NavigationHost {
         for id in deliveredOwners.keys where ownerValues[id] == nil && presenter.views[id] != nil { owners.append((id, nil)) }
         deliveredOwners = ownerValues
         guard !changes.isEmpty || !owners.isEmpty else { return }
-        // An inspector's column coming in: its route's are told first, still (`tellStill`).
+        // A route no frame has shown is told first, still (`tellStill`).
         tellStill(changes, owners) { if !$0.isEmpty || !$1.isEmpty { presenter.onCovers?($0, $1) } }
     }
 

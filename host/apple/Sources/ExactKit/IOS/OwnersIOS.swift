@@ -344,7 +344,7 @@ final class OwnerBlocks {
         for route in split.under { shown[route.node.id] = .under }
         let changes = Set(toldShown.keys).union(shown.keys).filter { (toldShown[$0] != shown[$0] || given.contains($0)) && (now[$0] != nil || shown[$0] != nil) }.map { ($0, shown[$0] ?? .inStack) }
         toldShown = shown
-        // An inspector's column coming in: its route's block is told first, still (`tellStill`).
+        // A route no frame has shown is told first, still (`tellStill`).
         var untold = changes
         presenter.navigation.tellStill(blocks, placements) { blocks, placements in
             if !blocks.isEmpty || !placements.isEmpty || !untold.isEmpty {

@@ -399,6 +399,38 @@ final class SplitIOSTests: XCTestCase {
         XCTAssertEqual(notes.frame.width, wide.width, accuracy: 0.5)
     }
 
+    /// A route that a selection shows while UIKit moves the columns appears
+    /// where it is laid out, as a hand-built screen's new views do. Laid out
+    /// as it was made and again inside the columns' animation, before any
+    /// frame showed it, it flew from the first layout to the second: the
+    /// Landmarks port's Collections grid, chosen on an iPhone Duo as the
+    /// inspector's column closed and the list came back beside the detail.
+    /// An animated resize of the split stands in for the columns' animation
+    /// here. Views that already showed move with it (the next test, and
+    /// `testTheInspectorsColumnMovesWithTheDetailAndKeepsItsRoute`).
+    func testARouteShownAsTheColumnsMoveAppearsWhereItIsLaidOut() throws {
+        let session = try boot(size: CGSize(width: 951, height: 669))
+        let navigation = session.presenter.navigation, agent = Agent(session: session)
+        until("a split") { navigation.split != nil && !agent.nativeInFlight() }
+        let split = try XCTUnwrap(navigation.split)
+        split.controller.traitOverrides.horizontalSizeClass = .regular
+        split.controller.preferredSplitBehavior = .tile
+        until("expanded") { !split.controller.isCollapsed && !agent.nativeInFlight() }
+        XCTAssertNil(agent.tap(["id": Int(try node(session, "row-a").id)])["error"])
+        until("the book is in the detail") { split.shown.count == 2 && !agent.nativeInFlight() }
+        let view = try XCTUnwrap(split.controller.view), wide = view.frame
+        // In one turn: the row's route is made and laid out, and the columns resize in an animation.
+        session.presenter.press(try node(session, "row-c").id)
+        let figure = try node(session, "chapter-figure"), first = figure.frame
+        UIView.animate(withDuration: 0.5) {
+            view.frame.size.width = wide.width - 200
+            view.layoutIfNeeded()
+        }
+        XCTAssertNotEqual(figure.frame, first, "laid out again inside the animation, before a frame showed it")
+        XCTAssertEqual(Self.moving(try node(session, "chapter-page").layer), [], "the new route's views and their pixels appear where they are laid out")
+        XCTAssertNotNil(Self.longest(view.layer), "the columns move")
+    }
+
     /// A paragraph whose padding follows its route's safe area moves with
     /// the content around it when an animation UIKit has open changes that
     /// safe area. Painted again, its words showed at their end place at once:
@@ -558,6 +590,64 @@ final class SplitIOSTests: XCTestCase {
         RunLoop.main.run(until: Date().addingTimeInterval(0.3)) // the syncs the expansion starts
         XCTAssertEqual(session.presenter.modals.routes.map(\.node), [info], "the sheet keeps the route")
         XCTAssertTrue(info.window != nil, "and shows it")
+    }
+
+    /// LLP 1127 D14 on the Landmarks port's iPhone Duo: with the inspector
+    /// open (which hides the list) and the list shown over the detail, a
+    /// row opens another route in the detail, and UIKit closes the
+    /// inspector's column and puts the list back beside the detail in its
+    /// animation. The new route, which no frame has shown, takes its place
+    /// where the columns end at once, as UIKit lays a new view out before it
+    /// animates; the columns move. It flew in from where it was first laid
+    /// out, with no list to clear (the port's Collections grid), and its
+    /// scroller, which UIKit insets under the bar as the route's safe area
+    /// reaches it inside the animation, slid down from under the bar.
+    func testARouteChosenAsTheInspectorClosesTakesItsPlaceAtOnce() throws {
+        guard #available(iOS 26.0, *) else { throw XCTSkip("the inspector's column is iOS 26's") }
+        let session = try boot(size: CGSize(width: 951, height: 669))
+        let navigation = session.presenter.navigation, agent = Agent(session: session)
+        until("a split") { navigation.split != nil && !agent.nativeInFlight() }
+        let split = try XCTUnwrap(navigation.split)
+        split.controller.traitOverrides.horizontalSizeClass = .regular
+        until("expanded") { !split.controller.isCollapsed && !agent.nativeInFlight() }
+        XCTAssertNil(agent.tap(["id": Int(try node(session, "row-a").id)])["error"])
+        until("the book is in the detail") { split.shown.count == 2 && !agent.nativeInFlight() }
+        XCTAssertNil(agent.tap(["id": Int(try node(session, "info-a").id)])["error"])
+        until("its info is in the inspector's column") { split.inspecting != nil && split.controller.transitionCoordinator == nil && !agent.nativeInFlight() }
+        XCTAssertFalse(split.showsList, "the inspector hides the list")
+        split.controller.show(.primary)
+        until("the list over the detail") { split.overlaysDetail && split.controller.transitionCoordinator == nil && !agent.nativeInFlight() }
+
+        // In one turn, before any frame shows the chapter.
+        session.presenter.press(try node(session, "row-c").id)
+        let page = try node(session, "chapter-page"), figure = try node(session, "chapter-figure")
+        let route = try XCTUnwrap(split.shown.last)
+        XCTAssertTrue(route.node === page, "the chapter is the detail")
+        XCTAssertFalse(split.controller.isShowing(.inspector), "the inspector's column closes")
+        XCTAssertTrue(split.showsList, "the list comes back beside the detail")
+        XCTAssertGreaterThan(route.view.safeAreaInsets.left, 0, "beside the list")
+        XCTAssertEqual(figure.frame.minX, 16 + route.view.safeAreaInsets.left, accuracy: 0.5, "laid out where the columns end")
+        let scroller = try XCTUnwrap(try node(session, "chapter-scroll").scroll)
+        XCTAssertGreaterThan(route.view.safeAreaInsets.top, 0, "under the bar")
+        XCTAssertEqual(scroller.adjustedContentInset.top, route.view.safeAreaInsets.top, accuracy: 0.5, "UIKit insets the scroller under the bar")
+        XCTAssertEqual(scroller.contentOffset.y, -scroller.adjustedContentInset.top, accuracy: 0.5, "at its start")
+        XCTAssertEqual(Self.moving(page.layer), [], "the chapter's views, its scroller's offset and its pixels take their place at once")
+        XCTAssertFalse(Self.moving(try XCTUnwrap(split.controller.view).layer, uikits: true).isEmpty, "the columns move")
+    }
+
+    /// What animates in the tree of Exact's own views and layers under
+    /// `layer`, and of UIKit's too with `uikits`. The views UIKit makes
+    /// inside a scroller (its indicators, the large title it hosts) are
+    /// UIKit's to lay out and to animate.
+    private static func moving(_ layer: CALayer, uikits: Bool = false) -> [String] {
+        var found: [String] = []
+        func walk(_ layer: CALayer) {
+            if !uikits, let view = layer.delegate as? UIView, !(view is NodeView || view is ScrollView || view is TextBoxView) { return }
+            if let keys = layer.animationKeys(), !keys.isEmpty { found.append("\(layer.delegate.map { "\(type(of: $0))" } ?? "\(type(of: layer))") \(keys)") }
+            layer.sublayers?.forEach(walk)
+        }
+        walk(layer)
+        return found
     }
 
     /// The longest animation on `layer`, if any.

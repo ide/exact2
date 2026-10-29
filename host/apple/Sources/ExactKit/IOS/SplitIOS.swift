@@ -188,22 +188,20 @@ final class SplitIOS: NSObject, UISplitViewControllerDelegate {
                     controller.view.layoutIfNeeded()
                 }
             } else if !controller.isShowing(.inspector) {
+                // UIKit lays its own inspector out where it ends and then
+                // slides the column in: the route, which no frame has shown,
+                // is told its place still (`NavigationHost.tellStill`).
                 controller.show(.inspector)
                 moveAlong()
-                // UIKit lays its own inspector out where it ends and then
-                // slides the column in: the route is laid out still until the
-                // column is in place (`OwnerBlocks.tell`).
-                arriving = route
-                if let coordinator = controller.transitionCoordinator {
-                    coordinator.animate(alongsideTransition: nil) { [weak self, weak route] _ in if self?.arriving === route { self?.arriving = nil } }
-                } else { arriving = nil }
             }
             return
         }
-        arriving = nil
         guard let nav = inspector, !nav.viewControllers.isEmpty else { return }
         // Collapsing, the column goes with the split (`topColumnForCollapsing`).
-        if controller.isCollapsed || collapsing || controller.viewController(for: .inspector) !== nav || !controller.isShowing(.inspector) { return nav.setViewControllers([], animated: false) }
+        if controller.isCollapsed || collapsing || controller.viewController(for: .inspector) !== nav { return nav.setViewControllers([], animated: false) }
+        // A close in its transition keeps the route's last pixels until it ends.
+        guard closing == nil else { return }
+        if !controller.isShowing(.inspector) { return nav.setViewControllers([], animated: false) }
         closes += 1
         let close = closes
         closing = close
@@ -225,9 +223,6 @@ final class SplitIOS: NSObject, UISplitViewControllerDelegate {
     private func moveAlong() {
         controller.transitionCoordinator?.animate(alongsideTransition: { [weak self] _ in self?.columnsMove() })
     }
-
-    /// The inspector's route while its column comes in.
-    private(set) weak var arriving: RouteController?
 
     /// Exact's close of the inspector's column, until its transition ends:
     /// UIKit's report of it is not the person's. Each close has its number,
@@ -379,23 +374,30 @@ extension NavigationHost {
         return inspecting != nil && split.inspecting === inspecting
     }
 
-    /// Tells `tell` what is to be told of the routes' boxes, keyed by node,
-    /// the part about the inspector's route first and still while its column
-    /// comes in (`SplitIOS.arriving`), as UIKit lays its own inspector out
-    /// where it ends before it slides the column in: told inside the
-    /// column's animation, the route's content moved from where it was laid
-    /// out before, flying in from the column's corner. The rest, in a last
-    /// call that may be empty, moves with the columns.
+    /// Tells `tell` what is to be told of the routes' boxes, keyed by node.
+    /// Inside an animation UIKit has open, the part about routes no frame has
+    /// shown (a route a selection shows as the split's columns move, the
+    /// inspector's as its column comes in) is told first and still, and
+    /// their controllers' views laid out with it: UIKit lays a view out where
+    /// it ends before it animates it in, and a new route told inside the
+    /// animation moved from where it was laid out before, unseen. The rest,
+    /// in a last call that may be empty, moves with the animation.
     func tellStill<A, B>(_ a: [(UInt32, A)], _ b: [(UInt32, B)], _ tell: ([(UInt32, A)], [(UInt32, B)]) -> Void) {
-        guard let route = split?.arriving, UIView.inheritedAnimationDuration > 0 else { return tell(a, b) }
-        let still = { (id: UInt32) in id == route.node.id || self.presenter.views[id]?.isDescendant(of: route.node) == true }
-        if a.contains(where: { still($0.0) }) || b.contains(where: { still($0.0) }) {
-            UIView.performWithoutAnimation {
-                tell(a.filter { still($0.0) }, b.filter { still($0.0) })
-                route.viewIfLoaded?.layoutIfNeeded()
-            }
+        guard UIView.inheritedAnimationDuration > 0 else { return tell(a, b) }
+        var unshown: [UInt32: RouteController] = [:]
+        for id in a.map(\.0) + b.map(\.0) {
+            guard let node = presenter.views[id],
+                  let route = ViewPresentation.controllers(for: node).lazy.compactMap({ $0 as? RouteController }).first,
+                  !presenter.showed(route.node) else { continue }
+            unshown[id] = route
         }
-        tell(a.filter { !still($0.0) }, b.filter { !still($0.0) })
+        guard !unshown.isEmpty else { return tell(a, b) }
+        UIView.performWithoutAnimation {
+            tell(a.filter { unshown[$0.0] != nil }, b.filter { unshown[$0.0] != nil })
+            var laidOut = Set<ObjectIdentifier>()
+            for route in unshown.values where laidOut.insert(ObjectIdentifier(route)).inserted { route.viewIfLoaded?.layoutIfNeeded() }
+        }
+        tell(a.filter { unshown[$0.0] == nil }, b.filter { unshown[$0.0] == nil })
     }
 
     /// The person closed the inspector's column: Back from its route, as a
