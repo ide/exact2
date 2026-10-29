@@ -13,31 +13,49 @@ extension NodeView {
     private static let extensions = NSMapTable<NodeView, UIView>.weakToStrongObjects()
 
     /// The image's extension view placed, filled and sized for where the
-    /// image is now; removed where it has nothing to fill.
+    /// image is now; removed where it has nothing to fill. A new one shows
+    /// where it goes at once; one already shown moves and resizes in the
+    /// animation it is placed in (a split's column coming or going), as the
+    /// image does, rather than growing from nothing or jumping to its end.
     func syncBackgroundExtension() {
         let held = Self.extensions.object(forKey: self)
         guard #available(iOS 26.0, tvOS 26.0, *), kind == "image", props["backgroundExtension"] == "auto", !cssVisibilityHidden,
-              window != nil, let image = raster?.image, let place = extensionPlace() else { return removeBackgroundExtension() }
-        let view = held as? UIBackgroundExtensionView ?? {
-            let view = UIBackgroundExtensionView()
-            view.automaticallyPlacesContentView = false
-            view.isUserInteractionEnabled = false
-            view.accessibilityElementsHidden = true
-            let content = UIView()
-            content.clipsToBounds = true
-            // The image's content box, which clips its picture, and the picture.
-            let box = CALayer()
-            box.masksToBounds = true
-            box.addSublayer(CALayer())
-            content.layer.addSublayer(box)
-            content.layer.mask = CAShapeLayer()
-            view.contentView = content
-            let outside = CAShapeLayer()
-            outside.fillRule = .evenOdd
-            view.layer.mask = outside
-            Self.extensions.setObject(view, forKey: self)
-            return view
-        }()
+              window != nil, let image = raster?.image else { return removeBackgroundExtension() }
+        guard let place = extensionPlace() else {
+            // Inside UIKit's animation, the safe areas are already its end's
+            // while the image's layout for that end has yet to land in it: the
+            // extension stays, to move there, and goes at a placement outside
+            // an animation that finds the image meeting no safe area.
+            if held != nil, UIView.inheritedAnimationDuration > 0 { return }
+            return removeBackgroundExtension()
+        }
+        if let view = held as? UIBackgroundExtensionView { return placeExtension(view, place, image) }
+        let view = UIBackgroundExtensionView()
+        view.automaticallyPlacesContentView = false
+        view.isUserInteractionEnabled = false
+        view.accessibilityElementsHidden = true
+        let content = UIView()
+        content.clipsToBounds = true
+        // The image's content box, which clips its picture, and the picture.
+        let box = ExtensionLayer(owner: content)
+        box.masksToBounds = true
+        box.addSublayer(ExtensionLayer(owner: content))
+        content.layer.addSublayer(box)
+        view.contentView = content
+        // What the extension draws: four bands around the image's box.
+        let outside = ExtensionLayer(owner: view)
+        for _ in 0..<4 {
+            let band = ExtensionLayer(owner: view)
+            band.backgroundColor = UIColor.black.cgColor
+            outside.addSublayer(band)
+        }
+        view.layer.mask = outside
+        Self.extensions.setObject(view, forKey: self)
+        UIView.performWithoutAnimation { placeExtension(view, place, image) }
+    }
+
+    @available(iOS 26.0, tvOS 26.0, *)
+    private func placeExtension(_ view: UIBackgroundExtensionView, _ place: (host: UIView, below: UIView, frame: CGRect, image: CGRect), _ image: RasterImage) {
         if view.superview !== place.host || place.host.subviews.firstIndex(of: view) != place.host.subviews.firstIndex(of: place.below).map({ $0 - 1 }) {
             place.host.insertSubview(view, belowSubview: place.below)
         }
@@ -48,16 +66,25 @@ extension NodeView {
         view.alpha = between.reduce(1) { $0 * $1.alpha }
         view.isHidden = between.contains { $0.isHidden }
         guard let content = view.contentView, let box = content.layer.sublayers?.first, let picture = box.sublayers?.first,
-              let corners = content.layer.mask as? CAShapeLayer, let outside = view.layer.mask as? CAShapeLayer else { return }
-        content.frame = place.image.offsetBy(dx: -place.frame.minX, dy: -place.frame.minY)
-        CATransaction.begin(); CATransaction.setDisableActions(true)
-        // The extension mirrors the image with its corners and draws only
+              let outside = view.layer.mask, let bands = outside.sublayers, bands.count == 4 else { return }
+        let shown = place.image.offsetBy(dx: -place.frame.minX, dy: -place.frame.minY)
+        content.frame = shown
+        // The extension mirrors the image with its corners, and draws only
         // outside the image's box, which the image draws: nothing of the copy
         // shows behind the image's corners or through the image as it fades.
-        corners.path = roundedPath(in: content.bounds).cgPath
-        let path = UIBezierPath(rect: view.bounds)
-        path.append(UIBezierPath(rect: content.frame))
-        outside.path = path.cgPath
+        if cornerRadii(in: bounds).contains(where: { $0 > 0 }) {
+            let corners = content.layer.mask as? CAShapeLayer ?? CAShapeLayer()
+            CATransaction.begin(); CATransaction.setDisableActions(true)
+            corners.path = roundedPath(in: shown.offsetBy(dx: -shown.minX, dy: -shown.minY)).cgPath
+            CATransaction.commit()
+            if content.layer.mask !== corners { content.layer.mask = corners }
+        } else if content.layer.mask != nil { content.layer.mask = nil }
+        let size = place.frame.size
+        outside.frame = CGRect(origin: .zero, size: size)
+        bands[0].frame = CGRect(x: 0, y: 0, width: max(0, shown.minX), height: size.height)
+        bands[1].frame = CGRect(x: shown.maxX, y: 0, width: max(0, size.width - shown.maxX), height: size.height)
+        bands[2].frame = CGRect(x: shown.minX, y: 0, width: shown.width, height: max(0, shown.minY))
+        bands[3].frame = CGRect(x: shown.minX, y: shown.maxY, width: shown.width, height: max(0, size.height - shown.maxY))
         // The pixels as the image shows them (`applyImageLayer`, `draw(_:)`):
         // an animated image's frame now, fitted by its `object-fit` in its
         // content box, which clips them, and with a `-exact-tint-color` the
@@ -67,7 +94,7 @@ extension NodeView {
         picture.frame = RasterGeometry.rect(natural: image.naturalSize, content: inner, fit: fit).offsetBy(dx: -inner.minX, dy: -inner.minY)
         let pixels = AnimatedRasters.shared.frame(for: self) ?? image.image
         if let tint = channels("tint_color").map({ TextEngine.color($0).cgColor }) {
-            let alpha = picture.mask ?? CALayer()
+            let alpha = picture.mask ?? ExtensionLayer(owner: content)
             alpha.frame = picture.bounds
             if (alpha.contents as AnyObject?) !== pixels { alpha.contents = pixels }
             picture.mask = alpha
@@ -78,7 +105,6 @@ extension NodeView {
             picture.backgroundColor = nil
             if (picture.contents as AnyObject?) !== pixels { picture.contents = pixels }
         }
-        CATransaction.commit()
     }
 
     /// The extension is a view beside the image, outside its subtree: it
@@ -114,6 +140,27 @@ extension Presenter {
     /// it follow, as they are outside the images' subtrees.
     func compositingChanged(_ view: UIView) {
         for image in carrying("backgroundExtension") where image.isDescendant(of: view) { image.syncBackgroundExtension() }
+    }
+}
+
+/// A layer of an image's extension (`syncBackgroundExtension`) that moves
+/// and resizes in the animation its view's frame is set in, as that view
+/// does; its other changes show at once. Core Animation asks a view for its
+/// own layer's actions only, never a sublayer's or a mask's: `owner` is asked.
+private final class ExtensionLayer: CALayer {
+    weak var owner: UIView?
+    init(owner: UIView) {
+        self.owner = owner
+        super.init()
+    }
+    override init(layer: Any) {
+        owner = (layer as? ExtensionLayer)?.owner
+        super.init(layer: layer)
+    }
+    required init?(coder: NSCoder) { nil }
+    override func action(forKey event: String) -> (any CAAction)? {
+        guard event == "bounds" || event == "position", let owner else { return NSNull() }
+        return owner.action(for: self, forKey: event) ?? NSNull()
     }
 }
 #endif
