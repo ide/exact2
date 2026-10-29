@@ -60,7 +60,15 @@ extension ExactSession {
             return nil
         }
         releaseSampler()
-        let report = FrameSampler.report(recording, identity: traceIdentity())
+        var render: [String: Any]?
+        #if canImport(UIKit)
+        if let window = presenter.viewport.window {
+            let began = CACurrentMediaTime()
+            render = FrameSampler.renderInventory(in: window, scroller: recording.scroller)
+            render?["ms"] = ((CACurrentMediaTime() - began) * 100_000).rounded() / 100
+        }
+        #endif
+        let report = FrameSampler.report(recording, identity: traceIdentity(recording), render: render)
         guard let data = FrameSampler.traceJSON(report) else {
             log("stopTrace_EXPERIMENTAL refused: the trace did not serialize")
             return nil
@@ -89,7 +97,7 @@ extension ExactSession {
         return text
     }
 
-    private func traceIdentity() -> [String: Any] {
+    private func traceIdentity(_ recording: FrameSampler.Recording) -> [String: Any] {
         let info = Bundle.main.infoDictionary ?? [:], meta = ExactEnv.appMetadata
         var machine = utsname()
         uname(&machine)
@@ -100,8 +108,9 @@ extension ExactSession {
             "os": ProcessInfo.processInfo.operatingSystemVersionString,
             "device": ProcessInfo.processInfo.environment["SIMULATOR_MODEL_IDENTIFIER"].map { "\($0) (simulator)" } ?? model,
             "production": ExactEnv.productionBake,
-            // Low Power Mode limits a ProMotion display to 60 Hz
+            // Low Power Mode limits a ProMotion display to 60 Hz, and a hot device may lower its rate
             "lowPowerMode": ProcessInfo.processInfo.isLowPowerModeEnabled,
+            "thermal": recording.thermal == ProcessInfo.processInfo.thermalState ? recording.thermal.name : "\(recording.thermal.name) to \(ProcessInfo.processInfo.thermalState.name)",
             "session": label,
         ]
         for (key, name) in [("ExactCommit", "exactCommit"), ("ExactAppCommit", "appCommit"), ("ExactBuildTime", "builtAt")] {
@@ -114,6 +123,18 @@ extension ExactSession {
         }
         #endif
         return out
+    }
+}
+
+extension ProcessInfo.ThermalState {
+    var name: String {
+        switch self {
+        case .nominal: "nominal"
+        case .fair: "fair"
+        case .serious: "serious"
+        case .critical: "critical"
+        @unknown default: "unknown"
+        }
     }
 }
 
@@ -145,13 +166,14 @@ extension FrameSampler {
         overrun > 0 && period > 0 ? period * (overrun / period).rounded(.up) : 0
     }
 
-    /// Whether a recorded frame was late by any measure
-    static func isLate(_ r: Record) -> Bool { r.missed > 0 || r.overrun > 0 || r.screenLate != nil || r.unshown }
+    /// Whether a recorded frame was late by any measure; a quiet gap owed no frame
+    static func isLate(_ r: Record) -> Bool { (r.missed > 0 && !r.quiet) || r.overrun > 0 || r.screenLate != nil || r.unshown }
 
     /// A recording as an agent reads it: its segments by scroll phase and
-    /// scroller, totals by phase, and its late frames with what the main
-    /// thread did in each.
-    static func report(_ recording: Recording, identity: [String: Any]) -> [String: Any] {
+    /// scroller, totals by phase, its late frames with what the main thread
+    /// did in each, and what on screen costs the render server
+    /// (`renderInventory`), when it was read.
+    static func report(_ recording: Recording, identity: [String: Any], render: [String: Any]? = nil) -> [String: Any] {
         let r2 = { (x: Double) in (x * 100).rounded() / 100 }
         let records = recording.records
         let phaseName = ["t": "drag", "d": "glide", "b": "bounce", "-": "rest"]
@@ -175,28 +197,54 @@ extension FrameSampler {
         // update stalls the next callback too, so the gap of the frame right after it counts only what that
         // commit's delay did not. A commit counts in full: it is late against its own update's deadline,
         // which a stall before the update does not leave in the past
-        var hitch: [Double] = [], carried = 0.0
+        //
+        // Each late frame's cause is the part its hitch came from: `update`, a commit past its deadline
+        // through the update's own work; `main`, one the main thread delayed, busy before the update
+        // began (its `start` longer than its `work`) or through a gap; `rate`, a gap in which something
+        // moved, the main thread idle, and UIKit made no update; `render`, a frame the probe saw reach the
+        // screen late or never. A display link's callback gap is the main thread's
+        var hitch: [Double] = [], causes: [String?] = [], carried = 0.0
         for (i, r) in records.enumerated() {
             if i > 0, abs(r.t - r.interval - records[i - 1].t) > 0.5 { carried = 0 }
             let commit = FrameSampler.commitDelay(overrun: r.overrun, period: r.period)
-            let shownAgain = r.missed > 0 ? max(0, r.interval - r.period - carried) : 0
-            hitch.append(max(shownAgain, commit, r.unshown ? r.period : r.screenLate ?? 0))
+            let shownAgain = r.missed > 0 && !r.quiet ? max(0, r.interval - r.period - carried) : 0
+            let screen = r.unshown ? r.period : r.screenLate ?? 0
+            let h = max(shownAgain, commit, screen)
+            hitch.append(h)
+            causes.append(h <= 0 ? nil : h == commit ? (r.update.map { $0.start > $0.work } == true ? "main" : "update")
+                          : h == shownAgain ? (r.update != nil && (r.main ?? 0) < r.interval - 1.5 * r.period ? "rate" : "main") : "render")
             carried = FrameSampler.commitDelay(overrun: r.ownOverrun, period: r.period)
         }
 
-        struct Totals { var ms = 0.0, frames = 0, missed = 0, late = 0, hitch = 0.0, main = 0.0, worst = 0.0, maxMain = 0.0, probed = 0, unshown = 0 }
+        struct Totals {
+            var ms = 0.0, frames = 0, missed = 0, late = 0, hitch = 0.0, main = 0.0, worst = 0.0, maxMain = 0.0, probed = 0, unshown = 0
+            var updates = 0, work = 0.0, maxWork = 0.0, commit = 0.0, own = 0.0, maxOwn = 0.0, causes: [String: Int] = [:]
+        }
         func add(_ t: inout Totals, _ i: Int) {
             let r = records[i]
-            t.ms += r.interval; t.frames += 1; t.missed += r.missed; t.hitch += hitch[i]
+            // A quiet gap's frame stands for the one period it was shown in
+            t.ms += r.quiet ? r.period : r.interval; t.frames += 1; t.missed += r.quiet ? 0 : r.missed; t.hitch += hitch[i]
             if FrameSampler.isLate(r) { t.late += 1 }
+            if let cause = causes[i] { t.causes[cause, default: 0] += 1 }
             if r.probed { t.probed += 1 }
             if r.unshown { t.unshown += 1 }
-            t.main += r.main ?? 0; t.worst = max(t.worst, r.interval); t.maxMain = max(t.maxMain, r.main ?? 0)
+            t.main += r.main ?? 0; t.worst = max(t.worst, r.quiet ? r.period : r.interval); t.maxMain = max(t.maxMain, r.main ?? 0)
+            if let u = r.update {
+                t.updates += 1; t.work += u.work; t.maxWork = max(t.maxWork, u.work); t.commit += r.commit ?? 0
+                t.own += u.own; t.maxOwn = max(t.maxOwn, u.own)
+            }
         }
         func json(_ t: Totals) -> [String: Any] {
-            ["ms": r2(t.ms), "frames": t.frames, "missed": t.missed, "lateFrames": t.late, "hitchMs": r2(t.hitch),
+            var o: [String: Any] = ["ms": r2(t.ms), "frames": t.frames, "missed": t.missed, "lateFrames": t.late, "hitchMs": r2(t.hitch),
              "hitchMsPerS": t.ms > 0 ? r2(t.hitch / (t.ms / 1000)) : 0, "worstIntervalMs": r2(t.worst),
-             "meanMainMs": t.frames > 0 ? r2(t.main / Double(t.frames)) : 0, "maxMainMs": r2(t.maxMain), "probed": t.probed, "unshown": t.unshown]
+             "meanMainMs": t.frames > 0 ? r2(t.main / Double(t.frames)) : 0, "maxMainMs": r2(t.maxMain), "probed": t.probed, "unshown": t.unshown,
+             "hz": t.ms > 0 ? (Double(t.frames) / (t.ms / 1000)).rounded() : 0, "causes": t.causes]
+            if t.updates > 0 {
+                let n = Double(t.updates)
+                o["meanWorkMs"] = r2(t.work / n); o["maxWorkMs"] = r2(t.maxWork); o["meanCommitMs"] = r2(t.commit / n)
+                o["ownMeanMs"] = r2(t.own / n); o["ownMaxMs"] = r2(t.maxOwn)
+            }
+            return o
         }
 
         // Segments: runs of one phase on one scroller
@@ -228,6 +276,7 @@ extension FrameSampler {
         let lateJSON = late.map { i -> [String: Any] in
             var o = records[i].json
             o["hitchMs"] = r2(hitch[i])
+            o["cause"] = causes[i]
             o["phase"] = phases[i]
             // Its scroller and that scroller's offset, whose phase `phase` names
             if phases[i] != "rest" { o["scroller"] = scrollers[i]; o["offset"] = records[i].scroll?.0 }
@@ -236,7 +285,7 @@ extension FrameSampler {
             return o
         }
         let all = records.indices.reduce(into: Totals()) { add(&$0, $1) }
-        return [
+        var out: [String: Any] = [
             "exactTrace": "recording",
             "identity": identity,
             "periodMs": records.map(\.period).sorted().dropFirst(records.count / 2).first.map(r2) ?? NSNull(),
@@ -247,13 +296,19 @@ extension FrameSampler {
             "lateShown": "\(lateJSON.count) of \(lateCount)",
             "hatches": HatchDiagnostics.available ? "timed" : "not timed in a production build",
         ]
+        if let render { out["render"] = render.merging(["columns": renderColumns]) { a, _ in a } }
+        return out
     }
 }
 
 extension FrameSampler {
-    static let compactTotals = ["frames", "ms", "missed", "lateFrames", "hitchMsPerS", "worstIntervalMs", "meanMainMs", "maxMainMs", "probed", "unshown"]
-    static let compactSegments = ["phase", "scroller", "from", "ms", "frames", "missed", "lateFrames", "hitchMsPerS", "worstIntervalMs", "meanMainMs", "maxMainMs", "scrolledPt"]
-    static let compactLate = ["t", "phase", "hitchMs", "interval", "period", "missed", "overrun", "commit", "screenLate", "unshown", "main", "batches", "apply", "unattributed", "phases", "hatches", "phasesCoverage", "coverage", "scroller", "offset"]
+    /// The render inventory's columns (`renderInventory`, iOS and tvOS)
+    static let renderColumns = ["kind", "place", "node", "top", "height", "count"]
+    /// Late frames a compact copy keeps before the render inventory's rows
+    static let compactLateFirst = 12
+    static let compactTotals = ["frames", "ms", "hz", "missed", "lateFrames", "hitchMsPerS", "causes", "worstIntervalMs", "meanMainMs", "maxMainMs", "meanWorkMs", "maxWorkMs", "meanCommitMs", "probed", "unshown", "ownMeanMs", "ownMaxMs"]
+    static let compactSegments = ["phase", "scroller", "from", "ms", "frames", "hz", "missed", "lateFrames", "hitchMsPerS", "causes", "worstIntervalMs", "meanMainMs", "maxMainMs", "meanWorkMs", "maxWorkMs", "scrolledPt"]
+    static let compactLate = ["t", "phase", "cause", "hitchMs", "interval", "missed", "overrun", "start", "events", "links", "work", "commit", "screenLate", "unshown", "main", "batches", "apply", "unattributed", "phases", "hatches", "phasesCoverage", "coverage", "scroller", "offset"]
 
     /// A trace as JSON with sorted keys and each number in its shortest form:
     /// `JSONSerialization` writes a `Double` with 17 significant digits (8.33
@@ -287,14 +342,15 @@ extension FrameSampler {
             }
         }
         func lateness(_ o: [String: Any]) -> Double { (o["hitchMs"] as? NSNumber)?.doubleValue ?? 0 }
-        let identity = (report["identity"] as? [String: Any] ?? [:]).filter { ["version", "exactCommit", "device", "os", "production", "lowPowerMode", "window"].contains($0.key) }
+        let identity = (report["identity"] as? [String: Any] ?? [:]).filter { ["version", "exactCommit", "device", "os", "production", "lowPowerMode", "thermal", "window"].contains($0.key) }
         let allSegments = (report["segments"] as? [[String: Any]] ?? []).filter { $0["phase"] as? String != "rest" }
         let worstSegments = allSegments.indices.sorted { (allSegments[$0]["hitchMsPerS"] as? Double ?? 0) > (allSegments[$1]["hitchMsPerS"] as? Double ?? 0) }
         let late = (report["late"] as? [[String: Any]] ?? []).sorted { lateness($0) > lateness($1) }
         let lateFrames = (report["recording"] as? [String: Any])?["lateFrames"] as? Int ?? late.count
-        func build(segments m: Int, late n: Int) -> Data {
+        let render = report["render"] as? [String: Any], renderRows = render?["rows"] as? [[Any]] ?? []
+        func build(segments m: Int, render k: Int = 0, late n: Int) -> Data {
             let segments = worstSegments.prefix(m).sorted().map { row(allSegments[$0], compactSegments) }
-            let out: [String: Any] = [
+            var out: [String: Any] = [
                 "exactTrace": "recording, compact",
                 "identity": identity,
                 "periodMs": report["periodMs"] ?? NSNull(),
@@ -309,11 +365,15 @@ extension FrameSampler {
                 "shown": "\(segments.count) of \(allSegments.count) scroll segments, \(min(n, late.count)) of \(lateFrames) late frames",
                 "full": file.map { "\($0) in the app's temporary directory, \(bytes) bytes" } ?? "not saved",
             ]
+            if let render {
+                out["render"] = ["layers": render["layers"] ?? 0, "columns": renderColumns, "rows": Array(renderRows.prefix(k)),
+                                 "shown": "\(min(k, renderRows.count)) of \(renderRows.count)"] as [String: Any]
+            }
             return traceJSON(out) ?? Data()
         }
-        // The most of `count` that fits, each one more making the report larger
-        func most(_ count: Int, _ size: (Int) -> Int) -> Int {
-            var lo = 0, hi = count
+        // The most of `count` that fits, at least `least`, each one more making the report larger
+        func most(_ count: Int, least: Int = 0, _ size: (Int) -> Int) -> Int {
+            var lo = min(least, count), hi = count
             while lo < hi {
                 let mid = (lo + hi + 1) / 2
                 if size(mid) <= maxBytes { lo = mid } else { hi = mid - 1 }
@@ -326,9 +386,11 @@ extension FrameSampler {
                                        "full": file.map { "\($0) in the app's temporary directory, \(bytes) bytes" } ?? "not saved"]
             return traceJSON(note) ?? Data()
         }
-        // Every segment that fits, then the most late frames
+        // Every segment that fits, then the worst late frames, then what costs the render server, then more late frames
         let m = most(allSegments.count) { build(segments: $0, late: 0).count }
-        return build(segments: m, late: most(late.count) { build(segments: m, late: $0).count })
+        let worst = most(min(late.count, compactLateFirst)) { build(segments: m, late: $0).count }
+        let k = most(renderRows.count) { build(segments: m, render: $0, late: worst).count }
+        return build(segments: m, render: k, late: most(late.count, least: worst) { build(segments: m, render: k, late: $0).count })
     }
 }
 
