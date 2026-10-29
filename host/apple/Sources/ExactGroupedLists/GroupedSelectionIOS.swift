@@ -13,18 +13,21 @@ extension GroupedListHost {
 
 extension GroupedListView {
     /// A pressed custom row is its cell pressed, as UIKit draws a row it
-    /// owns: the cell's pressed ground, with the list's lines beside it
-    /// hidden.
+    /// owns: in a plain list the cell's pressed ground, with the list's
+    /// lines beside it hidden; in a sidebar the row faded (`stateFollower`).
     func highlight(_ id: UInt32, _ down: Bool) -> Bool {
         // Only a pressable row takes a highlight; any row lets one go
         guard !down || pressable(id), let path = source.indexPath(for: id), let cell = collection.cellForItem(at: path) else { return false }
         if cell.isHighlighted != down { cell.isHighlighted = down }
         return true
     }
-    /// Draws a custom row in the dark appearance while its cell's ground is
-    /// dark (the accent under a sidebar's selected row), so its label colours
-    /// turn light as UIKit's own cell content does.
-    var groundFollower: UICollectionViewListCell.ConfigurationUpdateHandler? {
+    /// Draws a custom row as UIKit draws its own cell content in the cell's
+    /// state. While the cell's ground is dark (the accent under a sidebar's
+    /// selected row) the row is in the dark appearance, so its label colours
+    /// turn light. While it is pressed it fades as far as UIKit fades its own
+    /// label: a sidebar's held row keeps a clear ground and fades its content
+    /// (to 30% on iOS 27), where a plain list's fills its ground and fades nothing.
+    var stateFollower: UICollectionViewListCell.ConfigurationUpdateHandler? {
         #if os(iOS)
         return { cell, state in
             let fill = cell.defaultBackgroundConfiguration().updated(for: state).resolvedBackgroundColor(for: cell.tintColor)
@@ -32,10 +35,22 @@ extension GroupedListView {
             let dark = fill.getRed(&r, green: &g, blue: &b, alpha: &a) && a > 0.5 && 0.2126 * r + 0.7152 * g + 0.0722 * b < 0.5
             let wanted: UIUserInterfaceStyle = dark ? .dark : .unspecified
             if cell.contentView.overrideUserInterfaceStyle != wanted { cell.contentView.overrideUserInterfaceStyle = wanted }
+            let label = { (state: UICellConfigurationState) in
+                (cell as? UICollectionViewListCell)?.defaultContentConfiguration().updated(for: state)
+                    .textProperties.resolvedColor().resolvedColor(with: cell.traitCollection).cgColor.alpha ?? 1
+            }
+            let pressed = state.isHighlighted && !state.isSelected
+            let alpha = pressed ? min(1, label(state) / max(label(UICellConfigurationState(traitCollection: cell.traitCollection)), 0.01)) : 1
+            if cell.contentView.alpha != alpha { cell.contentView.alpha = alpha }
         }
         #else
         return nil
         #endif
+    }
+    /// Takes off what `stateFollower` set for the row a cell drew before.
+    func forgetState(of cell: UICollectionViewCell) {
+        cell.contentView.overrideUserInterfaceStyle = .unspecified
+        cell.contentView.alpha = 1
     }
     func collectionView(_ view: UICollectionView, shouldSelectItemAt path: IndexPath) -> Bool {
         collectionView(view, shouldHighlightItemAt: path)

@@ -67,9 +67,7 @@ final class GlassGroups {
         let range = (held as? UITextInput)?.selectedTextRange
         // The authored parent stays: a press held in a moved child goes on
         // (`NodeView.didMoveToSuperview`, `pressResponder`).
-        NodeView.containerMoves += 1
-        move()
-        NodeView.containerMoves -= 1
+        NodeView.containerMove(move)
         if let held, !held.isFirstResponder, held.window != nil, held.becomeFirstResponder(), let range {
             (held as? UITextInput)?.selectedTextRange = range
         }

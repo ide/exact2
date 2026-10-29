@@ -1225,9 +1225,15 @@ package final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, U
         f.render(layer, clip: resolvedClipMask(), scale: window?.screen.scale ?? traitCollection.displayScale, dark: drawsDark)
     }
 
-    /// Inside `GlassGroups.moving`: a container comes or goes under the
-    /// same authored parent, which is no reparenting.
-    static var containerMoves = 0
+    /// Runs `move`, in which views come or go under the same authored
+    /// parent (a glass group's container, a grouped list's cell carrying a
+    /// custom row), which is no reparenting: a press held in one goes on.
+    package static func containerMove(_ move: () -> Void) {
+        containerMoves += 1
+        defer { containerMoves -= 1 }
+        move()
+    }
+    private static var containerMoves = 0
     package override func didMoveToSuperview() {
         if Self.containerMoves == 0 { pressEpoch &+= 1; cancelPressContact(reparenting: true) }
         super.didMoveToSuperview()

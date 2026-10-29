@@ -1069,11 +1069,11 @@ final class GroupedListView: NSObject, UICollectionViewDelegate {
         cell.target = rows[id]?.target
         guard let row = rows[id] else { return }
         interact(cell, id)
-        cell.contentView.overrideUserInterfaceStyle = .unspecified // what `groundFollower` set for a row this cell drew
+        forgetState(of: cell)
         // A card-less section's rows sit on the list's background; a
         // pressable standard row still shows UIKit's highlight while pressed.
         if card(of: id) {
-            cell.configurationUpdateHandler = row.custom ? groundFollower : nil
+            cell.configurationUpdateHandler = row.custom ? stateFollower : nil
             var card = cell.defaultBackgroundConfiguration()
             if let fill = ThemeRoles.color("secondary-grouped-background", in: host.presenter.root) { card.backgroundColor = fill }
             cell.backgroundConfiguration = card
@@ -1318,7 +1318,7 @@ final class GroupedListView: NSObject, UICollectionViewDelegate {
         if height > 0 { unsized.remove(id) } else { unsized.insert(id) }
         cell.contentView.clipsToBounds = true
         if row.superview !== cell.contentView {
-            cell.contentView.addSubview(row)
+            NodeView.containerMove { cell.contentView.addSubview(row) } // a press held on it goes on (`restore`)
             // A paragraph drawn while its row was home, under the hidden
             // scroll, painted nothing and may have found no room for a
             // worker; it shows now, outside any batch's refresh when a
@@ -1348,11 +1348,11 @@ final class GroupedListView: NSObject, UICollectionViewDelegate {
         source.apply(snapshot, animatingDifferences: false)
     }
 
-    /// Every carried row back in its authored place.
+    /// Every carried row back in its authored place, as before every batch: a press held on one goes on.
     func restore() {
         for id in carriedOrder.reversed() {
             guard let place = carried[id], let row = host.presenter.views[id] else { continue }
-            if row.superview !== place.parent { place.parent.insertSubview(row, at: min(place.index, place.parent.subviews.count)) }
+            if row.superview !== place.parent { NodeView.containerMove { place.parent.insertSubview(row, at: min(place.index, place.parent.subviews.count)) } }
             row.frame = place.frame
         }
         carried.removeAll()

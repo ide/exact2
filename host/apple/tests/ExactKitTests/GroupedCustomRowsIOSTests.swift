@@ -180,5 +180,70 @@ final class GroupedCustomRowsIOSTests: GroupedListFixture {
         RunLoop.main.run(until: Date().addingTimeInterval(0.05))
         XCTAssertEqual(try cell(p, 11).bounds.height, 120, accuracy: 0.5, "its row grew")
     }
+
+    /// A finger held on a custom row keeps it pressed, its cell highlighted,
+    /// through a batch, which puts the row back in its authored place and
+    /// carries it into its cell again; the lift presses it once.
+    func testAPressHeldOnACustomRowGoesOnThroughABatch() throws {
+        let p = presenter { self.model(custom: true) }
+        var presses: [UInt32] = []
+        p.onPress = { presses.append($0) }
+        let row = try XCTUnwrap(p.views[21])
+        let touch = RowTouch(row, at: CGPoint(x: 100, y: 30))
+        row.touchesBegan([touch], with: nil)
+        XCTAssertTrue(row.pressed)
+        XCTAssertTrue(try cell(p, 21).isHighlighted, "its cell's press")
+        p.apply(wireBatch([["op": "props", "id": 21, "set": ["testId": "held"]]]))
+        let carried = try cell(p, 21)
+        XCTAssertTrue(row.superview === carried.contentView, "carried again")
+        XCTAssertTrue(row.pressed, "still pressed after the batch")
+        XCTAssertTrue(carried.isHighlighted, "and still highlighted")
+        row.touchesEnded([touch], with: nil)
+        XCTAssertEqual(presses, [21], "the lift presses it")
+        XCTAssertFalse(row.pressed)
+        XCTAssertFalse(try cell(p, 21).isHighlighted)
+    }
+
+    /// A held custom row fades as far as UIKit fades its own label in that
+    /// state: in a sidebar, whose held row keeps a clear ground, and not in
+    /// a plain list, whose held row fills its ground, nor once selected.
+    func testAHeldCustomRowFadesAsUIKitsOwnContentDoes() throws {
+        let follower = try XCTUnwrap(try list(presenter { self.model(custom: true) }).stateFollower)
+        func alpha(_ appearance: UICollectionLayoutListConfiguration.Appearance, highlighted: Bool, selected: Bool = false) throws -> (ours: CGFloat, label: CGFloat) {
+            let view = UICollectionView(frame: CGRect(x: 0, y: 0, width: 320, height: 400),
+                                        collectionViewLayout: UICollectionViewCompositionalLayout.list(using: .init(appearance: appearance)))
+            window.addSubview(view)
+            defer { view.removeFromSuperview() }
+            let registration = UICollectionView.CellRegistration<UICollectionViewListCell, Int> { _, _, _ in }
+            let source = UICollectionViewDiffableDataSource<Int, Int>(collectionView: view) { view, path, item in
+                view.dequeueConfiguredReusableCell(using: registration, for: path, item: item)
+            }
+            var snapshot = NSDiffableDataSourceSnapshot<Int, Int>()
+            snapshot.appendSections([0])
+            snapshot.appendItems([0])
+            source.apply(snapshot, animatingDifferences: false)
+            view.layoutIfNeeded()
+            let cell = try XCTUnwrap(view.cellForItem(at: IndexPath(item: 0, section: 0)) as? UICollectionViewListCell)
+            var state = cell.configurationState
+            state.isHighlighted = highlighted
+            state.isSelected = selected
+            follower(cell, state)
+            let label = cell.defaultContentConfiguration().updated(for: state).textProperties.resolvedColor().resolvedColor(with: cell.traitCollection)
+            return (cell.contentView.alpha, label.cgColor.alpha)
+        }
+        let held = try alpha(.sidebarPlain, highlighted: true)
+        XCTAssertLessThan(held.ours, 1, "a sidebar's held row fades")
+        XCTAssertEqual(held.ours, held.label, accuracy: 0.01, "as far as UIKit's own label")
+        XCTAssertEqual(try alpha(.sidebarPlain, highlighted: true, selected: true).ours, 1, "selected, on the accent")
+        XCTAssertEqual(try alpha(.sidebarPlain, highlighted: false).ours, 1)
+        XCTAssertEqual(try alpha(.plain, highlighted: true).ours, 1, "a plain list's held row fills its ground instead")
+    }
+
+    private final class RowTouch: UITouch {
+        let target: UIView, point: CGPoint
+        init(_ target: UIView, at point: CGPoint) { self.target = target; self.point = point; super.init() }
+        override var view: UIView? { target }
+        override func location(in view: UIView?) -> CGPoint { target.convert(point, to: view) }
+    }
 }
 #endif
