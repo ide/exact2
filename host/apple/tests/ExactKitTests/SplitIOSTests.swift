@@ -136,6 +136,25 @@ final class SplitIOSTests: XCTestCase {
             XCTAssertEqual(navigation.isInactiveRoute(containing: try node(session, "notes-a")), detail, "the host's, \(shows)")
         }
     }
+    /// LLP 1127 D7: beside the detail the list's route is clear, so UIKit's sidebar ground shows behind it, as it
+    /// shows behind a hand-built `UISplitViewController`'s and a SwiftUI `NavigationSplitView`'s sidebar list (both
+    /// (230, 234, 238) on the iOS 27 iPad simulator); collapsed into a stack, the route paints the platform's
+    /// background again.
+    func testTheListsRouteIsClearOnTheSidebarsGround() throws {
+        let session = try boot(size: CGSize(width: 1100, height: 800))
+        let navigation = session.presenter.navigation, agent = Agent(session: session)
+        until("a split") { navigation.split != nil && !agent.nativeInFlight() }
+        let split = try XCTUnwrap(navigation.split)
+        split.controller.traitOverrides.horizontalSizeClass = .regular
+        until("expanded") { !split.controller.isCollapsed && !agent.nativeInFlight() }
+        let list = try XCTUnwrap(split.list.viewControllers.first as? RouteController)
+        until("the list's route is clear beside the detail") { list.view.backgroundColor == .clear }
+        split.controller.traitOverrides.horizontalSizeClass = .compact
+        until("collapsed") { split.controller.isCollapsed && !agent.nativeInFlight() }
+        until("the list's route paints the platform's background in the stack") {
+            list.view.backgroundColor.map { $0.resolvedColor(with: list.traitCollection).cgColor.alpha == 1 } ?? false
+        }
+    }
     /// LLP 1127 §1, item 2: UIKit takes the detail's controller out of the
     /// list's as the split expands (an iPhone Duo unfolded on a book's
     /// notes), and nests it again as it collapses. Neither is a Back: the
