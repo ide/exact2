@@ -2,6 +2,7 @@
 import UIKit
 import XCTest
 @testable import ExactKit
+@testable import ExactGroupedLists
 
 /// LLP 1127 §1 on UIKit: collapsed, the split nests the detail's stack in
 /// the list's, so a back swipe has both stacks' pop recognizers under the
@@ -154,6 +155,39 @@ final class SplitIOSTests: XCTestCase {
         until("the list's route paints the platform's background in the stack") {
             list.view.backgroundColor.map { $0.resolvedColor(with: list.traitCollection).cgColor.alpha == 1 } ?? false
         }
+    }
+    /// LLP 1127 D7: a press on a custom row's own view in the sidebar's plain list goes through its cell's selection
+    /// (`GroupedListHost.select(carried:)`), as a tap on a row UIKit draws does: the book shows beside the list and its
+    /// row stays selected there, and a press on the other row moves both.
+    func testACustomRowsPressInTheSidebarSelectsItsCell() throws {
+        ExactGroupedLists.install()
+        let session = try boot("SPLIT_ROWS", size: CGSize(width: 1100, height: 800))
+        let navigation = session.presenter.navigation, agent = Agent(session: session)
+        until("a split") { navigation.split != nil && !agent.nativeInFlight() }
+        let split = try XCTUnwrap(navigation.split)
+        split.controller.traitOverrides.horizontalSizeClass = .regular
+        until("expanded") { !split.controller.isCollapsed && !agent.nativeInFlight() }
+        let host = try XCTUnwrap(session.presenter.groupedLists as? GroupedListHost)
+        let list = try XCTUnwrap(host.lists[try node(session, "books").id], "the plain list is UIKit's")
+        let has = { (testId: String) in session.presenter.views.values.contains { $0.props["testId"] == testId && $0.window != nil } }
+        for id in ["a", "b"] {
+            let row = try node(session, "row-\(id)")
+            until("row \(id) is carried into its cell") { list.cell(row.id).map { row.isDescendant(of: $0) } ?? false }
+            let touch = RowTouch(row, at: CGPoint(x: 20, y: 10))
+            row.touchesBegan([touch], with: nil)
+            row.touchesEnded([touch], with: nil)
+            until("book \(id) shows beside the list") { has("reading-\(id)") && !agent.nativeInFlight() }
+            until("row \(id) stays selected beside it") { list.cell(row.id)?.isSelected == true }
+            let other = try node(session, "row-\(id == "a" ? "b" : "a")")
+            XCTAssertNotEqual(list.cell(other.id)?.isSelected, true, "the other row is not selected")
+        }
+    }
+
+    private final class RowTouch: UITouch {
+        let target: UIView, point: CGPoint
+        init(_ target: UIView, at point: CGPoint) { self.target = target; self.point = point; super.init() }
+        override var view: UIView? { target }
+        override func location(in view: UIView?) -> CGPoint { target.convert(point, to: view) }
     }
     /// LLP 1127 §1, item 2: UIKit takes the detail's controller out of the
     /// list's as the split expands (an iPhone Duo unfolded on a book's
