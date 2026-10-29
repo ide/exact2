@@ -43,6 +43,10 @@ struct HeaderTitle: Equatable {
     struct Glyph: Equatable { let symbol: String?; let text: String }
     /// The element a tap on the title presses.
     let tap: UInt32?
+    /// That element's own `aria-label`, which names the title for VoiceOver
+    /// as it names the button on the web, where a button's children are
+    /// presentational (WAI-ARIA 1.2): its heading and subtitle are not read.
+    let label: String?
     let accessibilityDisabled: Bool
 
     init?(header: NodeView, heading: NodeView, tap: NodeView?, apart: [NodeView]) {
@@ -157,6 +161,7 @@ struct HeaderTitle: Equatable {
         self.spoken = spoken ?? subtitle
         self.rtl = rtl
         self.tap = tap?.id
+        label = tap?.props["accessibilityLabel"].flatMap { $0.isEmpty ? nil : $0 }
         accessibilityDisabled = tap?.ariaUnavailable == true
     }
 
@@ -170,7 +175,7 @@ struct HeaderTitle: Equatable {
     }
 
     /// Everything the title is drawn from.
-    var source: String { "\(id):\(avatar?.source ?? ""):\(subtitle):\(spoken):\(rtl):\(glyphs.map { "\($0.symbol ?? "")/\($0.text)" }.joined(separator: "\u{1F}")):\(tap ?? 0):\(accessibilityDisabled):\(titleGlyphs.map(\.source).joined(separator: "\u{1F}"))" }
+    var source: String { "\(id):\(avatar?.source ?? ""):\(subtitle):\(spoken):\(rtl):\(glyphs.map { "\($0.symbol ?? "")/\($0.text)" }.joined(separator: "\u{1F}")):\(tap ?? 0):\(label ?? ""):\(accessibilityDisabled):\(titleGlyphs.map(\.source).joined(separator: "\u{1F}"))" }
     static func == (a: HeaderTitle, b: HeaderTitle) -> Bool { a.source == b.source }
 
     static func holdsHeading(_ node: NodeView) -> Bool {
@@ -371,8 +376,8 @@ final class HeaderTitleView: UIControl {
         subtitle.isHidden = group.subtitle.isEmpty
         texts.alignment = group.avatar == nil ? .center : .leading
         isEnabled = group.tap != nil
-        accessibilityLabel = text
-        accessibilityValue = group.subtitle.isEmpty ? nil : group.spoken
+        accessibilityLabel = group.label ?? text
+        accessibilityValue = group.subtitle.isEmpty || group.label != nil ? nil : group.spoken
         accessibilityTraits = group.tap == nil ? .header : group.accessibilityDisabled ? [.button, .notEnabled] : .button
         accessibilityIdentifier = group.testId
         invalidateIntrinsicContentSize()

@@ -102,5 +102,32 @@ final class NativeBarDetailsIOSTests: XCTestCase {
         XCTAssertEqual(view.accessibilityLabel, "Verified")
         XCTAssertTrue(view.subtitle.isHidden)
     }
+
+    /// A pressable title group's `aria-label` names the title for VoiceOver, as it names the button on the web,
+    /// where a button's children are presentational: the heading and subtitle it shows are not read.
+    func testAPressableTitlesOwnLabelNamesIt() throws {
+        let p = Presenter()
+        let header = NodeView(id: 1, kind: "view", presenter: p)
+        let button = NodeView(id: 2, kind: "button", presenter: p)
+        let heading = NodeView(id: 3, kind: "text", presenter: p)
+        let status = NodeView(id: 4, kind: "text", presenter: p)
+        heading.props = ["text": "Alex", "accessibilityRole": "heading"]
+        status.props = ["text": "Online"]
+        header.addSubview(button); button.addSubview(heading); button.addSubview(status)
+        let view = HeaderTitleView(host: p.navigation)
+        let plain = try XCTUnwrap(HeaderTitle(header: header, heading: heading, tap: button, apart: []))
+        view.update(plain, title: "Alex")
+        XCTAssertEqual(view.accessibilityLabel, "Alex")
+        XCTAssertEqual(view.accessibilityValue, "Online")
+        button.props = ["accessibilityLabel": "Contact details"]
+        let labelled = try XCTUnwrap(HeaderTitle(header: header, heading: heading, tap: button, apart: []))
+        XCTAssertNotEqual(plain, labelled, "the label is part of what the title is drawn from")
+        view.update(labelled, title: "Alex")
+        XCTAssertEqual(view.title.text, "Alex", "the heading is still what shows")
+        XCTAssertEqual(view.subtitle.text, "Online")
+        XCTAssertEqual(view.accessibilityLabel, "Contact details")
+        XCTAssertNil(view.accessibilityValue)
+        XCTAssertTrue(view.accessibilityTraits.contains(.button))
+    }
 }
 #endif
