@@ -109,7 +109,7 @@ extension NodeView {
         let ink = textBoxLayer
         guard let style, let blur, !isParagraph || vibrantInk else {
             if let v = vibrancyView {
-                if let ink, ink.superlayer === v.contentView.layer { ink.removeFromSuperlayer(); mountTextBox() }
+                if let ink, ink.superlayer === v.contentView.layer { (ink.delegate as? UIView)?.removeFromSuperview(); ink.removeFromSuperlayer(); mountTextBox() }
                 v.removeFromSuperview()
                 vibrancyView = nil
                 // A fill paints its own background again.
@@ -135,7 +135,9 @@ extension NodeView {
         if v.effect != effect { v.effect = effect }
         if v.frame != bounds { v.frame = bounds }
         if isParagraph {
-            if let ink, ink.superlayer !== v.contentView.layer { v.contentView.layer.addSublayer(ink) }
+            if let ink, ink.superlayer !== v.contentView.layer {
+                if let view = ink.delegate as? UIView { v.contentView.addSubview(view) } else { v.contentView.layer.addSublayer(ink) }
+            }
         } else if v.contentView.backgroundColor != .white {
             v.contentView.backgroundColor = .white
         }

@@ -399,6 +399,92 @@ final class SplitIOSTests: XCTestCase {
         XCTAssertEqual(notes.frame.width, wide.width, accuracy: 0.5)
     }
 
+    /// A paragraph whose padding follows its route's safe area moves with
+    /// the content around it when an animation UIKit has open changes that
+    /// safe area. Painted again, its words showed at their end place at once:
+    /// the Landmarks port's headings, ahead of their cards as the sidebar
+    /// came in. Its pixels are its box's, at the box's place
+    /// (`NodeView.placeTextRaster`): a box that only moves keeps them.
+    func testAParagraphWhosePaddingFollowsTheSafeAreaMovesWithTheColumns() throws {
+        let session = try boot(size: CGSize(width: 951, height: 669))
+        let navigation = session.presenter.navigation, agent = Agent(session: session)
+        until("a split") { navigation.split != nil && !agent.nativeInFlight() }
+        let split = try XCTUnwrap(navigation.split)
+        split.controller.traitOverrides.horizontalSizeClass = .regular
+        split.controller.preferredSplitBehavior = .tile
+        until("expanded") { !split.controller.isCollapsed && !agent.nativeInFlight() }
+        XCTAssertNil(agent.tap(["id": Int(try node(session, "row-c").id)])["error"])
+        until("the chapter is in the detail") { has(session, "chapter-heading") && split.controller.transitionCoordinator == nil && !agent.nativeInFlight() }
+        let heading = try node(session, "chapter-heading"), figure = try node(session, "chapter-figure"), verse = try node(session, "chapter-verse")
+        until("its words are painted") { [heading, verse].allSatisfy { $0.textRasterReady && $0.textRasterLayer != nil } }
+        until("a frame shows them") { heading.layer.presentation() != nil && figure.layer.presentation() != nil }
+        // Where the words are in the heading, whatever layers hold them.
+        let words = { (ink: CALayer) in heading.layer.convert(ink.frame, from: ink.superlayer) }
+        let ink = try XCTUnwrap(heading.textRasterLayer), frame = heading.frame, place = words(ink), box = figure.frame
+        let lines = try XCTUnwrap(verse.textRaster)
+        XCTAssertGreaterThan(place.minX, 16 + 100, "the words clear the list beside them")
+        let view = try XCTUnwrap(split.controller.view)
+        UIView.animate(withDuration: 0.5) {
+            view.frame.size.width -= 200
+            view.layoutIfNeeded()
+        }
+        XCTAssertNotEqual(figure.frame.minX, box.minX, "the list's clearance changed inside the animation")
+        XCTAssertEqual(heading.frame.minX, frame.minX, "the box stays: its padding moves the words")
+        let moved = try XCTUnwrap(heading.textRasterLayer)
+        XCTAssertEqual(words(moved).minX - place.minX, figure.frame.minX - box.minX, accuracy: 0.5, "the words move with the figure")
+        let longest = { (layer: CALayer) in (layer.animationKeys() ?? []).filter { $0.hasPrefix("position") }.compactMap { layer.animation(forKey: $0) }.max { $0.duration < $1.duration } }
+        let slide = try XCTUnwrap(sequence(first: moved, next: \.superlayer).prefix { $0 !== heading.layer }.lazy.compactMap(longest).first,
+                                  "the words move inside the animation")
+        session.presenter.textRasters.settleVisible([verse]) // a worker's pixels, if it painted them again
+        XCTAssertTrue(verse.textRaster === lines, "a paragraph whose box only moves keeps its pixels")
+        let beside = try XCTUnwrap(longest(figure.layer), "the figure beside them moves inside it")
+        XCTAssertEqual(slide.duration, beside.duration, accuracy: 0.01, "with the same animation")
+    }
+
+    /// A text in one system colour on UIKit's sidebar has a view for its box
+    /// (`TextBoxView`), which UIKit may draw vibrantly; collapsed, the list
+    /// is no sidebar and the box a layer again.
+    func testATextInASystemColourOnTheSidebarHasAViewForItsBox() throws {
+        let session = try boot(size: CGSize(width: 951, height: 669))
+        let navigation = session.presenter.navigation, agent = Agent(session: session)
+        until("a split") { navigation.split != nil && !agent.nativeInFlight() }
+        let split = try XCTUnwrap(navigation.split)
+        split.controller.traitOverrides.horizontalSizeClass = .regular
+        until("expanded") { !split.controller.isCollapsed && split.showsList && !agent.nativeInFlight() }
+        let note = try node(session, "library-note")
+        until("its words are painted") { note.textRasterReady && note.textRasterLayer != nil }
+        let view = try XCTUnwrap(note.specs?.rasterBoxView, "a view on the sidebar")
+        XCTAssertTrue(view.superview === note && view.layer === note.textBoxLayer)
+        XCTAssertFalse(view.isUserInteractionEnabled)
+        split.controller.traitOverrides.horizontalSizeClass = .compact
+        until("collapsed") { split.controller.isCollapsed && !agent.nativeInFlight() && note.specs?.rasterBoxView == nil }
+        XCTAssertNil(view.superview)
+        XCTAssertTrue(note.textRasterLayer?.superlayer === note.textBoxLayer, "the ink in a layer for its box")
+    }
+
+    /// A text's box replaced by one of the other kind as it moves (the
+    /// sidebar's note recoloured from its system colour to another inside
+    /// an animation) keeps its motion: the new box takes UIKit's animation in
+    /// flight.
+    func testATextsBoxOfAnotherKindKeepsItsMotion() throws {
+        let session = try boot(size: CGSize(width: 951, height: 669))
+        let navigation = session.presenter.navigation, agent = Agent(session: session)
+        until("a split") { navigation.split != nil && !agent.nativeInFlight() }
+        let split = try XCTUnwrap(navigation.split)
+        split.controller.traitOverrides.horizontalSizeClass = .regular
+        until("expanded") { !split.controller.isCollapsed && split.showsList && !agent.nativeInFlight() }
+        let note = try node(session, "library-note")
+        until("its words are painted in a view's box") { note.textRasterReady && note.specs?.rasterBoxView != nil }
+        until("a frame shows it") { session.presenter.showed(note) }
+        let box = note.paragraphBox()
+        UIView.animate(withDuration: 0.5) {
+            session.presenter.apply(wireBatch([["op": "fieldContent", "id": Int(note.id), "rect": [box.minX + 20, box.minY, box.width, box.height]]]))
+            session.presenter.apply(wireBatch([["op": "style", "id": Int(note.id), "style": ["text_color": [200.0, 0.0, 0.0, 255.0], "font_size": 17.0]]]))
+        }
+        until("painted in its new colour") { note.textRasterReady && note.textBoxLayer != nil && note.specs?.rasterBoxView == nil }
+        XCTAssertNotNil(note.textBoxLayer?.animation(forKey: "position"), "the layer that took the view's place moves on")
+    }
+
     /// LLP 1127 D14 on an iPhone Duo folded and unfolded with its inspector
     /// shown. Collapsing with the inspector shown, UIKit presents the
     /// inspector's column as a sheet of its own: the route goes to the sheet

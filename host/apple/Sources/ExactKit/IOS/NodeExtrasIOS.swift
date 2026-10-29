@@ -27,8 +27,9 @@ final class TextSpecs {
     var headroom: Float?
     var raster: CGImage?
     var rasterLayer: CALayer?
-    /// The layer at the paragraph's place that holds `rasterLayer` (`NodeView.placeTextRaster`).
-    var rasterBox: CALayer?
+    /// The layer at the paragraph's place that holds `rasterLayer` (`NodeView.placeTextRaster`),
+    /// and the view it is the layer of when it is one (`NodeView.makeTextBox`).
+    var rasterBox: CALayer?, rasterBoxView: TextBoxView?
     /// What the shown pixels answer for in the paragraph's box, whether they
     /// are a band of it, the ink they were painted from (`TextRasterImage.ink`)
     /// and the room they serve (`TextRasterKey.room`).

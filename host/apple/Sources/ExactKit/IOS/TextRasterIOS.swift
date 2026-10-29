@@ -483,35 +483,59 @@ extension NodeView {
         textRaster = nil; textRasterKey = nil; textRasterReady = false; textRasterFailed = false; textRasterSpec = nil
     }
 
-    /// The paragraph's ink in its text's box (`placeTextRaster`), made now
-    /// if it has none. The box is inside a vibrancy view when the ink draws
-    /// in a system colour over a blur (`VibrancyIOS.swift`).
+    /// The paragraph's ink in its text's box (`placeTextRaster`), a box of
+    /// the kind it wants (`textBoxWantsView`): one made now, or one the ink
+    /// moves into when the kind changes, takes its place at once. The box is
+    /// inside a vibrancy view when the ink draws in a system colour over a
+    /// blur (`VibrancyIOS.swift`).
     func hostText(_ ink: CALayer) {
+        let asView = textBoxWantsView(ink), old = textBoxLayer
+        if old != nil, (specs?.rasterBoxView != nil) != asView { removeTextBox() }
         let made = textBoxLayer == nil
         if made { CATransaction.begin(); CATransaction.setDisableActions(true) }
         defer { if made { CATransaction.commit() } }
-        let box = textBoxLayer ?? makeTextBox()
+        let box = textBoxLayer ?? makeTextBox(asView: asView)
         if ink.superlayer !== box { box.addSublayer(ink) }
+        if let cast = ink.textCast, cast.superlayer !== box { box.insertSublayer(cast, below: ink) }
         textRasterLayer = ink
         if box.superlayer == nil, syncVibrancy() == nil { mountTextBox() }
         placeTextRaster()
+        // A box of the other kind takes over the one it replaces' motion: UIKit's animation in flight.
+        if let old, old !== box { for key in old.animationKeys() ?? [] { if let motion = old.animation(forKey: key) { box.add(motion, forKey: key) } } }
     }
 
-    private func makeTextBox() -> CALayer {
-        let box = BoxPartLayer()
+    /// The text's box again, of the kind the ground under it now asks for
+    /// (`NavigationHost.repaintGrounds`), its pixels kept.
+    func rehostText() { if let ink = textRasterLayer { hostText(ink) } }
+
+    /// Whether the text's box is a view (`TextBoxView`): its ink is one
+    /// system colour (a tint, `TextRasterImage.tint`, of a `system_colors`
+    /// row) on the ground of a split's sidebar or inspector, where UIKit
+    /// draws such a view's content vibrantly when the view is its own. A
+    /// view costs about seven times what a layer does to make, so every
+    /// other box is a layer.
+    private func textBoxWantsView(_ ink: CALayer) -> Bool {
+        ink is TintInk && systemColor("text_color") != nil && presenter?.onColumnGround(self) == true
+    }
+
+    private func makeTextBox(asView: Bool) -> CALayer {
+        let view = asView ? TextBoxView() : nil
+        let box = view?.layer ?? BoxPartLayer()
         box.anchorPoint = .zero
-        textBoxLayer = box
+        textBoxLayer = box; textMore.rasterBoxView = view
         return box
     }
 
     /// The text's box above the box's border (`applyBoxLayer`), under everything else.
     func mountTextBox() {
-        if let box = textBoxLayer { insertBoxSublayer(box) }
+        guard let box = textBoxLayer else { return }
+        if let view = specs?.rasterBoxView, view.superview !== self { insertSubview(view, at: 0) }
+        insertBoxSublayer(box)
     }
 
     func removeTextBox() {
-        textBoxLayer?.removeFromSuperlayer()
-        textBoxLayer = nil
+        if let view = specs?.rasterBoxView { view.removeFromSuperview() } else { textBoxLayer?.removeFromSuperlayer() }
+        textBoxLayer = nil; specs?.rasterBoxView = nil
     }
 
     /// Where the paragraph's box is drawn in this view: its content box
@@ -541,6 +565,17 @@ extension NodeView {
         let rows = specs.rasterBand ? CGRect(x: room.minX, y: covered.minY, width: room.width, height: covered.height) : room
         textRasterFrame = covered.isNull ? .zero : covered.union(rows)
     }
+}
+
+/// A paragraph's text box as a view (`NodeView.makeTextBox`). It takes no
+/// touches and is no accessibility element: the paragraph is.
+final class TextBoxView: UIView {
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        isUserInteractionEnabled = false
+        accessibilityElementsHidden = true
+    }
+    required init?(coder: NSCoder) { nil }
 }
 
 /// A paragraph's worker-rendered pixels (`showTextRaster`): its changes show
@@ -779,3 +814,4 @@ extension Presenter {
     }
 }
 #endif
+
