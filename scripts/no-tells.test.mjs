@@ -77,10 +77,15 @@ test('a fixed font size is a bare number, px or pt, whole or a branch; rem, a ro
     '      input value=v font-size=17',
     '      text "g" font-size=72 // no-tells: a poster',
     '      text "h" font-size=(items.length > 3 ? "2rem" : "1rem")',
+    '      for p in people key=p.id',
+    '        text p.initials font-size=18 testId=`initials-${p.id}`',
+    '        text p.name font-size=17 testId=`${p.id}-name`',
     'style Big',
     '  font-size="30pt"',
   ].join('\n');
-  assert.deepEqual(fixedSizesIn(source).map((f) => [f.line, f.tag, f.size, f.testId]), [[4, 'text', 28, 'big'], [6, 'text', 48, null], [9, 'text', 20, 'ff'], [15, 'style', 30, null]]);
+  // A row's templated testId is its literal head and `*`, which an accept's `initials-*` takes; one with no head is none
+  assert.deepEqual(fixedSizesIn(source).map((f) => [f.line, f.tag, f.size, f.testId]),
+    [[4, 'text', 28, 'big'], [6, 'text', 48, null], [9, 'text', 20, 'ff'], [15, 'text', 18, 'initials-*'], [16, 'text', 17, null], [18, 'style', 30, null]]);
 });
 
 // LLP 1116.021 D6: text that breaks inside words, and a symbol that stays small beside text that grows.

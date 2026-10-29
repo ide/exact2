@@ -290,18 +290,21 @@ export function fixedSizesIn(source) {
     if (/\/\/\s*no-tells:\s*\S/.test(lines[line - 1] ?? '') || CONTROL_TAGS.has(tag)) continue;
     const size = fixedSize(value);
     if (size == null) continue;
-    let testId = null;
-    for (let i = head; i < rows.length && (i === head || heads[i] === head) && testId == null; i++) testId = /(?:^|\s)testId=(?:"([^"]*)"|`([^`$]*)`)/.exec(rows[i])?.slice(1).find((v) => v != null) ?? null;
-    found.push({ line, column, tag, value, size, testId });
+    found.push({ line, column, tag, value, size, testId: testIdOf(rows, heads, head) });
   }
   return found;
 }
 
-/** A node's literal `testId`, read from its head line and the attribute lines under it. */
+/** A node's `testId`, read from its head line and the attribute lines under it: a literal one as written, and one
+ * written as a template (a list row's, `initials-${person.id}`) as its literal head and `*` (`initials-*`), which
+ * `verify.accept`'s `initials-*` takes. One with no literal head is none. */
 function testIdOf(rows, heads, head) {
   for (let i = head; i < rows.length && (i === head || heads[i] === head); i++) {
-    const id = /(?:^|\s)testId=(?:"([^"]*)"|`([^`$]*)`)/.exec(rows[i])?.slice(1).find((v) => v != null);
-    if (id != null) return id;
+    const m = /(?:^|\s)testId=(?:"([^"]*)"|`([^`]*)`)/.exec(rows[i]);
+    if (!m) continue;
+    if (m[1] != null) return m[1];
+    const at = m[2].indexOf('${');
+    return at < 0 ? m[2] : at > 0 ? `${m[2].slice(0, at)}*` : null;
   }
   return null;
 }
