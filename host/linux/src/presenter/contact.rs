@@ -423,6 +423,7 @@ impl<D: DataSource> Presenter<D> {
     /// synthesis; then the node's `pointerdown` (LLP 1005 §3), which the
     /// contact never waits for.
     pub fn pointer_down(&mut self, x: f32, y: f32, now_ms: f64) -> Result<bool, String> {
+        self.landed = None;
         if self.overlay_pointer(0, x, y, now_ms) || self.scrollbar_pointer(0, x, y) {
             return Ok(true);
         }
@@ -435,6 +436,10 @@ impl<D: DataSource> Presenter<D> {
         let mark = self.hatch_pointer_mark(crate::hatches::Phase::Down, x, y);
         let result = match self.contact_down(x, y, now_ms) {
             Ok(taken) => {
+                self.landed = (self.contact.as_ref()).map(|c| super::fling::Landed {
+                    hit: c.hit,
+                    took: c.canvas.is_some(),
+                });
                 // Keep the down target's identity before its handler can remove it.
                 let focus = self.contact.as_ref().and_then(|c| {
                     let node = self.host.kernel().node_by_key(c.hit)?;
@@ -785,6 +790,7 @@ impl<D: DataSource> Presenter<D> {
             contact.position = (x, y);
             if contact.panning || dx.abs().max(dy.abs()) > slop {
                 contact.panning = true;
+                self.contact_taken();
                 if let Some((key, _)) = contact.press.take() {
                     self.host.press_feedback(key, false, now_ms);
                 }
@@ -833,6 +839,7 @@ impl<D: DataSource> Presenter<D> {
                 return match self.begin_group(binding, contact.origin, now_ms) {
                     Ok(true) => {
                         contact.group = true;
+                        self.contact_taken();
                         let moved = self.move_group((x, y), now_ms);
                         self.contact = Some(contact);
                         moved
@@ -900,6 +907,7 @@ impl<D: DataSource> Presenter<D> {
                         }
                     }
                     contact.hold = Some(held);
+                    self.contact_taken();
                     contact.origin = (x, y);
                 }
                 Ok(None) => {

@@ -285,6 +285,17 @@ class ExactView(context: Context, private val live: Boolean, private val onFirst
 
     @SuppressLint("ClickableViewAccessibility")
     override fun onTouchEvent(e: MotionEvent): Boolean {
+        val kept = deliver(e)
+        if (started) flings.touch(e, kept)
+        return true
+    }
+    private val flings = Flings(context) { direction, pointers ->
+        val o = owner
+        if (o != null) o.call { Native.swipe(direction, pointers) } else { Native.swipe(direction, pointers); pump() }
+    }
+
+    /** A touch's event, to the reader and exact2, and who of the reader's kept it from exact2. */
+    private fun deliver(e: MotionEvent): Kept {
         val down = e.actionMasked == MotionEvent.ACTION_DOWN
         if (down) {
             // A new contact cannot borrow the previous contact's delayed hit answer.
@@ -292,7 +303,7 @@ class ExactView(context: Context, private val live: Boolean, private val onFirst
             moduleDownX = e.x; moduleDownY = e.y
         }
         // A touch that scrolls is the reader's and exact2 hears no more of it; any other goes on to exact2.
-        if (started && scrolling.touch(e)) { forgetModuleTap(); hold(null); return true }
+        if (started && scrolling.touch(e)) { forgetModuleTap(); hold(null); return Kept.SCROLLING }
         if (e.actionMasked == MotionEvent.ACTION_MOVE && (Math.abs(e.x - moduleDownX) > slop || Math.abs(e.y - moduleDownY) > slop)) {
             forgetModuleTap()
         }
@@ -303,7 +314,7 @@ class ExactView(context: Context, private val live: Boolean, private val onFirst
                 // As Fields does, keep a completed contact until exact2 identifies its target.
                 moduleReleased = MotionEvent.obtain(e)
             } else releaseModuleTap(e)
-            return true
+            return Kept.NONE
         }
         if (e.actionMasked == MotionEvent.ACTION_CANCEL || e.actionMasked == MotionEvent.ACTION_UP ||
             e.actionMasked == MotionEvent.ACTION_POINTER_DOWN || e.actionMasked == MotionEvent.ACTION_POINTER_UP) forgetModuleTap()
@@ -313,7 +324,7 @@ class ExactView(context: Context, private val live: Boolean, private val onFirst
         if (started && hosted != null && hosted.touch(e)) {
             hold(null)
             if (down) { val touch = hosted.serial; under(e.x, e.y) { hosted.under(touch, it.getOrElse(2) { 0 }) } }
-            return true
+            return Kept.FIELD
         }
         val action = when (e.actionMasked) {
             MotionEvent.ACTION_DOWN -> 0; MotionEvent.ACTION_UP -> 1; MotionEvent.ACTION_MOVE -> 2; else -> 3
@@ -340,7 +351,7 @@ class ExactView(context: Context, private val live: Boolean, private val onFirst
                 answered()
             }
         }
-        return true
+        return Kept.NONE
     }
 
     /** What is under a touch's down ([Native.under]), asked behind the down itself: by the time the finger passes the

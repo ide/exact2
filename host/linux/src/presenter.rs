@@ -59,6 +59,7 @@ mod field_pointer;
 mod field_scroll;
 #[cfg(test)]
 mod field_tests;
+mod fling;
 mod group;
 mod hatch;
 mod history;
@@ -288,6 +289,8 @@ pub struct Presenter<D: DataSource> {
     refusal_turn: bool,
     collection: collection::State,
     contact: Option<contact::Contact>,
+    /// The touch's first hit, for its fling (`fling.rs`).
+    landed: Option<fling::Landed>,
     retained_motion: Option<retained_action::MotionPermit>,
     arrange: Option<arrange::State>,
     group: Option<group::State>,
@@ -473,6 +476,7 @@ impl<D: DataSource> Presenter<D> {
             refusal_turn: false,
             collection: collection::State::default(),
             contact: None,
+            landed: None,
             retained_motion: None,
             transform_geometry: Default::default(),
             arrange: None,
