@@ -324,8 +324,12 @@ extension CollectionHost {
             // The port lands there, and its layer moves from where it showed
             // as a collection view's batch update moves it: an additive
             // animation of the difference, which later batches move under
-            // without stopping it. Inside an animation (the keyboard's) the
-            // pull already rides that one.
+            // without stopping it. Not `UIView.animate` of the offset: the
+            // model has already moved, and animating it would set it back and
+            // forth in one turn, which the list reads as the reader scrolling
+            // (filmed: the typing indicator's row dropped out until the next
+            // batch). Inside an animation (the keyboard's) the pull already
+            // rides that one.
             var shown = target
             if horizontal { shown.x = CGFloat(start) - insets.left + content.minX } else { shown.y = CGFloat(start) - insets.top + node.pageBand.top + content.minY }
             let gap = horizontal ? shown.x - target.x : shown.y - target.y
