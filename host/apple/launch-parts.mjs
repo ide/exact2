@@ -1,17 +1,21 @@
 // Builds module launch parts and their services for an Apple build.
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, resolve } from 'node:path';
+import { launchModules } from '../../scripts/launch-modules.mjs';
+
+export { launchModules };
 
 /** Writes a generated SwiftPM target with each module's `apple/launch/*.swift`
  * and a registry of their `ExactLaunchPart` types, in `launch` order. SwiftPM
  * needs it inside the package. Returns its directory, or null if there are none. */
 export function writeLaunchParts(pkg, app) {
-  if (!app.launch.some(m => m.launch.length)) return null;
+  const modules = launchModules(app.dir, app.manifest);
+  if (!modules.some(m => m.launch.length)) return null;
   const dir = resolve(pkg, '.launch-parts', app.id);
   mkdirSync(dir, { recursive: true });
   const keep = new Set(['Registry.swift']), types = [];
   const put = (name, text) => { const to = resolve(dir, name); if (!existsSync(to) || readFileSync(to, 'utf8') !== text) writeFileSync(to, text); };
-  for (const m of app.launch) for (const f of m.launch) {
+  for (const m of modules) for (const f of m.launch) {
     const text = readFileSync(f, 'utf8'), name = `${m.name}-${basename(f)}`;
     for (const match of text.matchAll(/(?:struct|class|enum)\s+(\w+)\s*:[^{]*\bExactLaunchPart\b/g)) types.push(match[1]);
     keep.add(name);
