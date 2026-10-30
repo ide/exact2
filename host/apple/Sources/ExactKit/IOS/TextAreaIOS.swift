@@ -190,28 +190,39 @@ package final class TextArea: UITextView {
     var atomLook: (any UITraitChangeRegistration)?
     /// UIKit rounds a text view's content height up to a whole point, so text
     /// that fills its box (a growing field's line, 40.333 points with its
-    /// padding) measured 41 and the field scrolled by the difference. Content
-    /// within a point of the box is the box: as a browser's textarea, it
-    /// scrolls only once its text overflows (a `field-sizing: content` field
-    /// at its `max-height`).
-    package override var contentSize: CGSize {
-        get { super.contentSize }
-        set { super.contentSize = fitted(newValue) }
+    /// padding) measures 41, and text a fraction past an integral box a whole
+    /// point more. Content no taller than the box rounded up the same way
+    /// fits it (half a pixel absorbs arithmetic error in the box). As in a
+    /// browser's textarea (a `field-sizing: content` one below its
+    /// `max-height`), text that fits is neither dragged nor scrolled; only
+    /// text that overflows scrolls.
+    var fits: Bool {
+        contentSize.height <= (bounds.height + 0.5 / max(1, traitCollection.displayScale)).rounded(.up)
     }
-    package override func layoutSubviews() {
-        super.layoutSubviews()
-        // The box grew or shrank under content UIKit had already measured
-        let fit = fitted(contentSize)
-        if fit != contentSize { super.contentSize = fit }
-        // Text that fits sits where layout put it, not where a scroll left it
-        let top = -adjustedContentInset.top
-        if fit.height <= bounds.height, contentOffset.y != top, !isTracking, !isDecelerating {
-            contentOffset.y = top
+    package override func gestureRecognizerShouldBegin(_ gesture: UIGestureRecognizer) -> Bool {
+        if gesture === panGestureRecognizer, fits { return false }
+        return super.gestureRecognizerShouldBegin(gesture)
+    }
+    // Text that fits stays at the top, wherever UIKit's caret reveal or the
+    // content's new size would move it
+    package override var contentOffset: CGPoint {
+        get { super.contentOffset }
+        set {
+            let old = super.contentOffset
+            super.contentOffset = fits ? CGPoint(x: newValue.x, y: -adjustedContentInset.top) : newValue
+            // A scroll view's own drawing does not move with its content: the
+            // decorations' lines are drawn again at each new offset.
+            if super.contentOffset != old, decorations?.drawsLines == true { setNeedsDisplay() }
         }
     }
-    private func fitted(_ size: CGSize) -> CGSize {
-        guard size.height > bounds.height, size.height < bounds.height + 1 else { return size }
-        return CGSize(width: size.width, height: bounds.height)
+    // Text that comes to fit, by growing its box or shrinking, shows from the
+    // top: UIKit moves the offset only when it is out of the new range
+    package override var contentSize: CGSize { didSet { if contentSize != oldValue { showFittingText() } } }
+    package override var frame: CGRect { didSet { if frame.size != oldValue.size { showFittingText() } } }
+    package override var bounds: CGRect { didSet { if bounds.size != oldValue.size { showFittingText() } } }
+    private func showFittingText() {
+        let top = -adjustedContentInset.top
+        if fits, super.contentOffset.y != top { contentOffset = CGPoint(x: super.contentOffset.x, y: top) }
     }
     // Typed text never takes a link's marks from the character before the
     // caret (its closing parenthesis, or its `[`).
@@ -420,11 +431,6 @@ package final class TextArea: UITextView {
     var placeholder = "" { didSet { setNeedsDisplay() } }
     /// The authored `::placeholder` colour (LLP 1104 D3); nil, UIKit's.
     var placeholderColor: UIColor?
-    // A scroll view's own drawing does not move with its content: the
-    // decorations' lines are drawn again at each new offset.
-    package override var contentOffset: CGPoint {
-        didSet { if contentOffset != oldValue, decorations?.drawsLines == true { setNeedsDisplay() } }
-    }
     package override func draw(_ rect: CGRect) {
         super.draw(rect)
         decorations?.drawLines(in: self)
@@ -511,6 +517,10 @@ extension NodeView {
         // Not the screen's scroller: the status bar scrolls that (LLP 1115).
         f.scrollsToTop = false
         #endif
+        // Its padding alone insets its text: the safe area it overlaps (a
+        // docked composer's bottom, under the home indicator) is no scroll
+        // range, as a browser's textarea takes none from the page
+        f.contentInsetAdjustmentBehavior = .never
         addSubview(f)
         textArea = f
     }
