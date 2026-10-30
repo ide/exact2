@@ -27,7 +27,6 @@ import { macResourceMappings, macResourceInventory, appleAssetCatalogInventory, 
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { basename, delimiter, dirname, isAbsolute, relative, resolve, sep, toNamespacedPath } from 'node:path';
-import { launchModules } from './launch-modules.mjs';
 import { homedir, tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { gzipSync } from 'node:zlib';
@@ -606,8 +605,6 @@ export function resolveApp(nameOrCrate) {
     get modules() {
       return { ...this.modulesFor('apple'), web: this.modulesFor('web').web };
     },
-    /** Module launch parts in `launch` order (launchModules). */
-    get launch() { return launchModules(dir, manifest); },
     /** The manifest, validated; the derived defaults when the app has none. */
     manifest,
     /** The app identity, reverse-DNS: the bundle id on every platform (`build.mjs:48–49` derived it from the crate name before the manifest). */
