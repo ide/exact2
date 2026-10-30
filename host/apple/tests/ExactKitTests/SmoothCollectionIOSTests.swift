@@ -23,8 +23,8 @@ final class SmoothCollectionIOSTests: XCTestCase {
         window.makeKeyAndVisible()
         return p
     }
-    private func collections(revision: Int, correction: Any) -> [String: Any] {
-        ["op": "collections", "items": [["view": 1, "revision": revision, "scrollSequence": 0, "count": 50, "totalExtent": 2000,
+    private func collections(revision: Int, correction: Any, extent: Double = 2000) -> [String: Any] {
+        ["op": "collections", "items": [["view": 1, "revision": revision, "scrollSequence": 0, "count": 50, "totalExtent": extent,
             "rows": [["view": 10, "root": 10, "epoch": 1]], "correction": correction]]]
     }
     private func spin(_ seconds: Double) { RunLoop.main.run(until: Date().addingTimeInterval(seconds)) }
@@ -232,6 +232,36 @@ final class SmoothCollectionIOSTests: XCTestCase {
         XCTAssertNil(p.collections.offsetDrivers[1], "no motion")
         XCTAssertFalse(p.collections.animating.contains(1))
         XCTAssertGreaterThan(scroll.contentOffset.y, 0.2, "set there, to the pixel")
+    }
+
+    /// A row removed at a followed end: UIKit pulls the offset in to the
+    /// shorter content at once, and the port lands there; its layer moves
+    /// from where it showed by an additive animation of the difference, as
+    /// a collection view's batch update does, so a batch meanwhile (a
+    /// receipt growing on the row above) moves the port under it without
+    /// stopping it.
+    func testAFollowedEndThatMovedUpMovesFromWhereThePortShowed() throws {
+        let p = presenter()
+        list(p, correction: NSNull())
+        let scroll = try XCTUnwrap(p.views[1]?.scroll)
+        p.apply(wireBatch([collections(revision: 2, correction: ["scrollSequence": "0", "offset": 1700, "smooth": false])]))
+        XCTAssertEqual(scroll.contentOffset.y, 1700, accuracy: 0.5, "at its end")
+        let seq = String(try XCTUnwrap(p.collections.entries[1]?.cursor.sequence))
+        p.apply(wireBatch([collections(revision: 3, correction: ["scrollSequence": seq, "offset": 1652, "smooth": true], extent: 1952),
+            ["op": "content", "id": 1, "w": 300.0, "h": 1952.0]]))
+        XCTAssertEqual(scroll.contentOffset.y, 1652, accuracy: 0.5, "the port is at the new end")
+        let motions = { (scroll.layer.animationKeys() ?? []).compactMap { scroll.layer.animation(forKey: $0) as? CABasicAnimation } }
+        let motion = try XCTUnwrap(motions().first, "its layer moves")
+        XCTAssertEqual(motion.keyPath, "bounds.origin.y")
+        XCTAssertTrue(motion.isAdditive)
+        XCTAssertEqual(try XCTUnwrap(motion.fromValue as? CGFloat), 48, accuracy: 0.5, "from where it showed")
+        XCTAssertEqual(motion.toValue as? Int, 0)
+        XCTAssertEqual(motion.duration, CollectionHost.smoothDuration)
+        XCTAssertFalse(p.collections.animating.contains(1), "no offset motion: the runner reads the port where it is")
+        p.apply(wireBatch([collections(revision: 4, correction: ["scrollSequence": seq, "offset": 1660, "smooth": true], extent: 1960),
+            ["op": "content", "id": 1, "w": 300.0, "h": 1960.0]]))
+        XCTAssertEqual(motions().count, 1, "a batch meanwhile keeps it")
+        wait("the end it moved to") { abs(scroll.contentOffset.y - 1660) < 0.5 && !p.collections.animating.contains(1) }
     }
 
     /// A smooth correction under half a point (a port rounded to a device

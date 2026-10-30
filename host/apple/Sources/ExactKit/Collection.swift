@@ -467,7 +467,11 @@ package final class CollectionHost {
                entry.cursor.takeCorrection(revision: entry.snapshot.revision,
                    sequence: correction.sequence == planned ? entry.cursor.sequence : correction.sequence) {
                 correcting = true
+                #if os(iOS) || os(tvOS)
+                correct(view, top: correction.offset, extent: entry.snapshot.extent, smooth: correction.smooth, from: entry.batchStart)
+                #else
                 correct(view, top: correction.offset, extent: entry.snapshot.extent, smooth: correction.smooth)
+                #endif
                 correcting = false
             }
             entry.batchStart = nil

@@ -294,7 +294,8 @@ extension CollectionHost {
     }
     /// UIKit's batch-update and scroll timing, which Signal's transcript rides.
     static let smoothDuration: TimeInterval = 0.3
-    func correct(_ id: UInt32, top: Double, extent: Double, smooth: Bool = false) {
+    /// `start`: where the port was when the batch began (`geometry`'s offset).
+    func correct(_ id: UInt32, top: Double, extent: Double, smooth: Bool = false, from start: Double? = nil) {
         guard let node = presenter?.views[id], let scroll = node.scroll else { return }
         let content = node.contentBox(), insets = scroll.adjustedContentInset
         let horizontal = entries[id]?.snapshot.horizontal ?? false
@@ -316,6 +317,28 @@ extension CollectionHost {
             stopAnimation(id)
             scroll.setContentOffset(target, animated: false)
             return
+        }
+        if animate, !animating.contains(id), let start, UIView.inheritedAnimationDuration == 0 {
+            // Content that shrank under the port (a row removed at a followed
+            // end) had UIKit pull the offset in at once (`setContentSize:`).
+            // The port lands there, and its layer moves from where it showed
+            // as a collection view's batch update moves it: an additive
+            // animation of the difference, which later batches move under
+            // without stopping it. Inside an animation (the keyboard's) the
+            // pull already rides that one.
+            var shown = target
+            if horizontal { shown.x = CGFloat(start) - insets.left + content.minX } else { shown.y = CGFloat(start) - insets.top + node.pageBand.top + content.minY }
+            let gap = horizontal ? shown.x - target.x : shown.y - target.y
+            if gap > 0.5, abs(scroll.contentOffset.x - target.x) + abs(scroll.contentOffset.y - target.y) < 0.5 {
+                if scroll.contentOffset != target { scroll.setContentOffset(target, animated: false) }
+                let motion = CABasicAnimation(keyPath: horizontal ? "bounds.origin.x" : "bounds.origin.y")
+                motion.fromValue = gap; motion.toValue = 0; motion.isAdditive = true
+                motion.duration = Self.smoothDuration
+                motion.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+                // Its own key: one already running goes on, and the two add up
+                scroll.layer.add(motion, forKey: "followed-end-\(CACurrentMediaTime())")
+                return
+            }
         }
         if animate {
             // On its way or at rest: one motion from what shows, retargeted
