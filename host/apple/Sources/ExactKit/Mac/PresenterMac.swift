@@ -114,6 +114,8 @@ package final class Presenter {
     lazy var alerts = AlertHost(self)
     lazy var navigation = NavigationHost(presenter: self)
     lazy var backSwipe = BackSwipe(self)
+    /// A node's swipe tracked from scroll events (LLP 1057.001 §8, `DiscreteSwipeMac.swift`).
+    lazy var nodeSwipe = NodeSwipe(self)
     /// SVG scenes and CSS animations (LLP 1055 D4, D7).
     let svg = SvgHost()
     /// Boxes under CSS `filter`, drawn again after each batch (LLP 1055.000 D14).

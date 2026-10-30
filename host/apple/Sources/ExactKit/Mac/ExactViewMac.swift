@@ -196,13 +196,20 @@ public final class ExactView: NSView {
     }
 
     /// The trackpad's swipe back from a pushed route (LLP 1115.000 D5.1,
-    /// `BackSwipe`): the page's scroll view passes a sideways gesture up
+    /// `BackSwipe`), and a node's under the pointer (LLP 1057.001 §8,
+    /// `NodeSwipe`): the page's scroll view passes a sideways gesture up
     /// here when it is pinned for it and this says a swipe may be tracked.
     public override func wantsScrollEventsForSwipeTracking(on axis: NSEvent.GestureAxis) -> Bool {
-        axis == .horizontal && session.presenter.navigation.canGoBack
+        guard axis == .horizontal else { return false }
+        let p = session.presenter
+        return p.navigation.canGoBack || p.nodeSwipe.wanted(in: self)
     }
+    /// A node's swipe under the gesture's start takes it before Back (LLP
+    /// 1057.001 §8), and one swipe tracks at a time.
     public override func scrollWheel(with event: NSEvent) {
-        if !session.presenter.backSwipe.scroll(event) { super.scrollWheel(with: event) }
+        let p = session.presenter
+        let idle = !p.nodeSwipe.tracking && !p.backSwipe.tracking
+        if !(idle && (p.nodeSwipe.scroll(event, in: self) || p.backSwipe.scroll(event))) { super.scrollWheel(with: event) }
     }
     public override func swipe(with event: NSEvent) {
         if !session.presenter.backSwipe.swiped(deltaX: event.deltaX) { super.swipe(with: event) }
