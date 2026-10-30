@@ -212,5 +212,51 @@ final class DiscreteSwipeMacTests: XCTestCase {
         XCTAssertNil(try gesture([(14, 0)]))
         XCTAssertFalse(p.nodeSwipe.tracking)
     }
+
+    /// The agent's `tap … swipe` (§8.7): a three-finger swipe event at the
+    /// target's middle or `at` in it, which the responder chain carries to the
+    /// first node that takes it; refused, having sent nothing, when that is
+    /// not the target.
+    func testTheAgentsSwipeIsAThreeFingerSwipeUpTheResponderChain() throws {
+        _ = NSApplication.shared
+        let session = ExactApp.shared.makeSession(label: "discrete-swipe-agent")
+        defer { session.destroy() }
+        let p = session.presenter
+        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 300), styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        defer { window.close() }
+        window.contentView = ExactView(session: session)
+        p.apply(wireBatch([
+            ["op": "create", "id": 1, "kind": "view", "handlers": ["swipe"], "props": ["swipeDirection": "left right"]],
+            ["op": "create", "id": 2, "kind": "view", "handlers": ["swipe"], "props": ["swipeDirection": "left"]],
+            ["op": "create", "id": 3, "kind": "view", "handlers": ["swipe"], "props": ["swipeDirection": "up", "touchCount": "2"]],
+            // A scroller that can scroll either way, around content that hears the wheel
+            ["op": "create", "id": 4, "kind": "view", "style": ["overflow_x": "scroll", "overflow_y": "hidden"]],
+            ["op": "create", "id": 5, "kind": "view", "handlers": ["wheel"]],
+            ["op": "children", "id": 4, "ids": [5]], ["op": "children", "id": 1, "ids": [2, 3, 4]], ["op": "roots", "ids": [1]],
+            ["op": "frame", "id": 1, "x": 0.0, "y": 0.0, "w": 400.0, "h": 300.0],
+            ["op": "frame", "id": 2, "x": 0.0, "y": 0.0, "w": 400.0, "h": 100.0],
+            ["op": "frame", "id": 3, "x": 0.0, "y": 100.0, "w": 400.0, "h": 100.0],
+            ["op": "frame", "id": 4, "x": 0.0, "y": 200.0, "w": 400.0, "h": 100.0],
+            ["op": "frame", "id": 5, "x": 0.0, "y": 0.0, "w": 800.0, "h": 100.0],
+            ["op": "content", "id": 4, "w": 800.0, "h": 100.0],
+        ]))
+        p.views[4]?.scroll?.contentView.scroll(to: NSPoint(x: 200, y: 0))
+        var sent: [String] = []
+        p.onSwipe = { sent.append("\($0) \($1)") }
+        let agent = Agent(session: session)
+        let inner = agent.tap(["id": 2, "swipe": "left"])
+        XCTAssertEqual(inner["delivery"] as? String, "platform", "\(inner)")
+        XCTAssertNil(agent.tap(["id": 1, "swipe": "right"])["error"], "its middle is past the inner node")
+        XCTAssertNil(agent.tap(["id": 1, "swipe": "right", "at": [20.0, 20.0]])["error"], "the inner node names no right: it goes on up")
+        XCTAssertNil(agent.tap(["id": 1, "swipe": "left", "at": [200.0, 250.0]])["error"], "inside a scroll view and past a `wheel` handler, as `swipe(with:)` goes")
+        XCTAssertEqual(sent, ["2 left", "1 right", "1 right", "1 left"])
+        let nearer = agent.tap(["id": 1, "swipe": "left", "at": [20.0, 20.0]])
+        XCTAssertTrue((nearer["error"] as? String)?.contains("#2, nearer") == true, "\(nearer)")
+        XCTAssertNotNil(agent.tap(["id": 1, "swipe": "up"])["error"])
+        XCTAssertNotNil(agent.tap(["id": 3, "swipe": "up"])["error"], "AppKit reports no finger count")
+        XCTAssertEqual(agent.tap(["id": 1, "swipe": "sideways"])["malformed"] as? Bool, true)
+        XCTAssertEqual(sent.count, 4, "a refusal sends nothing")
+    }
 }
 #endif

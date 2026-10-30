@@ -1177,3 +1177,28 @@ fn an_unmarked_long_hold_is_waited_on_before_a_timer() {
     assert_eq!(reply["inflight"], 1, "{reply}");
     assert!(reply.get("held").is_none(), "{reply}");
 }
+
+/// LLP 1057.001 §8.7: the Linux desktop and Windows make no swipe, so the
+/// agent's is refused there, having changed nothing.
+#[test]
+#[cfg(not(target_os = "android"))]
+fn a_swipe_is_refused_where_the_platform_makes_none() {
+    let plan = contract::compile("component App\n  state seen = 0\n  action went\n    seen = seen + 1\n  view\n    column width=300\n      box testId=\"it\" width=100 height=100 swipe=went swipe-direction=\"left\"\n").unwrap();
+    let (mut p, boot_error) = Presenter::boot_with(
+        &plan.encode(),
+        (),
+        (300.0, 300.0),
+        1.0,
+        std::path::PathBuf::new(),
+        PainterChoice::Cpu,
+    )
+    .unwrap();
+    assert!(boot_error.is_none(), "{boot_error:?}");
+    let k = p.host().kernel();
+    let it = k.node_by_key(k.find_by_test_id("it")[0]).unwrap().id;
+    let reply = handle(
+        &mut p,
+        &format!(r#"{{"op":"tap","id":{it},"swipe":"left"}}"#),
+    );
+    assert!(reply.contains("makes no swipe"), "{reply}");
+}

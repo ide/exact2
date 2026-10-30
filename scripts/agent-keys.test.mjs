@@ -2,7 +2,7 @@
 // a keyboard does (#140), each repeat a keydown whose `repeat` is true.
 import { test, expect } from 'bun:test';
 import { chordKeys } from './agent-playwright.mjs';
-import { KEY_REPEAT, validateKey, typeFor, cdpKey, withHeldModifiers, browserKey, nativeKey, typeArguments, typeCommand, tapWords, intoArguments, MalformedOperation, clockSlices, padOp, postCommand, postInto, resizeArguments } from './agent-keys.mjs';
+import { KEY_REPEAT, validateKey, typeFor, cdpKey, withHeldModifiers, browserKey, nativeKey, typeArguments, typeCommand, tapWords, tapArguments, pointerGap, intoArguments, MalformedOperation, clockSlices, padOp, postCommand, postInto, resizeArguments } from './agent-keys.mjs';
 import { open } from './agent.mjs';
 import { launchFacts } from './agent-launch.mjs';
 
@@ -171,3 +171,14 @@ test('resize takes <w>x<h> and <w> <h>, and its refusal names both (LLP 1139.004
   expect(resizeArguments(['1280', '800'])).toEqual([1280, 800]);
   for (const words of [['1280'], ['1280', 'by', '800'], ['1280x'], []]) expect(() => resizeArguments(words)).toThrow('resize <w>x<h> or resize <w> <h>');
 });
+
+test('tap <target> swipe <direction> [at <x> <y>] is a discrete swipe; any other direction, a mouse or modifiers are refused (LLP 1057.001 §8.7)', () => {
+  expect(tapWords(['composer', 'swipe', 'down'])).toEqual(['composer', { swipe: 'down' }]);
+  expect(tapWords(['composer', 'swipe', 'left', 'at', '10', '20'])).toEqual(['composer', { swipe: 'left', at: [10, 20] }]);
+  expect(tapArguments({ swipe: 'down', at: [10, 20] })).toEqual([]);
+  for (const opts of [{ swipe: 'sideways' }, { swipe: 'down', mouse: true }, { swipe: 'down', modifiers: 'Shift' }]) {
+    expect(() => tapArguments(opts)).toThrow(MalformedOperation);
+  }
+  expect(pointerGap('ios', undefined, { swipe: 'down' })).toBeNull();
+});
+

@@ -37,7 +37,8 @@ final class DiscreteSwipe: UISwipeGestureRecognizer {
         }
     }
     /// The finger's travel in its direction, as a pan's velocity reads it.
-    var travel: CGPoint {
+    var travel: CGPoint { Self.travel(word) }
+    static func travel(_ word: String) -> CGPoint {
         switch word {
         case "left": return CGPoint(x: -1, y: 0)
         case "up": return CGPoint(x: 0, y: -1)
@@ -119,13 +120,17 @@ extension NodeView {
         }
         guard let scroll = other.view as? UIScrollView, other === scroll.panGestureRecognizer,
               let hit = gesture.hit, hit === scroll || hit.isDescendant(of: scroll) else { return false }
-        let travel = gesture.travel, vertical = travel.y != 0
+        return Self.scrolls(scroll, travel: gesture.travel, from: gesture.location(in: scroll))
+    }
+    /// Whether `scroll`'s pan admits `travel` from `start`, in its own space.
+    static func scrolls(_ scroll: UIScrollView, travel: CGPoint, from start: CGPoint) -> Bool {
+        let vertical = travel.y != 0
         let size = scroll.bounds.inset(by: scroll.adjustedContentInset).size
         let overflows = vertical ? scroll.contentSize.height > size.height + 0.5 : scroll.contentSize.width > size.width + 0.5
         let bounces = vertical ? scroll.alwaysBounceVertical : scroll.alwaysBounceHorizontal
         guard overflows || bounces else { return false }
         if let area = scroll as? TextArea { return !area.fits }
-        if let own = scroll as? ScrollView { return own.admitsPan(velocity: travel, translation: travel, start: gesture.location(in: scroll)) }
+        if let own = scroll as? ScrollView { return own.admitsPan(velocity: travel, translation: travel, start: start) }
         return true
     }
     /// Whether a touch that lands here begins in a one-touch swipe in the

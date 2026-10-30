@@ -62,6 +62,79 @@ impl<D: DataSource> Presenter<D> {
         None
     }
 
+    /// The agent's `tap <id> swipe <direction> [at <x> <y>]` (LLP 1057.001
+    /// §8.7): the fling of a touch that starts there, at the node's count,
+    /// delivered `recognized` (no driver synthesizes the reader's fling)
+    /// once that touch would reach the node: it takes the direction, is
+    /// hit there, is the innermost such on the hit path, and nothing between
+    /// keeps the contact.
+    pub(crate) fn agent_swipe(
+        &mut self,
+        id: ViewId,
+        direction: &str,
+        at: Option<(f32, f32)>,
+    ) -> Result<String, String> {
+        let named = format!("tap #{id} swipe {direction}");
+        let node = self
+            .host
+            .kernel()
+            .node(id)
+            .ok_or_else(|| format!("no view {id}"))?;
+        let (key, props) = (node.key, node.props.clone());
+        let pointers = match props.get(PropId::TouchCount) {
+            Some(PropValue::Int(n)) if *n >= 1 => u32::try_from(*n).unwrap_or(u32::MAX),
+            _ => 1,
+        };
+        let swipes = self
+            .host
+            .runner()
+            .handlers_of(id)
+            .contains(&EventKind::Swipe);
+        if !swipes || !takes(&props, direction, pointers) || !self.input_live(key) {
+            return Err(format!("{named}: it takes no swipe to the {direction}; its `swipe-direction` names the directions"));
+        }
+        let b = self
+            .box_of(id)
+            .ok_or_else(|| format!("no view {id} on screen"))?;
+        if let Some((x, y)) = at {
+            if !(x.is_finite()
+                && y.is_finite()
+                && x >= 0.
+                && y >= 0.
+                && x < b.rect.2
+                && y < b.rect.3)
+            {
+                return Err(format!("{named}: at must be a finite point inside its box"));
+            }
+        }
+        let (x, y) = self
+            .pointer_target(id, at)
+            .map_err(|e| format!("{named}: {e}"))?;
+        let hit = self
+            .hit(x, y)
+            .and_then(|h| self.host.kernel().node(h))
+            .map(|n| n.key);
+        match hit.and_then(|hit| self.fling_target(hit, direction, pointers)) {
+            Some(target) if target == id => {}
+            Some(nearer) => return Err(format!("{named}: #{nearer}, nearer on the hit path, takes that swipe (rule 3)")),
+            None => return Err(format!("{named}: a `press`, a control or a text input between the hit and it keeps the contact (rule 3)")),
+        }
+        let now = self.host.now();
+        if let Some(error) = self
+            .host
+            .dispatch_at(id, Event::Swipe(direction.into()), now)
+            .or(self.after_commit())
+        {
+            return Err(error);
+        }
+        self.dirty = true;
+        Ok(format!(
+            "{{\"tapped\":{id},\"swipe\":\"{direction}\",\"at\":[{},{}],\"delivery\":\"recognized\"}}",
+            x - b.rect.0,
+            y - b.rect.1
+        ))
+    }
+
     /// A gesture took the touch's contact.
     pub(super) fn contact_taken(&mut self) {
         if let Some(landed) = &mut self.landed {

@@ -568,6 +568,7 @@ extension Agent {
 
     func tap(_ req: [String: Any]) -> [String: Any] {
         if req["holdState"] != nil { return holdTap(req) } // a held state (LLP 1122 D8, HeldState.swift)
+        if req["swipe"] != nil { return swipeTap(req) } // a three-finger swipe (LLP 1057.001 §8.7, AgentSwipeMac.swift)
         // An alert's buttons are AppKit's (LLP 1115.000 D7.6): a tap on an
         // authored button of it presses the alert's, and nothing behind its
         // sheet takes one.

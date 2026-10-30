@@ -116,5 +116,56 @@ final class DiscreteSwipeIOSTests: XCTestCase {
         field.selectionMovedAt = 11
         XCTAssertFalse(bar.swipeMayBegin(down), "moved during the contact: the editor's")
     }
+
+    /// The agent's `tap … swipe` (§8.7): UIKit synthesizes no touch, so the
+    /// swipe is recognized at its start once a finger there would reach the
+    /// node's recognizer, and refused, naming why and sending nothing, when
+    /// it would not; `check` asks only, for the touch runner's real swipe.
+    func testTheAgentsSwipeIsRecognizedWhereAFingersWouldReachTheNode() throws {
+        let session = ExactApp.shared.makeSession(label: "discrete-swipe-agent")
+        defer { session.destroy() }
+        let p = session.presenter
+        let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene
+        let win = scene.map { UIWindow(windowScene: $0) } ?? UIWindow(frame: CGRect(x: 0, y: 0, width: 400, height: 800))
+        win.frame = CGRect(x: 0, y: 0, width: 400, height: 800)
+        win.rootViewController = UIViewController()
+        win.makeKeyAndVisible()
+        defer { win.isHidden = true }
+        p.viewport.frame = win.bounds
+        win.rootViewController?.view.addSubview(p.viewport)
+        p.apply(wireBatch([
+            ["op": "create", "id": 1, "kind": "view", "handlers": ["swipe"], "props": ["swipeDirection": "left right"]],
+            ["op": "create", "id": 2, "kind": "view", "handlers": ["swipe"], "props": ["swipeDirection": "left"]],
+            ["op": "create", "id": 3, "kind": "button", "handlers": ["press"]],
+            ["op": "create", "id": 4, "kind": "view", "style": ["overflow_x": "scroll", "overflow_y": "hidden"]],
+            ["op": "create", "id": 5, "kind": "view"],
+            ["op": "create", "id": 6, "kind": "view", "handlers": ["swipe"], "props": ["swipeDirection": "up", "touchCount": "2"]],
+            ["op": "children", "id": 4, "ids": [5]], ["op": "children", "id": 1, "ids": [2, 3, 4, 6]], ["op": "roots", "ids": [1]],
+            ["op": "frame", "id": 1, "x": 0.0, "y": 0.0, "w": 400.0, "h": 500.0],
+            ["op": "frame", "id": 2, "x": 0.0, "y": 0.0, "w": 400.0, "h": 100.0],
+            ["op": "frame", "id": 3, "x": 0.0, "y": 120.0, "w": 60.0, "h": 40.0],
+            ["op": "frame", "id": 4, "x": 0.0, "y": 200.0, "w": 400.0, "h": 100.0],
+            ["op": "frame", "id": 5, "x": 0.0, "y": 0.0, "w": 800.0, "h": 100.0],
+            ["op": "content", "id": 4, "w": 800.0, "h": 100.0],
+            ["op": "frame", "id": 6, "x": 0.0, "y": 400.0, "w": 400.0, "h": 100.0],
+        ]))
+        p.viewport.layoutIfNeeded()
+        var sent: [String] = []
+        p.onSwipe = { sent.append("\($0) \($1)") }
+        let agent = Agent(session: session)
+        let error = { (req: [String: Any]) in agent.tap(req)["error"] as? String ?? "" }
+        XCTAssertEqual(agent.tap(["id": 2, "swipe": "left"])["delivery"] as? String, "recognized")
+        XCTAssertNil(agent.tap(["id": 1, "swipe": "right", "at": [200.0, 180.0]])["error"])
+        XCTAssertNil(agent.tap(["id": 6, "swipe": "up"])["error"], "recognized at its count")
+        XCTAssertEqual(sent, ["2 left", "1 right", "6 up"])
+        XCTAssertTrue(error(["id": 1, "swipe": "left", "at": [200.0, 50.0]]).contains("#2, nearer"))
+        XCTAssertTrue(error(["id": 1, "swipe": "right", "at": [30.0, 140.0]]).contains("keeps the contact"), "the button")
+        XCTAssertTrue(error(["id": 1, "swipe": "left", "at": [200.0, 250.0]]).contains("scrolls that way"))
+        XCTAssertTrue(error(["id": 1, "swipe": "right", "at": [5.0, 180.0]]).contains("leading edge"))
+        XCTAssertTrue(error(["id": 1, "swipe": "up"]).contains("takes no swipe to the up"))
+        XCTAssertEqual(agent.tap(["id": 1, "swipe": "right", "at": [200.0, 180.0], "check": true])["checked"] as? Bool, true)
+        XCTAssertTrue(error(["id": 6, "swipe": "up", "check": true]).contains("one finger"))
+        XCTAssertEqual(sent.count, 3, "a refusal or a check sends nothing")
+    }
 }
 #endif

@@ -13,6 +13,7 @@ pub(crate) mod contact;
 mod held;
 mod keys;
 mod sensors;
+mod swipe;
 
 use crate::presenter::Presenter;
 use exact_runner::agent::{error, field_bool, field_num, field_str, num};
@@ -380,6 +381,9 @@ fn answer_line<D: DataSource>(p: &mut Presenter<D>, line: &str) -> String {
             // A held state (LLP 1122 D8): the state, not a press.
             if let Some(state) = request.get("holdState") {
                 return p.hold_tap(id(), state).to_string();
+            }
+            if request.get("swipe").is_some() {
+                return swipe::tap(p, id(), &request);
             }
             // A held contact's phase that says `mouse` (a drag's, review A1)
             // is a contact with the left button held, as `answer` set it up.

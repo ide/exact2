@@ -22,7 +22,10 @@ extension NodeView {
     /// starts on a button inside it (kanban F6). A finger's `swipe` passes a
     /// text input (`editors: false`, LLP 1057.001 §8.4).
     func pressBoundary(_ touch: UITouch, presses: Bool = true, editors: Bool = true) -> Bool {
-        var view = touch.view
+        pressBoundary(from: touch.view, presses: presses, editors: editors)
+    }
+    func pressBoundary(from hit: UIView?, presses: Bool = true, editors: Bool = true) -> Bool {
+        var view = hit
         while let current = view, current !== self {
             if let node = current as? NodeView, (presses && node.handlers.contains("press")) || (editors && (node.field != nil || node.textArea != nil)) { return true }
             view = current.superview

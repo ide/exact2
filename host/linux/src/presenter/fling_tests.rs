@@ -120,3 +120,37 @@ fn a_count_takes_that_many_and_the_fling_outlives_the_contact_a_second_finger_en
     assert!(p.fling("down", 2, t + 60.).unwrap());
     assert_eq!(seen(&p), "pair-up outer-down ");
 }
+
+fn view(p: &Presenter<()>, name: &str) -> ViewId {
+    let k = p.host.kernel();
+    k.node_by_key(k.find_by_test_id(name)[0]).unwrap().id
+}
+
+/// The agent's `tap … swipe` (§8.7): the fling a touch there would make, at
+/// the node's count, once that touch would reach the node; refused, naming
+/// why, when it would not.
+#[test]
+fn the_agents_swipe_is_the_fling_a_touch_there_would_make() {
+    let mut p = boot();
+    let (outer, inner, pair) = (view(&p, "outer"), view(&p, "inner"), view(&p, "pair"));
+    let reply = p.agent_swipe(inner, "left", None).unwrap();
+    assert!(reply.contains(r#""delivery":"recognized""#), "{reply}");
+    assert!(
+        p.agent_swipe(outer, "right", None).is_ok(),
+        "its middle is its own"
+    );
+    assert!(p.agent_swipe(pair, "up", None).is_ok(), "at its count");
+    assert_eq!(seen(&p), "inner-left outer-right pair-up ");
+    let refusal =
+        |p: &mut Presenter<()>, id, direction, at| p.agent_swipe(id, direction, at).unwrap_err();
+    assert!(refusal(&mut p, outer, "up", None).contains("takes no swipe to the up"));
+    assert!(
+        refusal(&mut p, outer, "left", Some((100., 30.))).contains(&format!("#{inner}, nearer"))
+    );
+    assert!(
+        refusal(&mut p, outer, "left", Some((100., 150.))).contains("keeps the contact"),
+        "the button"
+    );
+    assert!(refusal(&mut p, outer, "down", Some((100., 400.))).contains("inside its box"));
+    assert_eq!(seen(&p), "inner-left outer-right pair-up ");
+}

@@ -536,6 +536,7 @@ extension Agent {
             return reply
         }
         if req["scrollDrag"] != nil { return scrollDrag(req) }
+        if req["swipe"] != nil { return swipeTap(req, delivered) }
         if view(req)?.placedAncestor?.placementHidden == true { return ["error": "placed child is hidden"] }
         if req["phase"] == nil, req["wheel"] == nil,
            let node = view(req), presenter.mounts(node), presenter.groupedLists?.draws(node.id) != true,

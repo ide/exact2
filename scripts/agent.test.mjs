@@ -252,7 +252,7 @@ test('an app that leaves the foreground fails the pending op and later ones unti
 test('the driver grammar names an unquoted mediasession action beside pinch', () => {
   const source = readFileSync(new URL('./agent.mjs', import.meta.url), 'utf8');
   const header = source.split('\n').slice(0, 16).join('\n');
-  const form = 'pinch <scale> [at <x> <y>] | mediasession <action> [seconds]';
+  const form = 'pinch <scale> [at <x> <y>] | swipe <left|right|up|down> [at <x> <y>] | mediasession <action> [seconds]';
   assert.ok(header.includes(form), header);
   const usage = spawnSync(process.execPath, [resolve(import.meta.dir, 'agent.mjs')], { encoding: 'utf8' });
   assert.equal(usage.status, 2, usage.stderr);
