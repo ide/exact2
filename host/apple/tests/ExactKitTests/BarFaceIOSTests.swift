@@ -47,6 +47,31 @@ final class BarFaceIOSTests: XCTestCase {
         XCTAssertLessThan(pixel.0, 15)
     }
 
+    /// A title's avatar is drawn as its author painted the box: its gradient over its colour, and its initials in the
+    /// author's font, at the size the author gave them in the box (a chat header's 38-point avatar).
+    func testAnAvatarFaceDrawsItsBoxsGradientAndItsAuthoredFont() throws {
+        let session = ExactApp.shared.makeSession(label: "avatar-face")
+        defer { session.destroy() }
+        let p = session.presenter
+        p.apply(wireBatch([
+            ["op": "create", "id": 1, "kind": "button", "props": ["testId": "contact"]],
+            ["op": "create", "id": 2, "kind": "view", "props": ["faceBoxSize": "38x38"],
+             "style": ["background_color": [95, 106, 125, 255], "background_image": ["linear": 180, "stops": [0, 255, 255, 255, 255, 1, 0, 0, 0, 255]]]],
+            ["op": "create", "id": 3, "kind": "text", "props": ["text": "PS"], "style": ["font_size": 17, "font_weight": 600, "written": ["font_size", "font_weight"]]],
+            ["op": "children", "id": 1, "ids": [2]], ["op": "children", "id": 2, "ids": [3]],
+            ["op": "roots", "ids": [1]],
+        ]))
+        let face = try XCTUnwrap(BadgeFace(box: try XCTUnwrap(p.views[2]), authored: true))
+        XCTAssertEqual(face.size, 38)
+        XCTAssertEqual(face.font?.pointSize, 17, "the author's size, the face as large as the box")
+        let image = try XCTUnwrap(face.image.cgImage)
+        let scale = CGFloat(image.height) / face.size
+        let top = try XCTUnwrap(SharePictureCase.rgba(image, x: Int(4 * scale), y: Int(2 * scale)))
+        let bottom = try XCTUnwrap(SharePictureCase.rgba(image, x: Int(4 * scale), y: Int(36 * scale)))
+        XCTAssertGreaterThan(top.0, 200, "the gradient's light top over the box's colour")
+        XCTAssertLessThan(bottom.0, 40, "and its dark bottom")
+    }
+
     func testADotBesideALabelIsDrawnAsPainted() throws {
         let (p, node) = button([dot, label(["written": ["text_color"]])])
         let face = try XCTUnwrap(ChipFace(node, engine: TextEngine(resolve: { _ in nil })))
