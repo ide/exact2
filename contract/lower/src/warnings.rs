@@ -114,7 +114,7 @@ pub(crate) fn with_text_styles(checked: &Checked<'_>, lowered: &TextStyles) -> V
                 // its header as written: nothing of it is the bar's to drop.
                 let no_bar = literal(attrs, "navigationBar") == Some("none");
                 if route && !no_bar {
-                    route_header(children, &[], &mut out);
+                    route_header(children, &[], &checked.file.styles, &mut out);
                     nested_header::nested_header(children, &mut out);
                 }
                 if let (true, Some(name)) = (route, back) {
@@ -350,17 +350,27 @@ fn holds_heading(node: &Node) -> bool {
     })
 }
 
-/// A box with a literal fill: before the heading, the title's avatar.
-fn filled(node: &Node) -> bool {
+/// A box with a literal fill, its own or its class's: before the heading, the title's avatar.
+fn filled(node: &Node, styles: &[StyleDecl]) -> bool {
     let Node::Element { attrs, .. } = node else {
         return false;
     };
-    has(attrs, "background-color") || has(attrs, "background")
+    let fill = |attrs: &[Attr]| has(attrs, "background-color") || has(attrs, "background");
+    fill(attrs)
+        || crate::class::rows(attrs, &|name| {
+            styles
+                .iter()
+                .find(|s| s.name == name)
+                .map(|s| s.attrs.as_slice())
+        })
+        .ok()
+        .flatten()
+        .is_some_and(|(_, rows)| fill(&rows))
 }
 
 /// A passive box of texts and symbol images, one of each at least: a
 /// subtitle's line of glyphs (Signal's "🔕 Muted ⏱ 1w").
-fn glyph_line(node: &Node) -> bool {
+fn glyph_line(node: &Node, styles: &[StyleDecl]) -> bool {
     let (mut symbol, mut text) = (false, false);
     for k in kids(node) {
         match (part(k), k) {
@@ -380,12 +390,14 @@ fn glyph_line(node: &Node) -> bool {
             _ => return false,
         }
     }
-    symbol && text && !filled(node)
+    symbol && text && !filled(node, styles)
 }
 
 /// What the walk of one header has seen.
 #[derive(Default)]
 struct Bar<'a> {
+    /// The file's styles, which a box's fill may come from
+    styles: &'a [StyleDecl],
     headings: usize,
     /// The last heading counted: the bar's title when it is the one.
     title: Option<&'a Node>,
@@ -419,14 +431,19 @@ const OR_NO_BAR: &str =
 /// header is shown as written: `lower-header-no-bar`'s (LLP 1116.003 D2.2).
 /// An `if` first among the route's children is read branch by branch: a branch's first node
 /// is the route's first child while it is taken, and `after` the route's nodes past that `if`.
-fn route_header<'a>(children: &'a [Node], after: &[&'a Node], out: &mut Vec<LowerError>) {
+fn route_header<'a>(
+    children: &'a [Node],
+    after: &[&'a Node],
+    styles: &'a [StyleDecl],
+    out: &mut Vec<LowerError>,
+) {
     if let Some(Node::When {
         then, otherwise, ..
     }) = children.first()
     {
         let rest: Vec<&Node> = children[1..].iter().chain(after.iter().copied()).collect();
-        route_header(then, &rest, out);
-        route_header(otherwise, &rest, out);
+        route_header(then, &rest, styles, out);
+        route_header(otherwise, &rest, styles, out);
         return;
     }
     let Some(header @ Node::Element { tag, attrs, .. }) = children.first() else {
@@ -435,7 +452,10 @@ fn route_header<'a>(children: &'a [Node], after: &[&'a Node], out: &mut Vec<Lowe
     if tag != "header" || literal(attrs, "display") == Some("none") || computed(attrs, "display") {
         return;
     }
-    let mut bar = Bar::default();
+    let mut bar = Bar {
+        styles,
+        ..Bar::default()
+    };
     walk(kids(header), &mut bar);
     if bar.headings != 1 {
         if !bar.doubt {
@@ -503,8 +523,15 @@ fn walk<'a>(nodes: &'a [Node], bar: &mut Bar<'a>) {
                     "this text, before the heading,".into()
                 },
             )),
-            Part::Box if bar.passed && !bar.subtitle && glyph_line(node) => bar.subtitle = true,
-            Part::Box if !bar.passed && !bar.avatar && filled(node) && !holds_heading(node) => {
+            Part::Box if bar.passed && !bar.subtitle && glyph_line(node, bar.styles) => {
+                bar.subtitle = true
+            }
+            Part::Box
+                if !bar.passed
+                    && !bar.avatar
+                    && filled(node, bar.styles)
+                    && !holds_heading(node) =>
+            {
                 bar.avatar = true;
             }
             Part::Box if holds_placed(node) => walk(kids(node), bar),

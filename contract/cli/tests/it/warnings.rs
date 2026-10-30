@@ -90,6 +90,12 @@ fn what_the_bar_places_or_the_compiler_cannot_see_is_not_warned() {
     ] {
         assert_eq!(warned(&route(header)), [], "{header}");
     }
+    // An avatar whose fill is its class's is the title's avatar as well.
+    let classed = format!(
+        "style Avatar\n  background-color=\"-exact-system-blue\"\n{}",
+        route("  row\n    box class=Avatar\n      text \"AL\"\n    text \"Ada\" role=\"heading\" aria-level=1")
+    );
+    assert_eq!(warned(&classed), [], "{classed}");
     // A header that is not the route's first child is not its bar.
     let src = route("  text \"List\" role=\"heading\" aria-level=1\n  text \"a\"\n  text \"b\"")
         .replace(
