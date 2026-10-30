@@ -1335,6 +1335,7 @@ impl Em<'_> {
                 | EventKind::Download // the browser opening its own and downloading,
                 | EventKind::Capture // and the runtime refusing a capture (`onFrameCapture`)
                 | EventKind::Userpromptopened // @ref LLP 1020.002 D9: the browser's own dialogs
+                | EventKind::Swipe // @ref LLP 1057.001 §8.3: the web makes no swipe
                 | EventKind::Select => {}
                 // The motion piece's: the swipe's holds, a pan's velocity.
                 EventKind::Swiperight
