@@ -132,9 +132,10 @@ final class UpdateRecorder {
         r.commit = r2((now - commitBegan) * 1000)
         r.main = r2(main * 1000)
         if let scroll { r.scroll = (r2(scroll.0), scroll.1); r.taken = taken }
-        // A gap owed frames when the main thread was busy through it or what the recording follows moved
-        let moved = scroll.map { s in followedBefore.map { $0.taken != taken || $0.offset != s.0 } ?? true } ?? false
-        r.quiet = r.missed > 0 && !moved && main * 1000 < interval - 1.5 * period
+        // A gap owed frames when the main thread was busy through all of it but one period, or something
+        // moved: what the recording follows, or the app's own motion, which applies a batch a frame
+        let moved = batches.batches > 0 || scroll.map { s in followedBefore.map { $0.taken != taken || $0.offset != s.0 } ?? true } ?? false
+        r.quiet = r.missed > 0 && !moved && main * 1000 < interval - period
         r.update = (r2((began - info.modelTime) * 1000), r2((eventsEnded - began) * 1000), r2((linksEnded - linksBegan) * 1000),
                     r2((now - began) * 1000), r2((own + CACurrentMediaTime() - now) * 1000))
         if (r.missed > 0 && !r.quiet) || r.overrun > 0 {
