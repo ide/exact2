@@ -784,6 +784,7 @@ package final class Presenter {
     /// hover`); under the agent it stands for the system cursor.
     var agentPointer: NSPoint?
     var onSwiperight: ((UInt32) -> Void)?
+    var onSwipe: ((UInt32, String) -> Void)?
     /// Pull-to-refresh is UIKit's; AppKit has no such control, so this never fires.
     var onRefresh: ((UInt32) -> Void)?
     var onPan: ((UInt32, Double, Double) -> Void)?
@@ -1000,6 +1001,8 @@ package final class Presenter {
     func dblclick(_ id: UInt32) { send(id) { [self] in onDblclick?(id) } }
     func pointer(_ id: UInt32, _ kind: PointerKind, _ sample: PointerSample) { send(id) { [self] in onPointer?(id, kind, sample) } }
     func swiperight(_ id: UInt32) { send(id) { [self] in onSwiperight?(id) } }
+    /// A discrete swipe AppKit delivered, in `direction` (LLP 1057.001 §8).
+    func swipe(_ id: UInt32, _ direction: String) { send(id) { [self] in onSwipe?(id, direction) } }
     func pan(_ id: UInt32, _ dx: Double, _ dy: Double) { send(id) { [self] in onPan?(id, dx, dy) } }
     /// Once per pan that began, after its last delta; only to a node that hears it.
     func panRelease(_ id: UInt32, _ vx: Double, _ vy: Double) {

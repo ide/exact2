@@ -418,6 +418,10 @@ package final class Runtime {
         }
     }
     package func swiperight(_ view: UInt32, now: Double) -> Batch { on { read(exact_dispatch(rt, view, 12, 0, now)) } }
+    /// A discrete swipe the platform recognized, in `direction` (60, LLP 1057.001 §8).
+    package func swipe(_ view: UInt32, direction: String, now: Double) -> Batch {
+        on { read(exact_dispatch(rt, view, 60, write(direction), now)) }
+    }
     package func refresh(_ view: UInt32, now: Double) -> Batch { on { read(exact_dispatch(rt, view, 22, 0, now)) } }
     package func pan(_ view: UInt32, dx: Double, dy: Double, now: Double) -> Batch {
         return on {

@@ -435,8 +435,24 @@ component App
 
 More: docs/recipes/persisted-setting.md
 
-## swipe: a list row's swipe actions
+## swipe: a discrete swipe, a swipe to reply, a list row's swipe actions
 names: delete, swipe-actions, swipeActions, swipe-to-delete, swipeleft, swipeContent, swipeLeading, swipeTrailing, swipe actions
+
+Three things are called a swipe. `swipe=action` with `swipe-direction` (and `touch-count`) is
+a discrete swipe: the platform's own recognizer says a flick went one of the named ways and
+the action runs once, nothing following the finger (UIKit's on iOS and tvOS, AppKit's on the
+Mac, Android's fling; the web, Linux and Windows make none, so give its effect a control too).
+`swiperight=action` is a drag: the node follows the finger to the right and releases past a
+knee (a swipe to reply). A list row's swipe actions are below.
+
+```contract
+component App
+  action hideKeys
+    blur("message")
+  view
+    row swipe=hideKeys swipe-direction="down"
+      textarea id="message" field-sizing="content" flex=1
+```
 
 `delete=action` on a list row is its swipe to delete: a red Delete beside the row, which a
 full swipe performs. On iOS it is UIKit's own swipe action; on the web and the Mac the row

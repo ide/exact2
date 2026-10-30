@@ -111,6 +111,7 @@ package final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, U
         didSet {
             updateContextGestures()
             updateSwipeGesture()
+            updateDiscreteSwipes()
             updateLayoutPan()
             updateMaterial()
             updateRefresh()
@@ -156,6 +157,7 @@ package final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, U
         }
     }
     package override func gestureRecognizerShouldBegin(_ gesture: UIGestureRecognizer) -> Bool {
+        if let swipe = gesture as? DiscreteSwipe { return swipeMayBegin(swipe) }
         if gesture === layoutPanRecognizer, let pan = gesture as? UIPanGestureRecognizer {
             guard SwipeInput.allows(self) else { return false }
             let action = style["touch_action"]?.string ?? "auto"
@@ -209,6 +211,7 @@ package final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, U
         }
     }
     package func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+        if let swipe = gestureRecognizer as? DiscreteSwipe { return admitsSwipe(swipe, touch) }
         if CanvasInputs.owns(touch.view) { return false }
         if gestureRecognizer === swipeRecognizer, gestureRecognizer.numberOfTouches == 0 { swipeDownX = touch.location(in: window).x }
         if stopsAtPress(gestureRecognizer), pressBoundary(touch, presses: gestureRecognizer !== layoutPanRecognizer) { return false } // LLP 1057.001 rule 3
@@ -1136,6 +1139,7 @@ package final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, U
         if disabled { pressEpoch &+= 1; cancelPressContact() }
         if props["inert"] == "true" { cancelPressContactsInSubtree() }
         swipeOwner = props["swipeContent"] != nil
+        if ["swipeDirection", "touchCount"].contains(where: { set[$0] != nil || clear.contains($0) }) { updateDiscreteSwipes() }
         if set["groupedSeparator"] != nil || clear.contains("groupedSeparator") { applyGroupedSeparator() }
         if set["symbolEffectValue"] != nil || set["symbolColorWritten"] != nil || clear.contains("symbolColorWritten")
             || set["symbolFillRule"] != nil || clear.contains("symbolFillRule") { updateSymbol() }

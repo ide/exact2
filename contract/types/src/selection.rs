@@ -86,6 +86,8 @@ pub fn event_record(attr: &str) -> Option<&'static str> {
         "focusin" | "focusout" => Some("FocusEvent"),
         "resize" => Some("DOMRectReadOnly"),
         "intersect" => Some("IntersectionObserverEntry"),
+        // @ref LLP 1057.001 §8 — the direction the platform recognized
+        "swipe" => Some("SwipeEvent"),
         "reorderdrop" => Some("ReorderEvent"),
         // @ref LLP 1125 D8 — Web MIDI's `MIDIMessageEvent`, with the input,
         // runner time and the transport's beat.
@@ -199,6 +201,9 @@ pub(super) fn declare(shapes: &mut Shapes) {
             ("beat".into(), Ty::Number),
         ],
     );
+    shapes
+        .map
+        .insert("SwipeEvent".into(), vec![("direction".into(), Ty::String)]);
     shapes.map.insert(
         "IntersectionObserverEntry".into(),
         vec![

@@ -1219,7 +1219,7 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
         var hit = view.hitTest(start, with: nil)
         if CanvasInputs.owns(hit) { return false }
         while let current = hit {
-            if let node = current as? NodeView, node.handlers.contains("swiperight") { overSwipeRight = true; break }
+            if let node = current as? NodeView, node.handlers.contains("swiperight") || node.takesLeadingSwipe { overSwipeRight = true; break }
             if current === view { break }
             hit = current.superview
         }

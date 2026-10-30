@@ -72,6 +72,7 @@ mod stmts;
 mod strings;
 pub mod style_names;
 mod svg;
+mod swipe;
 mod swipe_rows;
 mod symbols;
 pub mod tags;
@@ -1373,6 +1374,12 @@ impl<'a> Lowerer<'a> {
                     &glass
                 } else if prop == exact_kernel::PropId::IntersectMargin {
                     glass = crate::intersect::margin(&a.value, a.span)?;
+                    &glass
+                } else if prop == exact_kernel::PropId::SwipeDirection {
+                    glass = crate::swipe::direction(&a.value, a.span)?;
+                    &glass
+                } else if prop == exact_kernel::PropId::TouchCount {
+                    glass = crate::swipe::count(&a.value, a.span)?;
                     &glass
                 } else if let Some(width) = values::split_width(prop, &a.value) {
                     glass = width;
