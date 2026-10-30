@@ -200,8 +200,9 @@ extension FrameSampler {
         //
         // Each late frame's cause is the part its hitch came from: `update`, a commit past its deadline
         // through the update's own work; `main`, one the main thread delayed, busy before the update
-        // began (its `start` longer than its `work`) or through a gap; `rate`, a gap in which something
-        // moved, the main thread idle, and UIKit made no update; `render`, a frame the probe saw reach the
+        // began (its `start` longer than its `work`) or through all of a gap but one period; `rate`, a gap
+        // in which something moved, the main thread free for a period or more of it, and UIKit made no
+        // update; `render`, a frame the probe saw reach the
         // screen late or never. A display link's callback gap is the main thread's
         var hitch: [Double] = [], causes: [String?] = [], carried = 0.0
         for (i, r) in records.enumerated() {
@@ -212,7 +213,7 @@ extension FrameSampler {
             let h = max(shownAgain, commit, screen)
             hitch.append(h)
             causes.append(h <= 0 ? nil : h == commit ? (r.update.map { $0.start > $0.work } == true ? "main" : "update")
-                          : h == shownAgain ? (r.update != nil && (r.main ?? 0) < r.interval - 1.5 * r.period ? "rate" : "main") : "render")
+                          : h == shownAgain ? (r.update != nil && (r.main ?? 0) < r.interval - r.period ? "rate" : "main") : "render")
             carried = FrameSampler.commitDelay(overrun: r.ownOverrun, period: r.period)
         }
 
