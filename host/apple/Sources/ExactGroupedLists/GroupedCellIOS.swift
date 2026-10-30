@@ -52,6 +52,16 @@ final class GroupedCell: UICollectionViewListCell {
         contentConfiguration = c
     }
     #if os(iOS)
+    /// The state the cell's configurations draw: its own, in the active
+    /// appearance. UIKit's list cell draws a selected row's ground in the tint
+    /// only while its window is active and in a gray fill while it is not (the
+    /// app in the background, or behind another window); a row selected in the
+    /// tint stays in it.
+    override var configurationState: UICellConfigurationState {
+        var state = super.configurationState
+        state.traitCollection = state.traitCollection.modifyingTraits { $0.activeAppearance = .active }
+        return state
+    }
     /// A touch its row leaves to no control goes to the row's one field: the
     /// cell is the field (LLP 1116.005 D2).
     override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {

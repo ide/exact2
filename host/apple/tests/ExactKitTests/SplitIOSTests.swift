@@ -183,6 +183,38 @@ final class SplitIOSTests: XCTestCase {
         }
     }
 
+    /// A sidebar's selected row keeps its tinted ground, and its light content on it, while the window is
+    /// inactive (the app in the background), where UIKit's list cell would turn the ground to a gray fill.
+    func testASidebarsSelectedRowStaysTintedWhileTheWindowIsInactive() throws {
+        ExactGroupedLists.install()
+        let session = try boot("SPLIT_ROWS", size: CGSize(width: 1100, height: 800))
+        let navigation = session.presenter.navigation, agent = Agent(session: session)
+        until("a split") { navigation.split != nil && !agent.nativeInFlight() }
+        let split = try XCTUnwrap(navigation.split)
+        split.controller.traitOverrides.horizontalSizeClass = .regular
+        until("expanded") { !split.controller.isCollapsed && !agent.nativeInFlight() }
+        let host = try XCTUnwrap(session.presenter.groupedLists as? GroupedListHost)
+        let list = try XCTUnwrap(host.lists[try node(session, "books").id])
+        let row = try node(session, "row-a")
+        until("row a is carried into its cell") { list.cell(row.id).map { row.isDescendant(of: $0) } ?? false }
+        let touch = RowTouch(row, at: CGPoint(x: 20, y: 10))
+        row.touchesBegan([touch], with: nil)
+        row.touchesEnded([touch], with: nil)
+        until("row a stays selected beside the book") { list.cell(row.id)?.isSelected == true && !agent.nativeInFlight() }
+        let cell = try XCTUnwrap(list.cell(row.id))
+        let ground = { () -> UIColor? in
+            cell.layoutIfNeeded()
+            return cell.backgroundConfiguration?.resolvedBackgroundColor(for: cell.tintColor).resolvedColor(with: cell.traitCollection)
+        }
+        let tinted = try XCTUnwrap(ground())
+        XCTAssertEqual(tinted, cell.tintColor.resolvedColor(with: cell.traitCollection), "the selected row's ground is the tint")
+        XCTAssertEqual(cell.contentView.overrideUserInterfaceStyle, .dark, "its content is light on the tint")
+        try XCTUnwrap(window).traitOverrides.activeAppearance = .inactive
+        until("the window is inactive") { cell.traitCollection.activeAppearance == .inactive }
+        until("the ground stays the tint") { ground() == tinted }
+        XCTAssertEqual(cell.contentView.overrideUserInterfaceStyle, .dark, "its content stays light")
+    }
+
     /// LLP 1127 D7: a plain list beside the detail is UIKit's plain sidebar list (`.sidebarPlain`), with lines
     /// between its rows, where a grouped one is the sidebar list, which draws none.
     func testASidebarsPlainListHasLinesBetweenItsRows() throws {
