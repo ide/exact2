@@ -9,6 +9,10 @@ extension GroupedListHost {
     func highlight(carried node: NodeView, _ down: Bool) -> Bool {
         list(carrying: node)?.highlight(node.id, down) ?? false
     }
+    func opening(from row: NodeView) {
+        guard let list = lists.values.first(where: { $0.rows[row.id] != nil }), list.sidebar else { return }
+        list.pressedSidebarRow = row.id
+    }
 }
 
 extension GroupedListView {

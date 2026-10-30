@@ -44,6 +44,10 @@ package protocol GroupedLists: AnyObject {
     /// Sets the highlight of the cell carrying a custom row to `down`; false
     /// when no pressable cell carries it.
     func highlight(carried node: NodeView, _ down: Bool) -> Bool
+    /// A row's detail opens from the row other than by its press (its
+    /// committed preview): in a sidebar the row stays selected while that
+    /// detail shows, as after its press (LLP 1127).
+    func opening(from row: NodeView)
     /// `layout <id>`'s native fields for a list or a row it draws.
     func observation(_ node: NodeView) -> [String: Any]?
     // LLP 1080.001 D3: what the inspection walk accounts for.

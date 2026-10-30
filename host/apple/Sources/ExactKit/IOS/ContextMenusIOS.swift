@@ -487,6 +487,8 @@ final class ContextMenuHost: NSObject, UIContextMenuInteractionDelegate, UIEditM
               owner.inPopover,
               let source = owner.source, committable(row, in: pop, from: source) else { return }
         owner.committed = true
+        // The preview opens what its source row opens: a sidebar keeps that row selected
+        presenter.groupedLists?.opening(from: source)
         let before = presenter.navigation.activeKey
         // Held until the stack has applied it: a push deferred behind a
         // transition (`pendingSync`) is still the commit's.

@@ -1,14 +1,18 @@
 // SplitIOSTests': a split whose list is a plain grouped list of custom rows,
 // links as a chat's conversations are (LLP 1127 D7). A press on a row's own
 // view goes through its cell's selection, which pushes the book and keeps
-// the row selected beside it.
+// the row selected beside it. A long press peeks at the book, whose preview
+// opens it.
 routes nav
   library "/"
     book "/book/:id"
 
 component App
+  state peeked = ""
   action follow(url: string)
     nav = go(nav, url)
+  action peek(id: string)
+    peeked = id
   action back
     nav = back(nav)
   view
@@ -22,7 +26,7 @@ component App
               section
                 for id in ["a", "b"] key=id
                   // An avatar in the row's leading padding makes it a custom row, carried into its cell
-                  link href=path("book", id) testId=`row-${id}` position="relative" display="flex" flex-direction="column" gap=2 padding="12px 16px 12px 84px" min-height=69 box-sizing="border-box"
+                  link href=path("book", id) testId=`row-${id}` contextmenu=peek(id) contextPopover="book-peek" position="relative" display="flex" flex-direction="column" gap=2 padding="12px 16px 12px 84px" min-height=69 box-sizing="border-box"
                     row aria-hidden=true position="absolute" left=26 top=0 bottom=0 align-items="center"
                       column width=45 height=45 border-radius=22.5 background-color="-exact-fill"
                     text `Book ${id}`
@@ -32,3 +36,7 @@ component App
             header
               text `Book ${e.params.id}` role="heading" aria-level=2
             text `Reading ${e.params.id}` testId=`reading-${e.params.id}`
+      column id="book-peek" popover="auto" role="menu"
+        for id in [peeked].filter(p => p != "") key=id
+          button contextPreview=true press=follow(path("book", id)) popovertarget="book-peek" popovertargetaction="hide" testId="peek-preview" width="18.75rem" height="11.25rem"
+            text `Peek ${id}`

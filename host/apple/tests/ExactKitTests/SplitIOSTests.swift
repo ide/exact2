@@ -215,6 +215,47 @@ final class SplitIOSTests: XCTestCase {
         XCTAssertEqual(cell.contentView.overrideUserInterfaceStyle, .dark, "its content stays light")
     }
 
+    /// LLP 1127: a row's preview, committed, opens its book as the row's press does, and the sidebar selects the
+    /// row beside it in place of the one selected before.
+    func testACommittedPreviewSelectsItsRowInTheSidebar() throws {
+        if ExactEnv.agentMode { throw XCTSkip("under the agent the popover is painted") }
+        ExactGroupedLists.install()
+        let session = try boot("SPLIT_ROWS", size: CGSize(width: 1100, height: 800))
+        let navigation = session.presenter.navigation, agent = Agent(session: session)
+        until("a split") { navigation.split != nil && !agent.nativeInFlight() }
+        let split = try XCTUnwrap(navigation.split)
+        split.controller.traitOverrides.horizontalSizeClass = .regular
+        until("expanded") { !split.controller.isCollapsed && !agent.nativeInFlight() }
+        let host = try XCTUnwrap(session.presenter.groupedLists as? GroupedListHost)
+        let list = try XCTUnwrap(host.lists[try node(session, "books").id])
+        let has = { (testId: String) in session.presenter.views.values.contains { $0.props["testId"] == testId && $0.window != nil } }
+        let a = try node(session, "row-a"), b = try node(session, "row-b")
+        until("both rows are carried into their cells") { [a, b].allSatisfy { row in list.cell(row.id).map { row.isDescendant(of: $0) } ?? false } }
+        let touch = RowTouch(a, at: CGPoint(x: 20, y: 10))
+        a.touchesBegan([touch], with: nil)
+        a.touchesEnded([touch], with: nil)
+        until("row a is selected beside its book") { has("reading-a") && list.cell(a.id)?.isSelected == true && !agent.nativeInFlight() }
+
+        let menus = session.presenter.menus.context
+        let interaction = try XCTUnwrap(b.interactions.compactMap { $0 as? UIContextMenuInteraction }.first, "the row's peek is UIKit's context menu")
+        let configuration = try XCTUnwrap(menus.contextMenuInteraction(interaction, configurationForMenuAtLocation: CGPoint(x: 20, y: 10)))
+        _ = try XCTUnwrap(menus.contextMenuInteraction(interaction, previewForHighlightingMenuWithConfiguration: configuration))
+        let owner = try XCTUnwrap(menus.open)
+        _ = try XCTUnwrap(menus.lift(owner), "the preview")
+        menus.contextMenuInteraction(interaction, willPerformPreviewActionForMenuWith: configuration, animator: Commit())
+        menus.contextMenuInteraction(interaction, willEndFor: configuration, animator: nil)
+        until("book b shows beside the list") { has("reading-b") && !agent.nativeInFlight() }
+        until("row b is selected beside it") { list.cell(b.id)?.isSelected == true }
+        XCTAssertNotEqual(list.cell(a.id)?.isSelected, true, "row a is not")
+    }
+    /// UIKit's commit animator, as the delegate sees it.
+    private final class Commit: NSObject, UIContextMenuInteractionCommitAnimating {
+        var preferredCommitStyle: UIContextMenuInteractionCommitStyle = .pop
+        var previewViewController: UIViewController? { nil }
+        func addAnimations(_ animations: @escaping () -> Void) { animations() }
+        func addCompletion(_ completion: @escaping () -> Void) { completion() }
+    }
+
     /// LLP 1127 D7: a plain list beside the detail is UIKit's plain sidebar list (`.sidebarPlain`), with lines
     /// between its rows, where a grouped one is the sidebar list, which draws none.
     func testASidebarsPlainListHasLinesBetweenItsRows() throws {
