@@ -1206,10 +1206,7 @@ public final class ExactSession {
                 }
                 if ["navigate", "traverseHistory", "reload", "stopLoading", "captureScreenshot", "openDevTools"].contains(name) { app.deliver { [weak self] in self?.webviews.command(name, args) }; continue } // an iframe's, by id (LLP 1020.002 D3, D7, D11)
                 if name == "relaunch" || name == "setPageZoom" { app.deliver { [weak self] in if name == "relaunch" { self?.relaunch() } else { self?.setPageZoom(args) } }; continue } // `setPageZoom`: LLP 1021 §5.3.1 (ZoomMac.swift)
-                if name.hasPrefix("observe") {
-                    ExactEvents.hostCommand(name, args)
-                    continue
-                }
+                if name.hasPrefix("observe") { ExactEvents.hostCommand(name, args); continue }
                 if name == "startTrace_EXPERIMENTAL" || name == "stopTrace_EXPERIMENTAL" { app.deliver { [weak self] in self?.traceCommand(name, args) }; continue }
                 if name == "haptic" {
                     // @ref LLP 1077 D14 — feedback from app logic.
