@@ -38,9 +38,11 @@ final class NodeLayer: CALayer {
 /// A layer for part of a node's box (an image's fitted rectangle, a
 /// paragraph's text): its place changes in the animation context of the view
 /// it is in, as a subview's frame would, by that view's own
-/// `action(for:forKey:)`; nothing else of it animates.
+/// `action(for:forKey:)`; nothing else of it animates. A view's own layer
+/// (`TextBoxView`'s) asks its view, as any view's layer does.
 class BoxPartLayer: CALayer {
     override func action(forKey event: String) -> CAAction? {
+        if delegate is UIView { return super.action(forKey: event) }
         guard ["bounds", "position"].contains(event) else { return NSNull() }
         var ancestor = superlayer
         while let layer = ancestor {

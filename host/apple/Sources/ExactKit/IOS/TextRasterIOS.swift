@@ -437,6 +437,7 @@ extension NodeView {
             setNeedsDisplay()
             return
         }
+        let shown = textRasterSpec
         textRaster = result.image; textRasterScale = key.scale; textRasterSpec = key.spec
         textMore.rasterCovered = result.covered; textMore.rasterBand = key.clip != nil; textMore.rasterInk = (result.ink, result.shadows)
         textMore.rasterRoom = key.room ?? key.box
@@ -461,6 +462,8 @@ extension NodeView {
         hostText(ink)
         ink.frame = result.frame
         ink.contentsScale = key.scale
+        // The lines' clock settled first: a numeral roll runs in it
+        textBoxLayer?.show(from: shown, to: key.spec)
         let roll = NumeralRoll.roll(ink, node: self)
         if tint == nil { ink.contents = result.image }
         TextShadowLayer.apply(key.spec.hdrShadow == nil ? key.spec.shadow : nil, to: ink)
@@ -495,8 +498,10 @@ extension NodeView {
         if made { CATransaction.begin(); CATransaction.setDisableActions(true) }
         defer { if made { CATransaction.commit() } }
         let box = textBoxLayer ?? makeTextBox(asView: asView)
-        if ink.superlayer !== box { box.addSublayer(ink) }
-        if let cast = ink.textCast, cast.superlayer !== box { box.insertSublayer(cast, below: ink) }
+        if let lines = box.lines {
+            if ink.superlayer !== lines { lines.addSublayer(ink) }
+            if let cast = ink.textCast, cast.superlayer !== lines { lines.insertSublayer(cast, below: ink) }
+        }
         textRasterLayer = ink
         if box.superlayer == nil, syncVibrancy() == nil { mountTextBox() }
         placeTextRaster()
@@ -518,10 +523,21 @@ extension NodeView {
         ink is TintInk && systemColor("text_color") != nil && presenter?.onColumnGround(self) == true
     }
 
-    private func makeTextBox(asView: Bool) -> CALayer {
+    /// The box, placed and sized as the paragraph's content box, moving and
+    /// resizing in UIKit's animation (`BoxPartLayer`), with its lines at its
+    /// origin, which never move in it. The lines are a layer of their own for
+    /// a fade (`TextBoxLayer`): a transition was seen to render the old state of
+    /// the layer it is on with that layer's geometry before the change, so a
+    /// fade on the box itself, moved in the same transaction, left the old
+    /// lines where it was; and a fade on the ink alone left out a one-colour
+    /// ink's coverage mask (both states showed the new one).
+    private func makeTextBox(asView: Bool) -> TextBoxLayer {
         let view = asView ? TextBoxView() : nil
-        let box = view?.layer ?? BoxPartLayer()
+        let box = view.map { $0.layer as! TextBoxLayer } ?? TextBoxLayer(), lines = InkLayer()
         box.anchorPoint = .zero
+        lines.anchorPoint = .zero
+        box.addSublayer(lines)
+        box.lines = lines
         textBoxLayer = box; textMore.rasterBoxView = view
         return box
     }
@@ -570,6 +586,7 @@ extension NodeView {
 /// A paragraph's text box as a view (`NodeView.makeTextBox`). It takes no
 /// touches and is no accessibility element: the paragraph is.
 final class TextBoxView: UIView {
+    override class var layerClass: AnyClass { TextBoxLayer.self }
     override init(frame: CGRect) {
         super.init(frame: frame)
         isUserInteractionEnabled = false
