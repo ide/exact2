@@ -98,7 +98,9 @@ if (target !== '--wasm' && !game && !bakeOnly) {
   const message = lines.filter((l) => /^(error|[A-Z]\w*Error|E[A-Z]+)\b:?/.test(l.trim()) || /\): error TS\d+:|^(?:Error: )?(?:tsconfig: |module outside captured app: |source links are not captured: )|^note: /.test(l) || ambientDiagnostic(l) || packageRefusal(l) || /\bunoptimized$|\bnot on PATH\b/.test(l))
     // The bundler's refusal, in the words the type check uses (`Error: ` is its wrapper).
     .map((l) => l.replace(/^Error: (?=module outside captured app: )/, ''));
-  const reason = (message.length ? message : lines.slice(-3)).join('\n');
+  // A Contract refusal (`file:line:col [code] message`), with the notes and excerpt that follow it, as `contract build` prints one
+  const refusal = lines.findIndex((l) => /^\S.*:\d+:\d+ \[[a-z][\w-]*\] /.test(l));
+  const reason = (refusal >= 0 ? lines.slice(refusal) : message.length ? message : lines.slice(-3)).join('\n');
   const types = all.filter((l) => /^app\.contract\.d\.ts: /.test(l));
   console.error(`${[...types, ...warnings, reason, ...compiler].join('\n')}\n${app.name}: the web build (the JS target) failed; the wasm target is internal (--wasm)`);
   process.exit(1);
