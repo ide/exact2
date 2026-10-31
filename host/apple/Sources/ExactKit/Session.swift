@@ -761,6 +761,7 @@ public final class ExactSession {
             whenIdle(bound: true) { [unowned self] in applyUnlessEmpty(runtime.resizeBox(id, width: width, height: height)) }
         }
         #if os(iOS) || os(tvOS)
+        presenter.onMovingTops = { [unowned self] m in whenIdle(bound: true) { [unowned self] in applyUnlessEmpty(runtime.covers([], movingTops: m)) } } // PROTO (rule 4)
         natives.onHatchesConnected = { [weak self] in
             self?.presenter.navigation.replayHatches()
             self?.presenter.elements.replay()
