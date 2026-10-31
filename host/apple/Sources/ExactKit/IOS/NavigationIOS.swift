@@ -87,10 +87,13 @@ final class RouteController: UIViewController, UIScrollViewDelegate {
     // The safe area changed: the bar's height (a push to an inline title, a
     // rotation, a hatch), or UIKit moving an iPhone's bottom search bar over
     // the keys. The route's content area follows (LLP 1075.003 §3.5), and so
-    // does the room it adds for the keys.
+    // do the room it adds for the keys and where a drag takes them down.
     override func viewSafeAreaInsetsDidChange() {
         super.viewSafeAreaInsetsDidChange()
         fitContentViewport()
+        #if os(iOS)
+        host?.presenter.updateKeyboardDismissPadding()
+        #endif
         rideBars()
         host?.coversChanged()
     }

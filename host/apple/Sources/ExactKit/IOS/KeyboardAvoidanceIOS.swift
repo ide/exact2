@@ -361,14 +361,19 @@ extension Presenter {
     /// its keys (`UIKeyboardLayoutGuide.keyboardDismissPadding`), so the
     /// finger that reaches the bar carries it and the keys down together. The bar is the outermost box around
     /// the field that rests on the keys and holds no scroller; a field with
-    /// none, or one in a scroller, leaves the keys' own edge.
+    /// none, or one in a scroller, leaves the keys' own edge. A header's
+    /// search field is UIKit's: on an iPhone it sits in a bottom bar that
+    /// UIKit carries above the keys, and UIKit's part of the route's safe
+    /// area ends at that bar's top (`platformSafeBottom`).
     func updateKeyboardDismissPadding() {
         // Keys a drag carries below the screen report no top: the reach they
         // began with stands until they settle
-        guard let view = session?.view, view.hasKeyboardGuide, let top = keyboardTop else { return }
+        guard let view = session?.view, view.hasKeyboardGuide, let top = keyboardTop, let window = view.window else { return }
         var padding: CGFloat = 0
-        if keyboardPolicy == "resizes-content", let window = view.window,
-           let editor = editing, editor.window === window {
+        if let editor = keyboardEditor, let route = navigation.controllers.values.first(where: { $0.search?.field?.headerField === editor }),
+           let routeView = route.viewIfLoaded, routeView.window === window {
+            padding = max(0, top - routeView.convert(CGPoint(x: 0, y: routeView.bounds.maxY - route.platformSafeBottom), to: window).y)
+        } else if keyboardPolicy == "resizes-content", let editor = editing, editor.window === window {
             let scrolling = scrollers.compactMap { views[$0] }
             var at: UIView? = editor
             while let box = at, box !== view, !(box is UIScrollView), !scrolling.contains(where: { $0.isDescendant(of: box) }) {
