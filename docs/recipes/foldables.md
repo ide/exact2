@@ -5,8 +5,8 @@ A partially folded iPhone Duo splits its inner display at the hinge.
 `horizontalViewportSegments=2` (side by side, a book) or
 `verticalViewportSegments=2` (stacked, a laptop).
 `env(viewport-segment-<left|top|width|height> <x> <y>)` places a box in segment `x, y` (LLP 1078).
-Every iPhone Duo runs iOS 27.1 or later, so native code that runs only on the Duo needs no path
-for earlier systems: behind `#available(iOS 27.1, *)` it uses iOS 27.1's APIs, such as `UIHinge`.
+Every iPhone Duo runs iOS 27.1 or later, so Duo-only native code needs no path for earlier
+systems: behind `#available(iOS 27.1, *)` it uses iOS 27.1's APIs, such as `UIHinge`.
 
 ```contract
 shape Viewport
