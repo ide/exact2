@@ -154,6 +154,30 @@ fn invalid(message: impl Into<String>) -> RunnerError {
 }
 
 impl RouterContext {
+    /// The top's route pattern (`/post/:id`) and its bound parameters, in
+    /// the table's order: what navigation metrics group a change by.
+    fn route_facts(&self, top: &Entry) -> (String, Vec<(String, String)>) {
+        let pattern = self
+            .table
+            .routes
+            .iter()
+            .find(|route| route.name == top.name)
+            .map(|route| route.pattern.clone())
+            .unwrap_or_default();
+        let params = self
+            .table
+            .param_names()
+            .into_iter()
+            .filter_map(|n| {
+                top.params
+                    .get(n)
+                    .filter(|v| !v.is_empty())
+                    .map(|v| (n.to_string(), v.clone()))
+            })
+            .collect();
+        (pattern, params)
+    }
+
     pub(super) fn from_plan(plan: &Plan) -> Result<Option<Self>, RunnerError> {
         let Some(slot) = plan.router else {
             return Ok(None);
@@ -664,24 +688,7 @@ impl Routing for RouterContext {
             .filter(|e| !ids.contains(&e.id))
             .map(|e| e.id)
             .collect();
-        let pattern = self
-            .table
-            .routes
-            .iter()
-            .find(|route| route.name == top.name)
-            .map(|route| route.pattern.clone())
-            .unwrap_or_default();
-        let params = self
-            .table
-            .param_names()
-            .into_iter()
-            .filter_map(|n| {
-                top.params
-                    .get(n)
-                    .filter(|v| !v.is_empty())
-                    .map(|v| (n.to_string(), v.clone()))
-            })
-            .collect();
+        let (pattern, params) = self.route_facts(top);
         Ok(Some(RouterChange {
             top: top.id,
             url: top.url.clone(),
@@ -707,6 +714,7 @@ impl Routing for RouterContext {
         let change = change.or_else(|| {
             let r = self.router(&value)?;
             let top = exact_route::top(&r)?;
+            let (pattern, params) = self.route_facts(top);
             self.activates(&value, top).then(|| RouterChange {
                 top: top.id,
                 url: top.url.clone(),
@@ -717,6 +725,8 @@ impl Routing for RouterContext {
                 visits: (r.tabs.iter().flat_map(|t| &t.stack))
                     .map(|e| (e.id, e.url.clone()))
                     .collect(),
+                pattern,
+                params,
             })
         });
         self.navigations.borrow_mut().clear();
