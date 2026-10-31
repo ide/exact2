@@ -1038,6 +1038,7 @@ public final class ExactSession {
     /// once the batch the owner made before them has applied or skipped.
     private func drainReports() {
         if colorsOwed, !holdingReports, !awaitingTree { colorsOwed = false; apply(runtime.reportColors(tint: SystemColor.appTint.flatMap { SystemColor.tintPair($0) })) }
+        settleAppearances()
         while !holdingReports, !pendingViewDark.isEmpty {
             let (id, dark) = pendingViewDark.removeFirst()
             let batch = runtime.viewScheme(id, dark: dark)
@@ -1107,6 +1108,7 @@ public final class ExactSession {
         // Each presenter takes its boot's table, a second one with the same too.
         ThemeRoles.apply(batch, root: presenter.root); if batch.ops.contains(where: { $0.op == .roles }) { presenter.applyThemeTint() }
         ThemeRoles.within(presenter.root) { presenter.apply(batch) }; Tambers.moved(self) // bindings' places (LLP 1121 D12)
+        settleAppearances()
         if !batch.canvasImages.isEmpty { presenter.canvas2d.load(batch.canvasImages) }
         AnimatedRasters.shared.poke()
         for op in batch.ops where op.op == .reorder { presenter.reorder?.observe(ReorderState(op.payload)); presenter.reorderGroup?.observe(ReorderGroupState(op.payload)) }
@@ -1318,12 +1320,7 @@ public final class ExactSession {
         // §8): queued now, and said in the scheme's own batch, after it.
         if first {
             let early = unreported; unreported.removeAll()
-            for id in early {
-                if let v = presenter.views[id] { noteAppearance(v); continue }
-                #if os(iOS) || os(tvOS)
-                if let dark = presenter.flats.appearance(of: id) { noteAppearance(id, dark: dark) }
-                #endif
-            }
+            for id in early { if let dark = appearance(of: id) { noteAppearance(id, dark: dark) } }
         }
         // A subtree with a `color-scheme` of its own keeps its appearance when the session's changes, so no trait
         // callback says it: said here, after the scheme. Its views' appearance is the row's, already settled,
@@ -1356,6 +1353,29 @@ public final class ExactSession {
     func noteAppearance(_ view: NodeView) { noteAppearance(view.id, dark: view.drawsDark) }
     /// A node painting in `dark`: a view, or a flat leaf in its parent's appearance.
     func noteAppearance(_ id: UInt32, dark: Bool) {
+        if applying { appearancesToSettle.insert(id); return }
+        sayAppearance(id, dark: dark)
+    }
+    /// Nodes whose appearance changed while a batch applied. `settleAppearances` says each once the batch has
+    /// applied, in the appearance it ends in. Within a batch a grouped list takes its rows out of their cells and
+    /// back, and a selected sidebar cell draws its row dark: said at each change, every round trip asked for a
+    /// `viewScheme` batch that made another.
+    private var appearancesToSettle = Set<UInt32>()
+    private func settleAppearances() {
+        let ids = appearancesToSettle
+        appearancesToSettle.removeAll()
+        for id in ids { if let dark = appearance(of: id) { sayAppearance(id, dark: dark) } }
+    }
+    /// The appearance a node paints in now: its view's, or a flat leaf's, which is its parent's.
+    private func appearance(of id: UInt32) -> Bool? {
+        if let v = presenter.views[id] { return v.drawsDark }
+        #if os(iOS) || os(tvOS)
+        return presenter.flats.appearance(of: id)
+        #else
+        return nil
+        #endif
+    }
+    private func sayAppearance(_ id: UInt32, dark: Bool) {
         guard let session = schemeDark else { unreported.insert(id); return }
         guard dark != viewDark[id] ?? session else { return }
         viewDark[id] = dark == session ? nil : dark
@@ -1369,6 +1389,7 @@ public final class ExactSession {
         schemeDark = nil
         viewDark = [:]
         pendingViewDark = []
+        appearancesToSettle = []
         unreported = []
     }
     /// The agent API's runner half (LLP 1012): `tree`, `state`, `logs`, `settle`.
