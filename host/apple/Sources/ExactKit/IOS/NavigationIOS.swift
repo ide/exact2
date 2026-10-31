@@ -84,10 +84,13 @@ final class RouteController: UIViewController, UIScrollViewDelegate {
         appeared?()
     }
     required init?(coder: NSCoder) { nil }
-    // The bar's height changed (a push to an inline title, a rotation, a
-    // hatch): the route's content area follows (LLP 1075.003 §3.5).
+    // The safe area changed: the bar's height (a push to an inline title, a
+    // rotation, a hatch), or UIKit moving an iPhone's bottom search bar over
+    // the keys. The route's content area follows (LLP 1075.003 §3.5), and so
+    // does the room it adds for the keys.
     override func viewSafeAreaInsetsDidChange() {
         super.viewSafeAreaInsetsDidChange()
+        fitContentViewport()
         rideBars()
         host?.coversChanged()
     }
@@ -229,6 +232,10 @@ final class RouteController: UIViewController, UIScrollViewDelegate {
         if node.superview !== contentMount { contentMount.addSubview(node) }
         host?.presenter.regrid(node) // from the controller's view, a grid origin of its own
     }
+    /// UIKit's part of the route's bottom safe area: all of it but the room
+    /// the route adds for the keys (`fitContentViewport`). On an iPhone it
+    /// ends at the top of a bottom search bar UIKit carries above the keys.
+    var platformSafeBottom: CGFloat { view.safeAreaInsets.bottom - additionalSafeAreaInsets.bottom }
     /// The route's room for the keys, and under `resizes-visual` its
     /// viewport's frame, extent and inset.
     func fitContentViewport(in block: CGRect? = nil) {
@@ -241,7 +248,7 @@ final class RouteController: UIViewController, UIScrollViewDelegate {
             var keys: CGFloat = 0
             if contentViewport == nil, presenter.editsInBar(of: view), let top = presenter.keyboardTop, let window = view.window {
                 let edge = view.convert(CGPoint(x: 0, y: top), from: window).y
-                keys = max(0, view.bounds.maxY - edge - (view.safeAreaInsets.bottom - additionalSafeAreaInsets.bottom))
+                keys = max(0, view.bounds.maxY - edge - platformSafeBottom)
             }
             if additionalSafeAreaInsets.bottom != keys { additionalSafeAreaInsets.bottom = keys }
         }

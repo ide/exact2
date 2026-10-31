@@ -517,6 +517,28 @@ final class PushedTitleIOSTests: XCTestCase {
         try assertBarSearchKeys(policy: "resizes-visual")
     }
 
+    /// A bar search's keys are the route's safe area past what UIKit's own safe area holds. When UIKit raises its
+    /// own to them after they show (an iPhone's bottom search bar rides up over the keys), the route takes nothing
+    /// more: counted twice, the keys pushed the list's empty state up off its place above them.
+    func testABarSearchsKeysCountOnceWhenUIKitsSafeAreaRisesToThem() throws {
+        guard hostedWindowScene() != nil else {
+            throw missing("scene", "native search editing needs the hosted app responder lifecycle")
+        }
+        let (session, _, nav) = try fixture()
+        let p = session.presenter
+        try tap("home-open-seek", in: nav, depth: 2)
+        let search = try XCTUnwrap(nav.topViewController?.navigationItem.searchController)
+        until("the bar's search field takes the autofocus") { search.searchBar.searchTextField.isFirstResponder }
+        let route = try XCTUnwrap(nav.topViewController as? RouteController)
+        let keys: CGFloat = 300
+        setKeyboard(p, top: 874 - keys, responder: search.searchBar.searchTextField)
+        _ = Agent(session: session).clock(["settle": true])
+        XCTAssertGreaterThan(route.additionalSafeAreaInsets.bottom, 0, "the keys are the route's safe area")
+        // As the bar rides up, with no layout pass of the route after it: read before the run loop lays out
+        nav.additionalSafeAreaInsets.bottom = keys
+        XCTAssertEqual(route.view.safeAreaInsets.bottom, route.platformSafeBottom, "UIKit's safe area holds the keys, and the route adds nothing")
+    }
+
     private func assertBarSearchKeys(policy: String) throws {
         let (session, _, nav) = try fixture()
         let p = session.presenter
