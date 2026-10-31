@@ -68,6 +68,10 @@ final class ContextMenuHost: NSObject, UIContextMenuInteractionDelegate, UIEditM
         var controller: PreviewController?
         /// Whether the preview was tapped, and whether its press navigated.
         var committed = false, navigated = false
+        /// The platter's colour under its lifted cell, read as the cell first
+        /// lifts; the dismissal's preview reuses it, as UIKit dims what is
+        /// beneath once the menu shows.
+        var platter: UIColor?
         init(source: NodeView, popover: NodeView, name: String, point: CGPoint, inlineID: UInt32? = nil) {
             self.source = source; self.popover = popover; self.name = name; self.point = point; self.inlineID = inlineID
         }
@@ -476,11 +480,14 @@ final class ContextMenuHost: NSObject, UIContextMenuInteractionDelegate, UIEditM
         }
         // A row a list's cell draws lifts as UIKit lifts the cells it draws
         // itself: the cell, its selection's ground included, in its
-        // background's shape: a sidebar's rounded rectangle, a plain list's
-        // whole width, past a side safe area.
+        // background's shape (a sidebar's rounded rectangle, a plain list's
+        // whole width, past a side safe area), on the ground beneath it.
         if parameters.visiblePath == nil, let cell = Self.cell(drawing: shown), let background = cell.backgroundConfiguration {
             shown = cell
             parameters.visiblePath = Self.shape(of: background, in: cell)
+            let platter = owner.platter ?? Self.ground(beside: cell) ?? parameters.backgroundColor
+            owner.platter = platter
+            parameters.backgroundColor = platter
         }
         let radius = shown.layer.cornerRadius
         if radius > 0, parameters.visiblePath == nil { parameters.visiblePath = UIBezierPath(roundedRect: shown.bounds, cornerRadius: radius) }
@@ -515,6 +522,30 @@ final class ContextMenuHost: NSObject, UIContextMenuInteractionDelegate, UIEditM
         let rtl = cell.effectiveUserInterfaceLayoutDirection == .rightToLeft
         let box = cell.bounds.inset(by: UIEdgeInsets(top: insets.top, left: rtl ? insets.trailing : insets.leading, bottom: insets.bottom, right: rtl ? insets.leading : insets.trailing))
         return UIBezierPath(roundedRect: box, cornerRadius: background.cornerRadius)
+    }
+    /// The ground a list's cell lies on, read off the screen in the list's
+    /// margin beside it: in a sidebar, UIKit's material, which UIKit's own
+    /// lift copies from below the cell and no API names. Nil where the cell
+    /// spans its list (a plain list's): no margin shows the ground, and the
+    /// platter's default, the system background, is that list's ground.
+    private static func ground(beside cell: UICollectionViewCell) -> UIColor? {
+        guard let window = cell.window, let list = cell.superview else { return nil }
+        let margin = cell.frame.minX - list.bounds.minX
+        guard margin >= 2 else { return nil }
+        let point = list.convert(CGPoint(x: cell.frame.minX - margin / 2, y: cell.frame.midY), to: window)
+        var pixel: [UInt8] = [0, 0, 0, 0]
+        let drawn = pixel.withUnsafeMutableBytes { bytes -> Bool in
+            guard let context = CGContext(data: bytes.baseAddress, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4,
+                                          space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return false }
+            // Flip to UIKit's top-left origin, with `point` on the pixel
+            context.translateBy(x: -point.x, y: 1 + point.y)
+            context.scaleBy(x: 1, y: -1)
+            UIGraphicsPushContext(context)
+            defer { UIGraphicsPopContext() }
+            return window.drawHierarchy(in: window.bounds, afterScreenUpdates: false)
+        }
+        guard drawn, pixel[3] == 255 else { return nil }
+        return UIColor(red: CGFloat(pixel[0]) / 255, green: CGFloat(pixel[1]) / 255, blue: CGFloat(pixel[2]) / 255, alpha: 1)
     }
     func contextMenuInteraction(_ interaction: UIContextMenuInteraction, configuration: UIContextMenuConfiguration, highlightPreviewForItemWithIdentifier identifier: NSCopying) -> UITargetedPreview? {
         targeted(configuration)

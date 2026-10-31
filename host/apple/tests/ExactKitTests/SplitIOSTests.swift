@@ -316,6 +316,46 @@ final class SplitIOSTests: XCTestCase {
         shown.removeFromSuperview()
         preview.removeFromParent()
     }
+    /// LLP 1127: a sidebar's row lifts on the sidebar's ground, UIKit's material, as UIKit's own sidebar cell does,
+    /// in light and dark, where the platter's default is the system background, white or black.
+    func testASidebarsRowLiftsOnTheSidebarsGround() throws {
+        if ExactEnv.agentMode { throw XCTSkip("under the agent the popover is painted") }
+        guard UIApplication.shared.connectedScenes.contains(where: { $0 is UIWindowScene }) else {
+            throw missing("scene", "the ground is read off the screen, which draws only a scene's window")
+        }
+        ExactGroupedLists.install()
+        let session = try boot("SPLIT_ROWS", size: CGSize(width: 1100, height: 800))
+        let navigation = session.presenter.navigation, agent = Agent(session: session)
+        until("a split") { navigation.split != nil && !agent.nativeInFlight() }
+        let split = try XCTUnwrap(navigation.split)
+        split.controller.traitOverrides.horizontalSizeClass = .regular
+        until("expanded") { !split.controller.isCollapsed && !agent.nativeInFlight() }
+        let host = try XCTUnwrap(session.presenter.groupedLists as? GroupedListHost)
+        let list = try XCTUnwrap(host.lists[try node(session, "books").id])
+        let a = try node(session, "row-a")
+        until("row a is carried into its cell") { list.cell(a.id).map { a.isDescendant(of: $0) } ?? false }
+        let menus = session.presenter.menus.context
+        let interaction = try XCTUnwrap(a.interactions.compactMap { $0 as? UIContextMenuInteraction }.first)
+        // The sidebar's material over the page, as in an app's window
+        window?.rootViewController?.view.backgroundColor = .systemBackground
+        for style in [UIUserInterfaceStyle.light, .dark] {
+            window?.overrideUserInterfaceStyle = style
+            // Each peek reads the ground off the screen, which shows the style once it has drawn
+            until("in \(style == .dark ? "dark" : "light"), row a lifts on the sidebar's ground") {
+                guard let cell = list.cell(a.id),
+                      let configuration = menus.contextMenuInteraction(interaction, configurationForMenuAtLocation: CGPoint(x: 20, y: 10)) else { return false }
+                defer { menus.contextMenuInteraction(interaction, willEndFor: configuration, animator: nil) }
+                guard let lifted = menus.contextMenuInteraction(interaction, previewForHighlightingMenuWithConfiguration: configuration) else { return false }
+                let platter = lifted.parameters.backgroundColor.resolvedColor(with: cell.traitCollection)
+                let page = UIColor.systemBackground.resolvedColor(with: cell.traitCollection)
+                var white: CGFloat = 0, pageWhite: CGFloat = 0
+                platter.getWhite(&white, alpha: nil)
+                page.getWhite(&pageWhite, alpha: nil)
+                // Gray, neither the page's white nor its black
+                return abs(white - pageWhite) > 0.02 && platter.cgColor.alpha == 1
+            }
+        }
+    }
     /// LLP 1127: in a list that is not a sidebar (an iPhone's, a closed iPhone Duo's) a row's peek lifts its cell,
     /// its whole width past a side safe area, as UIKit lifts its own cells. UIKit asks for the preview about 0.18 s
     /// into a press (measured on iOS 27.1). The press stays a tap until the menu takes the touch, so a finger lifted
