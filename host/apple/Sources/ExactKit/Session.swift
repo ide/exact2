@@ -883,10 +883,8 @@ public final class ExactSession {
             text.commitFonts()
             appFileRoots = AppFiles.learn(runtime) // before the first frame's `app:/` images load (LLP 1069.002 D7)
         }
-        if !ApplyProfile.on { ApplyProfile.begin() }
-        ApplyProfile.add("runner", since: started)
-        apply(batch)
-        applyParts = ApplyProfile.end()
+        if !ApplyProfile.on { ApplyProfile.begin() }; ApplyProfile.add("runner", since: started)
+        apply(batch); applyParts = ApplyProfile.end()
         treeIsIn()
         if batch.error == nil { tellTime(); refuseUnheardLaunch(); ExactLaunch.shared.treeApplied(self, path: "baked") }
         // A fresh runner must receive the view's current viewport and insets.
@@ -1174,8 +1172,7 @@ public final class ExactSession {
                 for op in batch.ops {
                     kinds[op.op.rawValue, default: 0] += 1
                     guard op.nodeID != nil, names.count < 4 else { continue }
-                    let view = presenter.views[op.id]
-                    let name = view?.props["testId"] ?? view?.kind ?? op.kind
+                    let view = presenter.views[op.id]; let name = view?.props["testId"] ?? view?.kind ?? op.kind
                     if !names.contains(name) { names.append(name) }
                 }
                 let ops = kinds.sorted { $0.value > $1.value }.prefix(3).map { "\($0.key)×\($0.value)" }.joined(separator: " ")
