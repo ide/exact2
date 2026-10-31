@@ -70,5 +70,32 @@ final class MenuRowPopoverIOSTests: XCTestCase {
         while p.menus.isOpen(picker) && Date() < closing { RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.02)) }
         XCTAssertFalse(p.menus.isOpen(picker), "toggled closed")
     }
+
+    /// A link in a menu is one of its items, as an `a href` is in HTML: chosen, it follows its URL, which the app
+    /// opens (a contact card's Call row, `tel:`).
+    func testALinkInAMenuIsAnItemThatFollowsItsURL() throws {
+        final class Links: ExactSessionDelegate {
+            var urls: [String] = []
+            func exactSession(_ session: ExactSession, command name: String, args: [Any]) {
+                if name == "openURL", let url = args.first as? String { urls.append(url) }
+            }
+        }
+        let links = Links(), session = ExactApp.shared.makeSession(delegate: links, label: "menu-link")
+        defer { session.destroy() }
+        let p = presenter()
+        p.session = session
+        p.apply(wireBatch([
+            ["op": "create", "id": 110, "kind": "text", "props": ["text": "Call"]],
+            ["op": "frame", "id": 110, "x": 0.0, "y": 0.0, "w": 180.0, "h": 20.0],
+            ["op": "create", "id": 10, "kind": "button", "props": ["href": "tel:+14155550101"]],
+            ["op": "frame", "id": 10, "x": 0.0, "y": 0.0, "w": 200.0, "h": 30.0],
+            ["op": "children", "id": 10, "ids": [110]],
+            ["op": "children", "id": 2, "ids": [3, 4, 10]],
+        ]))
+        let items = p.menus.items(of: try XCTUnwrap(p.views[2]), opener: p.views[1])
+        let call = try XCTUnwrap(items.first { $0.title == "Call" } as? UIAction, "the link is an item")
+        UIButton().sendAction(call)
+        XCTAssertEqual(links.urls, ["tel:+14155550101"], "chosen, it follows its URL")
+    }
 }
 #endif
