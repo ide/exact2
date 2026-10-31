@@ -825,8 +825,7 @@ public final class ExactSession {
     func boot(size: CGSize, fallbackSize: (() -> CGSize)?) -> Batch {
         var size = size
         let t = CACurrentMediaTime()
-        ApplyProfile.begin()
-        ExactLaunch.shared.bootEntered(self)
+        ApplyProfile.begin(); ExactLaunch.shared.bootEntered(self)
         openStartLocation()
         primePreferences()
         primeTime(); claimColdShare()  // `prepare` primes again; the fallback boot reads this
@@ -856,8 +855,7 @@ public final class ExactSession {
     @discardableResult
     public func boot(plan bytes: Data, size: CGSize) -> Batch {
         let t = CACurrentMediaTime()
-        ApplyProfile.begin()
-        ExactLaunch.shared.bootEntered(self)
+        ApplyProfile.begin(); ExactLaunch.shared.bootEntered(self)
         openStartLocation()
         primePreferences()
         primeTime()
