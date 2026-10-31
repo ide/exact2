@@ -1486,9 +1486,8 @@ extension CGRect {
 }
 
 extension Presenter {
-    /// The view a view is under in the authored tree, where UIKit holds it elsewhere: a dialog's
-    /// sheet, a lifted popover, a route (any, presented or pushed) and a grouped list's carried row
-    /// to their authored parent; else its superview
+    /// The view a view is under in the authored tree, where UIKit holds it elsewhere: a dialog's sheet, a lifted
+    /// popover, a route (any, presented or pushed) and a grouped list's carried row to their authored parent; else its superview
     func authoredParent(of view: UIView) -> UIView? {
         if let node = view as? NodeView {
             if let p = menus.sheets.authoredParent(of: node) { return p }
