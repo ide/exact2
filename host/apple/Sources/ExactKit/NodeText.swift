@@ -130,6 +130,11 @@ extension NodeView {
         let outer = SystemColor.selectedItem
         SystemColor.selectedItem = inEmphasizedRow
         defer { SystemColor.selectedItem = outer }
+        #elseif os(iOS)
+        // In a list cell drawn on the accent, the label and secondary label take the cell content's ink (`SelectedItemInk`)
+        let outer = SystemColor.selectedItem
+        SystemColor.selectedItem = traitCollection[SelectedItemInk.self]
+        defer { SystemColor.selectedItem = outer }
         #endif
         var runs: [Run] = []
         // An inline run is not in the view hierarchy — its paragraph owns it

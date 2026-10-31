@@ -55,6 +55,12 @@ package enum SystemColor {
         "labelColor": 1, "textColor": 1, "controlTextColor": 1, "headerTextColor": 1, "linkColor": 1, "@tint": 1,
         "secondaryLabelColor": 0.92, "tertiaryLabelColor": 0.61, "quaternaryLabelColor": 0.39,
     ]
+    #elseif os(iOS)
+    /// Set, on the main thread, while a view in a list cell drawn on the
+    /// accent resolves its ink (`NodeView.paragraphSpec`): `labelColor` and
+    /// `secondaryLabelColor` resolve to the cell content's text and secondary
+    /// text (`SelectedItemInk`); the other roles keep the dark appearance's.
+    nonisolated(unsafe) static var selectedItem: SelectedItemInk.Ink?
     #endif
 
     /// Whether Increased Contrast is on, as `prefers-contrast` reads it (an
@@ -83,6 +89,9 @@ package enum SystemColor {
         if name == "exactGroupedCardColor" { return dark && elevated ? [255, 255, 255, 8] : fallback }
         if selectedItem, Thread.isMainThread, let share = selectedInk[name],
            var c = rgba(.alternateSelectedControlTextColor, dark: dark, contrast: contrast) { c[3] *= share; return c }
+        #elseif os(iOS)
+        if let ink = selectedItem, Thread.isMainThread, let color = name == "labelColor" ? ink.text : name == "secondaryLabelColor" ? ink.secondary : nil,
+           let c = rgba(color, dark: dark, contrast: contrast, elevated: elevated) { return c }
         #endif
         if name.hasPrefix("@tint") {
             let alpha = name.contains("/") ? Double(name.split(separator: "/").last ?? "") ?? 1 : 1
@@ -237,13 +246,32 @@ package enum SystemColor {
 #if os(iOS) || os(tvOS)
 extension SystemColor {
     /// Whether a platform colour resolves differently under `b` than under
-    /// `a`: by style, contrast and, on iOS, the level (tvOS has none).
+    /// `a`: by style, contrast and, on iOS, the level (tvOS has none) and a
+    /// list cell's selected ink.
     static func resolvesDifferently(_ a: UITraitCollection, _ b: UITraitCollection) -> Bool {
         #if os(iOS)
-        if a.userInterfaceLevel != b.userInterfaceLevel { return true }
+        if a.userInterfaceLevel != b.userInterfaceLevel || a[SelectedItemInk.self] != b[SelectedItemInk.self] { return true }
         #endif
         return a.userInterfaceStyle != b.userInterfaceStyle || a.accessibilityContrast != b.accessibilityContrast
     }
+}
+#endif
+
+#if os(iOS)
+/// @ref LLP 1127 D7 — the ink of a list cell drawn on the accent (a
+/// sidebar's selected row), as UIKit's own cell content takes it: its text
+/// and secondary text in the colours `UIListContentConfiguration` resolves
+/// for the cell's state (white, and white at 0.8, on iOS 27.1, where the
+/// dark appearance's secondary label is a gray at 0.6). The list's cell sets
+/// it on a custom row's content; `labelColor` and `secondaryLabelColor`
+/// resolve to it there, and a colour the author wrote stays the author's.
+package struct SelectedItemInk: UITraitDefinition {
+    package struct Ink: Equatable {
+        package let text: UIColor, secondary: UIColor
+        package init(text: UIColor, secondary: UIColor) { self.text = text; self.secondary = secondary }
+    }
+    package static let defaultValue: Ink? = nil
+    package static let affectsColorAppearance = true
 }
 #endif
 

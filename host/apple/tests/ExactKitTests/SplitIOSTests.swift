@@ -215,6 +215,45 @@ final class SplitIOSTests: XCTestCase {
         XCTAssertEqual(cell.contentView.overrideUserInterfaceStyle, .dark, "its content stays light")
     }
 
+    /// LLP 1127 D7: a sidebar's selected row draws its label and secondary label in the colours UIKit's own cell
+    /// content takes on the accent (white, and white at 0.8, on iOS 27.1), not the dark appearance's secondary
+    /// label, a gray at 0.6; a row not selected keeps the label colours.
+    func testASidebarsSelectedRowsTextIsInTheInkOfUIKitsCellContent() throws {
+        ExactGroupedLists.install()
+        let session = try boot("SPLIT_ROWS", size: CGSize(width: 1100, height: 800))
+        let navigation = session.presenter.navigation, agent = Agent(session: session)
+        until("a split") { navigation.split != nil && !agent.nativeInFlight() }
+        let split = try XCTUnwrap(navigation.split)
+        split.controller.traitOverrides.horizontalSizeClass = .regular
+        until("expanded") { !split.controller.isCollapsed && !agent.nativeInFlight() }
+        let host = try XCTUnwrap(session.presenter.groupedLists as? GroupedListHost)
+        let list = try XCTUnwrap(host.lists[try node(session, "books").id])
+        let a = try node(session, "row-a"), b = try node(session, "row-b")
+        until("both rows are carried into their cells") { [a, b].allSatisfy { row in list.cell(row.id).map { row.isDescendant(of: $0) } ?? false } }
+        let touch = RowTouch(a, at: CGPoint(x: 20, y: 10))
+        a.touchesBegan([touch], with: nil)
+        a.touchesEnded([touch], with: nil)
+        until("row a is selected beside its book") { list.cell(a.id)?.isSelected == true && !agent.nativeInFlight() }
+        let cell = try XCTUnwrap(list.cell(a.id) as? UICollectionViewListCell)
+        let content = cell.defaultContentConfiguration().updated(for: cell.configurationState)
+        let ink = { (testId: String) -> [Double] in
+            guard let spec = (try? self.node(session, testId))?.paragraphSpec() else { return [] }
+            return spec.runs.first?.color ?? spec.color
+        }
+        let text = channels(content.textProperties.resolvedColor(), cell.traitCollection)
+        let secondary = channels(content.secondaryTextProperties.resolvedColor(), cell.traitCollection)
+        until("row a's name is in the cell content's text ink \(text): \(ink("name-a"))") { near(ink("name-a"), text) }
+        until("row a's preview is in its secondary text ink \(secondary): \(ink("preview-a"))") { near(ink("preview-a"), secondary) }
+        let other = try XCTUnwrap(list.cell(b.id)).traitCollection
+        XCTAssertTrue(near(ink("preview-b"), channels(.secondaryLabel, other)), "row b's preview keeps the secondary label: \(ink("preview-b"))")
+    }
+    private func channels(_ color: UIColor, _ traits: UITraitCollection) -> [Double] {
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        color.resolvedColor(with: traits).getRed(&r, green: &g, blue: &b, alpha: &a)
+        return [r, g, b, a].map { Double(min(max($0, 0), 1)) * 255 }
+    }
+    private func near(_ a: [Double], _ b: [Double]) -> Bool { a.count == b.count && zip(a, b).allSatisfy { abs($0 - $1) < 1 } }
+
     /// LLP 1127: a row's preview, committed, opens its book as the row's press does, and the sidebar selects the
     /// row beside it in place of the one selected before. The row lifts as UIKit lifts a sidebar's cell, and the
     /// book that takes the shown one's place, keeping its key, is still the commit's to grow into. A later peek's
