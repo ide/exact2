@@ -30,7 +30,13 @@ final class ContextMenuHost: NSObject, UIContextMenuInteractionDelegate, UIEditM
     private var parkedViews = NSHashTable<UIView>.weakObjects()
     /// The preview's controller: its view holds the lifted row.
     final class PreviewController: UIViewController {
+        /// Runs as its view appears (`viewIsAppearing`).
+        var appearing: (() -> Void)?
         override func loadView() { view = UIView() }
+        override func viewIsAppearing(_ animated: Bool) {
+            super.viewIsAppearing(animated)
+            appearing?()
+        }
     }
     /// One presentation, from its configuration to the end of its dismissal.
     final class Open {
@@ -411,6 +417,17 @@ final class ContextMenuHost: NSObject, UIContextMenuInteractionDelegate, UIEditM
         owner.preview = row
         owner.controller = controller
         controller.view.addSubview(row)
+        // UIKit shows the preview through a portal from a container it keeps
+        // transparent, so the row's text is never found showing
+        // (`textIsVisible`): its paragraphs paint as the preview appears.
+        controller.appearing = { [weak self, weak row] in
+            guard let presenter = self?.presenter, let row else { return }
+            var views: [UIView] = [row]
+            while let view = views.popLast() {
+                views.append(contentsOf: view.subviews)
+                if let node = view as? NodeView, node.isParagraph { _ = presenter.textRasters.ensure(node, urgent: true) }
+            }
+        }
         place(owner)
         presenter?.controls.syncShown()
         return controller

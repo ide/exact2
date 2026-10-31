@@ -217,7 +217,8 @@ final class SplitIOSTests: XCTestCase {
 
     /// LLP 1127: a row's preview, committed, opens its book as the row's press does, and the sidebar selects the
     /// row beside it in place of the one selected before. The row lifts as UIKit lifts a sidebar's cell, and the
-    /// book that takes the shown one's place, keeping its key, is still the commit's to grow into.
+    /// book that takes the shown one's place, keeping its key, is still the commit's to grow into. A later peek's
+    /// text paints as its preview appears, though UIKit shows the preview through a transparent container.
     func testACommittedPreviewSelectsItsRowInTheSidebar() throws {
         if ExactEnv.agentMode { throw XCTSkip("under the agent the popover is painted") }
         ExactGroupedLists.install()
@@ -255,6 +256,26 @@ final class SplitIOSTests: XCTestCase {
         until("book b shows beside the list") { has("reading-b") && !has("reading-a") && !agent.nativeInFlight() }
         until("row b is selected beside it") { list.cell(b.id)?.isSelected == true }
         XCTAssertNotEqual(list.cell(a.id)?.isSelected, true, "row a is not")
+
+        // A later peek, of the other row: UIKit shows its preview through a container it keeps transparent, where
+        // no text is found showing, so the preview's text paints as it appears, in its first frame
+        let other = try XCTUnwrap(a.interactions.compactMap { $0 as? UIContextMenuInteraction }.first)
+        let again = try XCTUnwrap(menus.contextMenuInteraction(other, configurationForMenuAtLocation: CGPoint(x: 20, y: 10)))
+        _ = try XCTUnwrap(menus.contextMenuInteraction(other, previewForHighlightingMenuWithConfiguration: again))
+        let preview = try XCTUnwrap(menus.open.flatMap { menus.lift($0) }, "row a's preview")
+        let text = try XCTUnwrap(session.presenter.views.values.first { $0.isParagraph && $0.isDescendant(of: preview.view) }, "its text")
+        let shown = UIView(frame: preview.view.frame), root = try XCTUnwrap(window?.rootViewController)
+        shown.alpha = 0
+        root.view.addSubview(shown)
+        root.addChild(preview)
+        shown.addSubview(preview.view)
+        preview.didMove(toParent: root)
+        root.view.layoutIfNeeded()
+        XCTAssertNotNil(text.textRaster, "its text paints as it appears")
+        menus.contextMenuInteraction(other, willEndFor: again, animator: nil)
+        preview.willMove(toParent: nil)
+        shown.removeFromSuperview()
+        preview.removeFromParent()
     }
     /// LLP 1127: in a list that is not a sidebar (an iPhone's, a closed iPhone Duo's) a row's peek lifts its cell,
     /// its whole width past a side safe area, as UIKit lifts its own cells. UIKit asks for the preview about 0.18 s

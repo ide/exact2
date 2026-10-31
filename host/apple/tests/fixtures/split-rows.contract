@@ -42,5 +42,7 @@ component App
             text `Reading ${e.params.id}` testId=`reading-${e.params.id}`
       column id="book-peek" popover="auto" role="menu"
         for id in [peeked].filter(p => p != "") key=id
-          button contextPreview=true press=follow(path("book", id)) popovertarget="book-peek" popovertargetaction="hide" testId="peek-preview" width="18.75rem" height="11.25rem"
+          // Its own content, as a chat's preview of a conversation is: no native button's title
+          button contextPreview=true press=follow(path("book", id)) popovertarget="book-peek" popovertargetaction="hide" testId="peek-preview" display="flex" flex-direction="column" gap=4 padding=16 box-sizing="border-box" width="18.75rem" height="11.25rem"
             text `Peek ${id}`
+            text "Its first lines"
