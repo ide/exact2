@@ -1246,9 +1246,6 @@ export function wholeProgram(kind, profile) {
   return ['apple','ios','macos','tvos','android'].includes(kind) && profile === 'release' ? ['--config','profile.release.lto="fat"'] : [];
 }
 
-/** `env` for a bake whose build scripts compile Objective-C++ for the Mac while SDKROOT names the phone's SDK, which cc-rs inherits: those units take the Mac SDK, as host/apple/build.mjs gives them. */
-export const macHostUnits = (env, ios) => ios ? { ...env, HOST_CXXFLAGS: `${process.env.HOST_CXXFLAGS ?? ''} -isysroot ${spawnSync('xcrun', ['--sdk', 'macosx', '--show-sdk-path'], { encoding: 'utf8' }).stdout.trim()}` } : env;
-
 /** One actual target build, including the optional GPU artifact. Consumers
  * classify its completed receipt; compatibility is never recomputed in JS.
  * `check` runs `cargo check`: the build scripts (the bake) and the receipt,
