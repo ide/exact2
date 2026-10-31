@@ -356,6 +356,12 @@ final class HeaderTitleView: UIControl {
     private var shownInk: UIColor?
 
     func update(_ group: HeaderTitle, title text: String) {
+        tap = group.tap
+        #if os(iOS)
+        // A long press on the title is its group's menu, as on the group
+        // itself, whether or not the title's drawing changed
+        host?.presenter.syncMenu(on: self)
+        #endif
         // Every batch projects the routes again: an unchanged title is left
         // alone, since invalidating its size relaid the whole navigation
         // bar out each time (~1 ms a batch, a fling's every frame).
@@ -365,7 +371,6 @@ final class HeaderTitleView: UIControl {
         #if EXACT_INSPECT
         groupId = group.id
         #endif
-        tap = group.tap
         avatar.image = group.avatar?.image
         avatar.isHidden = group.avatar == nil
         avatarWidth.constant = group.avatar?.size ?? 0
@@ -387,6 +392,13 @@ final class HeaderTitleView: UIControl {
         if let tap { _ = host?.act(tap, 0) }
     }
 }
+
+#if os(iOS)
+extension HeaderTitleView: MenuSurface {
+    /// The pressable group the title is drawn from.
+    var menuSource: NodeView? { tap.flatMap { host?.presenter.views[$0] } }
+}
+#endif
 
 extension NavigationHost {
     /// What the agent says of a header node the bar leaves out.

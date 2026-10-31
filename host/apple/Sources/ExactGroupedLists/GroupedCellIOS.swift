@@ -84,5 +84,5 @@ final class GroupedCell: UICollectionViewListCell {
 #endif
 
 #if os(iOS)
-extension GroupedCell: GroupedMenuSurface {}
+extension GroupedCell: MenuSurface {}
 #endif

@@ -95,7 +95,7 @@ final class ContextMenuHost: NSObject, UIContextMenuInteractionDelegate, UIEditM
         view.interactions.compactMap { $0 as? UIContextMenuInteraction }.filter { $0.delegate === self }
     }
 
-    func syncProjected(_ view: UIView & GroupedMenuSurface) {
+    func syncProjected(_ view: UIView & MenuSurface) {
         let key = ObjectIdentifier(view)
         if let owner = open, owner.interaction?.view === view, owner.source !== view.menuSource {
             owner.interaction?.dismissMenu()
@@ -137,7 +137,7 @@ final class ContextMenuHost: NSObject, UIContextMenuInteractionDelegate, UIEditM
             for v in presenter.carrying("contextPopover") where v.props["contextPopover"]?.isEmpty == false { wanted[v.id] = v }
         }
         for (key, interaction) in projected {
-            if let view = interaction.view as? (UIView & GroupedMenuSurface) { syncProjected(view) }
+            if let view = interaction.view as? (UIView & MenuSurface) { syncProjected(view) }
             else { projected[key] = nil; recognizers[ObjectIdentifier(interaction)] = nil }
         }
         syncMounts(presenter, sources: Array(wanted.values))
@@ -276,12 +276,17 @@ final class ContextMenuHost: NSObject, UIContextMenuInteractionDelegate, UIEditM
     /// The popover as it is now, if its source still names it.
     private func current(_ owner: Open) -> NodeView? {
         // A cell may have been reused while UIKit still holds its menu.
-        if let cell = owner.interaction?.view as? GroupedMenuSurface, cell.menuSource !== owner.source { return nil }
+        if let cell = owner.interaction?.view as? MenuSurface, cell.menuSource !== owner.source { return nil }
         // Its own action, which has run, may have disabled, hidden or moved it.
         guard let source = owner.source, live(source), contextName(owner) == owner.name,
-              menus?.eligible(source, contextMenu: true) == true, let pop = popover(named: owner.name) else { return nil }
+              eligible(source, of: owner), let pop = popover(named: owner.name) else { return nil }
         owner.popover = pop
         return pop
+    }
+    /// Whether the source may still show its menu: a source a surface draws
+    /// in a bar (its title) is hidden from the page while the bar shows it.
+    private func eligible(_ source: NodeView, of owner: Open) -> Bool {
+        menus?.eligible(source, contextMenu: true, inBar: owner.interaction?.view is HeaderTitleView) == true
     }
     private func log(_ line: String) { presenter?.session?.log(line) }
 
@@ -310,8 +315,8 @@ final class ContextMenuHost: NSObject, UIContextMenuInteractionDelegate, UIEditM
         let source: NodeView, point: CGPoint, hit: UIView?
         if let node = view as? NodeView {
             source = node; point = location; hit = node.hitTest(location, with: nil)
-        } else if let cell = view as? (UIView & GroupedMenuSurface), let found = cell.menuSource {
-            source = found; point = location; hit = cell
+        } else if let surface = view as? (UIView & MenuSurface), let found = surface.menuSource {
+            source = found; point = location; hit = surface
         } else if let mount = view as? PresentationMount, let found = mount.relay?.listener(mount.hitTest(location, with: nil), contextMenu: true, { $0.props["contextPopover"]?.isEmpty == false }) {
             // A sheet's mount: its route's nearest logical ancestor with a
             // menu, unless a node in the sheet is nearer (`MountRelay`)
@@ -319,7 +324,7 @@ final class ContextMenuHost: NSObject, UIContextMenuInteractionDelegate, UIEditM
         } else { return nil }
         let run = source.inlineContextTarget(at: point)
         guard live(source), let name = run?.props["contextPopover"] ?? (run == nil ? source.props["contextPopover"] : nil),
-              menus.eligible(source, contextMenu: true) else { return nil }
+              menus.eligible(source, contextMenu: true, inBar: view is HeaderTitleView) else { return nil }
         // UIKit's row menu wins over text selection. An authored menu
         // nearer the hit still belongs to that node (LLP 1115.000 D11.6).
         if view is NodeView ? NodeView.nativeEditor(hit, below: view) : NodeView.nativeInputOwns(hit, below: view) { return nil }
@@ -530,7 +535,7 @@ final class ContextMenuHost: NSObject, UIContextMenuInteractionDelegate, UIEditM
         guard let owner = open, let presenter, let row = owner.preview, live(row), row.handlers.contains("press"),
               let pop = owner.homePopover, live(pop), current(owner) === pop, !owner.dropped,
               owner.inPopover,
-              let source = owner.source, committable(row, in: pop, from: source) else { return }
+              let source = owner.source, committable(row, in: pop, from: source, of: owner) else { return }
         owner.committed = true
         let before = presenter.navigation.activeKey
         // Held until the stack has applied it: a push deferred behind a
@@ -575,8 +580,8 @@ final class ContextMenuHost: NSObject, UIContextMenuInteractionDelegate, UIEditM
     /// reads it but for the popover's own hiding: nothing disabled, inert or
     /// hidden (the row itself included), in the active route, and the source
     /// still eligible.
-    private func committable(_ row: NodeView, in pop: NodeView, from source: NodeView) -> Bool {
-        guard let presenter, let menus, !row.disabled, !row.isHidden, row.props["inert"] != "true", menus.eligible(source, contextMenu: true),
+    private func committable(_ row: NodeView, in pop: NodeView, from source: NodeView, of owner: Open) -> Bool {
+        guard let presenter, !row.disabled, !row.isHidden, row.props["inert"] != "true", eligible(source, of: owner),
               !presenter.navigation.isInactiveRoute(containing: pop) else { return false }
         var view: UIView? = pop
         while let current = view {
@@ -638,6 +643,19 @@ final class ContextMenuHost: NSObject, UIContextMenuInteractionDelegate, UIEditM
                 "popover": owner.popover.map { Int($0.id) as Any } ?? NSNull(),
                 "preview": owner.preview.map { Int($0.id) as Any } ?? NSNull(),
                 "phase": owner.committed ? "commit" : "open"]
+    }
+}
+
+/// A view that draws a node it is not and takes that node's long press: a
+/// grouped list's cell for a row UIKit draws, a navigation bar's title for its
+/// route's heading group. Its menu is the node's (`syncProjected`).
+package protocol MenuSurface: AnyObject {
+    var menuSource: NodeView? { get }
+}
+
+extension Presenter {
+    package func syncMenu(on view: UIView & MenuSurface) {
+        menus.context.syncProjected(view)
     }
 }
 #endif

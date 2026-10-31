@@ -70,6 +70,23 @@ extension NavigationBasicsIOSTests {
         XCTAssertTrue(item.titleView === hatches, "the hatch's title view is left alone")
     }
 
+    /// A pressable group naming a context popover keeps its long press in the title the bar draws in its place:
+    /// the title carries the group's menu, lifts as it begins, and pops its card, though the group itself is hidden
+    /// while the bar shows it.
+    func testADrawnTitleCarriesItsGroupsContextMenu() throws {
+        let session = try fixture("basics-title-menu")
+        let (_, _, chat) = try chat(session)
+        let view = try XCTUnwrap(chat.navigationItem.titleView as? HeaderTitleView)
+        let menus = session.presenter.menus.context
+        let interaction = try XCTUnwrap(view.interactions.compactMap { $0 as? UIContextMenuInteraction }.first, "the title takes the group's menu")
+        let configuration = try XCTUnwrap(menus.contextMenuInteraction(interaction, configurationForMenuAtLocation: CGPoint(x: view.bounds.midX, y: view.bounds.midY)))
+        let lifted = try XCTUnwrap(menus.contextMenuInteraction(interaction, previewForHighlightingMenuWithConfiguration: configuration))
+        XCTAssertTrue(lifted.view === view, "the title lifts")
+        let owner = try XCTUnwrap(menus.open)
+        XCTAssertNotNil(menus.lift(owner), "its card pops")
+        menus.contextMenuInteraction(interaction, willEndFor: configuration, animator: nil)
+    }
+
     func testARIAUnavailablePressableTitleKeepsItsAction() throws {
         let session = try fixture("aria-title")
         let (_, _, chat) = try chat(session)

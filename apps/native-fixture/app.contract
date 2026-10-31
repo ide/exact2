@@ -417,9 +417,10 @@ component NativeFixture
                         button appearance="none" role="tab" aria-selected=(segment == "missed") press=chooseSegment("missed") testId="segment-missed"
                           text "Missed"
                     // A pressable group around the heading, with an avatar and
-                    // a subtitle: the item's title, drawn, tapped (§9.10).
+                    // a subtitle: the item's title, drawn, tapped (§9.10); a
+                    // long press on it is its card's menu.
                     if e.name == "chat"
-                      button press=pressTitle testId="title-group" display="flex" flex-direction="row" flex=1 align-items="center" gap=8
+                      button press=pressTitle contextPopover="title-menu" testId="title-group" display="flex" flex-direction="row" flex=1 align-items="center" gap=8
                         column width=32 height=32 border-radius="50%" background-color="#dcfce7" align-items="center" justify-content="center"
                           text "CD" font-size=13 color="#166534"
                         column
@@ -726,6 +727,12 @@ component NativeFixture
                         text "Subtitle"
                       button press=toggleMuted testId="toggle-muted" padding=6 background-color="#e5e7eb"
                         text "Muted"
+                      // The title's long press: a card over one action
+                      column id="title-menu" popover="auto" role="menu"
+                        button contextPreview=true press=pressTitle popovertarget="title-menu" popovertargetaction="hide" testId="title-card" width=300 height=80
+                          text "CD"
+                        button press=pressTitle popovertarget="title-menu" popovertargetaction="hide" testId="title-message"
+                          text "Message"
                       button press=toggleShortChat testId="toggle-short-chat" padding=6 background-color="#e5e7eb"
                         text "Short"
                       text ("title presses " + titlePresses.toString()) testId="title-presses"

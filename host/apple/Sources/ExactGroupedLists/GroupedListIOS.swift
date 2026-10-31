@@ -1437,7 +1437,7 @@ final class GroupedListView: NSObject, UICollectionViewDelegate {
         #if os(iOS)
         if let cell = cell as? GroupedCell {
             cell.menuSource = rows[id]?.custom == false ? node : nil
-            host.presenter.syncGroupedMenu(on: cell)
+            host.presenter.syncMenu(on: cell)
         }
         #endif
         if node?.disabled == true || node?.ariaUnavailable == true { cell.accessibilityTraits.insert(.notEnabled) }
