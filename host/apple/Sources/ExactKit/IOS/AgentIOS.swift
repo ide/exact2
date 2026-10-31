@@ -562,6 +562,23 @@ extension Agent {
             if req["contextmenu"] == nil, req["dblclick"] == nil, node.activateInline(id) { return delivered(["tapped": Int(id), "delivery": "host-activation", "native": "inline-text"], node) }
         }
 
+        #if os(iOS)
+        // A long press on a group the bar draws as its title is the title's,
+        // as a finger's is: the title takes one only through the menu of a
+        // context popover the group can open now. The group's own action
+        // runs, then its popover opens, painted (the group itself is hidden
+        // while the bar shows it).
+        if req["contextmenu"] as? Bool == true, let id = req["id"] as? Int, let node = presenter.views[UInt32(id)],
+           presenter.navigation.drawsTitle(for: node) {
+            guard node.props["contextPopover"]?.isEmpty == false, presenter.menus.eligible(node, contextMenu: true, inBar: true) else {
+                return ["error": "tap #\(id) contextmenu: the bar draws this group as its title, which takes a long press only for a context popover the group can open now; give the group a `contextPopover`, or tap it"]
+            }
+            if node.handlers.contains("contextmenu") { presenter.contextmenu(node.id) }
+            _ = presenter.menus.agentContext(node, inBar: true)
+            return delivered(["tapped": id, "event": "contextmenu", "delivery": "recognized"], node)
+        }
+        #endif
+
         // A held contact (LLP 1035.003 D1) needs a touch that stays down
         // across requests, which XCTest's touches do not (LLP 1080.000 P3):
         // the iOS carrier says so rather than activating a node and calling it

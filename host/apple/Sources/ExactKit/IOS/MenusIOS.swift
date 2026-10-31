@@ -886,9 +886,9 @@ final class MenuHost {
     /// Paint the context popover after its source's handler ran. Read the
     /// live run's props because the handler may replace it.
     @discardableResult
-    func agentContext(_ node: NodeView, inline inlineID: UInt32? = nil) -> Bool {
+    func agentContext(_ node: NodeView, inline inlineID: UInt32? = nil, inBar: Bool = false) -> Bool {
         // Its own action may have unmounted or disabled it, or renamed its popover.
-        guard ExactEnv.agentMode, let presenter, eligible(node, contextMenu: true) else { return false }
+        guard ExactEnv.agentMode, let presenter, eligible(node, contextMenu: true, inBar: inBar) else { return false }
         let props: [String: String]
         if let inlineID {
             guard presenter.textHost(inlineID) === node, !presenter.inlineInert(inlineID), let run = presenter.inlineText(inlineID) else { return false }

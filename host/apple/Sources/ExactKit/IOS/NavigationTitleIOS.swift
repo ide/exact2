@@ -398,6 +398,14 @@ extension HeaderTitleView: MenuSurface {
     /// The pressable group the title is drawn from.
     var menuSource: NodeView? { tap.flatMap { host?.presenter.views[$0] } }
 }
+
+extension NavigationHost {
+    /// Whether a shown route's bar draws `node`, a pressable heading group,
+    /// as its title, which takes the group's long press (`HeaderTitleView`).
+    func drawsTitle(for node: NodeView) -> Bool {
+        controllers.values.contains { ($0.navigationItem.titleView as? HeaderTitleView)?.menuSource === node && $0.viewIfLoaded?.window != nil }
+    }
+}
 #endif
 
 extension NavigationHost {

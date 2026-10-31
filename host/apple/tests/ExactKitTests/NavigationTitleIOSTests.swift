@@ -87,6 +87,24 @@ extension NavigationBasicsIOSTests {
         menus.contextMenuInteraction(interaction, willEndFor: configuration, animator: nil)
     }
 
+    /// The agent's long press on a group the bar draws as its title does what a finger's does: the title takes a
+    /// long press only through the menu of a context popover the group can open now, so a disabled group, or one
+    /// without a context popover, is refused, where a finger's long press opens nothing or ends as a tap.
+    func testTheAgentsLongPressOnADrawnTitleOpensOnlyWhatAFingersCan() throws {
+        let session = try fixture("basics-title-agent")
+        let (_, _, chat) = try chat(session)
+        _ = try XCTUnwrap(chat.navigationItem.titleView as? HeaderTitleView)
+        let group = try node(session, "title-group"), agent = Agent(session: session)
+        let longPress: [String: Any] = ["id": Int(group.id), "contextmenu": true]
+        XCTAssertNil(agent.tap(longPress)["error"], "a group with a context popover takes it")
+        group.props["disabled"] = "true"
+        XCTAssertNotNil(agent.tap(longPress)["error"], "a disabled group takes none")
+        group.props["disabled"] = nil
+        group.props["contextPopover"] = nil
+        group.handlers.insert("contextmenu")
+        XCTAssertNotNil(agent.tap(longPress)["error"], "a group with no context popover takes none, its `contextmenu` action included")
+    }
+
     func testARIAUnavailablePressableTitleKeepsItsAction() throws {
         let session = try fixture("aria-title")
         let (_, _, chat) = try chat(session)
