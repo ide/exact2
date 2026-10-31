@@ -1359,6 +1359,18 @@ price: answers arrive `Later`, outside the action's transaction (LLP 1027.002 D1
   (polling, a server push, a measured latency). `state` lists what is pending.
   (Depot on three backends, 2026-10-05.)
 
+- **A drive cannot show what the app does while a slow reply is in flight.** Cause:
+  on Apple's hosts the agent's clock waits for in-flight replies before it fires a
+  due timer (`Agent.advanceRunner`), `clock +N real` included, so motion an
+  `every(frame, …)` task drives stands still until a slow save answers, where a
+  phone runs it on. Without any `clock` operation the runner fires no timer at
+  all under the agent. The frozen clock also lands a smooth scroll at once (a
+  `scrollIntoView` with `behavior="smooth"`, a followed end), which the platform
+  takes 0.3 s over. Fix: to film such motion, build the app
+  (`bun exact.mjs ios --sim <udid>`), launch it with `xcrun simctl launch`, not
+  through the agent, let a temporary task in the app make the input, and record
+  with `xcrun simctl io <udid> recordVideo`. (Chat template's send, 2026-10-30.)
+
 - **A date input reads `10/05/2026` beside a label the app wrote in UTC.** Cause:
   `input type="date"`/`"time"` show the browser's own locale format and mean a
   local wall time, as on the web; the app's label used another zone. Fix: label in
