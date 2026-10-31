@@ -1,7 +1,7 @@
 // @ref LLP 1021 §5.1 — the context menu on UIKit: a node naming a popover
 // with `contextPopover` gets a UIContextMenuInteraction. UIKit owns the long
-// press, the lift of the node itself (its targeted preview), the menu's
-// placement and the morph. The popover's menu rows are the UIMenu (D3's
+// press, the lift of the node or of the list cell that draws it (its targeted
+// preview), the menu's placement and the morph. The popover's menu rows are the UIMenu (D3's
 // extraction), and its `contextPreview` row, moved out of the hidden popover
 // into the preview controller's view, is the preview, sized by its layout.
 // Tapping the preview presses that row (UIKit's commit): a press that
@@ -440,16 +440,25 @@ final class ContextMenuHost: NSObject, UIContextMenuInteractionDelegate, UIEditM
         }
     }
 
-    /// UIKit lifts the node itself, clipped to its corners.
+    /// The view UIKit lifts: the node, clipped to its corners, or the list
+    /// cell that draws it, in its background's shape.
     private func targeted(_ configuration: UIContextMenuConfiguration) -> UITargetedPreview? {
         guard let owner = open, let source = owner.source, live(source), (owner.touched ?? source).window != nil,
               (configuration.identifier as? NSNumber)?.uint32Value == (owner.inlineID ?? source.id) else { return nil }
         let parameters = UIPreviewParameters()
-        let shown = owner.touched.flatMap { $0.window == nil ? nil : $0 } ?? source
+        var shown: UIView = owner.touched.flatMap { $0.window == nil ? nil : $0 } ?? source
         if let id = owner.inlineID, let run = presenter?.inlineText(id) {
             let path = UIBezierPath()
             source.inlineRects(run).forEach { path.append(UIBezierPath(rect: $0)) }
             parameters.visiblePath = path
+        }
+        // A row a list's cell draws lifts as UIKit lifts the cells it draws
+        // itself: the cell, its selection's ground included, in its
+        // background's shape: a sidebar's rounded rectangle, a plain list's
+        // whole width, past a side safe area.
+        if parameters.visiblePath == nil, let cell = Self.cell(drawing: shown), let background = cell.backgroundConfiguration {
+            shown = cell
+            parameters.visiblePath = Self.shape(of: background, in: cell)
         }
         let radius = shown.layer.cornerRadius
         if radius > 0, parameters.visiblePath == nil { parameters.visiblePath = UIBezierPath(roundedRect: shown.bounds, cornerRadius: radius) }
@@ -465,6 +474,25 @@ final class ContextMenuHost: NSObject, UIContextMenuInteractionDelegate, UIEditM
         }
         let target = UIPreviewTarget(container: window, center: superview.convert(shown.center, to: window), transform: transform)
         return UITargetedPreview(view: shown, parameters: parameters, target: target)
+    }
+    /// The list cell drawing `view`: the cell itself, or the cell whose content carries it.
+    private static func cell(drawing view: UIView) -> UICollectionViewCell? {
+        if let cell = view as? UICollectionViewCell { return cell }
+        guard let content = view.superview, let cell = content.superview as? UICollectionViewCell, cell.contentView === content else { return nil }
+        return cell
+    }
+    /// A cell's background as its configuration draws it: the cell's bounds
+    /// less the configuration's insets, with its corner radius.
+    private static func shape(of background: UIBackgroundConfiguration, in cell: UICollectionViewCell) -> UIBezierPath {
+        var insets = background.backgroundInsets
+        let margins = cell.directionalLayoutMargins, edges = background.edgesAddingLayoutMarginsToBackgroundInsets
+        if edges.contains(.top) { insets.top += margins.top }
+        if edges.contains(.leading) { insets.leading += margins.leading }
+        if edges.contains(.bottom) { insets.bottom += margins.bottom }
+        if edges.contains(.trailing) { insets.trailing += margins.trailing }
+        let rtl = cell.effectiveUserInterfaceLayoutDirection == .rightToLeft
+        let box = cell.bounds.inset(by: UIEdgeInsets(top: insets.top, left: rtl ? insets.trailing : insets.leading, bottom: insets.bottom, right: rtl ? insets.leading : insets.trailing))
+        return UIBezierPath(roundedRect: box, cornerRadius: background.cornerRadius)
     }
     func contextMenuInteraction(_ interaction: UIContextMenuInteraction, configuration: UIContextMenuConfiguration, highlightPreviewForItemWithIdentifier identifier: NSCopying) -> UITargetedPreview? {
         targeted(configuration)

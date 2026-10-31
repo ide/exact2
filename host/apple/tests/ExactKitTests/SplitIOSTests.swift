@@ -216,8 +216,8 @@ final class SplitIOSTests: XCTestCase {
     }
 
     /// LLP 1127: a row's preview, committed, opens its book as the row's press does, and the sidebar selects the
-    /// row beside it in place of the one selected before. The book that takes the shown one's place, keeping its
-    /// key, is still the commit's to grow into.
+    /// row beside it in place of the one selected before. The row lifts as UIKit lifts a sidebar's cell, and the
+    /// book that takes the shown one's place, keeping its key, is still the commit's to grow into.
     func testACommittedPreviewSelectsItsRowInTheSidebar() throws {
         if ExactEnv.agentMode { throw XCTSkip("under the agent the popover is painted") }
         ExactGroupedLists.install()
@@ -240,7 +240,12 @@ final class SplitIOSTests: XCTestCase {
         let menus = session.presenter.menus.context
         let interaction = try XCTUnwrap(b.interactions.compactMap { $0 as? UIContextMenuInteraction }.first, "the row's peek is UIKit's context menu")
         let configuration = try XCTUnwrap(menus.contextMenuInteraction(interaction, configurationForMenuAtLocation: CGPoint(x: 20, y: 10)))
-        _ = try XCTUnwrap(menus.contextMenuInteraction(interaction, previewForHighlightingMenuWithConfiguration: configuration))
+        let lifted = try XCTUnwrap(menus.contextMenuInteraction(interaction, previewForHighlightingMenuWithConfiguration: configuration))
+        let cell = try XCTUnwrap(list.cell(b.id)), background = try XCTUnwrap(cell.backgroundConfiguration)
+        XCTAssertTrue(lifted.view === cell, "the row lifts with its cell")
+        XCTAssertGreaterThan(background.cornerRadius, 0, "a sidebar's cell has a rounded ground")
+        let shape = lifted.parameters.visiblePath?.bounds ?? .null
+        XCTAssertTrue(shape.insetBy(dx: -0.01, dy: -0.01).contains(cell.bounds) && cell.bounds.insetBy(dx: -0.01, dy: -0.01).contains(shape), "in its ground's shape: \(shape)")
         let owner = try XCTUnwrap(menus.open)
         _ = try XCTUnwrap(menus.lift(owner), "the preview")
         let commit = Commit()
@@ -250,6 +255,37 @@ final class SplitIOSTests: XCTestCase {
         until("book b shows beside the list") { has("reading-b") && !has("reading-a") && !agent.nativeInFlight() }
         until("row b is selected beside it") { list.cell(b.id)?.isSelected == true }
         XCTAssertNotEqual(list.cell(a.id)?.isSelected, true, "row a is not")
+    }
+    /// LLP 1127: in a list that is not a sidebar (an iPhone's, a closed iPhone Duo's) a row's peek lifts its cell,
+    /// its whole width past a side safe area, as UIKit lifts its own cells. UIKit asks for the preview about 0.18 s
+    /// into a press (measured on iOS 27.1). The press stays a tap until the menu takes the touch, so a finger lifted
+    /// in between opens the row.
+    func testACollapsedListsRowLiftsWithItsCellAndATapThroughItsHighlightOpensIt() throws {
+        if ExactEnv.agentMode { throw XCTSkip("under the agent the popover is painted") }
+        ExactGroupedLists.install()
+        let session = try boot("SPLIT_ROWS")
+        let navigation = session.presenter.navigation, agent = Agent(session: session)
+        until("a split") { navigation.split != nil && !agent.nativeInFlight() }
+        XCTAssertTrue(try XCTUnwrap(navigation.split).controller.isCollapsed, "an iPhone's width collapses it")
+        let host = try XCTUnwrap(session.presenter.groupedLists as? GroupedListHost)
+        let list = try XCTUnwrap(host.lists[try node(session, "books").id])
+        let a = try node(session, "row-a")
+        until("row a is carried into its cell") { list.cell(a.id).map { a.isDescendant(of: $0) } ?? false }
+        let cell = try XCTUnwrap(list.cell(a.id))
+        let touch = RowTouch(a, at: CGPoint(x: 20, y: 10))
+        a.touchesBegan([touch], with: nil)
+        until("the pressed row's cell is highlighted") { cell.isHighlighted }
+        let menus = session.presenter.menus.context
+        let interaction = try XCTUnwrap(a.interactions.compactMap { $0 as? UIContextMenuInteraction }.first)
+        let configuration = try XCTUnwrap(menus.contextMenuInteraction(interaction, configurationForMenuAtLocation: CGPoint(x: 20, y: 10)))
+        let lifted = try XCTUnwrap(menus.contextMenuInteraction(interaction, previewForHighlightingMenuWithConfiguration: configuration))
+        XCTAssertTrue(lifted.view === cell, "the row lifts with its cell")
+        let shape = lifted.parameters.visiblePath?.bounds ?? .null
+        XCTAssertTrue(shape.insetBy(dx: -0.01, dy: -0.01).contains(cell.bounds) && cell.bounds.insetBy(dx: -0.01, dy: -0.01).contains(shape), "its whole width: \(shape)")
+        XCTAssertTrue(cell.isHighlighted, "the press holds while UIKit highlights the preview")
+        a.touchesEnded([touch], with: nil)
+        menus.contextMenuInteraction(interaction, willEndFor: configuration, animator: nil)
+        until("the row's book shows") { session.presenter.views.values.contains { $0.props["testId"] == "reading-a" && $0.window != nil } && !agent.nativeInFlight() }
     }
     /// UIKit's commit animator, as the delegate sees it.
     private final class Commit: NSObject, UIContextMenuInteractionCommitAnimating {
