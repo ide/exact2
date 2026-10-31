@@ -487,17 +487,20 @@ final class ContextMenuHost: NSObject, UIContextMenuInteractionDelegate, UIEditM
               owner.inPopover,
               let source = owner.source, committable(row, in: pop, from: source) else { return }
         owner.committed = true
-        // The preview opens what its source row opens: a sidebar keeps that row selected
-        presenter.groupedLists?.opening(from: source)
         let before = presenter.navigation.activeKey
         // Held until the stack has applied it: a push deferred behind a
         // transition (`pendingSync`) is still the commit's.
         presenter.navigation.unanimated = true
-        presenter.press(row.id)
+        // The preview opens what its source row opens: a sidebar selects that row, as its press would
+        if let lists = presenter.groupedLists { lists.open(from: source) { presenter.press(row.id) } } else { presenter.press(row.id) }
         if !presenter.navigation.inTransition || presenter.navigation.activeKey == before { presenter.navigation.unanimated = false }
+        // It navigated if it pushed a screen, or if a split's detail now
+        // shows its sidebar row's: a route shown in the place of the one
+        // before keeps its key.
+        let navigated = presenter.navigation.activeKey != before || presenter.sidebarSelection(source) == source.id
         // A press that unmounted its source, or renamed its popover, without
         // navigating: `sync` left the row to the commit, which may not end.
-        if presenter.navigation.activeKey == before, !(owner.source.map { live($0) && contextName(owner) == owner.name } ?? false) {
+        if !navigated, !(owner.source.map { live($0) && contextName(owner) == owner.name } ?? false) {
             restore(owner)
             open = nil
             sync()
@@ -505,8 +508,9 @@ final class ContextMenuHost: NSObject, UIContextMenuInteractionDelegate, UIEditM
         }
         // UIKit grows the preview into the screen only when the commit adds
         // an animation: at `.pop` with none it shrinks it away, as `.dismiss`
-        // would (measured on iOS 27). The pushed screen's layout is the one.
-        if presenter.navigation.activeKey != before {
+        // would (measured on iOS 27). That animation is the new screen's
+        // layout (`layoutIfNeeded`).
+        if navigated {
             owner.navigated = true
             animator.preferredCommitStyle = .pop
             animator.addAnimations { [weak presenter] in presenter?.session?.view?.layoutIfNeeded() }

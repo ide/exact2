@@ -216,7 +216,8 @@ final class SplitIOSTests: XCTestCase {
     }
 
     /// LLP 1127: a row's preview, committed, opens its book as the row's press does, and the sidebar selects the
-    /// row beside it in place of the one selected before.
+    /// row beside it in place of the one selected before. The book that takes the shown one's place, keeping its
+    /// key, is still the commit's to grow into.
     func testACommittedPreviewSelectsItsRowInTheSidebar() throws {
         if ExactEnv.agentMode { throw XCTSkip("under the agent the popover is painted") }
         ExactGroupedLists.install()
@@ -242,9 +243,11 @@ final class SplitIOSTests: XCTestCase {
         _ = try XCTUnwrap(menus.contextMenuInteraction(interaction, previewForHighlightingMenuWithConfiguration: configuration))
         let owner = try XCTUnwrap(menus.open)
         _ = try XCTUnwrap(menus.lift(owner), "the preview")
-        menus.contextMenuInteraction(interaction, willPerformPreviewActionForMenuWith: configuration, animator: Commit())
+        let commit = Commit()
+        menus.contextMenuInteraction(interaction, willPerformPreviewActionForMenuWith: configuration, animator: commit)
+        XCTAssertEqual(commit.preferredCommitStyle, .pop, "the preview grows into book b")
         menus.contextMenuInteraction(interaction, willEndFor: configuration, animator: nil)
-        until("book b shows beside the list") { has("reading-b") && !agent.nativeInFlight() }
+        until("book b shows beside the list") { has("reading-b") && !has("reading-a") && !agent.nativeInFlight() }
         until("row b is selected beside it") { list.cell(b.id)?.isSelected == true }
         XCTAssertNotEqual(list.cell(a.id)?.isSelected, true, "row a is not")
     }

@@ -9,9 +9,15 @@ extension GroupedListHost {
     func highlight(carried node: NodeView, _ down: Bool) -> Bool {
         list(carrying: node)?.highlight(node.id, down) ?? false
     }
-    func opening(from row: NodeView) {
-        guard let list = lists.values.first(where: { $0.rows[row.id] != nil }), list.sidebar else { return }
+    func open(from row: NodeView, press: () -> Void) {
+        guard let list = lists.values.first(where: { $0.rows[row.id] != nil }), list.sidebar else { return press() }
         list.pressedSidebarRow = row.id
+        press()
+        // Selected here: a detail that took the shown one's place is the
+        // same screen, so no update of the split selects the row
+        #if os(iOS)
+        list.selectDetailRow()
+        #endif
     }
 }
 

@@ -1,8 +1,9 @@
 // SplitIOSTests': a split whose list is a plain grouped list of custom rows,
 // links as a chat's conversations are (LLP 1127 D7). A press on a row's own
 // view goes through its cell's selection, which pushes the book and keeps
-// the row selected beside it. A long press peeks at the book, whose preview
-// opens it.
+// the row selected beside it; beside a book, a row's book takes its place,
+// as a chat's conversation does. A long press peeks at the book, whose
+// preview opens it.
 routes nav
   library "/"
     book "/book/:id"
@@ -10,7 +11,10 @@ routes nav
 component App
   state peeked = ""
   action follow(url: string)
-    nav = go(nav, url)
+    if top(nav).name == "book" and url.startsWith("/book/")
+      nav = replace(nav, url)
+    else
+      nav = go(nav, url)
   action peek(id: string)
     peeked = id
   action back
