@@ -192,12 +192,6 @@ package final class Presenter {
     let pinnedRoom = PinnedRoom()
     /// A native prompt outside the session's mounts, associated by its creator.
     package weak var keyboardPrompt: UITextField?
-    var keyboardEditor: UIView? {
-        guard let responder = FirstResponder.current as? UIView, responder is UIKeyInput,
-              mounts(responder) || responder === keyboardPrompt else { return nil }
-        return responder
-    }
-    var hasKeyboardEditor: Bool { keyboardEditor != nil }
 
     /// A route's content or its projected search field currently owns text input.
     func ownsKeyboard(in container: UIView) -> Bool { edits(in: container) || editsInBar(of: container) }
