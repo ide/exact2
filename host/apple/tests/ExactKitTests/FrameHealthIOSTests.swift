@@ -50,6 +50,10 @@ final class FrameHealthIOSTests: XCTestCase {
         let shown = expectation(description: "native developer sheet presented")
         root.present(navigation, animated: false) { shown.fulfill() }
         wait(for: [shown], timeout: 5)
+        // Attached to the bottom edge in regular height, where a sheet can rest at the medium detent
+        if window.traitCollection.horizontalSizeClass == .compact && window.traitCollection.verticalSizeClass == .regular {
+            XCTAssertGreaterThan(navigation.view.frame.height, window.bounds.height * 0.8, "the sheet opens at full height, not half")
+        }
         let menu = try XCTUnwrap(navigation.viewControllers.first as? DevMenuController)
         menu.tableView.layoutIfNeeded()
         XCTAssertEqual(menu.groups[1].first?.title, "Hide Frame Health")
@@ -308,7 +312,6 @@ final class FrameHealthIOSTests: XCTestCase {
         menu.tableView(menu.tableView, didSelectRowAt: IndexPath(row: 0, section: 2))
         XCTAssertTrue(navigation.viewControllers.last?.view is UITextView)
         XCTAssertEqual(navigation.viewControllers.last?.title, "Build Information")
-        XCTAssertEqual(navigation.sheetPresentationController?.widthFollowsPreferredContentSizeWhenEdgeAttached, false)
     }
 }
 #endif

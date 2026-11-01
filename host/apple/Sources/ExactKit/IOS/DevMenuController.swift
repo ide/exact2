@@ -17,7 +17,7 @@ final class DevMenuController: UITableViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         title = "Exact Developer"
-        navigationItem.rightBarButtonItem = UIBarButtonItem(systemItem: .done, primaryAction: UIAction { [weak self] _ in
+        navigationItem.rightBarButtonItem = UIBarButtonItem(systemItem: .close, primaryAction: UIAction { [weak self] _ in
             self?.dismiss(animated: true)
         })
         tableView.rowHeight = UITableView.automaticDimension
@@ -25,17 +25,11 @@ final class DevMenuController: UITableViewController {
         tableView.cellLayoutMarginsFollowReadableWidth = true
         tableView.accessibilityIdentifier = "exact.host.dev-menu"
         rebuild()
-        if traitCollection.preferredContentSizeCategory.isAccessibilityCategory {
-            navigationController?.sheetPresentationController?.selectedDetentIdentifier = .large
-        }
     }
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
         rebuild()
-        if traitCollection.preferredContentSizeCategory.isAccessibilityCategory {
-            navigationController?.sheetPresentationController?.selectedDetentIdentifier = .large
-        }
     }
 
     private func rebuild() {
@@ -96,17 +90,13 @@ final class DevMenuController: UITableViewController {
         }
     }
 
-    static func navigation(contentSizeCategory: UIContentSizeCategory = .large) -> UINavigationController {
+    static func navigation() -> UINavigationController {
         let navigation = UINavigationController(rootViewController: DevMenuController())
+        // On an iPhone a page sheet at UIKit's one detent, full height, as the HIG suggests for a sheet
+        // more useful at full height: no medium detent, and so no grabber
         navigation.modalPresentationStyle = UIDevice.current.userInterfaceIdiom == .pad ? .formSheet : .pageSheet
         navigation.preferredContentSize = CGSize(width: 560, height: 640)
-        if let sheet = navigation.sheetPresentationController {
-            sheet.detents = [.medium(), .large()]
-            sheet.selectedDetentIdentifier = contentSizeCategory.isAccessibilityCategory ? .large : .medium
-            sheet.prefersGrabberVisible = true
-            sheet.prefersEdgeAttachedInCompactHeight = true
-            sheet.widthFollowsPreferredContentSizeWhenEdgeAttached = false
-        }
+        navigation.sheetPresentationController?.prefersEdgeAttachedInCompactHeight = true
         return navigation
     }
 }
