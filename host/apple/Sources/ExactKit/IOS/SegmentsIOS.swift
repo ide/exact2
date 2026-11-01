@@ -673,6 +673,8 @@ final class SegmentHost: NSObject, UIGestureRecognizerDelegate, UITabBarDelegate
     func reset() {
         for id in Array(members.keys) { restore(owner: id) }
         decisions.removeAll()
+        // A restart's views are new though their ids come again: its adopted tablist is hidden anew
+        adoptedLists.removeAll()
     }
 }
 #endif

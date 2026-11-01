@@ -184,6 +184,8 @@ final class NavigationTabsIOSTests: XCTestCase {
     /// The runtime covers the root tablist the bar replaces before the first
     /// layout, and the presenter holds that cover from its first batch; a
     /// restart's boot covers it again, and its first batch looks for it again.
+    /// The bar takes the restarted tablist's place too, which the host hides
+    /// though it has the same id as before (the dev menu's Reload).
     func testTheBootsTablistCoverIsThePresentersAtEveryBoot() throws {
         let session = try fixture("boot-tablist")
         let navigation = session.presenter.navigation
@@ -204,6 +206,8 @@ final class NavigationTabsIOSTests: XCTestCase {
         XCTAssertTrue(try covered())
         XCTAssertTrue(navigation.bootCoverSeen)
         XCTAssertEqual(navigation.delivered[list.id], .whole)
+        XCTAssertTrue(navigation.adopts(tablist: list))
+        XCTAssertTrue(list.isHidden, "the bar takes the restart's tablist's place too: its tabs do not draw at the origin")
     }
 
     /// A style that drops the tablist's `accent-color` (here one sent by
