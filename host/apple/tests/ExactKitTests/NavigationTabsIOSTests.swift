@@ -132,8 +132,16 @@ final class NavigationTabsIOSTests: XCTestCase {
         // A modal's root seen for the first time: a change its stack cannot follow either
         let modal = RouteController(NodeView(id: 9_999, kind: "column", presenter: session.presenter))
         session.presenter.navigation.followTablistAtRoot(modal, hidden: false, in: UINavigationController(rootViewController: modal))
-        sheet.dismiss(animated: false)
-        try tapNode(session, "bump")
+        var dismissed = false
+        sheet.dismiss(animated: false) { dismissed = true }
+        // "The next batch after it": UIKit's dismissal completed and neither stack in a transition
+        until("the sheet is dismissed") {
+            dismissed && tabs.presentedViewController == nil && tabs.transitionCoordinator == nil && nav.transitionCoordinator == nil
+        }
+        let bumpID = Int(try node(session, "bump").id)
+        let bump = Agent(session: session).tap(["id": bumpID])
+        XCTAssertNil(bump["error"], "the bump reaches its button: \(bump)")
+        XCTAssertEqual(bump["pressed"] as? Int, bumpID, "the bump presses its own button: \(bump)")
         until("the bar came back") { !tabs.isTabBarHidden }
     }
 
