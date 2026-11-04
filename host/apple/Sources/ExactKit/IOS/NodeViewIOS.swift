@@ -709,6 +709,8 @@ package final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, U
     /// each side, as overflow. Its bounds origin is shifted by as much, so its subviews stay where layout
     /// put them while the view covers the band and UIKit's safe area reaches what is inside it.
     package var reach: UIEdgeInsets = .zero
+    /// PROTO (UIKit-first measurement): the route view whose top edge this box reaches or takes (`SafeReachIOS.swift`).
+    weak var reachRoute: UIView?
     /// PROTO: the laid-out box in this view's own coordinates, its bounds less its reach.
     package var boxBounds: CGRect { bounds.inset(by: reach) }
     /// PROTO: the adjustment behaviour the reach pass set on its scroll view, to undo when it stops reaching.

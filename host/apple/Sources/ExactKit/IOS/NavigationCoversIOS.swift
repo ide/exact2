@@ -113,9 +113,9 @@ extension NavigationHost {
                 // PROTO (safe-area design r6 §2.4): the content root is laid out against the resting safe area: its top
                 // is the bar's at full height, a large title expanded and the bar unminimized, as UIKit sizes it
                 // (`sizeThatFits`, measured equal to both while collapsed or minimized) and the route's own additional inset, whatever the bar shows now.
-                if let bar = barNav.map({ $0.navigationBar }), !(barNav?.isNavigationBarHidden ?? true), bar.window != nil {
+                if !ExactSession.protoLive, let bar = barNav.map({ $0.navigationBar }), !(barNav?.isNavigationBarHidden ?? true), bar.window != nil {
                     let full = c.view.convert(bar.bounds, from: bar).minY + bar.sizeThatFits(CGSize(width: bar.bounds.width, height: .greatestFiniteMagnitude)).height + c.additionalSafeAreaInsets.top
-                    if full > safe.top, !ExactSession.protoLive { safe.top = full }
+                    if full > safe.top { safe.top = full }
                 }
                 // PROTO (rule 4, `EdgeFramesIOS.swift`): where the top edge rests, and whether UIKit moves it: a large
                 // title collapsing, the bar minimizing as configured, or UIKit having moved it where the system decides

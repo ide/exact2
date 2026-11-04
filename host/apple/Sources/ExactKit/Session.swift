@@ -420,9 +420,16 @@ public final class ExactSession {
     // frame's tick, a timer, a reply, an intrinsic size, a report) waits on
     // main instead, and runs after the slice lands, in order.
     private(set) var fillInFlight = false
-    /// PROTO (UIKit-first measurement): the live mode, from the simulator default `ExactProtoLive`: the content root
-    /// follows UIKit's live safe area, laid out on every change, and the far pass is off
-    package static let protoLive = UserDefaults.standard.bool(forKey: "ExactProtoLive")
+    /// PROTO (UIKit-first measurement): how a route's content follows an edge UIKit moves. `resting` lays it out
+    /// with the bar at its full height and places the boxes that depend on the edge between layouts computed ahead
+    /// (the far pass). `live` lays it out in UIKit's live safe area on every change, through the general batch
+    /// pipeline. `geometry` is `live` with a batch of frames alone applying its frames and reach only, the rest
+    /// waiting for the frame after the edge stops (`GeometryOnlyIOS.swift`). From the default `ExactProtoMode`
+    /// (`ExactProtoLive` for `live`), and switched by an app's `data-safe-area-mode` on its root (Duo Lab's Edges).
+    package enum ProtoMode: String { case resting, live, geometry }
+    nonisolated(unsafe) package static var protoMode: ProtoMode = ProtoMode(rawValue: UserDefaults.standard.string(forKey: "ExactProtoMode") ?? "")
+        ?? (UserDefaults.standard.bool(forKey: "ExactProtoLive") ? .live : .resting)
+    package static var protoLive: Bool { protoMode != .resting }
     private var fillStarted = 0.0
     private typealias IdleWork = (views: Int?, work: () -> Void, cancelled: (() -> Void)?)
     private var afterFill: [IdleWork] = []
@@ -779,7 +786,7 @@ public final class ExactSession {
                     #else
                     let phases = ""
                     #endif
-                    NSLog("PROTO live covers cpu %.0f µs runtime %.0f apply %.0f wall %.0f ops %d frames %d waited %.0f µs%@ · %@", cpu() - startCPU, ranCPU - startCPU, cpu() - ranCPU, (CACurrentMediaTime() - start) * 1e6, batch.ops.count, frames, (start - asked) * 1e6, deferred ? " fill-in-flight" : "", phases)
+                    NSLog("PROTO live covers cpu %.0f µs runtime %.0f apply %.0f wall %.0f ops %d frames %d waited %.0f µs%@ · %@ · kinds %@", cpu() - startCPU, ranCPU - startCPU, cpu() - ranCPU, (CACurrentMediaTime() - start) * 1e6, batch.ops.count, frames, (start - asked) * 1e6, deferred ? " fill-in-flight" : "", phases, Set(batch.ops.map { $0.op == .unknown ? ($0.payload["op"] as? String ?? "unknown") : $0.op.rawValue }).sorted().joined(separator: ","))
                 }
             }
         }

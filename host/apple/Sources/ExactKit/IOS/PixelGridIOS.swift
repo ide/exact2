@@ -167,10 +167,17 @@ extension Presenter {
         // A frame is set untransformed (UIKit's `frame` is undefined
         // under a transform); the presentation goes back on after.
         v.transform = .identity
-        v.frame = groupedLists?.carriesRows == true ? groupedLists?.cellFrame(of: v, at: place) ?? place.drawn : place.drawn
-        // PROTO (safe-area design r2 §5.3): a box that reaches past its laid-out box keeps its outset frame.
-        if v.take != .zero { v.frame = v.frame.inset(by: UIEdgeInsets(top: -v.take.top, left: -v.take.left, bottom: -v.take.bottom, right: -v.take.right)) }
-        if v.reach != .zero { v.frame = v.frame.inset(by: UIEdgeInsets(top: -v.reach.top, left: -v.reach.left, bottom: -v.reach.bottom, right: -v.reach.right)) }
+        // PROTO (safe-area design r2 §5.3): a box that reaches past its laid-out box keeps its outset frame, set once.
+        let drawn = groupedLists?.carriesRows == true ? groupedLists?.cellFrame(of: v, at: place) ?? place.drawn : place.drawn
+        // PROTO (UIKit-first measurement): under a moving top edge a box reaching the top reaches it from its new place,
+        // so a scroller pinned to the allocation's top keeps its native frame and is not written (`GeometryOnlyIOS.swift`).
+        if geometryPass, v.reach.top > 0, let route = v.reachRoute, let up = v.superview {
+            let depth = max(0, up.convert(drawn.origin, to: route).y - route.bounds.minY)
+            if abs(depth - v.reach.top) > 0.01 { v.reach.top = depth; v.bounds.origin.y = -depth }
+        }
+        let out = UIEdgeInsets(top: -v.take.top - v.reach.top, left: -v.take.left - v.reach.left, bottom: -v.take.bottom - v.reach.bottom, right: -v.take.right - v.reach.right)
+        let framed = drawn.inset(by: out)
+        if v.frame != framed { v.frame = framed }
         v.textRasterGeometryChanged()
         v.scroll?.frame = v.scrollFrame
         if v.fieldWaits, rect.width > 0 || rect.height > 0 { v.makeWaitingField() } // its box laid out (MenuHost.waitingFields)

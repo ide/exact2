@@ -21,14 +21,35 @@ extension Presenter {
         }
         let a = view.bounds
         let s = CGRect(x: a.minX + e.left, y: a.minY + e.top, width: max(0, a.width - e.left - e.right), height: max(0, a.height - e.top - e.bottom))
-        let walk = SafeReach(view: view, allocation: a, safe: s, pixel: 1 / max(1, view.traitCollection.displayScale))
+        var top: [NodeView] = []
+        let walk = SafeReach(view: view, allocation: a, safe: s, pixel: 1 / max(1, view.traitCollection.displayScale)) { top.append($0); $0.reachRoute = view }
         _ = walk.visit(c.node, allowed: .all)
+        topReachers[c.node.id] = top
+    }
+
+    /// PROTO (UIKit-first measurement, `GeometryOnlyIOS.swift`): a moving top edge's reach. While the top edge moves,
+    /// what touches it does not change, only how far it lies from the allocation's top: each box the last walk found
+    /// reaching or taking the top has that depth written again, and the rest keep theirs until the walk after the edge
+    /// stops.
+    func reachMovingTops() {
+        for c in navigation.controllers.values where views[c.node.id] === c.node {
+            guard let view = c.viewIfLoaded, view.window != nil, let top = topReachers[c.node.id] else { continue }
+            let a = view.bounds
+            for v in top where v.window != nil {
+                // A box its frame op already placed at the new depth (`PixelGrid.frame`) is left as it is
+                let depth = max(0, v.convert(v.boxBounds.inset(by: v.take), to: view).minY - a.minY)
+                if v.take.top > 0, abs(v.take.top - depth) > 0.01 { var take = v.take; take.top = depth; SafeReach.take(take, to: v) }
+                if v.reach.top > 0, abs(v.reach.top - depth) > 0.01 { var reach = v.reach; reach.top = depth; SafeReach.apply(reach, to: v) }
+            }
+        }
     }
 }
 
 /// One route's walk: which edges each box touches, which it reaches, and the outset applied.
 struct SafeReach {
     let view: UIView, allocation: CGRect, safe: CGRect, pixel: CGFloat
+    /// Told of each box that reaches or takes the top edge (`Presenter.reachMovingTops`).
+    var reachesTop: (NodeView) -> Void = { _ in }
 
     /// The edges a box or something inside it reaches.
     @discardableResult
@@ -100,6 +121,7 @@ struct SafeReach {
             }
         }
         // What of the reach lies inside the safe area: an enclosing scroller's padding, crossed to reach its edge.
+        if reach.top > 0 || v.take.top > 0 { reachesTop(v) }
         v.reachOwn = UIEdgeInsets(top: 0, left: reach.left > 0 ? max(0, safe.minX - self.safe.minX) : 0,
                                   bottom: 0, right: reach.right > 0 ? max(0, self.safe.maxX - safe.maxX) : 0)
         Self.apply(reach, to: v)

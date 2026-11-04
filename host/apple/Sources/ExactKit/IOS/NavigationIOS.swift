@@ -95,10 +95,12 @@ final class RouteController: UIViewController, UIScrollViewDelegate {
     // The bar's height changed (a push to an inline title, a rotation, a
     // hatch): the route's content area follows (LLP 1075.003 §3.5).
     override func viewSafeAreaInsetsDidChange() {
+        let started = ExactSession.protoLive ? ApplyPhases.cpu() : 0 // PROTO (UIKit-first measurement)
         super.viewSafeAreaInsetsDidChange()
         rideBars()
         host?.coversChanged()
         host?.presenter.placeEdge(self) // PROTO (rule 4)
+        if ExactSession.protoLive { NSLog("PROTO live edge %@ cpu %.0f µs top %.2f", ExactSession.protoMode.rawValue, ApplyPhases.cpu() - started, view.safeAreaInsets.top) }
     }
     // Back on a screen whose list pushed the one leaving: the row that was
     // tapped fades with the transition (LLP 1115.000 D11.3).

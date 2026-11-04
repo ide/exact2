@@ -737,6 +737,11 @@ package final class Presenter {
     // PROTO (rule 4, `EdgeFramesIOS.swift`): routes whose top edge moves, as told; each one's boxes' two frames
     var onMovingTops: (([(UInt32, Bool)]) -> Void)?
     var movingTops = Set<UInt32>(), deliveredMovingTops = Set<UInt32>()
+    // PROTO (UIKit-first measurement, `GeometryOnlyIOS.swift`): what geometry-only batches left to sync, the
+    // frame clock that runs it once they stop, and the root's words the mode was last read from
+    var deferredGeometry = Set<UInt32>(), geometryQuiet: GeometryQuiet?, protoDataset = "", protoRun = "", edgeRun: EdgeRun?
+    var topReachers: [UInt32: [NodeView]] = [:] // PROTO (`SafeReachIOS.swift`): each route's boxes reaching its top
+    var geometryPass = false // PROTO: the batch being applied is geometry-only (`PixelGrid.frame`)
     /// PROTO (rule 4): routes whose top edge UIKit moved though nothing configured said it would (`noteUnforeseenMove`)
     var movedTops = Set<UInt32>()
     var edgeFrames: [UInt32: [UInt32: [(t: Double, frame: CGRect)]]] = [:]
@@ -789,6 +794,9 @@ package final class Presenter {
         defer { inputStarted = outerInput }
         defer { applyLanguage(batch); applyWakeLock(batch); applyOrientationLock(batch) }
         if applySnapshots(batch) { return }
+        let geometryOnly = geometryOnly(batch) // PROTO (UIKit-first measurement)
+        let outerPass = geometryPass; geometryPass = geometryOnly
+        defer { geometryPass = outerPass }
         PaintOrder.begin(); let schemes = ColorSchemes.begin(); defer { schemes.end() }
         let post = Self.signposts.beginInterval("apply"), phase = HostPhases.shared.begin(.apply)
         defer { Self.signposts.endInterval("apply", post); HostPhases.shared.end(phase) }
@@ -804,7 +812,8 @@ package final class Presenter {
         navigation.prepare(batch)
         anchorChanges.reset()
         let anchorFocus = scrollers.isEmpty ? nil : focusedNode
-        for id in scrollers where !collections.owns(id) { views[id]?.captureScrollPosition(focused: anchorFocus) }
+        // A moving edge's frames leave each scroller's offset to UIKit, which follows the edge itself
+        for id in scrollers where !collections.owns(id) && !geometryOnly { views[id]?.captureScrollPosition(focused: anchorFocus) }
         if let e = batch.error { FileHandle.standardError.write(Data("exact: \(e)\n".utf8)) }
         if let text = session?.text {
             // SVG text shapes with the session's fonts (LLP 1055.000 D11).
@@ -1044,10 +1053,12 @@ package final class Presenter {
         // A view the flush promoted and mounted may have moved its children.
         while !gridMoved.isEmpty { regridMoved(); flats.flush() }
         ApplyPhases.regrid += ApplyPhases.cpu() - protoRegrid; let protoReach = ApplyPhases.cpu() // PROTO
-        fitDocument(); reachPageEdges(); reachSafeEdges() // PROTO (safe-area design r2)
+        // PROTO (safe-area design r2): a moving edge's frames change only the depth of the top's reach
+        if geometryOnly { reachMovingTops(); verifyMovingTops() } else { fitDocument(); reachPageEdges(); reachSafeEdges() }
         placeEdgesAfterBatch() // PROTO (rule 4)
         ApplyPhases.reach += ApplyPhases.cpu() - protoReach // PROTO
         paintCanvas()
+        if geometryOnly { deferGeometry(touchedIDs + geometryApplied); geometryApplied = []; return } // PROTO
         let first = root.subviews.first as? NodeView
         let widget = first?.props["interactiveWidget"]
         if widget != interactiveWidget {
@@ -1056,6 +1067,7 @@ package final class Presenter {
         }
         let fit = first?.props["viewportFit"]
         if fit != viewportFit { viewportFit = fit; onViewportFit?() }
+        applyProtoMode(first) // PROTO
         session?.canvases.cancelMovedControls()
         PaintOrder.flush()
         session?.canvases.captureIfNeeded()
@@ -1179,7 +1191,7 @@ package final class Presenter {
 
     /// The views a batch touched and every view above them, as the batch
     /// left the hierarchy: what a pass reading a subtree must revisit.
-    private func touchedAndAbove(_ ids: [UInt32]) -> Set<UInt32> {
+    func touchedAndAbove(_ ids: [UInt32]) -> Set<UInt32> {
         var seen = Set<UInt32>()
         for id in ids {
             var view: UIView? = views[id]
@@ -1303,7 +1315,7 @@ package final class Presenter {
         reaimFixedGradients()
     }
 
-    private func positionContexts() {
+    func positionContexts() {
         for id in contextNodes {
             guard let node = views[id] else { continue }
             node.contextTransform = .identity
