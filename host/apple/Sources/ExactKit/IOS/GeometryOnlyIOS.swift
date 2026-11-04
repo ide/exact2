@@ -73,6 +73,8 @@ extension Presenter {
         guard let words = try? JSONSerialization.jsonObject(with: Data(dataset.utf8)) as? [String: Any] else { return }
         if let word = words["safe-area-mode"] as? String, let mode = ExactSession.ProtoMode(rawValue: word), mode != ExactSession.protoMode {
             ExactSession.protoMode = mode
+            // Frames kept for placing between rest and the far edge are stale once the live layout moves the boxes
+            if mode != .resting { edgeFrames = [:]; for c in navigation.controllers.values { c.placedEdge = nil } }
             NSLog("PROTO mode %@", mode.rawValue)
             afterBatch { [weak self] in self?.navigation.reportCovers() }
         }

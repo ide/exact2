@@ -40,6 +40,7 @@ extension Presenter {
     /// After a batch, which places each box at its resting frame: each moving route's
     /// boxes where the edge is now.
     func placeEdgesAfterBatch() {
+        guard ExactSession.protoMode == .resting else { return }
         for route in edgeFrames.keys {
             guard let c = navigation.controllers[route] else { continue }
             // At rest, the batch placed what it moved and the rest stands
@@ -52,7 +53,8 @@ extension Presenter {
     /// as far as UIKit has moved the edge from its resting place (`restingTop`) toward the
     /// block's top.
     func placeEdge(_ c: RouteController) {
-        guard c.restingTop > 0, c.viewIfLoaded?.window != nil else { return }
+        // Only the resting mode places boxes between frames; the live ones lay them out where the edge is
+        guard ExactSession.protoMode == .resting, c.restingTop > 0, c.viewIfLoaded?.window != nil else { return }
         guard let frames = edgeFrames[c.node.id], !frames.isEmpty else {
             noteUnforeseenMove(c)
             return

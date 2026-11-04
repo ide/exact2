@@ -215,7 +215,8 @@ extension NavigationHost {
         covers = wanted
         let ownersChanged = owners != ownerValues
         ownerValues = owners
-        guard !changes.isEmpty || ownersChanged else { return }
+        // PROTO (rule 4): a route that starts or stops moving is told too, though no cover changed (a mode switched)
+        guard !changes.isEmpty || ownersChanged || presenter.movingTops != presenter.deliveredMovingTops else { return }
         // A scroller's least content height is the port its cover leaves
         // (`scrollFloor`); the kernel sends no new content size when only that changed.
         for (id, _) in changes { presenter.views[id]?.fitScroll() }

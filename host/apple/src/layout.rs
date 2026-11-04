@@ -237,8 +237,13 @@ impl<D: DataSource> Host<D> {
             }
             let started = std::time::Instant::now(); // PROTO: the far pass timed
             // One trial session per pass: the kernel copies once and lays out each place in the copy
-            let Ok(mut trial) = self.runner.kernel_mut().clearance_trial(route, 0.0) else {
-                continue;
+            let mut trial = match self.runner.kernel_mut().clearance_trial(route, 0.0) {
+                Ok(trial) => trial,
+                Err(e) => {
+                    batch.far_reset(route, 0, 0, [0, 0, 0]); // PROTO: a refused trial, logged as an empty pass
+                    eprintln!("PROTO rule4 trial refused for {route:?}: {e:?}");
+                    continue;
+                }
             };
             self.far_frozen.insert(route, trial.frozen().to_vec());
             let Ok(all) = trial.frames(1.0) else {
