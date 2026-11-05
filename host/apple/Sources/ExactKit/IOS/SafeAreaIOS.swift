@@ -77,8 +77,7 @@ final class RouteSafeArea {
         pass()
     }
 
-    /// Hands `scroll` back without its correction before its owner stops UIKit
-    /// insetting it (`.never`); a later pass corrects it again while it is a target.
+    /// PROTO: release this route's correction when its primary scroller changes; UIKit keeps its adjustment
     func release(_ scroll: UIScrollView?) {
         guard let scroll, let state = states.first(where: { $0.scroll === scroll }) else { return }
         states.removeAll { $0 === state }

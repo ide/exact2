@@ -271,7 +271,7 @@ extension NodeView {
         if scrollView == nil { presenter?.scrollers.remove(id) }
         else { presenter?.scrollers.insert(id) }
         scrollWritten = nil
-        view?.contentInsetAdjustmentBehavior = .never
+        // PROTO: a native backend keeps its own adjustment, as a scroll view Exact makes keeps UIKit's (`syncScroll`)
         view?.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         syncScroll()
         updateRefresh()

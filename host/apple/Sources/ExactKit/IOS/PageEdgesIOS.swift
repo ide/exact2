@@ -203,7 +203,8 @@ extension NodeView {
         sv.verticalScrollIndicatorInsets = bars
         fitScroll()
         if atEnd { sv.layoutIfNeeded() }
-        sv.contentOffset = PixelGrid.offset(CGPoint(x: sv.contentOffset.x, y: atEnd ? end() : top - scrollTopInset(sv)), in: sv, clamped: !sv.isTracking && !sv.isDragging && !sv.isDecelerating)
+        let point = CGPoint(x: sv.contentOffset.x, y: atEnd ? end() : top - scrollTopInset(sv))
+        if point != sv.contentOffset { sv.contentOffset = PixelGrid.offset(point, in: sv, clamped: !sv.isTracking && !sv.isDragging && !sv.isDecelerating) } // PROTO: leave UIKit's unchanged offset unsnapped
         // Offsets a layout in flight saved to restore are native: they move with the inset.
         let moved = own.top - oldOwn.top
         if var saved = beforeLayoutScroll { saved.offset.y -= moved; saved.topInset += moved; beforeLayoutScroll = saved }

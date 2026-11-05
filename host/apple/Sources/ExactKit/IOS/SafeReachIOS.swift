@@ -204,22 +204,23 @@ struct SafeReach {
     /// The content's place on each edge a scroller reaches: UIKit's adjustment on the axes UIKit adjusts, and
     /// `contentInset` for the scroll view's own safe-area inset on the rest. Which axes those are follows UIKit's
     /// rule (`UIScrollView.h`: `.scrollableAxes` adjusts an axis whose content passes the view's size or that
-    /// bounces, `.always` every axis), never `adjustedContentInset`, which trails the safe area while a minimized
-    /// bar restores. Called again whenever the scroll view's safe area changes.
+    /// bounces, `.always` every axis). PROTO: a primary `.automatic` scroller also adjusts vertically when its
+    /// content fits. The adjusted inset trails a restoring bar; a safe-area change must not fill that lag.
     static func reconcile(_ v: NodeView) {
         guard let sv = v.scroll else { return }
         if v.safeReach.insetView != ObjectIdentifier(sv) { v.safeReach.inset = .zero; v.safeReach.insetView = ObjectIdentifier(sv) }
         let r = v.reach, safe = sv.safeAreaInsets, ci = sv.contentInset
-        let scrolls = (x: sv.contentSize.width > sv.bounds.width || sv.alwaysBounceHorizontal,
-                       y: sv.contentSize.height > sv.bounds.height || sv.alwaysBounceVertical)
-        func part(_ reach: CGFloat, _ safe: CGFloat, _ scrolls: Bool) -> CGFloat {
-            reach > 0 && !scrolls && sv.contentInsetAdjustmentBehavior != .always ? safe : 0
+        let adjusts = (x: sv.contentSize.width > sv.bounds.width || sv.alwaysBounceHorizontal,
+                       y: sv.contentSize.height > sv.bounds.height || sv.alwaysBounceVertical
+                           || (sv.contentInsetAdjustmentBehavior == .automatic && v.presenter?.navigation.insetByUIKit(v) == true))
+        func part(_ reach: CGFloat, _ safe: CGFloat, _ adjusts: Bool) -> CGFloat {
+            reach > 0 && !adjusts && sv.contentInsetAdjustmentBehavior != .always && sv.contentInsetAdjustmentBehavior != .never ? safe : 0
         }
         let own = v.safeReach.own
-        let want = UIEdgeInsets(top: part(r.top, safe.top, scrolls.y) + (r.top > 0 ? own.top : 0),
-                                left: part(r.left, safe.left, scrolls.x) + (r.left > 0 ? own.left : 0),
-                                bottom: part(r.bottom, safe.bottom, scrolls.y) + (r.bottom > 0 ? own.bottom : 0),
-                                right: part(r.right, safe.right, scrolls.x) + (r.right > 0 ? own.right : 0))
+        let want = UIEdgeInsets(top: part(r.top, safe.top, adjusts.y) + (r.top > 0 ? own.top : 0),
+                                left: part(r.left, safe.left, adjusts.x) + (r.left > 0 ? own.left : 0),
+                                bottom: part(r.bottom, safe.bottom, adjusts.y) + (r.bottom > 0 ? own.bottom : 0),
+                                right: part(r.right, safe.right, adjusts.x) + (r.right > 0 ? own.right : 0))
         let old = v.safeReach.inset
         guard want != old else { return }
         v.safeReach.inset = want
@@ -234,7 +235,7 @@ struct SafeReach {
         guard atRest else { return }
         let now = sv.adjustedContentInset
         let o = CGPoint(x: atStart.x ? -now.left : sv.contentOffset.x, y: atStart.y ? -now.top : sv.contentOffset.y)
-        if o != sv.contentOffset { sv.contentOffset = PixelGrid.offset(o, in: sv) }
+        if o != sv.contentOffset { sv.contentOffset = o } // PROTO: keep the resting edge UIKit reports, including its fractional inset
     }
 
     /// Whether `v` lies in another scroller's scrolled content (the presenter's viewport is no author's).

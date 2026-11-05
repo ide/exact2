@@ -1117,7 +1117,6 @@ extension NavigationHost {
         guard c.collapseScroll !== target || c.collapseScrollView !== physical else { return }
         c.safeArea.release(c.collapseScrollView)
         let old = c.collapseScroll, oldView = c.collapseScrollView
-        if let old, let sv = oldView { old.retainScrollPosition(from: sv) }
         c.collapseScroll = target
         c.collapseScrollView = physical
         // PROTO: let UIKit place the content as its first safe area arrives (`syncScroll`)
@@ -1126,18 +1125,12 @@ extension NavigationHost {
         // the bar, as on the web under a fixed transparent header: a hero
         // photo bleeds to the top, and the bar's material comes as it scrolls.
         // That is the top's clearance turned off (`ignoresSafeArea`).
-        shown?.contentInsetAdjustmentBehavior = .automatic
+        if shown?.contentInsetAdjustmentBehavior == .scrollableAxes { shown?.contentInsetAdjustmentBehavior = .automatic } // PROTO: release the reach's axis policy for the primary scroller
         c.setContentScrollView(shown ?? c.bandedTop, for: .top) // or the scroller its control bars are over (LLP 1131)
-        // The scroller left behind gets the page's offsets back only once the
-        // bar follows the new one: UIKit reads its inset taken away while the
-        // bar still follows it as a scroll, and closes an open large title.
-        if let old, let sv = oldView, sv !== shown {
-            let top = sv.contentOffset.y + old.scrollTopInset(sv)
-            // The bottom edge's scroller stays UIKit's to inset (`reachBottom`).
-            if old !== c.edgeScroll || sv !== old.scrollView { sv.contentInsetAdjustmentBehavior = .never }
+        // PROTO: keep UIKit's inset and offset when only the bar's scroll association changes
+        if let old, oldView !== shown {
             old.scrollOrigin = 0
             old.scrollCollapsed = 0
-            sv.contentOffset = PixelGrid.offset(CGPoint(x: sv.contentOffset.x, y: top - old.scrollTopInset(sv)), in: sv, clamped: !sv.isTracking && !sv.isDragging && !sv.isDecelerating)
         }
         // UIKit keeps a pushed route's large title inside the scroller the bar
         // follows and moves it only on the bar's next layout, which handing
@@ -1194,12 +1187,9 @@ extension NavigationHost {
         let target = Self.bottomScroller(in: c.node, cover: c.bottomClearance)
         guard c.edgeScroll !== target || c.contentScrollView(for: .bottom) !== (target?.scrollView ?? c.bandedBottom) else { return }
         c.safeArea.release(c.edgeScroll?.scrollView)
-        if let old = c.edgeScroll, let sv = old.scrollView, old !== c.collapseScroll { sv.contentInsetAdjustmentBehavior = .never }
-        if let previous = c.contentScrollView(for: .bottom), previous !== target?.scrollView,
-           previous !== c.collapseScrollView { previous.contentInsetAdjustmentBehavior = .never }
         c.edgeScroll = target
         let shown = shownScroll(target)
-        shown?.contentInsetAdjustmentBehavior = .automatic
+        if shown?.contentInsetAdjustmentBehavior == .scrollableAxes { shown?.contentInsetAdjustmentBehavior = .automatic } // PROTO: release only the reach's axis policy
         // tvOS has no bottom bar whose edge follows a scroller.
         #if !os(tvOS)
         c.setContentScrollView(shown ?? c.bandedBottom, for: .bottom)
