@@ -1238,7 +1238,8 @@ extension NavigationHost {
         // (a column with a Save button at its foot) and keeps the cover. The
         // laid-out frames say so; the host is not sent the flex direction.
         func alone(_ last: NodeView, among children: [NodeView]) -> Bool {
-            children.allSatisfy { $0 === last || $0.frame.maxY <= last.frame.minY + 0.5 }
+            // PROTO (UIKit-first measurement): laid-out boxes, not the native frames a reaching scroller outsets
+            children.allSatisfy { $0 === last || $0.frame.inset(by: $0.reach).maxY <= last.frame.inset(by: last.reach).minY + 0.5 }
         }
         var parent = route
         while true {
