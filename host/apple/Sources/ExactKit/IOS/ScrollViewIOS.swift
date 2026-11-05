@@ -61,8 +61,6 @@ package class ScrollView: UIScrollView {
         let was = keptInset
         keptInset = adjustedContentInset
         super.adjustedContentInsetDidChange()
-        // PROTO (safe-area design r3 §2.3): the reach pass's part of the inset follows UIKit's.
-        if let node = superview as? NodeView, node.reach != .zero { SafeReach.reconcile(node) }
         guard let node = superview as? NodeView, node.props["scrollStart"] == "end" || node.props["scrollFollowEnd"] == "true",
               node.presenter?.collections.entries[node.id]?.snapshot.horizontal != true,
               !isTracking, !isDecelerating, contentSize.height > 0 else { return }

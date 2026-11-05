@@ -15,7 +15,7 @@ struct SafeReachState {
     weak var route: UIView?
     /// PROTO (UIKit-first measurement): the adjustment behavior set on the scroll view, undone when it stops reaching
     var behavior: UIScrollView.ContentInsetAdjustmentBehavior?
-    /// PROTO (UIKit-first measurement): this pass's contribution to `contentInset`, the safe area UIKit does not adjust
+    /// PROTO (UIKit-first measurement): this pass's contribution to `contentInset` on axes UIKit does not adjust
     var inset: UIEdgeInsets = .zero
     /// PROTO (UIKit-first measurement): the scroll view given that inset; a replaced backing view starts from none
     var insetView: ObjectIdentifier?
@@ -165,9 +165,9 @@ struct SafeReach {
     }
 
     /// Outsets `v`'s frame by `reach` and shifts its bounds origin by as much. A reaching scroller's scroll view is
-    /// framed to its outset bounds and UIKit adjusts its content on the axes it scrolls (`.automatic`; one inside
-    /// another scroller's content `.scrollableAxes`). Every setting the pass owns is derived from the current state
-    /// and undone when that state no longer asks for it, so a retained view ends as a cold mount would.
+    /// framed to its outset bounds and UIKit adjusts its content on the axes it scrolls (`.scrollableAxes`). Every
+    /// setting the pass owns is derived from the current state and undone when that state no longer asks for it, so a
+    /// retained view ends as a cold mount would.
     static func apply(_ reach: UIEdgeInsets, to v: NodeView) {
         if reach != v.reach {
             let base = v.frame.inset(by: v.reach)
@@ -202,31 +202,34 @@ struct SafeReach {
         reconcile(v)
     }
 
-    /// The content's place on each edge a scroller reaches: UIKit's adjustment where UIKit applies one, and
-    /// `contentInset` for the rest of the scroll view's own safe-area inset there, read from UIKit, never computed:
-    /// its `safeAreaInsets` less UIKit's part (`adjustedContentInset` less `contentInset`). Called again whenever
-    /// UIKit's adjustment or the scroll view's safe area changes.
+    /// The content's place on each edge a scroller reaches: UIKit's adjustment on the axes UIKit adjusts, and
+    /// `contentInset` for the scroll view's own safe-area inset on the rest. Which axes those are follows UIKit's
+    /// rule (`UIScrollView.h`: `.scrollableAxes` adjusts an axis whose content passes the view's size or that
+    /// bounces, `.always` every axis), never `adjustedContentInset`, which trails the safe area while a minimized
+    /// bar restores. Called again whenever the scroll view's safe area changes.
     static func reconcile(_ v: NodeView) {
         guard let sv = v.scroll else { return }
         if v.safeReach.insetView != ObjectIdentifier(sv) { v.safeReach.inset = .zero; v.safeReach.insetView = ObjectIdentifier(sv) }
-        let r = v.reach, safe = sv.safeAreaInsets, adj = sv.adjustedContentInset, ci = sv.contentInset
-        func part(_ reach: CGFloat, _ safe: CGFloat, _ adjusted: CGFloat, _ content: CGFloat) -> CGFloat {
-            reach > 0 ? max(0, safe - (adjusted - content)) : 0
+        let r = v.reach, safe = sv.safeAreaInsets, ci = sv.contentInset
+        let scrolls = (x: sv.contentSize.width > sv.bounds.width || sv.alwaysBounceHorizontal,
+                       y: sv.contentSize.height > sv.bounds.height || sv.alwaysBounceVertical)
+        func part(_ reach: CGFloat, _ safe: CGFloat, _ scrolls: Bool) -> CGFloat {
+            reach > 0 && !scrolls && sv.contentInsetAdjustmentBehavior != .always ? safe : 0
         }
-        // PROTO (UIKit-first measurement): add the part of each reached edge crossing an enclosing scroller's padding (`safeReach.own`)
-        // and the scroll view's own safe area that UIKit does not adjust
         let own = v.safeReach.own
-        let want = UIEdgeInsets(top: part(r.top, safe.top, adj.top, ci.top) + (r.top > 0 ? own.top : 0),
-                                left: part(r.left, safe.left, adj.left, ci.left) + (r.left > 0 ? own.left : 0),
-                                bottom: part(r.bottom, safe.bottom, adj.bottom, ci.bottom) + (r.bottom > 0 ? own.bottom : 0),
-                                right: part(r.right, safe.right, adj.right, ci.right) + (r.right > 0 ? own.right : 0))
+        let want = UIEdgeInsets(top: part(r.top, safe.top, scrolls.y) + (r.top > 0 ? own.top : 0),
+                                left: part(r.left, safe.left, scrolls.x) + (r.left > 0 ? own.left : 0),
+                                bottom: part(r.bottom, safe.bottom, scrolls.y) + (r.bottom > 0 ? own.bottom : 0),
+                                right: part(r.right, safe.right, scrolls.x) + (r.right > 0 ? own.right : 0))
         let old = v.safeReach.inset
         guard want != old else { return }
         v.safeReach.inset = want
         // UIKit keeps the offset as an inset changes; content resting at its start stays there (CSS scrollLeft and
         // scrollTop 0), as it does when UIKit's own adjustment arrives (`NavigationBar`'s `atStart`).
         let atRest = !sv.isTracking && !sv.isDragging && !sv.isDecelerating // PROTO (UIKit-first measurement): leave a moving scroller's offset to UIKit
-        let atStart = (x: sv.contentOffset.x <= 0.5 - adj.left, y: sv.contentOffset.y <= 0.5 - adj.top)
+        let adj = sv.adjustedContentInset
+        let atStart = (x: want.left != old.left && sv.contentOffset.x <= 0.5 - adj.left,
+                       y: want.top != old.top && sv.contentOffset.y <= 0.5 - adj.top)
         sv.contentInset = UIEdgeInsets(top: ci.top + want.top - old.top, left: ci.left + want.left - old.left,
                                        bottom: ci.bottom + want.bottom - old.bottom, right: ci.right + want.right - old.right)
         guard atRest else { return }
