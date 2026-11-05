@@ -737,11 +737,7 @@ package final class Presenter {
     // PROTO (rule 4, `EdgeFramesIOS.swift`): routes whose top edge moves, as told; each one's boxes' two frames
     var onMovingTops: (([(UInt32, Bool)]) -> Void)?
     var movingTops = Set<UInt32>(), deliveredMovingTops = Set<UInt32>()
-    // PROTO (UIKit-first measurement, `GeometryOnlyIOS.swift`): what geometry-only batches left to sync, the
-    // frame clock that runs it once they stop, and the root's words the mode was last read from
-    var deferredGeometry = Set<UInt32>(), geometryQuiet: GeometryQuiet?, protoDataset = "", protoRun = "", edgeRun: EdgeRun?
-    var topReachers: [UInt32: [NodeView]] = [:] // PROTO (`SafeReachIOS.swift`): each route's boxes reaching its top
-    var geometryPass = false // PROTO: the batch being applied is geometry-only (`PixelGrid.frame`)
+    let geometry = GeometryOnlyState() // PROTO (UIKit-first measurement, `GeometryOnlyIOS.swift`)
     /// PROTO (rule 4): routes whose top edge UIKit moved though nothing configured said it would (`noteUnforeseenMove`)
     var movedTops = Set<UInt32>()
     var edgeFrames: [UInt32: [UInt32: [(t: Double, frame: CGRect)]]] = [:]
@@ -795,8 +791,8 @@ package final class Presenter {
         defer { applyLanguage(batch); applyWakeLock(batch); applyOrientationLock(batch) }
         if applySnapshots(batch) { return }
         let geometryOnly = geometryOnly(batch) // PROTO (UIKit-first measurement)
-        let outerPass = geometryPass; geometryPass = geometryOnly
-        defer { geometryPass = outerPass }
+        let outerPass = geometry.applying; geometry.applying = geometryOnly // PROTO (UIKit-first measurement)
+        defer { geometry.applying = outerPass } // PROTO (UIKit-first measurement)
         PaintOrder.begin(); let schemes = ColorSchemes.begin(); defer { schemes.end() }
         let post = Self.signposts.beginInterval("apply"), phase = HostPhases.shared.begin(.apply)
         defer { Self.signposts.endInterval("apply", post); HostPhases.shared.end(phase) }
@@ -812,8 +808,10 @@ package final class Presenter {
         navigation.prepare(batch)
         anchorChanges.reset()
         let anchorFocus = scrollers.isEmpty ? nil : focusedNode
-        // A moving edge's frames leave each scroller's offset to UIKit, which follows the edge itself
-        for id in scrollers where !collections.owns(id) && !geometryOnly { views[id]?.captureScrollPosition(focused: anchorFocus) }
+        // PROTO (UIKit-first measurement): leave scroll offsets to UIKit while the edge moves
+        if !geometryOnly {
+            for id in scrollers where !collections.owns(id) { views[id]?.captureScrollPosition(focused: anchorFocus) }
+        }
         if let e = batch.error { FileHandle.standardError.write(Data("exact: \(e)\n".utf8)) }
         if let text = session?.text {
             // SVG text shapes with the session's fonts (LLP 1055.000 D11).
@@ -1053,12 +1051,11 @@ package final class Presenter {
         // A view the flush promoted and mounted may have moved its children.
         while !gridMoved.isEmpty { regridMoved(); flats.flush() }
         ApplyPhases.regrid += ApplyPhases.cpu() - protoRegrid; let protoReach = ApplyPhases.cpu() // PROTO
-        // PROTO (safe-area design r2): a moving edge's frames change only the depth of the top's reach
-        if geometryOnly { reachMovingTops(); verifyMovingTops() } else { fitDocument(); reachPageEdges(); reachSafeEdges() }
+        if geometryOnly { reachMovingTops(); verifyMovingTops() } else { fitDocument(); reachPageEdges(); reachSafeEdges() } // PROTO (UIKit-first measurement): only top reach depth changes during the move
         placeEdgesAfterBatch() // PROTO (rule 4)
         ApplyPhases.reach += ApplyPhases.cpu() - protoReach // PROTO
         paintCanvas()
-        if geometryOnly { deferGeometry(touchedIDs + geometryApplied); geometryApplied = []; return } // PROTO
+        if geometryOnly { deferGeometry(touchedIDs + geometryApplied); geometryApplied = []; return } // PROTO (UIKit-first measurement)
         let first = root.subviews.first as? NodeView
         let widget = first?.props["interactiveWidget"]
         if widget != interactiveWidget {
@@ -1067,11 +1064,11 @@ package final class Presenter {
         }
         let fit = first?.props["viewportFit"]
         if fit != viewportFit { viewportFit = fit; onViewportFit?() }
-        applyProtoMode(first) // PROTO
+        applyProtoMode(first) // PROTO (UIKit-first measurement)
         session?.canvases.cancelMovedControls()
         PaintOrder.flush()
         session?.canvases.captureIfNeeded()
-        let changed = touchedAndAbove(touchedIDs + geometryApplied)
+        let deferredIDs = takeDeferredGeometry(), changed = touchedAndAbove(touchedIDs + geometryApplied + deferredIDs) // PROTO (UIKit-first measurement): merge views deferred by geometry batches
         geometryApplied = []
         swipeActions.sync(changed: changed, reshaped: touchedAndAbove(reshapedIDs)); rowCells.sync(changed: changed)
         groupedLists?.sync(changed: changed); reachPageEdges(); reachSafeEdges() // a list mounted now reaches its bands too
@@ -1106,7 +1103,7 @@ package final class Presenter {
         let disabledRoots = Set(ariaProps).union(ariaMoved)
         placedAnew.removeSubrange(anewFrom...)
         // What a node's name, state and focus read: not its box (an autofocus waiting for one is indexed).
-        let named = touchedAndAbove(batch.ops.compactMap { [.create, .props, .style, .children, .paragraph, .flow].contains($0.op) ? $0.id : nil })
+        let named = touchedAndAbove(batch.ops.compactMap { [.create, .props, .style, .children, .paragraph, .flow].contains($0.op) ? $0.id : nil } + deferredIDs) // PROTO (UIKit-first measurement): include deferred names and states
         // Finish controls and frames before UIKit synchronously lays out the destination.
         afterBatch { [weak self] in
             guard let self else { return }

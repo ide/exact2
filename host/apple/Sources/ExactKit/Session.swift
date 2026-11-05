@@ -420,16 +420,6 @@ public final class ExactSession {
     // frame's tick, a timer, a reply, an intrinsic size, a report) waits on
     // main instead, and runs after the slice lands, in order.
     private(set) var fillInFlight = false
-    /// PROTO (UIKit-first measurement): how a route's content follows an edge UIKit moves. `resting` lays it out
-    /// with the bar at its full height and places the boxes that depend on the edge between layouts computed ahead
-    /// (the far pass). `live` lays it out in UIKit's live safe area on every change, through the general batch
-    /// pipeline. `geometry` is `live` with a batch of frames alone applying its frames and reach only, the rest
-    /// waiting for the frame after the edge stops (`GeometryOnlyIOS.swift`). From the default `ExactProtoMode`
-    /// (`ExactProtoLive` for `live`), and switched by an app's `data-safe-area-mode` on its root (Duo Lab's Edges).
-    package enum ProtoMode: String { case resting, live, geometry }
-    nonisolated(unsafe) package static var protoMode: ProtoMode = ProtoMode(rawValue: UserDefaults.standard.string(forKey: "ExactProtoMode") ?? "")
-        ?? (UserDefaults.standard.bool(forKey: "ExactProtoLive") ? .live : .resting)
-    package static var protoLive: Bool { protoMode != .resting }
     private var fillStarted = 0.0
     private typealias IdleWork = (views: Int?, work: () -> Void, cancelled: (() -> Void)?)
     private var afterFill: [IdleWork] = []
@@ -770,31 +760,12 @@ public final class ExactSession {
         // @ref LLP 1075.003 §3.5, Q3 (c) — what a bar covers reaches layout as an intrinsic
         // size does, on AppKit too (LLP 1115.002 D8.1); the hatches replay once the module connects.
         // An owner's values change with each frame of a keyboard; where no row reads them the batch changes nothing (LLP 1123 D9).
-        presenter.onCovers = { [unowned self] covers, owners in
-            let asked = CACurrentMediaTime(), deferred = fillInFlight // PROTO (UIKit-first measurement)
-            whenIdle(bound: true) { [unowned self] in
-                // The main thread's CPU time, which preemption on a loaded machine does not inflate, and the wall time
-                let cpu = { Double(clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID)) / 1000 }
-                let start = CACurrentMediaTime(), startCPU = cpu()
-                let batch = runtime.covers(covers, owners: owners)
-                let ranCPU = cpu()
-                applyUnlessEmpty(batch)
-                if Self.protoLive {
-                    let frames = batch.ops.filter { $0.op == .frame }.count
-                    #if os(iOS)
-                    let phases = ApplyPhases.take()
-                    #else
-                    let phases = ""
-                    #endif
-                    NSLog("PROTO live covers cpu %.0f µs runtime %.0f apply %.0f wall %.0f ops %d frames %d waited %.0f µs%@ · %@ · kinds %@", cpu() - startCPU, ranCPU - startCPU, cpu() - ranCPU, (CACurrentMediaTime() - start) * 1e6, batch.ops.count, frames, (start - asked) * 1e6, deferred ? " fill-in-flight" : "", phases, Set(batch.ops.map { $0.op == .unknown ? ($0.payload["op"] as? String ?? "unknown") : $0.op.rawValue }).sorted().joined(separator: ","))
-                }
-            }
-        }
+        presenter.onCovers = { [unowned self] covers, owners in applyMeasuredCovers(covers, owners: owners) } // PROTO (UIKit-first measurement)
         presenter.onResizeBox = { [unowned self] id, width, height in
             whenIdle(bound: true) { [unowned self] in applyUnlessEmpty(runtime.resizeBox(id, width: width, height: height)) }
         }
         #if os(iOS) || os(tvOS)
-        presenter.onMovingTops = { [unowned self] m in NSLog("PROTO moving %@", m.map { "\($0.0)=\($0.1)" }.joined(separator: ",")); whenIdle(bound: true) { [unowned self] in applyUnlessEmpty(runtime.covers([], movingTops: m)) } } // PROTO (rule 4)
+        presenter.onMovingTops = { [unowned self] moving in whenIdle(bound: true) { [unowned self] in applyUnlessEmpty(runtime.covers([], movingTops: moving)) } } // PROTO (rule 4)
         natives.onHatchesConnected = { [weak self] in
             self?.presenter.navigation.replayHatches()
             self?.presenter.elements.replay()

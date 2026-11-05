@@ -167,16 +167,16 @@ extension Presenter {
         // A frame is set untransformed (UIKit's `frame` is undefined
         // under a transform); the presentation goes back on after.
         v.transform = .identity
-        // PROTO (safe-area design r2 §5.3): a box that reaches past its laid-out box keeps its outset frame, set once.
+        // PROTO (rule 4): keep the outset frame for a box reaching past its laid-out box, set once
         let drawn = groupedLists?.carriesRows == true ? groupedLists?.cellFrame(of: v, at: place) ?? place.drawn : place.drawn
-        // PROTO (UIKit-first measurement): under a moving top edge a box reaching the top reaches it from its new place,
-        // so a scroller pinned to the allocation's top keeps its native frame and is not written (`GeometryOnlyIOS.swift`).
-        if geometryPass, v.reach.top > 0, let route = v.reachRoute, let up = v.superview {
+        // PROTO (UIKit-first measurement): update reach from the box's new place before framing so a
+        // scroller pinned to the allocation's top keeps its native frame (`GeometryOnlyIOS.swift`)
+        if geometry.applying, v.reach.top > 0, let route = v.safeReach.route, let up = v.superview {
             let depth = max(0, up.convert(drawn.origin, to: route).y - route.bounds.minY)
             if abs(depth - v.reach.top) > 0.01 { v.reach.top = depth; v.bounds.origin.y = -depth }
         }
-        let out = UIEdgeInsets(top: -v.take.top - v.reach.top, left: -v.take.left - v.reach.left, bottom: -v.take.bottom - v.reach.bottom, right: -v.take.right - v.reach.right)
-        let framed = drawn.inset(by: out)
+        let outset = UIEdgeInsets(top: -v.take.top - v.reach.top, left: -v.take.left - v.reach.left, bottom: -v.take.bottom - v.reach.bottom, right: -v.take.right - v.reach.right)
+        let framed = drawn.inset(by: outset)
         if v.frame != framed { v.frame = framed }
         v.textRasterGeometryChanged()
         v.scroll?.frame = v.scrollFrame

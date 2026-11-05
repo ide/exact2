@@ -110,12 +110,13 @@ extension NavigationHost {
             }
             if settled, c.viewIfLoaded?.window != nil {
                 var safe = c.view.safeAreaInsets
-                // PROTO (safe-area design r6 §2.4): the content root is laid out against the resting safe area: its top
-                // is the bar's at full height, a large title expanded and the bar unminimized, as UIKit sizes it
-                // (`sizeThatFits`, measured equal to both while collapsed or minimized) and the route's own additional inset, whatever the bar shows now.
+                // PROTO (rule 4): lay out at the resting top with the large title expanded and bar unminimized,
+                // plus the route's own additional inset or its held run inset. UIKit's `sizeThatFits` measured
+                // equal to the full height while collapsed or minimized, whatever the bar shows now.
                 if !ExactSession.protoLive, let bar = barNav.map({ $0.navigationBar }), !(barNav?.isNavigationBarHidden ?? true), bar.window != nil {
-                    let full = c.view.convert(bar.bounds, from: bar).minY + bar.sizeThatFits(CGSize(width: bar.bounds.width, height: .greatestFiniteMagnitude)).height + max(c.additionalSafeAreaInsets.top, EdgeRun.heldTop)
-                    if full > safe.top { safe.top = full }
+                    let inset = max(c.additionalSafeAreaInsets.top, presenter.geometry.run?.restingInset(for: c) ?? 0)
+                    let full = c.view.convert(bar.bounds, from: bar).minY + bar.sizeThatFits(CGSize(width: bar.bounds.width, height: .greatestFiniteMagnitude)).height + inset
+                    safe.top = max(safe.top, full)
                 }
                 // PROTO (rule 4, `EdgeFramesIOS.swift`): where the top edge rests, and whether UIKit moves it: a large
                 // title collapsing, the bar minimizing as configured, or UIKit having moved it where the system decides
@@ -215,7 +216,7 @@ extension NavigationHost {
         covers = wanted
         let ownersChanged = owners != ownerValues
         ownerValues = owners
-        // PROTO (rule 4): a route that starts or stops moving is told too, though no cover changed (a mode switched)
+        // PROTO (rule 4): deliver moving-edge changes even when a mode switch leaves the covers unchanged
         guard !changes.isEmpty || ownersChanged || presenter.movingTops != presenter.deliveredMovingTops else { return }
         // A scroller's least content height is the port its cover leaves
         // (`scrollFloor`); the kernel sends no new content size when only that changed.

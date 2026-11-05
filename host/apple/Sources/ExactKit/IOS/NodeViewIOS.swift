@@ -705,25 +705,13 @@ package final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, U
     package var container: UIView { glassGroupView?.contentView ?? baseContainer }
     /// Where layout put this box and where it is drawn (`PixelGridIOS.swift`).
     package var grid: GridPlace?
-    /// PROTO (safe-area design r2 §2.3): how far this box's native view reaches past its laid-out box on
-    /// each side, as overflow. Its bounds origin is shifted by as much, so its subviews stay where layout
-    /// put them while the view covers the band and UIKit's safe area reaches what is inside it.
+    /// PROTO (UIKit-first measurement): how far this box's native view reaches past its laid-out box on each side,
+    /// as overflow. Its bounds origin is shifted by as much, so its subviews stay where layout put them while
+    /// the view covers the band and UIKit's safe area reaches what is inside it.
     package var reach: UIEdgeInsets = .zero
-    /// PROTO (UIKit-first measurement): the route view whose top edge this box reaches or takes (`SafeReachIOS.swift`).
-    weak var reachRoute: UIView?
-    /// PROTO: the laid-out box in this view's own coordinates, its bounds less its reach.
-    package var boxBounds: CGRect { bounds.inset(by: reach) }
-    /// PROTO: the adjustment behaviour the reach pass set on its scroll view, to undo when it stops reaching.
-    package var reachBehavior: UIScrollView.ContentInsetAdjustmentBehavior?
-    /// PROTO: the part of its scroll view's `contentInset` the reach pass wrote (its safe area UIKit does not adjust),
-    /// and the scroll view it was written to: a replaced backing view starts from none.
-    package var reachInset: UIEdgeInsets = .zero
-    package var reachInsetView: ObjectIdentifier?
-    /// PROTO: the main-axis bounce the reach pass set, to undo when it no longer applies.
-    package var reachBounce = false
-    /// PROTO: the part of the reach that crosses an enclosing scroller's padding, which the composer insets too.
-    package var reachOwn: UIEdgeInsets = .zero
-    /// PROTO: how far a leaf that takes its edges is laid out past its box, content and all (bounds origin kept).
+    /// PROTO (UIKit-first measurement): the retained reach state for this box (`SafeReachIOS.swift`)
+    var safeReach = SafeReachState()
+    /// PROTO (UIKit-first measurement): how far a leaf taking its edges is laid out past its box, content and all, with its bounds origin kept
     package var take: UIEdgeInsets = .zero
 
     /// Every canvas's overlay alive, and every node a surface placed. With

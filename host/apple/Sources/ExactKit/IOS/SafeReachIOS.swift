@@ -8,9 +8,32 @@
 #if os(iOS) || os(tvOS)
 import UIKit
 
+/// PROTO (UIKit-first measurement): a box's route and the scroll settings owned by the reach pass
+struct SafeReachState {
+    /// PROTO (UIKit-first measurement): the route view whose top edge this box reaches or takes,
+    /// available without walking ancestors during a frame operation
+    weak var route: UIView?
+    /// PROTO (UIKit-first measurement): the adjustment behavior set on the scroll view, undone when it stops reaching
+    var behavior: UIScrollView.ContentInsetAdjustmentBehavior?
+    /// PROTO (UIKit-first measurement): this pass's contribution to `contentInset`, the safe area UIKit does not adjust
+    var inset: UIEdgeInsets = .zero
+    /// PROTO (UIKit-first measurement): the scroll view given that inset; a replaced backing view starts from none
+    var insetView: ObjectIdentifier?
+    /// PROTO (UIKit-first measurement): the main-axis bounce set by this pass, undone when it no longer applies
+    var bounce = false
+    /// PROTO (UIKit-first measurement): the part of the reach crossing an enclosing scroller's padding, also inset by the composer
+    var own: UIEdgeInsets = .zero
+}
+
+extension NodeView {
+    /// PROTO (UIKit-first measurement): the laid-out box in this view's own coordinates, its bounds less its reach
+    package var boxBounds: CGRect { bounds.inset(by: reach) }
+}
+
 extension Presenter {
     /// Every shown route's reach, after a batch's frames.
     func reachSafeEdges() {
+        geometry.topReachers.removeAll(keepingCapacity: true) // PROTO (UIKit-first measurement): rebuild the route-to-view ID lists
         for c in navigation.controllers.values where views[c.node.id] === c.node { reachSafeEdges(of: c) }
     }
 
@@ -20,27 +43,30 @@ extension Presenter {
             return
         }
         let a = view.bounds
-        // PROTO (rule 4): in the resting mode the boxes the far pass places stand where the live edge is, so what
-        // touches the top is measured there, not at the resting top the route was laid out against
+        // PROTO (rule 4): test contact at the live edge after the resting mode places its boxes
         var edge = e.top
         if ExactSession.protoMode == .resting, edgeFrames[c.node.id]?.isEmpty == false { edge = min(e.top, max(0, view.safeAreaInsets.top)) }
         let s = CGRect(x: a.minX + e.left, y: a.minY + edge, width: max(0, a.width - e.left - e.right), height: max(0, a.height - edge - e.bottom))
-        var top: [NodeView] = []
-        let walk = SafeReach(view: view, allocation: a, safe: s, pixel: 1 / max(1, view.traitCollection.displayScale)) { top.append($0); $0.reachRoute = view }
+        var top: [UInt32] = [] // PROTO (UIKit-first measurement): view IDs reaching or taking this route's top
+        let walk = SafeReach(view: view, allocation: a, safe: s, pixel: 1 / max(1, view.traitCollection.displayScale)) {
+            top.append($0.id)
+            $0.safeReach.route = view
+        }
         _ = walk.visit(c.node, allowed: .all)
-        topReachers[c.node.id] = top
+        geometry.topReachers[c.node.id] = top // PROTO (UIKit-first measurement)
     }
 
-    /// PROTO (UIKit-first measurement, `GeometryOnlyIOS.swift`): a moving top edge's reach. While the top edge moves,
-    /// what touches it does not change, only how far it lies from the allocation's top: each box the last walk found
-    /// reaching or taking the top has that depth written again, and the rest keep theirs until the walk after the edge
-    /// stops.
+    /// PROTO (UIKit-first measurement): a moving top edge's reach (`GeometryOnlyIOS.swift`).
+    /// What touches the edge stays the same while it moves; only its depth from the allocation's
+    /// top changes. Each box the last walk found reaching or taking the top gets that depth again;
+    /// the rest keep theirs until the walk after the edge stops.
     func reachMovingTops() {
         for c in navigation.controllers.values where views[c.node.id] === c.node {
-            guard let view = c.viewIfLoaded, view.window != nil, let top = topReachers[c.node.id] else { continue }
+            guard let view = c.viewIfLoaded, view.window != nil, let top = geometry.topReachers[c.node.id] else { continue }
             let a = view.bounds
-            for v in top where v.window != nil {
-                // A box its frame op already placed at the new depth (`PixelGrid.frame`) is left as it is
+            for id in top {
+                guard let v = views[id], v.window != nil else { continue }
+                // PROTO (UIKit-first measurement): skip writes already made by the frame operation (`PixelGrid.frame`)
                 let depth = max(0, v.convert(v.boxBounds.inset(by: v.take), to: view).minY - a.minY)
                 if v.take.top > 0, abs(v.take.top - depth) > 0.01 { var take = v.take; take.top = depth; SafeReach.take(take, to: v) }
                 if v.reach.top > 0, abs(v.reach.top - depth) > 0.01 { var reach = v.reach; reach.top = depth; SafeReach.apply(reach, to: v) }
@@ -52,8 +78,9 @@ extension Presenter {
 /// One route's walk: which edges each box touches, which it reaches, and the outset applied.
 struct SafeReach {
     let view: UIView, allocation: CGRect, safe: CGRect, pixel: CGFloat
-    /// Told of each box that reaches or takes the top edge (`Presenter.reachMovingTops`).
-    var reachesTop: (NodeView) -> Void = { _ in }
+    /// PROTO (UIKit-first measurement): the callback for each box that reaches or takes the top
+    /// edge (`Presenter.reachMovingTops`)
+    let reachesTop: (NodeView) -> Void
 
     /// The edges a box or something inside it reaches.
     @discardableResult
@@ -124,9 +151,9 @@ struct SafeReach {
             default: reach.right = allocation.maxX - r.maxX
             }
         }
+        if reach.top > 0 || v.take.top > 0 { reachesTop(v) } // PROTO (UIKit-first measurement)
         // What of the reach lies inside the safe area: an enclosing scroller's padding, crossed to reach its edge.
-        if reach.top > 0 || v.take.top > 0 { reachesTop(v) }
-        v.reachOwn = UIEdgeInsets(top: 0, left: reach.left > 0 ? max(0, safe.minX - self.safe.minX) : 0,
+        v.safeReach.own = UIEdgeInsets(top: 0, left: reach.left > 0 ? max(0, safe.minX - self.safe.minX) : 0,
                                   bottom: 0, right: reach.right > 0 ? max(0, self.safe.maxX - safe.maxX) : 0)
         Self.apply(reach, to: v)
         var reached: UIRectEdge = below
@@ -151,15 +178,15 @@ struct SafeReach {
         guard let sv = v.scroll else { return }
         if sv.frame != v.scrollFrame { sv.frame = v.scrollFrame }
         if reach == .zero {
-            if let set = v.reachBehavior, sv.contentInsetAdjustmentBehavior == set { sv.contentInsetAdjustmentBehavior = .never }
-            v.reachBehavior = nil
+            if let set = v.safeReach.behavior, sv.contentInsetAdjustmentBehavior == set { sv.contentInsetAdjustmentBehavior = .never }
+            v.safeReach.behavior = nil
         } else {
             // `.scrollableAxes` everywhere: UIKit adjusts exactly the axes it counts scrollable, and the
             // bounce below makes that count the scroll axes Exact decided from layout (`axes`).
             let want: UIScrollView.ContentInsetAdjustmentBehavior = .scrollableAxes
             // `.always` is another owner's choice (a dialog sheet's scroller); the rest are this pass's or UIKit's default.
             if sv.contentInsetAdjustmentBehavior != want, sv.contentInsetAdjustmentBehavior != .always { sv.contentInsetAdjustmentBehavior = want }
-            v.reachBehavior = sv.contentInsetAdjustmentBehavior
+            v.safeReach.behavior = sv.contentInsetAdjustmentBehavior
         }
         v.fitScroll()
         // Each scroll axis that no enclosing scroller scrolls bounces, so UIKit's own test (`UIScrollView.h`: content
@@ -168,9 +195,9 @@ struct SafeReach {
         let axes = Self.axes(v), outer = Self.outer(v).map(Self.axes)
         // (`fitScroll` already bounces a vertical axis that no enclosing scroller scrolls vertically.)
         let bx = reach != .zero && axes.x && !(outer?.x ?? false)
-        if bx != v.reachBounce || (bx && !sv.alwaysBounceHorizontal) {
-            if bx { sv.alwaysBounceHorizontal = true } else if v.reachBounce { sv.alwaysBounceHorizontal = false }
-            v.reachBounce = bx
+        if bx != v.safeReach.bounce || (bx && !sv.alwaysBounceHorizontal) {
+            if bx { sv.alwaysBounceHorizontal = true } else if v.safeReach.bounce { sv.alwaysBounceHorizontal = false }
+            v.safeReach.bounce = bx
         }
         reconcile(v)
     }
@@ -181,21 +208,21 @@ struct SafeReach {
     /// UIKit's adjustment or the scroll view's safe area changes.
     static func reconcile(_ v: NodeView) {
         guard let sv = v.scroll else { return }
-        if v.reachInsetView != ObjectIdentifier(sv) { v.reachInset = .zero; v.reachInsetView = ObjectIdentifier(sv) }
+        if v.safeReach.insetView != ObjectIdentifier(sv) { v.safeReach.inset = .zero; v.safeReach.insetView = ObjectIdentifier(sv) }
         let r = v.reach, safe = sv.safeAreaInsets, adj = sv.adjustedContentInset, ci = sv.contentInset
         func part(_ reach: CGFloat, _ safe: CGFloat, _ adjusted: CGFloat, _ content: CGFloat) -> CGFloat {
             reach > 0 ? max(0, safe - (adjusted - content)) : 0
         }
-        // Each reached edge: the part of the reach that crosses an enclosing scroller's padding (Exact's own geometry,
-        // `reachOwn`), plus the scroll view's own safe area that UIKit does not adjust.
-        let own = v.reachOwn
+        // PROTO (UIKit-first measurement): add the part of each reached edge crossing an enclosing scroller's padding (`safeReach.own`)
+        // and the scroll view's own safe area that UIKit does not adjust
+        let own = v.safeReach.own
         let want = UIEdgeInsets(top: part(r.top, safe.top, adj.top, ci.top) + (r.top > 0 ? own.top : 0),
                                 left: part(r.left, safe.left, adj.left, ci.left) + (r.left > 0 ? own.left : 0),
                                 bottom: part(r.bottom, safe.bottom, adj.bottom, ci.bottom) + (r.bottom > 0 ? own.bottom : 0),
                                 right: part(r.right, safe.right, adj.right, ci.right) + (r.right > 0 ? own.right : 0))
-        let old = v.reachInset
+        let old = v.safeReach.inset
         guard want != old else { return }
-        v.reachInset = want
+        v.safeReach.inset = want
         // UIKit keeps the offset as an inset changes; content resting at its start stays there (CSS scrollLeft and
         // scrollTop 0), as it does when UIKit's own adjustment arrives (`NavigationBar`'s `atStart`).
         let atStart = (x: sv.contentOffset.x <= 0.5 - adj.left, y: sv.contentOffset.y <= 0.5 - adj.top)

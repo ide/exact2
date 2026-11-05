@@ -10,18 +10,6 @@
 #if os(iOS)
 import UIKit
 
-
-/// PROTO (UIKit-first measurement): the main thread's CPU time in the apply's phases, µs, since the session's last
-/// live log read and reset them: the operations, the regrid and flush, reach and placement, and navigation's sync
-enum ApplyPhases {
-    static var ops = 0.0, regrid = 0.0, reach = 0.0, navigation = 0.0
-    static func cpu() -> Double { Double(clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID)) / 1000 }
-    static func take() -> String {
-        defer { ops = 0; regrid = 0; reach = 0; navigation = 0 }
-        return String(format: "ops %.0f regrid %.0f reach %.0f navigation %.0f", ops, regrid, reach, navigation)
-    }
-}
-
 extension Presenter {
     /// A `far` op: its route's frames replaced (`property` "reset", `id` the route), or a
     /// box's frames along the edge's range (`property` "<route> x y w h[; t x y w h]…": its
@@ -53,7 +41,7 @@ extension Presenter {
     /// as far as UIKit has moved the edge from its resting place (`restingTop`) toward the
     /// block's top.
     func placeEdge(_ c: RouteController) {
-        // Only the resting mode places boxes between frames; the live ones lay them out where the edge is
+        // PROTO (rule 4): place boxes between frames only in the resting mode; live modes lay them out at the edge
         guard ExactSession.protoMode == .resting, c.restingTop > 0, c.viewIfLoaded?.window != nil else { return }
         guard let frames = edgeFrames[c.node.id], !frames.isEmpty else {
             noteUnforeseenMove(c)
@@ -75,10 +63,10 @@ extension Presenter {
             applyGeometry(op)
         }
         regridMoved()
-        // A placed box that reaches the top, or holds one that does (the route's root holding its list), reaches it
-        // from its new place, so a scroller pinned to the allocation's top stays there under UIKit's collapse
+        // PROTO (rule 4): measure reach from each placed box and the boxes it holds so a scroller pinned to
+        // the allocation's top stays there under UIKit's collapse
         reachMovingTops()
-        verifyMovingTops() // PROTO: under `ExactProtoVerify`, whether the placement left any reach stale
+        verifyMovingTops() // PROTO (UIKit-first measurement): under `ExactProtoVerify`, whether placement left reach stale
     }
 
     /// Registers `c`'s route as one whose top edge moves when UIKit has moved the edge outside a transition though
@@ -93,8 +81,9 @@ extension Presenter {
         onMovingTops?([(id, true)])
     }
 
-    /// Whether a box holding `v` under `root` reaches the top edge: what a reaching scroller holds is UIKit's to move,
-    /// while the scroller's own frame is placed, so its size follows the root's and its reach is measured from it.
+    /// PROTO (UIKit-first measurement): whether a box holding `v` under `root` reaches the top edge.
+    /// A reaching scroller's content is UIKit's to move; the scroller's own frame is placed so
+    /// its size follows the root's and its reach is measured from that frame.
     private func reachesTop(_ v: NodeView, under root: NodeView) -> Bool {
         var view: UIView? = v.superview
         while let at = view, at !== root {
