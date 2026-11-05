@@ -29,6 +29,7 @@ public final class ExactLaunch: NSObject {
     /// Services the launch parts asked for, waiting for their moment.
     private var services: [(module: String, when: ExactServiceLoad, config: [String: Any], handoff: () -> Data)] = []
     private var loaded: Set<String> = []
+    private var failed: Set<String> = []
     /// "cold", "warm", or nil before didFinishLaunching.
     private(set) var launchType: String?
     /// Why this launch reports no startup metrics, when it doesn't.
@@ -324,14 +325,26 @@ public final class ExactLaunch: NSObject {
 
     /// Loads due services in a later turn, never inside the work that triggered them.
     private func loadServices(_ moment: ExactServiceLoad) {
-        let due = services.filter { ($0.when == moment || moment == .afterStartup) && !loaded.contains($0.module) }
-        for s in due {
-            loaded.insert(s.module)
-            DispatchQueue.main.async {
-                let config = (try? JSONSerialization.data(withJSONObject: s.config)) ?? Data("{}".utf8)
-                guard let service = ExactService.load(module: s.module, config: config, handoff: s.handoff()) else { return }
-                ExactJournal.shared.attach(service)
+        for s in services where (s.when == moment || moment == .afterStartup) && !loaded.contains(s.module) { load(s) }
+    }
+
+    /// Schedules a declared service for a query, sharing a load already in flight.
+    /// Returns false when the service is undeclared or its load failed. Main thread only.
+    func loadForQuery(_ module: String) -> Bool {
+        guard let s = services.first(where: { $0.module == module }), !failed.contains(module) else { return false }
+        if !loaded.contains(module) { load(s) }
+        return true
+    }
+
+    private func load(_ s: (module: String, when: ExactServiceLoad, config: [String: Any], handoff: () -> Data)) {
+        loaded.insert(s.module)
+        DispatchQueue.main.async {
+            let config = (try? JSONSerialization.data(withJSONObject: s.config)) ?? Data("{}".utf8)
+            guard let service = ExactService.load(module: s.module, config: config, handoff: s.handoff()) else {
+                self.failed.insert(s.module)
+                return ExactJournal.shared.loadEnded(s.module, nil)
             }
+            ExactJournal.shared.attach(service)
         }
     }
 

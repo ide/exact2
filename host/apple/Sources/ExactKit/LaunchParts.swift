@@ -42,6 +42,8 @@ public final class ExactJournal {
     private var subscribers: [(fn: (ExactJournalEvent) -> Void, next: Int)] = []
     private var delivering = false
     private var services: [ExactService] = []
+    /// What waits on a service still loading (`ExactServices.query`), by module
+    private var waiting: [String: [(ExactService?) -> Void]] = [:]
 
     /// Seconds all subscribers may spend in one turn; the rest is delivered next turn.
     static let turnBudget = 0.001
@@ -67,6 +69,17 @@ public final class ExactJournal {
     func attach(_ service: ExactService) {
         services.append(service)
         for e in events { service.event(e) }
+        loadEnded(service.module, service)
+    }
+
+    /// `then` runs with `module`'s service once it loads, or with nil if it fails to (main thread)
+    func whenLoaded(_ module: String, _ then: @escaping (ExactService?) -> Void) {
+        waiting[module, default: []].append(then)
+    }
+
+    /// `module`'s load ended with `service`, nil when it failed: what waits on it runs
+    func loadEnded(_ module: String, _ service: ExactService?) {
+        for then in waiting.removeValue(forKey: module) ?? [] { then(service) }
     }
 
     func background() { for s in services { s.background() } }
@@ -251,13 +264,19 @@ final class ExactService {
 
 /// A module's service, asked by the app's own module (LLP 1067.000 keeps
 /// one module per app; a service such as Observe's is the framework's).
-/// `reply` runs once, on any thread, with the service's JSON answer, or nil
-/// when that service is not loaded (yet) or answers no queries.
+/// `reply` runs once, on any thread, with the service's JSON answer. A query
+/// made before its service has loaded (Observe's loads after startup) loads
+/// it then and waits; nil when the app asks for no such service, it fails
+/// to load, or it answers no queries.
 public enum ExactServices {
     public static func query(_ module: String, _ request: [String: Any], reply: @escaping ([String: Any]?) -> Void) {
         DispatchQueue.main.async {
-            guard let service = ExactJournal.shared.service(module) else { return reply(nil) }
-            service.query(request, reply: reply)
+            if let service = ExactJournal.shared.service(module) { return service.query(request, reply: reply) }
+            guard ExactLaunch.shared.loadForQuery(module) else { return reply(nil) }
+            ExactJournal.shared.whenLoaded(module) { service in
+                guard let service else { return reply(nil) }
+                service.query(request, reply: reply)
+            }
         }
     }
 }
