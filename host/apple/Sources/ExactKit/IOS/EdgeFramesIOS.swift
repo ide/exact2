@@ -75,6 +75,10 @@ extension Presenter {
             applyGeometry(op)
         }
         regridMoved()
+        // A placed box that reaches the top, or holds one that does (the route's root holding its list), reaches it
+        // from its new place, so a scroller pinned to the allocation's top stays there under UIKit's collapse
+        reachMovingTops()
+        verifyMovingTops() // PROTO: under `ExactProtoVerify`, whether the placement left any reach stale
     }
 
     /// Registers `c`'s route as one whose top edge moves when UIKit has moved the edge outside a transition though
@@ -89,9 +93,10 @@ extension Presenter {
         onMovingTops?([(id, true)])
     }
 
-    /// Whether `v`, or a box holding it under `root`, reaches the top edge.
+    /// Whether a box holding `v` under `root` reaches the top edge: what a reaching scroller holds is UIKit's to move,
+    /// while the scroller's own frame is placed, so its size follows the root's and its reach is measured from it.
     private func reachesTop(_ v: NodeView, under root: NodeView) -> Bool {
-        var view: UIView? = v
+        var view: UIView? = v.superview
         while let at = view, at !== root {
             if let node = at as? NodeView, node.reach.top > 0 { return true }
             view = at.superview

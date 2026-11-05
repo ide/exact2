@@ -20,7 +20,11 @@ extension Presenter {
             return
         }
         let a = view.bounds
-        let s = CGRect(x: a.minX + e.left, y: a.minY + e.top, width: max(0, a.width - e.left - e.right), height: max(0, a.height - e.top - e.bottom))
+        // PROTO (rule 4): in the resting mode the boxes the far pass places stand where the live edge is, so what
+        // touches the top is measured there, not at the resting top the route was laid out against
+        var edge = e.top
+        if ExactSession.protoMode == .resting, edgeFrames[c.node.id]?.isEmpty == false { edge = min(e.top, max(0, view.safeAreaInsets.top)) }
+        let s = CGRect(x: a.minX + e.left, y: a.minY + edge, width: max(0, a.width - e.left - e.right), height: max(0, a.height - edge - e.bottom))
         var top: [NodeView] = []
         let walk = SafeReach(view: view, allocation: a, safe: s, pixel: 1 / max(1, view.traitCollection.displayScale)) { top.append($0); $0.reachRoute = view }
         _ = walk.visit(c.node, allowed: .all)

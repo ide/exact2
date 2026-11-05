@@ -34,6 +34,7 @@ extension Presenter {
             guard let now = views[id]?.frame, now != frame else { continue }
             changed += 1
             most = max(most, abs(now.minX - frame.minX), abs(now.minY - frame.minY), abs(now.width - frame.width), abs(now.height - frame.height))
+            if most > 1 { NSLog("PROTO verify view %u %@ %@ → %@", id, views[id]?.props["testId"] ?? views[id]?.kind ?? "?", NSCoder.string(for: frame), NSCoder.string(for: now)) }
         }
         NSLog("PROTO verify changed %d frames, at most %.2f", changed, most)
     }
@@ -91,23 +92,29 @@ extension Presenter {
 }
 
 /// Moves a route's top edge as a collapsing and minimizing bar does, frame by frame, through the
-/// route's `additionalSafeAreaInsets.top`: 0 to 106 points and back over a second each, twice. UIKit
-/// changes the safe area and calls `viewSafeAreaInsetsDidChange` on every frame, as for a bar; a
-/// programmatic scroll does not collapse a large title, and a drag cannot keep a schedule on a loaded
-/// machine. In the resting mode the inset counts in the resting top, so a run there is no moving edge.
-/// Its start and end are logged for cutting the log.
+/// route's `additionalSafeAreaInsets.top`: from 106 points to 0 and back over a second each, twice.
+/// UIKit changes the safe area and calls `viewSafeAreaInsetsDidChange` on every frame, as for a bar;
+/// a programmatic scroll does not collapse a large title, and a drag cannot keep a schedule on a
+/// loaded machine. The run holds the edge 106 points low for half a second first, and in the resting
+/// mode that held inset is the resting top's (`heldTop`), so the sweep moves the edge up from its
+/// resting place as a collapsing title does. Its start and end are logged for cutting the log.
 final class EdgeRun: NSObject {
+    /// The inset the resting top counts while a run in the resting mode holds the edge low.
+    nonisolated(unsafe) static var heldTop: CGFloat = 0
     private weak var route: UIViewController?
     private let done: () -> Void
     private var link: CADisplayLink?
     private var started: CFTimeInterval = 0
-    private static let legs: [CGFloat] = [106, 0, 106, 0], leg: CFTimeInterval = 1
+    private static let hold: CFTimeInterval = 0.5, leg: CFTimeInterval = 1, travel: CGFloat = 106
+    private static let legs: [CGFloat] = [0, travel, 0, travel]
 
     init(_ route: UIViewController, done: @escaping () -> Void) {
         self.route = route
         self.done = done
         super.init()
         NSLog("PROTO run start %@", ExactSession.protoMode.rawValue)
+        if ExactSession.protoMode == .resting { Self.heldTop = Self.travel }
+        route.additionalSafeAreaInsets.top = Self.travel
         let link = CADisplayLink(target: self, selector: #selector(tick))
         link.add(to: .main, forMode: .common)
         self.link = link
@@ -116,9 +123,11 @@ final class EdgeRun: NSObject {
     @objc private func tick(_ link: CADisplayLink) {
         guard let route else { return finish() }
         if started == 0 { started = link.timestamp }
-        let t = link.timestamp - started, index = Int(t / Self.leg)
-        guard index < Self.legs.count else { route.additionalSafeAreaInsets.top = 0; return finish() }
-        let from = index == 0 ? 0 : Self.legs[index - 1], to = Self.legs[index]
+        let t = link.timestamp - started - Self.hold
+        guard t >= 0 else { return }
+        let index = Int(t / Self.leg)
+        guard index < Self.legs.count else { return finish() }
+        let from = index == 0 ? Self.travel : Self.legs[index - 1], to = Self.legs[index]
         let f = CGFloat((t - Double(index) * Self.leg) / Self.leg), eased = f * f * (3 - 2 * f)
         route.additionalSafeAreaInsets.top = from + (to - from) * eased
     }
@@ -126,6 +135,8 @@ final class EdgeRun: NSObject {
     private func finish() {
         link?.invalidate()
         link = nil
+        Self.heldTop = 0
+        route?.additionalSafeAreaInsets.top = 0
         NSLog("PROTO run end %@", ExactSession.protoMode.rawValue)
         done()
     }

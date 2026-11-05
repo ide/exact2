@@ -114,7 +114,7 @@ extension NavigationHost {
                 // is the bar's at full height, a large title expanded and the bar unminimized, as UIKit sizes it
                 // (`sizeThatFits`, measured equal to both while collapsed or minimized) and the route's own additional inset, whatever the bar shows now.
                 if !ExactSession.protoLive, let bar = barNav.map({ $0.navigationBar }), !(barNav?.isNavigationBarHidden ?? true), bar.window != nil {
-                    let full = c.view.convert(bar.bounds, from: bar).minY + bar.sizeThatFits(CGSize(width: bar.bounds.width, height: .greatestFiniteMagnitude)).height + c.additionalSafeAreaInsets.top
+                    let full = c.view.convert(bar.bounds, from: bar).minY + bar.sizeThatFits(CGSize(width: bar.bounds.width, height: .greatestFiniteMagnitude)).height + max(c.additionalSafeAreaInsets.top, EdgeRun.heldTop)
                     if full > safe.top { safe.top = full }
                 }
                 // PROTO (rule 4, `EdgeFramesIOS.swift`): where the top edge rests, and whether UIKit moves it: a large
