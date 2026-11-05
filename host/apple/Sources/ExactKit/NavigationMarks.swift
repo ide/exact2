@@ -20,7 +20,7 @@ final class NavigationMarks: NSObject {
     private var seen: [ObjectIdentifier: Set<UInt64>] = [:]
     private var launched: Set<ObjectIdentifier> = []
     private var pending: Pending?
-    private var link: CADisplayLink?
+    private(set) var link: CADisplayLink?
     private var deadline: DispatchWorkItem?
     /// Recent measurements for `state.observe`, newest last.
     private(set) var recent: [String] = []
@@ -106,6 +106,7 @@ final class NavigationMarks: NSObject {
             fields["exact.nav.cause"] = "program"
         }
         lastInput = nil
+        stop()
         if pending != nil { ExactJournal.shared.record("navigation.superseded", ["route": fields["route"] ?? ""]) }
         note("change \(fields["route"] ?? "") \(cold ? "cold" : "warm") \(fields["exact.nav.cause"] ?? "")")
         // The platform's own change: its screen showed when UIKit began to
@@ -171,6 +172,8 @@ final class NavigationMarks: NSObject {
 
     @objc private func tick(_ link: CADisplayLink) {
         guard let p = pending, let ended = p.turnEnded, p.presented == nil, let g = Vsync(link).next(after: ended) else { return }
+        // Only the first frame needs a link; later batches re-check TTI
+        stop()
         p.presented = g
         var f = p.fields
         f["name"] = p.cold ? "cold_ttr" : "warm_ttr"
