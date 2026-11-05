@@ -256,6 +256,9 @@ final class InlineContextIOSTests: XCTestCase {
     }
 
     func testAWrappedRunLiftsAllItsLines() throws {
+        guard hostedWindowScene() != nil else {
+            throw missing("scene", "the preview reads the scene’s composed pixels")
+        }
         let p = try presenter()
         defer { p.menus.reset(); window.isHidden = true }
         var style = InlineStyle()
@@ -297,6 +300,9 @@ final class InlineContextIOSTests: XCTestCase {
     }
 
     func testARunOnAnOpaqueCoverOverAPictureLiftsOnTheCoversColor() throws {
+        guard hostedWindowScene() != nil else {
+            throw missing("scene", "the preview reads the scene’s composed pixels")
+        }
         let p = try presenter()
         defer { p.menus.reset(); window.isHidden = true }
         let node = try XCTUnwrap(p.views[2])
@@ -347,6 +353,9 @@ final class InlineContextIOSTests: XCTestCase {
     }
 
     func testARunNearAPictureCardsEdgeExtendsThePicture() throws {
+        guard hostedWindowScene() != nil else {
+            throw missing("scene", "the preview reads the scene’s composed pixels")
+        }
         let p = try presenter()
         defer { p.menus.reset(); window.isHidden = true }
         let (node, card) = try cardAround(p, margin: 4)
@@ -388,6 +397,9 @@ final class InlineContextIOSTests: XCTestCase {
     }
 
     func testARunNearAScreenDrawnCardsEdgeStretchesTheScreensEdge() throws {
+        guard hostedWindowScene() != nil else {
+            throw missing("scene", "the preview reads the scene’s composed pixels")
+        }
         let p = try presenter()
         defer { p.menus.reset(); window.isHidden = true }
         let (node, card) = try cardAround(p, margin: 4)
@@ -456,6 +468,9 @@ final class InlineContextIOSTests: XCTestCase {
     }
 
     func testARunOverABlurShowsTheBlurLive() throws {
+        guard hostedWindowScene() != nil else {
+            throw missing("scene", "the preview reads the scene’s composed pixels")
+        }
         let p = try presenter()
         defer { p.menus.reset(); window.isHidden = true }
         let node = try XCTUnwrap(p.views[2])
@@ -517,6 +532,9 @@ final class InlineContextIOSTests: XCTestCase {
     }
 
     func testANodeCardsStyleMakesItTheBoxInsideItsBorder() throws {
+        guard hostedWindowScene() != nil else {
+            throw missing("scene", "the preview reads the scene’s composed pixels")
+        }
         let p = try presenter()
         defer { p.menus.reset(); window.isHidden = true }
         // Under a root controller, whose view the preview rises over, as in an app
@@ -549,6 +567,9 @@ final class InlineContextIOSTests: XCTestCase {
     }
 
     func testABorderedCardExtendsItsFillNotItsBorder() throws {
+        guard hostedWindowScene() != nil else {
+            throw missing("scene", "the preview reads the scene’s composed pixels")
+        }
         let p = try presenter()
         defer { p.menus.reset(); window.isHidden = true }
         let (node, card) = try cardAround(p, margin: 4)
