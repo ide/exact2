@@ -22,6 +22,8 @@ private final class KeyboardCheck: NSObject, UINavigationControllerDelegate {
     private var samplingMs = 0.0
     private var worstSamplingMs = 0.0
     private static let limit = 3000
+    /// PROTO (stuck bar): the readout over the route whose bar minimizes
+    private let readout = MinimizeReadout()
 
     init(temporary: URL) { self.temporary = temporary }
 
@@ -32,6 +34,7 @@ private final class KeyboardCheck: NSObject, UINavigationControllerDelegate {
         // PROTO (rule 4): a route that says `data-minimize="scroll-down"` minimizes its bar as its scroller scrolls down
         if #available(iOS 27.0, *), route.data[.minimize] == "scroll-down" {
             route.controller.navigationItem.navigationBarMinimization.minimizationBehavior = .onScrollDown
+            readout.follow(route)
         }
         guard route.data[.keyboardScreen] != nil else { return }
         let items = route.controller.navigationItem.rightBarButtonItems ?? []
@@ -47,7 +50,10 @@ private final class KeyboardCheck: NSObject, UINavigationControllerDelegate {
         route.controller.navigationItem.rightBarButtonItems = [share, record] + authored
     }
 
-    func remove(_ route: ExactRoute) { routes.removeValue(forKey: ObjectIdentifier(route.controller)) }
+    func remove(_ route: ExactRoute) {
+        routes.removeValue(forKey: ObjectIdentifier(route.controller))
+        readout.stop(route)
+    }
 
     func update(_ element: ExactElement) {
         element.reusable = true
@@ -244,6 +250,75 @@ private final class KeyboardCheck: NSObject, UINavigationControllerDelegate {
             alert.addAction(UIAlertAction(title: "OK", style: .default))
             host.present(alert, animated: true)
         }
+    }
+}
+#endif
+
+#if os(iOS)
+/// PROTO (stuck bar): text over a route whose bar minimizes, for a screenshot when the bar stays minimized: the scroll
+/// view UIKit's bar follows at the top edge against the route's content scroll view, the bar's hidden state and frame,
+/// the route's safe top and the window's (equal while the bar is minimized away, the status bar aside), the minimization
+/// configuration, and the content scroll view's offset, insets and motion. Read five times a second.
+private final class MinimizeReadout {
+    private weak var route: ExactRoute?
+    private let label = UILabel()
+    private var timer: Timer?
+    /// The scroll view the bar last followed, and how many times that changed
+    private var followed: ObjectIdentifier??
+    private var changes = 0
+
+    func follow(_ route: ExactRoute) {
+        self.route = route
+        guard timer == nil else { return }
+        label.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
+        label.numberOfLines = 0
+        label.backgroundColor = UIColor.systemBackground.withAlphaComponent(0.85)
+        label.isUserInteractionEnabled = false
+        let timer = Timer(timeInterval: 0.2, repeats: true) { [weak self] _ in self?.refresh() }
+        RunLoop.main.add(timer, forMode: .common)
+        self.timer = timer
+    }
+
+    func stop(_ route: ExactRoute) {
+        guard self.route == nil || self.route === route else { return }
+        timer?.invalidate()
+        timer = nil
+        label.removeFromSuperview()
+        followed = nil
+        changes = 0
+    }
+
+    private func refresh() {
+        guard let route, let view = route.controller.viewIfLoaded, let window = view.window else {
+            label.removeFromSuperview()
+            return
+        }
+        let controller = route.controller, nav = controller.navigationController, list = route.contentScrollView
+        let tracked = controller.contentScrollView(for: .top)
+        let id = tracked.map(ObjectIdentifier.init)
+        if followed != .some(id) {
+            if followed != nil { changes += 1 }
+            followed = .some(id)
+        }
+        let follows = tracked.map { $0 === list ? "list" : "\(type(of: $0)) \(Unmanaged.passUnretained($0).toOpaque())" } ?? "nil"
+        let bar = nav?.navigationBar
+        let frame = bar.map { $0.convert($0.bounds, to: window) } ?? .zero
+        var lines = ["follows \(follows) · changed \(changes) · top \(nav?.topViewController === controller ? "route" : "other")",
+                     String(format: "bar hidden %@ · y %.1f h %.1f · alpha %.2f · safe top %.1f (window %.1f)", (nav?.isNavigationBarHidden ?? true) ? "yes" : "no",
+                            frame.minY, frame.height, bar?.alpha ?? 0, view.safeAreaInsets.top, window.safeAreaInsets.top)]
+        if #available(iOS 27.0, *) {
+            let minimization = controller.navigationItem.navigationBarMinimization
+            lines.append("minimize \(minimization.minimizationBehavior.rawValue) · restore \(minimization.restorationBehavior.rawValue) · safe area \(minimization.safeAreaAdjustment.rawValue)")
+        }
+        lines.append(list.map {
+            String(format: "list y %.1f · adjusted %.1f · inset %.1f · %@", $0.contentOffset.y, $0.adjustedContentInset.top, $0.contentInset.top,
+                   $0.isTracking ? "tracking" : $0.isDecelerating ? "decelerating" : "rest")
+        } ?? "list none")
+        label.text = lines.joined(separator: "\n")
+        if label.superview !== window { window.addSubview(label) } else { window.bringSubviewToFront(label) }
+        let size = label.sizeThatFits(CGSize(width: min(window.bounds.width - 16, 560), height: .greatestFiniteMagnitude))
+        label.frame = CGRect(x: window.safeAreaInsets.left + 8, y: window.bounds.height - window.safeAreaInsets.bottom - size.height - 72,
+                             width: size.width, height: size.height)
     }
 }
 #endif
