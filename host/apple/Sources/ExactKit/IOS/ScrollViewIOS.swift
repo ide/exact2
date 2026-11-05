@@ -40,6 +40,7 @@ package class ScrollView: UIScrollView {
     package override var bounds: CGRect {
         get { super.bounds }
         set {
+            guard super.bounds != newValue else { return } // PROTO (stuck bar): skip unchanged bounds before moveOrPlace
             guard UIView.inheritedAnimationDuration > 0, let node = scrollingNode, let presenter = node.presenter else { return super.bounds = newValue }
             presenter.moveOrPlace(node) { super.bounds = newValue }
         }
@@ -160,7 +161,7 @@ package class ScrollView: UIScrollView {
         // `none` gets its band back: off for this drag's `none`, or for an
         // axis this view scrolls under `none`.
         let still = { (axis: String) in owner.style["overscroll_behavior_\(axis)"]?.string == "none" }
-        bounces = !(behavior == "none" || (scrollsX && still("x")) || (scrollsY && still("y")))
+        assign(self, \.bounces, !(behavior == "none" || (scrollsX && still("x")) || (scrollsY && still("y")))) // PROTO (stuck bar)
         return chains(velocity)
     }
     /// `handsOff`'s answer without its side effect: whether a drag in

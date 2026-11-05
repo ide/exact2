@@ -33,7 +33,10 @@ private final class KeyboardCheck: NSObject, UINavigationControllerDelegate {
         routes[ObjectIdentifier(route.controller)] = route
         // PROTO (rule 4): a route that says `data-minimize="scroll-down"` minimizes its bar as its scroller scrolls down
         if #available(iOS 27.0, *), route.data[.minimize] == "scroll-down" {
-            route.controller.navigationItem.navigationBarMinimization.minimizationBehavior = .onScrollDown
+            // PROTO (stuck bar): keep the current minimization configuration while UIKit uses it
+            if route.controller.navigationItem.navigationBarMinimization.minimizationBehavior != .onScrollDown {
+                route.controller.navigationItem.navigationBarMinimization.minimizationBehavior = .onScrollDown
+            }
             readout.follow(route)
         }
         guard route.data[.keyboardScreen] != nil else { return }
@@ -314,11 +317,14 @@ private final class MinimizeReadout {
             String(format: "list y %.1f · adjusted %.1f · inset %.1f · %@", $0.contentOffset.y, $0.adjustedContentInset.top, $0.contentInset.top,
                    $0.isTracking ? "tracking" : $0.isDecelerating ? "decelerating" : "rest")
         } ?? "list none")
-        label.text = lines.joined(separator: "\n")
-        if label.superview !== window { window.addSubview(label) } else { window.bringSubviewToFront(label) }
+        // PROTO (stuck bar): update the readout only where its text, frame or place changed
+        let text = lines.joined(separator: "\n")
+        if label.text != text { label.text = text }
+        if label.superview !== window { window.addSubview(label) } else if window.subviews.last !== label { window.bringSubviewToFront(label) }
         let size = label.sizeThatFits(CGSize(width: min(window.bounds.width - 16, 560), height: .greatestFiniteMagnitude))
-        label.frame = CGRect(x: window.safeAreaInsets.left + 8, y: window.bounds.height - window.safeAreaInsets.bottom - size.height - 72,
-                             width: size.width, height: size.height)
+        let place = CGRect(x: window.safeAreaInsets.left + 8, y: window.bounds.height - window.safeAreaInsets.bottom - size.height - 72,
+                           width: size.width, height: size.height)
+        if label.frame != place { label.frame = place }
     }
 }
 #endif

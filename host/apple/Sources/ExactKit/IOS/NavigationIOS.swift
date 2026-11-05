@@ -836,8 +836,8 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
                 recordOwned(nav)
                 // A press that pushed may hand its control's focus to the arriving route's first autofocus (PressHandoffIOS).
                 if pushOrPop || arrives { presenter.pressShows((stack.last as? RouteController)?.node) }
+                nav.view.layoutIfNeeded() // PROTO (stuck bar): lay out the stack only when Exact changed it
             }
-            nav.view.layoutIfNeeded()
         }
         unanimated = false
         // As the split expands, the inspector's sheet gives its route to the
@@ -879,10 +879,9 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
         }
         // A presented navigation fills its sheet; the primary owner the root,
         // which no presentation resizes (LLP 1123 D1)
-        if let top = primaryOwner {
+        if primaryOwner != nil {
             fitOwner()
             placeOwner()
-            top.view.layoutIfNeeded()
         }
         for (id, c) in controllers where !routeIDs.contains(id) { end(c) }
         controllers = controllers.filter { routeIDs.contains($0.key) }

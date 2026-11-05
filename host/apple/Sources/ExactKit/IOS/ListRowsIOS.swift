@@ -34,8 +34,7 @@ extension Presenter {
             if route?.props["navigationKey"] != nil { gather(header) }
         }
         func projected(_ props: [String: String], kind: String, includingScrolls: Bool = true) -> Bool {
-            props["semanticTag"] == "header" || ["tab", "tablist", "tabpanel", "radiogroup"].contains(props["accessibilityRole"] ?? "")
-                || (props["accessibilityRole"] == "radio" && props["type"] != "radio")
+            props["semanticTag"] == "header" || ["tab", "tablist", "tabpanel"].contains(props["accessibilityRole"] ?? "")
                 || props["navigationKey"] != nil || props["navigationBack"] != nil || (back != nil && props["id"] == back)
                 || (includingScrolls && props["id"].map(scrolls.contains) == true) || props["id"].map(invoked.contains) == true
         }
@@ -43,8 +42,7 @@ extension Presenter {
         /// Read with everything under it: a header's items and title, a
         /// tab's face, a tablist's segments, the Back control's title.
         func readsInside(_ node: NodeView) -> Bool {
-            node.props["semanticTag"] == "header" || ["tab", "tablist", "radiogroup"].contains(node.props["accessibilityRole"] ?? "")
-                || (node.props["accessibilityRole"] == "radio" && node.props["type"] != "radio")
+            node.props["semanticTag"] == "header" || ["tab", "tablist"].contains(node.props["accessibilityRole"] ?? "")
                 || (back != nil && node.props["id"] == back)
         }
         // The nodes the batch creates, and those of them the projection
@@ -62,7 +60,8 @@ extension Presenter {
         // What the projection reads by name or role, wherever it is: tab
         // lists (their tint comes from their ancestors), the Back control,
         // each route's named content scroller, the routes themselves.
-        var read = chrome.ids("role:tablist").union(chrome.ids("role:radiogroup")).union(chrome.ids("navigationBack"))
+        // PROTO (stuck bar): leave a row's radios to SegmentHost, which syncs independently of navigation
+        var read = chrome.ids("role:tablist").union(chrome.ids("navigationBack"))
         for name in [back].compactMap({ $0 }) + Array(scrolls) { read.formUnion(chrome.named[name] ?? []) }
         let targets = invoked.reduce(into: Set<UInt32>()) { $0.formUnion(chrome.named[$1] ?? []) }
         read.formUnion(navigation.controllers.keys)
