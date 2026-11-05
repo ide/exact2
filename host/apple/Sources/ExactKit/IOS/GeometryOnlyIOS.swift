@@ -15,8 +15,6 @@ final class GeometryOnlyState {
     var lastRun: String?
     var run: EdgeRun?
     var topReachers: [UInt32: [UInt32]] = [:]
-    /// PROTO (UIKit-first measurement): whether the batch being applied is geometry-only (`PixelGrid.frame`)
-    var applying = false
 }
 
 extension Presenter {

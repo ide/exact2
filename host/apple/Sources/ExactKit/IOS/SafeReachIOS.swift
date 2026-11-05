@@ -225,9 +225,11 @@ struct SafeReach {
         v.safeReach.inset = want
         // UIKit keeps the offset as an inset changes; content resting at its start stays there (CSS scrollLeft and
         // scrollTop 0), as it does when UIKit's own adjustment arrives (`NavigationBar`'s `atStart`).
+        let atRest = !sv.isTracking && !sv.isDragging && !sv.isDecelerating // PROTO (UIKit-first measurement): leave a moving scroller's offset to UIKit
         let atStart = (x: sv.contentOffset.x <= 0.5 - adj.left, y: sv.contentOffset.y <= 0.5 - adj.top)
         sv.contentInset = UIEdgeInsets(top: ci.top + want.top - old.top, left: ci.left + want.left - old.left,
                                        bottom: ci.bottom + want.bottom - old.bottom, right: ci.right + want.right - old.right)
+        guard atRest else { return }
         let now = sv.adjustedContentInset
         let o = CGPoint(x: atStart.x ? -now.left : sv.contentOffset.x, y: atStart.y ? -now.top : sv.contentOffset.y)
         if o != sv.contentOffset { sv.contentOffset = PixelGrid.offset(o, in: sv) }

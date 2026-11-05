@@ -791,8 +791,6 @@ package final class Presenter {
         defer { applyLanguage(batch); applyWakeLock(batch); applyOrientationLock(batch) }
         if applySnapshots(batch) { return }
         let geometryOnly = geometryOnly(batch) // PROTO (UIKit-first measurement)
-        let outerPass = geometry.applying; geometry.applying = geometryOnly // PROTO (UIKit-first measurement)
-        defer { geometry.applying = outerPass } // PROTO (UIKit-first measurement)
         PaintOrder.begin(); let schemes = ColorSchemes.begin(); defer { schemes.end() }
         let post = Self.signposts.beginInterval("apply"), phase = HostPhases.shared.begin(.apply)
         defer { Self.signposts.endInterval("apply", post); HostPhases.shared.end(phase) }
@@ -859,7 +857,7 @@ package final class Presenter {
         let animating = UIView.inheritedAnimationDuration > 0
         if outermost { placedAnew.removeAll(keepingCapacity: true) } // a flat leaf promoted between batches
         let anewFrom = placedAnew.count
-        let rowsOnly = onlyListRows(batch)
+        let skipNavigationSync = canSkipNavigationSync(batch)
         if batch.controls { controls.facesChanged() }
         // An op inside an animation UIKit has open only if its view showed in the last frame (`moveOrPlace`).
         func applyOp(_ op: BatchOp, _ kind: BatchOp.Kind, _ id: UInt32) {
@@ -1108,7 +1106,7 @@ package final class Presenter {
         afterBatch { [weak self] in
             guard let self else { return }
             let protoNav = ApplyPhases.cpu() // PROTO
-            navigation.batchApplied(batch, rowsOnly: rowsOnly)
+            navigation.batchApplied(batch, skipSync: skipNavigationSync)
             ApplyPhases.navigation += ApplyPhases.cpu() - protoNav // PROTO
             keyboardToolbars.finishBackendChange()
             for id in scrollers.union(pendingScrolls).union(materialNodes) {
