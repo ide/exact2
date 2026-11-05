@@ -1120,19 +1120,13 @@ extension NavigationHost {
         if let old, let sv = oldView { old.retainScrollPosition(from: sv) }
         c.collapseScroll = target
         c.collapseScrollView = physical
-        // A scroller at its start (CSS scrollTop 0) stays there as UIKit
-        // begins to inset it: UIKit keeps the offset it had, a new
-        // scroller's 0, which left its content's top under the bar.
+        // PROTO: let UIKit place the content as its first safe area arrives (`syncScroll`)
         let shown = shownScroll(target)
-        let atStart = shown.map { $0.contentOffset.y <= 0.5 - $0.adjustedContentInset.top } ?? false
         // Under a transparent bar the content starts at the top edge, under
         // the bar, as on the web under a fixed transparent header: a hero
         // photo bleeds to the top, and the bar's material comes as it scrolls.
         // That is the top's clearance turned off (`ignoresSafeArea`).
         shown?.contentInsetAdjustmentBehavior = .automatic
-        // …and is there before UIKit is handed it: a bar handed a
-        // scroller that far from its top closes an open large title.
-        if atStart, let sv = shown, sv.contentOffset.y != -sv.adjustedContentInset.top { sv.contentOffset = PixelGrid.offset(CGPoint(x: sv.contentOffset.x, y: -sv.adjustedContentInset.top), in: sv) }
         c.setContentScrollView(shown ?? c.bandedTop, for: .top) // or the scroller its control bars are over (LLP 1131)
         // The scroller left behind gets the page's offsets back only once the
         // bar follows the new one: UIKit reads its inset taken away while the
@@ -1205,14 +1199,7 @@ extension NavigationHost {
            previous !== c.collapseScrollView { previous.contentInsetAdjustmentBehavior = .never }
         c.edgeScroll = target
         let shown = shownScroll(target)
-        // A scroller at its start stays there as UIKit begins to inset it.
-        // One made in this batch can hold a safe area from before its first
-        // frame (at the route's top, under the bar): UIKit insets it by that
-        // first, then, given it below, takes the inset away and moves the
-        // offset by as much, scrolling its content out of its port.
-        let atStart = shown.map { $0.contentOffset.y <= 0.5 - $0.adjustedContentInset.top } ?? false
         shown?.contentInsetAdjustmentBehavior = .automatic
-        if atStart, let sv = shown, sv.contentOffset.y != -sv.adjustedContentInset.top { sv.contentOffset = PixelGrid.offset(CGPoint(x: sv.contentOffset.x, y: -sv.adjustedContentInset.top), in: sv) }
         // tvOS has no bottom bar whose edge follows a scroller.
         #if !os(tvOS)
         c.setContentScrollView(shown ?? c.bandedBottom, for: .bottom)

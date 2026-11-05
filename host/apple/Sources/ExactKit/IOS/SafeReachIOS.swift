@@ -178,15 +178,14 @@ struct SafeReach {
         guard let sv = v.scroll else { return }
         if sv.frame != v.scrollFrame { sv.frame = v.scrollFrame }
         if reach == .zero {
-            if let set = v.safeReach.behavior, sv.contentInsetAdjustmentBehavior == set { sv.contentInsetAdjustmentBehavior = .never }
+            if let set = v.safeReach.behavior, sv.contentInsetAdjustmentBehavior == set { sv.contentInsetAdjustmentBehavior = .automatic } // PROTO: return UIKit's default
             v.safeReach.behavior = nil
-        } else {
-            // `.scrollableAxes` everywhere: UIKit adjusts exactly the axes it counts scrollable, and the
-            // bounce below makes that count the scroll axes Exact decided from layout (`axes`).
+        } else if v.presenter?.navigation.insetByUIKit(v) != true { // PROTO: leave navigation's adjustment alone
+            // UIKit adjusts the axes it counts scrollable; bounce below makes those layout's axes
             let want: UIScrollView.ContentInsetAdjustmentBehavior = .scrollableAxes
             // `.always` is another owner's choice (a dialog sheet's scroller); the rest are this pass's or UIKit's default.
             if sv.contentInsetAdjustmentBehavior != want, sv.contentInsetAdjustmentBehavior != .always { sv.contentInsetAdjustmentBehavior = want }
-            v.safeReach.behavior = sv.contentInsetAdjustmentBehavior
+            v.safeReach.behavior = sv.contentInsetAdjustmentBehavior == want ? want : nil // PROTO: own only the reach policy
         }
         v.fitScroll()
         // Each scroll axis that no enclosing scroller scrolls bounces, so UIKit's own test (`UIScrollView.h`: content
@@ -225,7 +224,7 @@ struct SafeReach {
         guard want != old else { return }
         v.safeReach.inset = want
         // UIKit keeps the offset as an inset changes; content resting at its start stays there (CSS scrollLeft and
-        // scrollTop 0), as it does when UIKit's own adjustment arrives (`NavigationBar`'s `atStart`).
+        // scrollTop 0), as it does when UIKit's own adjustment arrives.
         let atRest = !sv.isTracking && !sv.isDragging && !sv.isDecelerating // PROTO (UIKit-first measurement): leave a moving scroller's offset to UIKit
         let adj = sv.adjustedContentInset
         let atStart = (x: want.left != old.left && sv.contentOffset.x <= 0.5 - adj.left,

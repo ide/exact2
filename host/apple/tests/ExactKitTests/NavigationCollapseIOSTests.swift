@@ -504,14 +504,7 @@ final class NavigationCollapseIOSTests: XCTestCase {
         XCTAssertEqual(row?["sy"] as? Double ?? -1, 30, accuracy: 0.5)
     }
 
-    /// A scroller replaced in place by a taller one, then a shorter one, as
-    /// a quiz's results replace its question (bake-off round 3: the results
-    /// opened scrolled by the bar, their score and Play Again under it).
-    /// UIKit insets a new scroller from the offset it had, 0, which leaves
-    /// its content's top under the bar; each opens at its top instead, just
-    /// below the bar. The bar stays as the page before left it, its title
-    /// collapsed, as UIKit keeps the bar of a hand-built screen whose scroll
-    /// view is replaced in place (measured on iOS 27); a pull opens it.
+    /// PROTO: open taller and shorter replacements at their start, keeping UIKit's collapsed title until a pull
     func testAScrollerReplacedInPlaceOpensAtItsTopBelowTheBarAsItWasLeft() throws {
         let (session, nav) = try second("collapse-replaced")
         let list = try node(session, "list-second")

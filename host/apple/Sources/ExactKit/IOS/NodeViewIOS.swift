@@ -1301,9 +1301,8 @@ package final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, U
         if scrolls { syncClipBox(false) }
         if scrolls && scroll == nil && !scrollWaits && !groupedOwner {
             if pageBand != .zero, extras?.nativeScrollView != nil { setPageBand(.zero) } // the list leaving keeps its scrollTop
-            let sv = ScrollView(frame: bounds)
+            let sv = ScrollView(frame: bounds) // PROTO: take UIKit's first inset with its default adjustment
             sv.backgroundColor = .clear
-            sv.contentInsetAdjustmentBehavior = .never
             sv.delegate = self
             sv.autoresizingMask = [.flexibleWidth, .flexibleHeight]
             GlassGroups.moving(in: self) {
