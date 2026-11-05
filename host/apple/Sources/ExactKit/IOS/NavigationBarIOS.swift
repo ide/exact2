@@ -1285,8 +1285,7 @@ extension NavigationHost {
     /// The physical backend owned by a content node.
     func shownScroll(_ node: NodeView?) -> UIScrollView? { node?.scrollView }
 
-    /// Whether UIKit insets this scroller under its bars (`.automatic`): a
-    /// route's collapse or bottom-edge scroller, or an arranged peer.
+    /// Whether UIKit insets this scroller under its bars (`.automatic`): a route's collapse or bottom-edge scroller, or an arranged peer.
     func insetByUIKit(_ node: NodeView) -> Bool {
         controllers.values.contains { $0.collapseScroll === node || $0.edgeScroll === node || arrangementPeers(in: $0).contains { $0 === node } }
     }
