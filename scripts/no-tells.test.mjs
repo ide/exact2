@@ -83,6 +83,52 @@ test('a fixed font size is a bare number, px or pt, whole or a branch; rem, a ro
   assert.deepEqual(fixedSizesIn(source).map((f) => [f.line, f.tag, f.size, f.testId]), [[4, 'text', 28, 'big'], [6, 'text', 48, null], [9, 'text', 20, 'ff'], [15, 'style', 30, null]]);
 });
 
+test('fixed sizes, broken words and fixed symbols identify a row template by its literal prefix', () => {
+  const cases = [
+    ['testId="literal"', 'literal'],
+    ['testId=`literal`', 'literal'],
+    ['testId=`price$`', 'price$'],
+    ['testId=`initials-${p.id}`', 'initials-*'],
+    ['testId=`initials-${p.id}-label-${p.index}`', 'initials-*'],
+    ['testId=`literal\\${p.id}`', 'literal${p.id}'],
+    ['testId=`\\${p.id}-${p.index}`', '${p.id}-*'],
+    ['testId=`\\u0069nitials-${p.id}`', 'initials-*'],
+    ['testId=`person-\\u{1f600}-${p.id}`', 'person-😀-*'],
+    ['testId=`tick\\`-${p.id}`', 'tick`-*'],
+    ['aria-label="testId=`initials-${p.id}`"', null],
+    ['title=`a ${`testId="trap"`}`', null],
+    ['title=`a ${`testId="trap"`}` testId=`initials-${p.id}`', 'initials-*'],
+    ['testId=`${p.id}-label`', null],
+    ['testId=`${p.id}`', null],
+    ['testId=p.id', null],
+    ['', null],
+  ];
+  for (const [node, scan] of [
+    ['text p.initials font-size=18', fixedSizesIn],
+    ['text p.name overflow-wrap="anywhere"', brokenWordsIn],
+    ['image "symbol:person" width=28', fixedSymbolsIn],
+  ]) {
+    for (const [attribute, expected] of cases) {
+      for (const continued of [false, true]) {
+        const source = [
+          'component A', '  view', '    for p in people key=p.id', '      row testId="parent"',
+          `        ${node}${continued ? '' : ' ' + attribute}`,
+          ...(continued && attribute ? [`          ${attribute}`] : []),
+          '        text p.name', '      text "Next" testId="next"',
+        ].join('\n');
+        assert.deepEqual(scan(source).map(f => f.testId), [expected], `${node}, ${attribute}, continued=${continued}`);
+      }
+    }
+  }
+});
+
+test('a positional string or template containing testId does not identify its node', () => {
+  for (const content of ['"example testId=`initials-${p.id}`"', '`example ${`testId="trap"`}`']) {
+    const source = `component A\n  view\n    text ${content} font-size=18\n`;
+    assert.deepEqual(fixedSizesIn(source).map(f => f.testId), [null]);
+  }
+});
+
 // LLP 1116.021 D6: text that breaks inside words, and a symbol that stays small beside text that grows.
 test('overflow-wrap anywhere on prose is a tell; on a link, in a monospace face or kept, it is not', () => {
   const source = [

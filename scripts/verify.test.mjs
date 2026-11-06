@@ -1274,6 +1274,36 @@ test('fixed type: a symbol sized in points and a word broken inside are findings
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
+test('fixed type: a prefix wildcard accepts templated row findings, leaving unidentified rows counted', async () => {
+  const dir = mkdtempSync(resolve(tmpdir(), 'verify-fixed-'));
+  try {
+    writeFileSync(resolve(dir, 'app.contract'), [
+      'component App', '  view', '    for p in people key=p.id', '      column',
+      '        text p.initials font-size=18 testId=`initials-${p.id}`',
+      '        text p.name font-size=17 testId=`${p.id}-name`',
+      '        text p.name overflow-wrap="anywhere"', '          testId=`name-${p.id}`',
+      '        row', '          image "symbol:person" width=28 testId=`icon-${p.id}`', '          text p.name',
+    ].join('\n'));
+    const accept = [
+      { finding: 'fixed-type', node: 'initials-*', why: 'avatar initials' },
+      { finding: 'fixed-symbol', node: 'icon-*', why: 'row icons' },
+      { finding: 'broken-words', node: 'name-*', why: 'narrow labels' },
+    ];
+    const fixed = await fixedType(dir, 'ios', accept);
+    assert.deepEqual(new Set(fixed.accepted.map(f => f.accept)), new Set(accept));
+    assert.equal(fixed.fonts, 1);
+    assert.equal(fixed.lines.length, 1);
+    assert.match(fixed.lines[0], /app\.contract:6 text font-size=17/);
+    const r = report({ host: 'ios', built: null, tested: { passed: 1, failed: 0, results: [] }, checks: [], fixed, accept, shots: [], ms: 1000 });
+    assert.ok(r.lines.includes('accepted (app.json verify.accept, not counted): 3 findings'), r.lines.join('\n'));
+    assert.ok(!r.lines.some(l => l.includes('accepts nothing')), r.lines.join('\n'));
+    assert.equal(r.lines.at(-1), 'verify: 1 problem (1 finding; the tests passed) in 1.0 s');
+    const exact = await fixedType(dir, 'ios', [{ finding: 'fixed-type', node: 'initials-1', why: 'one row' }]);
+    assert.equal(exact.accepted.length, 0);
+    assert.equal(exact.fonts, 2);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
 test('a relaunch names the requests the server holds, as no finding (LLP 1016.000 D9)', () => {
   const test = { name: 't', end: { ops: 1, resources: {}, slots: {} } };
   const shown = { texts: new Set(['Feed']), resources: {}, slots: {} };
