@@ -643,6 +643,7 @@ final class SplitIOSTests: XCTestCase {
     /// app's stack pushing the notes again.
     func testABackUnderTheInspectorTakesItsRouteWithIt() throws {
         guard #available(iOS 26.0, *) else { throw XCTSkip("the inspector's column is iOS 26's") }
+        guard UIApplication.shared.connectedScenes.first is UIWindowScene else { throw missing("scene", "UIKit animates a pop only in a window a scene holds") }
         let (session, agent, split) = try inspectedNotes()
         let book = try XCTUnwrap(split.detail.viewControllers.first)
         split.detail.popViewController(animated: true)
@@ -654,6 +655,7 @@ final class SplitIOSTests: XCTestCase {
     /// finished, it takes the notes and their info.
     func testASwipeUnderTheInspectorTakesItsRouteWithItOnceFinished() throws {
         guard #available(iOS 26.0, *) else { throw XCTSkip("the inspector's column is iOS 26's") }
+        guard UIApplication.shared.connectedScenes.first is UIWindowScene else { throw missing("scene", "UIKit animates a pop only in a window a scene holds") }
         let (session, agent, split) = try inspectedNotes()
         let navigation = session.presenter.navigation, info = try XCTUnwrap(split.inspecting)
         let pop = InteractivePop()
@@ -681,6 +683,7 @@ final class SplitIOSTests: XCTestCase {
     /// The agent's `back` there ends where UIKit's Back does.
     func testTheAgentsBackUnderTheInspectorEndsWhereUIKitsBackDoes() throws {
         guard #available(iOS 26.0, *) else { throw XCTSkip("the inspector's column is iOS 26's") }
+        guard UIApplication.shared.connectedScenes.first is UIWindowScene else { throw missing("scene", "UIKit animates a pop only in a window a scene holds") }
         let (session, agent, split) = try inspectedNotes()
         let book = try XCTUnwrap(split.detail.viewControllers.first)
         XCTAssertNil(agent.back()["error"])
@@ -691,7 +694,6 @@ final class SplitIOSTests: XCTestCase {
     /// its notes over it, and the notes' info in the inspector's column.
     @available(iOS 26.0, *)
     private func inspectedNotes() throws -> (ExactSession, Agent, SplitIOS) {
-        guard UIApplication.shared.connectedScenes.first is UIWindowScene else { throw missing("scene", "UIKit animates a pop only in a window a scene holds") }
         let session = try boot(size: CGSize(width: 951, height: 669))
         let navigation = session.presenter.navigation, agent = Agent(session: session)
         until("a split") { navigation.split != nil && !agent.nativeInFlight() }

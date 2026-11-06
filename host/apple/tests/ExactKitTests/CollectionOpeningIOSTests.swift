@@ -6,31 +6,37 @@ import XCTest
 final class CollectionOpeningIOSTests: XCTestCase {
     // PROTO: replace a scroll under a shown bar, with and without an authored offset
     func testAReplacementStartsUnderTheBarAndAcceptsTheOldScrollTop() throws {
-        let p = Presenter()
-        let frame = CGRect(x: 0, y: 0, width: 400, height: 800)
+        let session = ExactApp.shared.makeSession(label: "collection-replacement")
+        let p = session.presenter
+        let scene = hostedWindowScene()
+        let window = scene.map { UIWindow(windowScene: $0) } ?? UIWindow(frame: .zero)
+        window.frame = window.screen.bounds
+        let frame = window.bounds
+        defer { session.destroy(); window.isHidden = true }
+        // A refused boot keeps view layout from loading the baked plan.
+        XCTAssertNotNil(session.boot(plan: Data(), size: frame.size).error)
+        let view = ExactView(session: session), host = UIViewController()
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        host.view.addSubview(view)
+        view.frame = host.view.bounds
+        p.viewport.frame = host.view.bounds
         p.apply(wireBatch([
-            ["op": "create", "id": 1, "kind": "view", "props": ["navigationScroll": "edges-scroll"]],
+            ["op": "create", "id": 100, "kind": "view", "props": ["navigationBack": "back", "navigationKey": "edges"]],
+            ["op": "create", "id": 1, "kind": "view", "props": ["navigationKey": "edges", "navigationScroll": "edges-scroll"]],
             ["op": "create", "id": 2, "kind": "view", "props": ["semanticTag": "header"]],
             ["op": "create", "id": 3, "kind": "text", "props": ["text": "Edges", "accessibilityRole": "heading", "accessibilityHeadingLevel": "2"]],
             ["op": "create", "id": 4, "kind": "scroll", "props": ["id": "edges-scroll"], "style": ["overflow_y": "scroll", "overflow_x": "hidden"], "handlers": ["scroll"]],
             ["op": "children", "id": 2, "ids": [3]], ["op": "children", "id": 1, "ids": [2, 4]],
-            ["op": "roots", "ids": [1]],
+            ["op": "children", "id": 100, "ids": [1]], ["op": "roots", "ids": [100]],
+            ["op": "frame", "id": 100, "x": 0, "y": 0, "w": frame.width, "h": frame.height],
             ["op": "frame", "id": 1, "x": 0, "y": 0, "w": frame.width, "h": frame.height],
             ["op": "frame", "id": 4, "x": 0, "y": 0, "w": frame.width, "h": frame.height],
             ["op": "content", "id": 4, "w": frame.width, "h": 3000]
         ]))
         let root = try XCTUnwrap(p.views[1]), old = try XCTUnwrap(p.views[4])
-        let route = RouteController(root)
-        route.host = p.navigation
-        p.navigation.controllers[root.id] = route
-        let nav = p.navigation.makeNavigation(first: root)
-        nav.setViewControllers([route], animated: false)
-        let scene = hostedWindowScene()
-        let window = scene.map { UIWindow(windowScene: $0) } ?? UIWindow(frame: frame)
-        window.frame = frame
-        window.rootViewController = nav
-        window.makeKeyAndVisible()
-        defer { p.reset(); window.isHidden = true }
+        let route = try XCTUnwrap(p.navigation.controllers[root.id])
+        let nav = try XCTUnwrap(p.navigation.primaryNavigation)
         p.navigation.prepareRoutes([route], in: nav)
         nav.view.layoutIfNeeded()
         let safe = route.view.safeAreaInsets, box = route.view.bounds.inset(by: safe)

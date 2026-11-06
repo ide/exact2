@@ -15,8 +15,7 @@ final class ListRowsIOSTests: XCTestCase {
     /// 30 holds a header 50, which holds a virtualized list 4 (row 40 > 42),
     /// a virtualized list 1 (row 10 > 11), a tab 70 whose face is 71, and a
     /// virtualized list 5 whose row 80 holds a tablist 81.
-    private func presenter() -> Presenter {
-        let p = Presenter()
+    private func presenter(_ p: Presenter = Presenter()) -> Presenter {
         p.apply(wireBatch([
             ["op": "collections", "items": [snapshot(1, revision: 1), snapshot(4, revision: 1), snapshot(5, revision: 1)]],
             ["op": "create", "id": 30, "kind": "view"],
@@ -185,12 +184,32 @@ final class ListRowsIOSTests: XCTestCase {
 
     /// PROTO (UIKit-first measurement): a fill of the named scroller's rows asks no sync; a change to the scroller does
     func testNamedScrollerRowsSkipNavigationButScrollerChangesDoNot() throws {
-        let p = presenter()
+        let session = ExactApp.shared.makeSession(label: "named-scroller-rows")
+        let scene = hostedWindowScene()
+        let window = scene.map { UIWindow(windowScene: $0) } ?? UIWindow(frame: .zero)
+        window.frame = window.screen.bounds
+        let frame = window.bounds
+        defer { session.destroy(); window.isHidden = true }
+        // A refused boot keeps view layout from loading the baked plan.
+        XCTAssertNotNil(session.boot(plan: Data(), size: frame.size).error)
+        let view = ExactView(session: session), host = UIViewController()
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        host.view.addSubview(view)
+        view.frame = host.view.bounds
+        session.presenter.viewport.frame = host.view.bounds
+        let p = presenter(session.presenter)
         p.apply(wireBatch([
+            ["op": "create", "id": 100, "kind": "view", "props": ["navigationBack": "back", "navigationKey": "edges"]],
             ["op": "props", "id": 1, "set": ["id": "edges-scroll"]],
-            ["op": "props", "id": 30, "set": ["navigationScroll": "edges-scroll"]],
+            ["op": "props", "id": 30, "set": ["navigationKey": "edges", "navigationScroll": "edges-scroll"]],
+            ["op": "children", "id": 100, "ids": [30]], ["op": "roots", "ids": [100]],
+            ["op": "frame", "id": 100, "x": 0, "y": 0, "w": frame.width, "h": frame.height],
+            ["op": "frame", "id": 30, "x": 0, "y": 0, "w": frame.width, "h": frame.height],
         ]))
-        p.navigation.controllers[30] = RouteController(try XCTUnwrap(p.views[30]))
+        let route = try XCTUnwrap(p.navigation.controllers[30])
+        XCTAssertEqual(route.node.props["navigationScroll"], "edges-scroll")
+        waitFor("the route's first frame settles") { p.awaitingFrame.isEmpty && !p.navigation.syncOwed }
         let batch = wireBatch([
             ["op": "create", "id": 20, "kind": "view"],
             ["op": "children", "id": 1, "ids": [20]],
@@ -202,6 +221,7 @@ final class ListRowsIOSTests: XCTestCase {
         let before = p.navigation.syncCalls
         p.apply(batch)
         XCTAssertEqual(p.navigation.syncCalls, before)
+        waitFor("the new rows' first frame settles") { p.awaitingFrame.isEmpty }
         for op: [String: Any] in [
             ["op": "create", "id": 60, "kind": "view"],
             ["op": "destroy", "id": 1],
