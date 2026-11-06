@@ -467,6 +467,22 @@ impl Kernel {
         if before.is_some() == block.is_some() {
             return;
         }
+        // A block's cover becomes clearance instead of padding. Its children's
+        // derived insets and side reach change even when the cover does not.
+        if matches!(self.arena.cover(slot), Some(HostCover::Edges(_))) {
+            let affected = super::cover::positioned_children(&self.arena, slot)
+                .into_iter()
+                .chain(super::cover::reaching(&self.arena, slot));
+            for child in affected {
+                if let (Some(node), Some(layout)) =
+                    (self.arena.taffy(child), self.layout.as_deref_mut())
+                {
+                    layout.restyle(&self.arena, child, node);
+                    layout.mark_dirty(node);
+                }
+            }
+            super::cover::settle_chain(&mut self.arena, self.layout.as_deref_mut());
+        }
         // It leaves its parent's layout, or returns to it: published whole
         // in the space it is now in, and its parent's children again.
         self.arena.flags_mut(slot).insert(NodeFlags::ATTACHED);

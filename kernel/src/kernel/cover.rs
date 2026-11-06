@@ -537,7 +537,7 @@ pub(crate) fn side_reach(arena: &NodeArena, slot: u32) -> [f32; 2] {
 /// The scrollers that may reach past `slot`'s sides when it is covered
 /// (`side_reach`): the first `scroll` on each path down from it, which
 /// `apply` derives again when the cover changes.
-fn reaching(arena: &NodeArena, slot: u32) -> Vec<u32> {
+pub(super) fn reaching(arena: &NodeArena, slot: u32) -> Vec<u32> {
     let mut out = Vec::new();
     let mut stack: Vec<u32> = arena.children(slot).to_vec();
     while let Some(c) = stack.pop() {

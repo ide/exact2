@@ -209,7 +209,8 @@ component DuoLab
           column role="tabpanel" id=`panel-${t.name}` position="absolute" inset=0
             for entry in t.stack key=entry.id
               if t.name == "keyboard"
-                column navigationKey=`${entry.id}` navigationScroll=`keyboard-scroll-${entry.id}` id=`keyboard-route-${entry.id}` hatch="keyboard-route" data-keyboard-screen=entry.name data-focus-on-show=(entry.name == "keyboard-editor" ? "keyboard-editor" : entry.name == "keyboard" and returnFocus ? "keyboard-return" : "") class=Screen background-color=((entry.name == "keyboard" or entry.name == "keyboard-form") ? "-exact-grouped-background" : "Canvas") testId=`screen-${entry.name}`
+                // PROTO: native form rows supply the child screens' margins and spacing.
+                column navigationKey=`${entry.id}` navigationScroll=`keyboard-scroll-${entry.id}` id=`keyboard-route-${entry.id}` hatch="keyboard-route" data-keyboard-screen=entry.name data-focus-on-show=(entry.name == "keyboard-editor" ? "keyboard-editor" : entry.name == "keyboard" and returnFocus ? "keyboard-return" : "") class=Screen background-color="-exact-grouped-background" testId=`screen-${entry.name}`
                   header class=Head display="flex" align-items="center" gap=8
                     text (entry.name == "keyboard" ? "Keyboard Check" : entry.name == "keyboard-form" ? "Far Focus" : entry.name == "keyboard-search" ? "Search" : "Editor") role="heading" aria-level=2
                     if entry.name == "keyboard-form"
@@ -261,13 +262,16 @@ component DuoLab
                         row
                           text "Tap the first field, then Focus last. The last field and Done should appear above the keyboard. Use First to jump back, and repeat."
                   if entry.name == "keyboard-editor"
-                    scroll id=`keyboard-scroll-${entry.id}` flex=1 min-height=0 padding-top=16 padding-bottom=16 padding-left="var(--exact-readable-content-corners-inset-left)" padding-right="var(--exact-readable-content-corners-inset-right)" testId="keyboard-editor-scroll"
-                      column gap=16
-                        text "Type sample text. Try a cancelled swipe, a completed swipe, and the native Back button."
-                        input id="keyboard-editor" hatch="keyboard-field" value=checkEditor input=checkWriteEditor placeholder="Type here" aria-label="Editor" testId="keyboard-editor" width="100%"
+                    list id=`keyboard-scroll-${entry.id}` flex=1 min-height=0 appearance="auto" listStyle="inset-grouped" class=ReadableList testId="keyboard-editor-scroll"
+                      section
+                        row
+                          text "Type sample text. Try a cancelled swipe, a completed swipe, and the native Back button."
+                        row
+                          input id="keyboard-editor" hatch="keyboard-field" value=checkEditor input=checkWriteEditor placeholder="Type here" aria-label="Editor" testId="keyboard-editor" flex=1
                         button press=checkDismissBack testId="keyboard-dismiss-back"
                           text "Dismiss keyboard and go Back"
-                        text "If a blank band appears, tap Share immediately. The file keeps the recent geometry from before the share sheet."
+                        footer
+                          text "If a blank band appears, tap Share immediately. The file keeps the recent geometry from before the share sheet."
                   if entry.name == "keyboard-form"
                     list id=`keyboard-scroll-${entry.id}` flex=1 min-height=0 appearance="auto" listStyle="inset-grouped" class=ReadableList testId="keyboard-long-form"
                       section
@@ -285,8 +289,10 @@ component DuoLab
                         button press=dismiss testId="keyboard-form-done"
                           text "Done"
                   if entry.name == "keyboard-search"
-                    scroll id=`keyboard-scroll-${entry.id}` flex=1 min-height=0 padding-top=16 padding-bottom=16 padding-left="var(--exact-readable-content-corners-inset-left)" padding-right="var(--exact-readable-content-corners-inset-right)"
-                      text "Type sample text in the header, then use Back. The previous screen should show the final committed text and one blur. Repeat with a swipe. Check the committed text after Back, then Share from that screen; recording continues through Back."
+                    list id=`keyboard-scroll-${entry.id}` flex=1 min-height=0 appearance="auto" listStyle="inset-grouped" class=ReadableList
+                      section
+                        row
+                          text "Type sample text in the header, then use Back. The previous screen should show the final committed text and one blur. Repeat with a swipe. Check the committed text after Back, then Share from that screen; recording continues through Back."
               // Every screen's header is the platform's: on iOS, UIKit's navigation bar.
               // Reflow and Images scroll the whole width under it, and UIKit takes the
               // large title away as the scroller immediately following the header moves.

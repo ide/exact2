@@ -751,6 +751,7 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
         nativeMoved = false; settled = false
         syncing = true
         defer { syncing = false; presenter.flushPendingFocus(); presenter.elementScrolls.flush() }
+        presenter.owners.publish() // PROTO: covers must find a block before deriving child styles.
         guard let p = projection(batch) else { settled = true; return }
         let root = p.root, wanted = p.chosen
         // A presentation whose route a logical ancestor's `display: none`
@@ -889,8 +890,6 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
         window?.layoutIfNeeded() // PROTO: propagate the containers' safe areas to new scrollers before reports
         reportCovers()
         refitForBars()
-        // A route that left every stack gives its block back (LLP 1123 D2)
-        presenter.owners.publish()
         settled = true
     }
 
