@@ -3,11 +3,10 @@ import UIKit
 import XCTest
 @testable import ExactKit
 
-/// LLP 1070.000 §6.2, LLP 1010 §6.8: a correction marked smooth (a smooth
-/// `scrollIntoView`, or a `scroll-behavior: smooth` list following its end)
-/// is one 0.3 s ease-in-out motion of the port; while it runs the fill
-/// reports no travel; a later smooth target retargets it from what shows;
-/// an ordinary correction is set at once.
+/// LLP 1070.000 §6.2, LLP 1010 §6.8: smooth requests retarget the port with
+/// 0.3 s ease-in-out timing. A shrinking followed end or exiting rows use
+/// the batch-update spring. Neither is reader travel; ordinary corrections
+/// and Reduce Motion land at once.
 final class SmoothCollectionIOSTests: XCTestCase {
     private var window: UIWindow!
     override func tearDown() { window?.isHidden = true; window = nil; super.tearDown() }
@@ -23,8 +22,8 @@ final class SmoothCollectionIOSTests: XCTestCase {
         window.makeKeyAndVisible()
         return p
     }
-    private func collections(revision: Int, correction: Any) -> [String: Any] {
-        ["op": "collections", "items": [["view": 1, "revision": revision, "scrollSequence": 0, "count": 50, "totalExtent": 2000,
+    private func collections(revision: Int, correction: Any, extent: Double = 2000) -> [String: Any] {
+        ["op": "collections", "items": [["view": 1, "revision": revision, "scrollSequence": 0, "count": 50, "totalExtent": extent,
             "rows": [["view": 10, "root": 10, "epoch": 1]], "correction": correction]]]
     }
     private func spin(_ seconds: Double) { RunLoop.main.run(until: Date().addingTimeInterval(seconds)) }
@@ -328,6 +327,193 @@ final class SmoothCollectionIOSTests: XCTestCase {
         XCTAssertFalse(p.collections.animating.contains(1))
         XCTAssertNil(p.collections.offsetDrivers[1])
         XCTAssertEqual(scroll.contentOffset.y, 1200, accuracy: 0.5)
+    }
+
+    /// A row removed at a followed end: UIKit pulls the offset in to the
+    /// shorter content at once, and the port lands there; its layer moves
+    /// from where it showed by an additive animation of the difference, as
+    /// a collection view's batch update does, so a batch meanwhile (a
+    /// receipt growing on the row above) moves the port under it without
+    /// stopping it.
+    func testAFollowedEndThatMovedUpMovesFromWhereThePortShowed() throws {
+        let p = presenter()
+        list(p, correction: NSNull())
+        let scroll = try XCTUnwrap(p.views[1]?.scroll)
+        p.apply(wireBatch([collections(revision: 2, correction: ["scrollSequence": "0", "offset": 1700, "smooth": false])]))
+        XCTAssertEqual(scroll.contentOffset.y, 1700, accuracy: 0.5, "at its end")
+        let seq = String(try XCTUnwrap(p.collections.entries[1]?.cursor.sequence))
+        p.apply(wireBatch([collections(revision: 3, correction: ["scrollSequence": seq, "offset": 1652, "smooth": true], extent: 1952),
+            ["op": "content", "id": 1, "w": 300.0, "h": 1952.0]]))
+        XCTAssertEqual(scroll.contentOffset.y, 1652, accuracy: 0.5, "the port is at the new end")
+        let motions = { (scroll.layer.animationKeys() ?? []).compactMap { scroll.layer.animation(forKey: $0) as? CASpringAnimation } }
+        let motion = try XCTUnwrap(motions().first, "its layer moves")
+        XCTAssertEqual(motion.keyPath, "bounds.origin.y")
+        XCTAssertTrue(motion.isAdditive)
+        XCTAssertEqual(try XCTUnwrap(motion.fromValue as? CGFloat), 48, accuracy: 0.5, "from where it showed")
+        XCTAssertEqual(motion.toValue as? Int, 0)
+        XCTAssertEqual(motion.perceptualDuration, 0.3, accuracy: 0.001, "on a batch update's spring")
+        XCTAssertEqual(motion.bounce, 0, accuracy: 0.001)
+        XCTAssertFalse(p.collections.animating.contains(1), "no offset motion: the runner reads the port where it is")
+        p.apply(wireBatch([collections(revision: 4, correction: ["scrollSequence": seq, "offset": 1660, "smooth": true], extent: 1960),
+            ["op": "content", "id": 1, "w": 300.0, "h": 1960.0]]))
+        XCTAssertEqual(motions().count, 1, "a batch meanwhile keeps it")
+        wait("the end it moved to") { abs(scroll.contentOffset.y - 1660) < 0.5 && !p.collections.animating.contains(1) }
+    }
+
+    private func removalFixture(horizontal: Bool) throws -> (p: Presenter, scroll: UIScrollView, leaving: NodeView, batch: Batch) {
+        let p = presenter()
+        let rows = { (ids: [Int]) in ids.map { ["view": $0, "root": $0, "epoch": 1] } }
+        let frame = { (id: Int, at: Double) -> [String: Any] in
+            ["op": "frame", "id": id, "x": horizontal ? at : 0, "y": horizontal ? 0 : at, "w": horizontal ? 40.0 : 300.0, "h": horizontal ? 300.0 : 40.0]
+        }
+        p.apply(wireBatch([["op": "collections", "items": [["view": 1, "revision": 1, "scrollSequence": 0, "axis": horizontal ? "x" : "y", "count": 50, "totalExtent": 2000,
+            "rows": rows([16, 10, 12, 14]), "correction": NSNull()]]],
+            ["op": "create", "id": 1, "kind": "list", "style": [horizontal ? "overflow_x" : "overflow_y": "scroll"]],
+            ["op": "create", "id": 10, "kind": "view"], ["op": "create", "id": 12, "kind": "view"], ["op": "create", "id": 14, "kind": "view"], ["op": "create", "id": 16, "kind": "view"],
+            ["op": "children", "id": 1, "ids": [16, 10, 12, 14]], ["op": "roots", "ids": [1]],
+            ["op": "frame", "id": 1, "x": 0.0, "y": 0.0, "w": 300.0, "h": 300.0],
+            frame(16, 1840), frame(10, 1880), frame(12, 1920), frame(14, 1960),
+            ["op": "content", "id": 1, "w": horizontal ? 2000.0 : 300.0, "h": horizontal ? 300.0 : 2000.0]]))
+        let scroll = try XCTUnwrap(p.views[1]?.scroll)
+        p.apply(wireBatch([["op": "collections", "items": [["view": 1, "revision": 2, "scrollSequence": 0, "axis": horizontal ? "x" : "y", "count": 50, "totalExtent": 2000, "rows": rows([16, 10, 12, 14]),
+            "correction": ["scrollSequence": "0", "offset": 1700, "smooth": false]]]]]))
+        XCTAssertEqual(horizontal ? scroll.contentOffset.x : scroll.contentOffset.y, 1700, accuracy: 0.5, "at its end")
+        let leaving = try XCTUnwrap(p.views[12]), seq = String(try XCTUnwrap(p.collections.entries[1]?.cursor.sequence))
+        let batch = wireBatch([["op": "collections", "items": [["view": 1, "revision": 3, "scrollSequence": seq, "axis": horizontal ? "x" : "y", "count": 49, "totalExtent": 1960, "rows": rows([8, 10, 14]),
+            "correction": ["scrollSequence": seq, "offset": 1660, "smooth": true]]]],
+            ["op": "exit", "id": 12], ["op": "destroy", "id": 16],
+            ["op": "create", "id": 8, "kind": "view"],
+            ["op": "children", "id": 1, "ids": [8, 10, 14]],
+            frame(8, 1840), frame(14, 1920),
+            ["op": "content", "id": 1, "w": horizontal ? 1960.0 : 300.0, "h": horizontal ? 300.0 : 1960.0]])
+        return (p, scroll, leaving, batch)
+    }
+
+    /// Surviving, leaving and newly mounted rows move once, even when the
+    /// removal arrives inside another batch. An unmounted row is ignored.
+    func testARemovalMovesItsRowsFromWhereTheyShowed() throws {
+        for horizontal in [false, true] {
+            for nested in [false, true] {
+                let (p, scroll, leaving, batch) = try removalFixture(horizontal: horizontal)
+                defer { p.reset(); window.isHidden = true }
+                if nested { p.collections.beginBatch(wireBatch([])) }
+                p.apply(batch)
+                if nested {
+                    XCTAssertTrue((scroll.layer.animationKeys() ?? []).isEmpty, "no port animation before the outer batch ends")
+                    XCTAssertTrue((leaving.layer.animationKeys() ?? []).isEmpty, "the rows wait for the outer batch")
+                    p.collections.endBatch()
+                }
+                XCTAssertEqual(horizontal ? scroll.contentOffset.x : scroll.contentOffset.y, 1660, accuracy: 0.5, "the port is at the new end")
+                let ride = { (view: UIView) in (view.layer.animationKeys() ?? []).compactMap { view.layer.animation(forKey: $0) as? CASpringAnimation }.first { $0.keyPath == (horizontal ? "position.x" : "position.y") } }
+                XCTAssertTrue((scroll.layer.animationKeys() ?? []).isEmpty, "the rows move, not the port")
+                let above = try XCTUnwrap(ride(try XCTUnwrap(p.views[10])), "the row before it moves")
+                XCTAssertTrue(above.isAdditive)
+                XCTAssertEqual(try XCTUnwrap(above.fromValue as? CGFloat), -40, accuracy: 0.5, "from where it showed")
+                XCTAssertEqual(above.perceptualDuration, 0.3, accuracy: 0.001)
+                XCTAssertEqual(try XCTUnwrap(ride(leaving)?.fromValue as? CGFloat), -40, accuracy: 0.5, "the leaving row comes with it")
+                XCTAssertEqual(try XCTUnwrap(ride(try XCTUnwrap(p.views[8]))?.fromValue as? CGFloat), -40, accuracy: 0.5, "and the newly mounted row")
+                XCTAssertNil(ride(try XCTUnwrap(p.views[14])), "the row after it stays where it showed")
+                XCTAssertNil(p.views[16], "an unmounted row is not animated or retained")
+            }
+        }
+    }
+
+    func testRemovalMotionsDoNotFollowAPooledRowIntoAnotherItem() throws {
+        for horizontal in [false, true] {
+            let (p, scroll, _, batch) = try removalFixture(horizontal: horizontal)
+            defer { p.reset(); window.isHidden = true }
+            p.apply(batch)
+            let row = try XCTUnwrap(p.views[10]), incarnation = row.incarnation
+            let removalKeys = { (row.layer.animationKeys() ?? []).filter { $0.hasPrefix("removal-") } }
+            XCTAssertEqual(removalKeys().count, 1, "the first removal moved this survivor")
+            let sequence = String(try XCTUnwrap(p.collections.entries[1]).cursor.sequence)
+            // A second deletion composes another spring before the row retires.
+            p.apply(wireBatch([["op": "collections", "items": [["view": 1, "revision": 4, "scrollSequence": sequence,
+                "axis": horizontal ? "x" : "y", "count": 48, "totalExtent": 1920,
+                "rows": [["view": 8, "root": 8, "epoch": 1], ["view": 10, "root": 10, "epoch": 1]],
+                "correction": ["scrollSequence": sequence, "offset": 1620, "smooth": true]]]],
+                ["op": "exit", "id": 14], ["op": "children", "id": 1, "ids": [8, 10]],
+                ["op": "content", "id": 1, "w": horizontal ? 1920.0 : 300.0, "h": horizontal ? 300.0 : 1920.0]]))
+            let motions = removalKeys()
+            XCTAssertEqual(motions.count, 2, "overlapping removals keep both additive motions while the row is live")
+            for key in motions {
+                let motion = try XCTUnwrap(row.layer.animation(forKey: key) as? CASpringAnimation)
+                XCTAssertTrue(motion.isAdditive)
+                XCTAssertEqual(motion.keyPath, horizontal ? "position.x" : "position.y")
+                XCTAssertEqual(try XCTUnwrap(motion.fromValue as? CGFloat), -40, accuracy: 0.5)
+            }
+            let unrelated = CABasicAnimation(keyPath: "opacity")
+            unrelated.fromValue = 1; unrelated.toValue = 0.8; unrelated.duration = 60
+            row.layer.add(unrelated, forKey: "pool-test-unrelated")
+            let parks = p.pool.parks, takes = p.pool.takes, count = p.pool.count
+            p.apply(wireBatch([["op": "collections", "items": [["view": 1, "revision": 5, "scrollSequence": sequence,
+                "axis": horizontal ? "x" : "y", "count": 48, "totalExtent": 1920,
+                "rows": [["view": 8, "root": 8, "epoch": 1]], "correction": NSNull()]]],
+                ["op": "destroy", "id": 10], ["op": "children", "id": 1, "ids": [8]]]))
+            XCTAssertNil(p.views[10])
+            XCTAssertTrue(p.pool.isParked(row), "the presenter used the real retirement and recycle path")
+            XCTAssertEqual(p.pool.parks, parks + 1)
+            XCTAssertEqual(p.pool.count, count + 1)
+            XCTAssertEqual(row.incarnation, 0)
+            XCTAssertTrue(removalKeys().isEmpty, "the former item's displacement ends when it parks")
+            XCTAssertNotNil(row.layer.animation(forKey: "pool-test-unrelated"), "recycling removes only the collection's owned motions")
+            let frame = CGRect(x: horizontal ? 600 : 0, y: horizontal ? 0 : 600, width: horizontal ? 40 : 300, height: horizontal ? 300 : 40)
+            p.apply(wireBatch([["op": "collections", "items": [["view": 1, "revision": 6, "scrollSequence": sequence,
+                "axis": horizontal ? "x" : "y", "count": 48, "totalExtent": 1920,
+                "rows": [["view": 8, "root": 8, "epoch": 1], ["view": 20, "root": 20, "epoch": 1]], "correction": NSNull()]]],
+                ["op": "create", "id": 20, "kind": "view", "props": ["testId": "replacement-row"]],
+                ["op": "children", "id": 1, "ids": [8, 20]],
+                ["op": "frame", "id": 20, "x": Double(frame.minX), "y": Double(frame.minY), "w": Double(frame.width), "h": Double(frame.height)]]))
+            let replacement = try XCTUnwrap(p.views[20])
+            XCTAssertTrue(replacement === row, "the replacement takes and rebinds the parked view")
+            XCTAssertEqual(p.pool.takes, takes + 1)
+            XCTAssertEqual(p.pool.count, count)
+            XCTAssertFalse(p.pool.isParked(replacement))
+            XCTAssertNotEqual(replacement.incarnation, 0)
+            XCTAssertNotEqual(replacement.incarnation, incarnation)
+            XCTAssertEqual(replacement.id, 20)
+            XCTAssertEqual(replacement.props["testId"], "replacement-row")
+            XCTAssertTrue(replacement.superview === scroll)
+            XCTAssertEqual(replacement.frame, frame)
+            XCTAssertEqual(replacement.layer.position, CGPoint(x: frame.midX, y: frame.midY))
+            XCTAssertTrue(removalKeys().isEmpty, "the replacement inherits neither former displacement")
+            XCTAssertNotNil(replacement.layer.animation(forKey: "pool-test-unrelated"))
+        }
+    }
+
+    func testUnderReduceMotionARemovalLandsWithoutRowOrPortSprings() throws {
+        let before = DisplayPreferences.agent
+        DisplayPreferences.agent = (reducedMotion: true, reducedTransparency: false)
+        defer { DisplayPreferences.agent = before }
+        for horizontal in [false, true] {
+            let (p, scroll, leaving, batch) = try removalFixture(horizontal: horizontal)
+            defer { p.reset(); window.isHidden = true }
+            p.apply(batch)
+            XCTAssertTrue(p.isLeaving(leaving), "the batch exercised the exit path")
+            XCTAssertEqual(horizontal ? scroll.contentOffset.x : scroll.contentOffset.y, 1660, accuracy: 0.5)
+            for row in [leaving, try XCTUnwrap(p.views[8]), try XCTUnwrap(p.views[10]), try XCTUnwrap(p.views[14])] {
+                XCTAssertTrue((row.layer.animationKeys() ?? []).isEmpty, "Reduce Motion also governs removal springs")
+            }
+            XCTAssertTrue((scroll.layer.animationKeys() ?? []).isEmpty)
+            XCTAssertFalse(p.collections.animating.contains(1))
+        }
+    }
+
+    func testAnEnclosingAnimationOwnsTheRemovalMotion() throws {
+        for horizontal in [false, true] {
+            let (p, scroll, leaving, batch) = try removalFixture(horizontal: horizontal)
+            defer { p.reset(); window.isHidden = true }
+            UIView.animate(withDuration: 0.8) {
+                XCTAssertGreaterThan(UIView.inheritedAnimationDuration, 0)
+                p.apply(batch)
+            }
+            XCTAssertTrue(p.isLeaving(leaving))
+            XCTAssertEqual(horizontal ? scroll.contentOffset.x : scroll.contentOffset.y, 1660, accuracy: 0.5)
+            let moved: [UIView] = [scroll, leaving, try XCTUnwrap(p.views[8]), try XCTUnwrap(p.views[10]), try XCTUnwrap(p.views[14])]
+            for view in moved {
+                XCTAssertFalse((view.layer.animationKeys() ?? []).contains { $0.hasPrefix("removal-") || $0.hasPrefix("followed-end-") }, "the enclosing animation supplies the motion")
+            }
+        }
     }
 
     /// A smooth correction under half a point (a port rounded to a device

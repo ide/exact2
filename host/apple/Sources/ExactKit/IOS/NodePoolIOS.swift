@@ -27,10 +27,10 @@
 //   node shows no symbol;
 // - input and accessibility: interaction enabled, the element, traits,
 //   label, value, hint, identifier, hidden-elements, all set again by props;
-// - motion: an `svg`'s scene layers and every Core Animation spec the view
-//   ran (`SvgHost.forget`, on release), so no animation of the old row
-//   plays on the new one (LLP 1055 D8; the new row's scene op starts its
-//   own). SVG elements are not views: an `svg` parks as one leaf.
+// - motion: an `svg`'s scene layers and registered Core Animation specs
+//   (`SvgHost.forget`, on release), plus the collection's row-removal
+//   displacements (`recycle`). A new row's scene op starts its own motion
+//   (LLP 1055 D8). SVG elements are not views: an `svg` parks as one leaf.
 // - identity (LLP 1068 §4.9): the view's `incarnation`, zeroed when it
 //   parks, before the reset, and a never-used one issued at the take, in
 //   the batch that installs its props and handlers; an asynchronous
@@ -530,6 +530,8 @@ extension NodeView {
     func recycle() {
         holdGone() // a held state goes with its node, parked under its row (HeldState.swift)
         cancelPressContact()
+        // A collection's row displacements end with the item being recycled.
+        for key in layer.animationKeys() ?? [] where key.hasPrefix("removal-") { layer.removeAnimation(forKey: key) }
         pressContact = nil
         scrollEnd?.reset()
         presenter?.forgetParagraph(self)

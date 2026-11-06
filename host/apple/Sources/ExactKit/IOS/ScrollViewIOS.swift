@@ -28,6 +28,33 @@ package final class PlainView: UIView {
 /// (`AgentIOS.swift`).
 package class ScrollView: UIScrollView {
     var scrollingNode: NodeView? { (superview as? NodeView) ?? (self as? Viewport)?.documentNode }
+    package override var contentOffset: CGPoint {
+        didSet { if adjustedContentInset == settledInset { settledY = contentOffset.y } }
+    }
+    /// The offset the last move under unchanged insets left, and those insets.
+    private var settledY: CGFloat = 0, settledInset = UIEdgeInsets.zero
+    /// An end-anchored list stays at its end when a bottom inset changes.
+    /// Outside a batch, following lists and mounted collections compensate
+    /// for UIKit's top-inset adjustment before it reads as reader travel.
+    package override func adjustedContentInsetDidChange() {
+        let old = settledInset, before = settledY
+        super.adjustedContentInsetDidChange()
+        let inset = adjustedContentInset
+        settledInset = inset
+        defer { settledY = contentOffset.y }
+        guard let node = superview as? NodeView else { return }
+        let presenter = node.presenter, entry = presenter?.collections.entries[node.id]
+        guard entry?.snapshot.horizontal != true,
+              scrollsY, !isTracking, !isDecelerating, contentSize.height > 0,
+              before >= max(-old.top, contentSize.height + old.bottom - bounds.height) - 1 else { return }
+        let follows = node.props["scrollFollowEnd"] == "true"
+        let keepBottom = old.bottom != inset.bottom && (follows || node.props["scrollStart"] == "end")
+        let compensateTop = old.top != inset.top && presenter?.applying == false && (follows || entry != nil)
+        guard keepBottom || compensateTop else { return }
+        let end = max(-inset.top, contentSize.height + inset.bottom - bounds.height)
+        let target = PixelGrid.offset(CGPoint(x: contentOffset.x, y: end), in: self)
+        if contentOffset != target { contentOffset = target }
+    }
     package override func layoutSubviews() {
         super.layoutSubviews()
         keepPlatformViewsOver()
@@ -43,25 +70,6 @@ package class ScrollView: UIScrollView {
             guard UIView.inheritedAnimationDuration > 0, let node = scrollingNode, let presenter = node.presenter else { return super.bounds = newValue }
             presenter.moveOrPlace(node) { super.bounds = newValue }
         }
-    }
-    /// The insets the offset was last kept under (`adjustedContentInsetDidChange`).
-    private var keptInset = UIEdgeInsets.zero
-    /// A list that opens at its end (`scroll-start: end`) or follows it, at
-    /// its end, stays there as its insets change, as SwiftUI's
-    /// `defaultScrollAnchor(.bottom)` keeps it; UIKit keeps the offset. A
-    /// tab bar's inset reaches a grid after it opened at its newest row
-    /// (r25's photos, at launch and as a viewer closes), and kept, the
-    /// offset left that row under the bar.
-    package override func adjustedContentInsetDidChange() {
-        let was = keptInset
-        keptInset = adjustedContentInset
-        super.adjustedContentInsetDidChange()
-        guard let node = superview as? NodeView, node.props["scrollStart"] == "end" || node.props["scrollFollowEnd"] == "true",
-              node.presenter?.collections.entries[node.id]?.snapshot.horizontal != true,
-              !isTracking, !isDecelerating, contentSize.height > 0 else { return }
-        let end = { (inset: UIEdgeInsets) in max(-inset.top, self.contentSize.height + inset.bottom - self.bounds.height) }
-        guard contentOffset.y >= end(was) - 1, was.bottom != keptInset.bottom else { return }
-        contentOffset = PixelGrid.offset(CGPoint(x: contentOffset.x, y: end(keptInset)), in: self)
     }
     package override var accessibilityElements: [Any]? {
         get { super.accessibilityElements ?? NodeView.emptyBoxAccessibility(in: self) }
