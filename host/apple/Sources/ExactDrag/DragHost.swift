@@ -24,6 +24,13 @@ final class DragHost: DragCapability {
     func shouldBegin(_ view: NodeView, _ gesture: UIGestureRecognizer) -> Bool? {
         view.reorderShouldBegin(gesture) ?? view.transformShouldBegin(gesture)
     }
+    func blocksSwipe(_ view: NodeView, touches: Int, travel: CGPoint, from start: CGPoint, scrollBelow: Bool) -> Bool {
+        if view.reorderPan?.admitsTouches(touches) == true, view.reorderPanMayBegin(velocity: travel, translation: travel) { return true }
+        guard !scrollBelow else { return false }
+        if view.heightRecognizer?.admitsTouches(touches) == true, view.heightPanMayBegin(velocity: travel, translation: travel) { return true }
+        let local = view.convert(start, from: nil), end = view.convert(CGPoint(x: start.x + travel.x, y: start.y + travel.y), from: nil)
+        return view.transformRecognizer?.admitsTouches(touches) == true && view.transformPanMayBegin(CGPoint(x: end.x - local.x, y: end.y - local.y), from: local)
+    }
     func recognizedPinch(_ handle: NodeView, scale: Double, focal: CGPoint) -> String? {
         TransformDragHold.recognizedPinch(handle, scale: scale, focal: focal)
     }

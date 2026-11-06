@@ -166,22 +166,13 @@ package final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, U
         // This node's own swipe: UIKit asks the hit view about an ancestor's too
         if let swipe = gesture as? DiscreteSwipe, swipe.view === self { return swipeMayBegin(swipe) }
         if gesture === layoutPanRecognizer, let pan = gesture as? UIPanGestureRecognizer {
-            guard SwipeInput.allows(self) else { return false }
-            let action = style["touch_action"]?.string ?? "auto"
-            // An explicit native pan axis belongs to the scroller. Keep the
-            // existing unqualified pan behavior for auto and manipulation.
-            if action == "auto" || action == "manipulation" { return true }
             let velocity = pan.velocity(in: self)
             let direction = velocity == .zero ? pan.translation(in: self) : velocity
-            return direction == .zero || !allowsTouchPan(direction)
+            return layoutPanMayBegin(direction)
         }
         if let drag = DragLink.installed?.shouldBegin(self, gesture) { return drag }
         if gesture === heightRecognizer, let pan = gesture as? UIPanGestureRecognizer {
-            let velocity = pan.velocity(in: window), translation = pan.translation(in: window)
-            return SwipeInput.allows(self) && HeightDragDirection.accepts(
-                velocityX: Double(velocity.x), velocityY: Double(velocity.y),
-                translationX: Double(translation.x), translationY: Double(translation.y))
-                && presenter?.heightBindings[id]?.target != nil
+            return heightPanMayBegin(velocity: pan.velocity(in: window), translation: pan.translation(in: window))
         }
         if gesture === swipeRecognizer, let pan = gesture as? UIPanGestureRecognizer {
             let velocity = pan.velocity(in: window)
@@ -189,9 +180,23 @@ package final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, U
             // before recognition, so a swipe from x = 2 read as starting past
             // the edge and a back swipe over a message became a reply.
             let start = swipeDownX ?? pan.location(in: window).x - pan.translation(in: window).x
-            return !disabled && start >= Gesture.edge && SwipeRecognition.accepts(x: Double(velocity.x), y: Double(velocity.y), presentedX: Double(translate.x)) && !allowsTouchPan(velocity)
+            return swipeRightMayBegin(velocity: velocity, start: start)
         }
         return super.gestureRecognizerShouldBegin(gesture)
+    }
+    /// The pan's direction gate, also asked by the agent's recognized swipe.
+    func layoutPanMayBegin(_ direction: CGPoint) -> Bool {
+        let action = style["touch_action"]?.string ?? "auto"
+        return SwipeInput.allows(self) && (action == "auto" || action == "manipulation" || direction == .zero || !allowsTouchPan(direction))
+    }
+    package func heightPanMayBegin(velocity: CGPoint, translation: CGPoint) -> Bool {
+        SwipeInput.allows(self) && HeightDragDirection.accepts(
+            velocityX: Double(velocity.x), velocityY: Double(velocity.y),
+            translationX: Double(translation.x), translationY: Double(translation.y))
+            && presenter?.heightBindings[id]?.target != nil
+    }
+    func swipeRightMayBegin(velocity: CGPoint, start: CGFloat) -> Bool {
+        !disabled && start >= Gesture.edge && SwipeRecognition.accepts(x: Double(velocity.x), y: Double(velocity.y), presentedX: Double(translate.x)) && !allowsTouchPan(velocity)
     }
     @objc func swiping(_ gesture: UIPanGestureRecognizer) {
         let translation = Double(gesture.translation(in: window).x)

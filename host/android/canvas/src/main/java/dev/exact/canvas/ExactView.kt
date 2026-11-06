@@ -272,7 +272,7 @@ class ExactView(context: Context, private val live: Boolean, private val onFirst
         moduleTap = 0; moduleAwaiting = 0; moduleSerial++
         moduleReleased?.let { release ->
             moduleReleased = null
-            forward(if (replayRelease) 1 else 3, release.x, release.y, release.getToolType(0), -1L)
+            forward(if (replayRelease) 1 else 5, release.x, release.y, release.getToolType(0), -1L)
             release.recycle()
         }
     }
@@ -280,7 +280,7 @@ class ExactView(context: Context, private val live: Boolean, private val onFirst
     private fun releaseModuleTap(e: MotionEvent) {
         val clicked = moduleTap != 0 && natives?.click(moduleTap, moduleSlot, moduleGeneration, moduleX, moduleY) == true
         forgetModuleTap()
-        forward(if (clicked) 3 else 1, e.x, e.y, e.getToolType(0), -1L)
+        forward(if (clicked) 5 else 1, e.x, e.y, e.getToolType(0), -1L)
     }
 
     private fun answered() {
@@ -315,7 +315,7 @@ class ExactView(context: Context, private val live: Boolean, private val onFirst
             forgetModuleTap(replayRelease = true)
             moduleDownX = e.x; moduleDownY = e.y
         }
-        // A touch that scrolls is the reader's and exact2 hears no more of it; any other goes on to exact2.
+        // Scrolling forwards its terminal after cancelling recognition; its moves stay in the reader.
         if (started && scrolling.touch(e)) { forgetModuleTap(); hold(null); return }
         if (e.actionMasked == MotionEvent.ACTION_MOVE && (Math.abs(e.x - moduleDownX) > slop || Math.abs(e.y - moduleDownY) > slop)) {
             forgetModuleTap()
@@ -339,9 +339,7 @@ class ExactView(context: Context, private val live: Boolean, private val onFirst
             if (down) { val touch = hosted.serial; under(e.x, e.y) { hosted.under(touch, it.getOrElse(2) { 0 }) } }
             return
         }
-        val action = when (e.actionMasked) {
-            MotionEvent.ACTION_DOWN -> 0; MotionEvent.ACTION_UP -> 1; MotionEvent.ACTION_MOVE -> 2; else -> 3
-        }
+        val action = pointerAction(e.actionMasked)
         when (action) {
             0 -> if (started) hold(e)
             2 -> if (Math.abs(e.x - heldX) > slop || Math.abs(e.y - heldY) > slop) hold(null)
@@ -395,12 +393,12 @@ class ExactView(context: Context, private val live: Boolean, private val onFirst
     /** exact2 runs here (owner=0) and was told something of a field: what that changed is drawn. */
     internal fun turned() = pump()
 
-    /** A touch to exact2 (0 down, 1 up, 2 move, 3 cancel) at the view's pixels. [wait]: the ms the frame waits for
-     * exact2's answer, or negative for the action's own. [Scrolling] cancels a touch its scroll won with this, and
-     * waits for nothing. */
+    /** A touch to exact2 (0 down, 1 up, 2 move, 3 recognition cancel, 5 physical cancel) at the view's pixels.
+     * [wait] bounds exact2's answer in ms, or uses the action's own when negative. [Scrolling]'s cancel after it
+     * wins a touch waits for nothing. */
     internal fun forward(action: Int, x: Float, y: Float, tool: Int, wait: Long) {
         // A scroll that takes a hosted field's touch cancels it in the field: exact2 never heard of it.
-        if (action == 3 && fields?.cancel() == true) return
+        if ((action == 3 || action == 5) && fields?.cancel() == true) return
         val o = owner
         // A press or release waits for exact2's answer within this frame, as a click handler holds the main thread; a
         // drag's moves barely wait, so the drag keeps its frames.
@@ -416,9 +414,9 @@ class ExactView(context: Context, private val live: Boolean, private val onFirst
                 android.view.Choreographer.getInstance().removeFrameCallback(holder); hold()
                 o.held(true)
             }
-            if (action == 1 || action == 3) holdFrom = 0L
+            if (action == 1 || action == 3 || action == 5) holdFrom = 0L
             val answered = o.touch(action, x, y, tool, if (wait >= 0) wait else if (press) 0L else if (action == 2) 2L else releaseWait)
-            if (action == 1 || action == 3) o.held(false)
+            if (action == 1 || action == 3 || action == 5) o.held(false)
             if (answered) publish()
             return
         }

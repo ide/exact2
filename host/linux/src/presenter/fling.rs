@@ -4,10 +4,122 @@
 //! had down at once. The presenter's contact is one pointer and a second ends
 //! it, so the touch's first hit is kept past that end for the fling, until a
 //! gesture of the presenter's own takes the contact.
+use super::contact::Candidate;
 use super::*;
 use exact_kernel::{ControlKind, Display, NodeKey, PropValue};
 
 impl<D: DataSource> Presenter<D> {
+    /// The fling a new touch here could make, recognized without making
+    /// platform touches. Admission and dispatch are the live fling's own.
+    pub(crate) fn agent_swipe(
+        &mut self,
+        id: ViewId,
+        direction: &str,
+        at: Option<(f32, f32)>,
+    ) -> Result<String, String> {
+        if !["left", "right", "up", "down"].contains(&direction) {
+            return Err("swipe: expected left, right, up or down".into());
+        }
+        if self.contact.is_some()
+            || self.landed.is_some()
+            || self.pointer_held.is_some()
+            || self.pointer_buttons != 0
+        {
+            return Err("a contact is already down; use `tap up` or `tap cancel` first".into());
+        }
+        let named = format!("tap #{id} swipe {direction}");
+        let b = self
+            .box_of(id)
+            .ok_or_else(|| format!("{named}: no box on screen"))?;
+        let node = self
+            .host
+            .kernel()
+            .node(id)
+            .ok_or_else(|| format!("no view {id}"))?;
+        let pointers = match node
+            .props
+            .get(PropId::TouchCount)
+            .and_then(PropValue::as_int)
+        {
+            Some(n) => u32::try_from(n)
+                .ok()
+                .filter(|n| *n > 0)
+                .ok_or_else(|| format!("{named}: its touch-count cannot be driven"))?,
+            None => 1,
+        };
+        if !self.input_live(node.key)
+            || self.placement_hidden(id)
+            || !self
+                .host
+                .runner()
+                .handlers_of(id)
+                .contains(&EventKind::Swipe)
+            || !takes(node.props, direction, pointers)
+        {
+            return Err(format!("{named}: it takes no swipe that way while hidden, disabled or inert, or its swipe-direction does not name it"));
+        }
+        let ((x, y), local) = b
+            .point_at(at)
+            .ok_or_else(|| format!("{named}: at must be a finite point inside its box"))?;
+        if x < 0. || y < 0. || x >= self.viewport.0 || y >= self.viewport.1 {
+            return Err(format!("{named}: its start is outside the viewport"));
+        }
+        let first = self
+            .hit(x, y)
+            .ok_or_else(|| format!("{named}: nothing is under its start"))?;
+        if !std::iter::successors(Some(first), |&id| self.host.kernel().node(id)?.parent)
+            .any(|n| n == id)
+        {
+            return Err(format!("{named}: it is covered or clipped at its start"));
+        }
+        if self.hosted_at(first).is_some() {
+            return Err(format!("{named}: a hosted text input keeps the touch"));
+        }
+        let hit = self
+            .host
+            .kernel()
+            .node(first)
+            .ok_or_else(|| format!("{named}: its hit is gone"))?
+            .key;
+        // The reader has already kept hosted touches. A down on any other hit
+        // that is not live keeps only the path for its later fling.
+        if self.input_live(hit) {
+            let candidates = self.candidates_at(hit, x);
+            if candidates.is_empty() && self.canvas_contact_target(first).is_some() {
+                return Err(format!("{named}: the canvas at the start takes input and keeps the touch; use a control for this action instead"));
+            }
+            let (dx, dy) = match direction {
+                "left" => (-1., 0.),
+                "right" => (1., 0.),
+                "up" => (0., -1.),
+                _ => (0., 1.),
+            };
+            // With multiple pointers down before motion, the reader cancels this
+            // single-pointer contact and keeps its first hit for the native fling.
+            if pointers == 1
+                && candidates
+                    .into_iter()
+                    .find(|c| c.accepts(dx, dy))
+                    .is_some_and(|c| match c {
+                        Candidate::Swipe(key) => self.swipe_admits_motion(key, dx),
+                        _ => true,
+                    })
+            {
+                return Err(format!("{named}: a drag on the hit path takes the contact"));
+            }
+        }
+        match self.fling_target(hit, direction, pointers) {
+            Some(target) if target == id => {},
+            Some(nearer) => return Err(format!("{named}: #{nearer}, nearer on the hit path, takes that swipe (rule 3)")),
+            None => return Err(format!("{named}: a scroller, press, control or text input on the hit path keeps the contact")),
+        }
+        self.landed = Some(hit);
+        if !self.fling(direction, pointers, self.host.now())? {
+            return Err(format!("{named}: its swipe is no longer eligible"));
+        }
+        Ok(serde_json::json!({"tapped": id, "swipe": direction, "at": [local.0, local.1], "delivery": "recognized"}).to_string())
+    }
+
     /// Dispatches the touch's fling in `direction` (left, right, up or down)
     /// to the innermost node on its first hit's path whose swipe takes that
     /// direction with `pointers` down (rule 3), and returns whether one took
@@ -116,3 +228,7 @@ fn takes(props: &exact_kernel::PropList, direction: &str, pointers: u32) -> bool
 #[cfg(test)]
 #[path = "fling_tests.rs"]
 mod fling_tests;
+
+#[cfg(test)]
+#[path = "agent_swipe_tests.rs"]
+mod agent_swipe_tests;

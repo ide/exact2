@@ -26,7 +26,7 @@ impl Candidate {
         }
     }
     /// The candidate's own axis rule, at the slop (LLP 1057.001 §1).
-    fn accepts(&self, dx: f64, dy: f64) -> bool {
+    pub(super) fn accepts(&self, dx: f64, dy: f64) -> bool {
         match self {
             Candidate::Arrange(_) | Candidate::Height { .. } => dy.abs() > dx.abs(),
             Candidate::Swipe(_) => dx.abs() > dy.abs(),
@@ -245,6 +245,16 @@ impl<D: DataSource> Presenter<D> {
     pub(crate) fn contact_position(&self) -> Option<(f32, f32)> {
         self.contact.as_ref().map(|c| c.position)
     }
+    /// An agent ends the whole touch, including its pending fling. A pointer
+    /// observer can outlive the gesture contact and still needs its up.
+    pub(crate) fn prepare_agent_end(&mut self) -> Option<String> {
+        self.landed = None;
+        if self.contact.is_none() {
+            self.pointer_lifted(None, self.host.now())
+        } else {
+            None
+        }
+    }
     /// The agent's contact phase is done: its press lands at once (LLP
     /// 1061 D2, D7), the clock unmoved.
     pub(crate) fn land_presses(&mut self) {
@@ -301,6 +311,14 @@ impl<D: DataSource> Presenter<D> {
             .collect();
         found.sort_by_key(|&(depth, rank, _)| (depth, rank));
         found.into_iter().map(|(_, _, c)| c).collect()
+    }
+    /// The candidates offered at down, after yielding the system's edge.
+    pub(super) fn candidates_at(&self, hit: NodeKey, x: f32) -> Vec<Candidate> {
+        let mut candidates = self.candidates(hit);
+        if self.in_gesture_edge(x) {
+            candidates.retain(|c| !matches!(c, Candidate::Swipe(_)));
+        }
+        candidates
     }
     fn depth(&self, hit: NodeKey, candidate: NodeKey) -> Option<usize> {
         let kernel = self.host.kernel();
@@ -430,6 +448,32 @@ impl<D: DataSource> Presenter<D> {
         }
         false
     }
+    /// The reader's native input: cancel 3 ends recognition while preserving
+    /// a possible multi-finger fling; cancel 5 ends the whole physical touch.
+    #[cfg(any(target_os = "android", test))]
+    pub(crate) fn reader_touch(
+        &mut self,
+        action: i32,
+        x: f32,
+        y: f32,
+        now_ms: f64,
+    ) -> Result<(), String> {
+        match action {
+            0 => self.pointer_down(x, y, now_ms).map(|_| ()),
+            1 => self.pointer_up(x, y, now_ms).map(|_| ()),
+            2 => self.pointer_move(x, y, now_ms).map(|_| ()),
+            4 => {
+                self.long_press(x, y, now_ms);
+                Ok(())
+            }
+            5 => {
+                self.landed = None;
+                self.pointer_cancel(now_ms)
+            }
+            _ => self.pointer_cancel(now_ms),
+        }
+    }
+
     /// Primary down shared by evdev, VNC, and explicitly labeled agent
     /// synthesis; then the node's `pointerdown` (LLP 1005 §3), which the
     /// contact never waits for.
@@ -603,11 +647,7 @@ impl<D: DataSource> Presenter<D> {
         if !self.input_live(hit) {
             return Ok(false);
         }
-        let mut rest = self.candidates(hit);
-        // A swipe yields the edge the system's own gesture starts from.
-        if self.in_gesture_edge(x) {
-            rest.retain(|c| !matches!(c, Candidate::Swipe(_)));
-        }
+        let mut rest = self.candidates_at(hit, x);
         let arrange = rest
             .iter()
             .find(|c| matches!(c, Candidate::Arrange(_)))
@@ -893,8 +933,7 @@ impl<D: DataSource> Presenter<D> {
                             self.set_collection_interaction(None);
                             return Ok(false);
                         }
-                        let view = self.host.kernel().node_by_key(key).unwrap().id;
-                        if self.host.presented(view).translate.0 <= 0. {
+                        if !self.swipe_admits_motion(key, dx) {
                             self.set_collection_interaction(None);
                             return Ok(false);
                         }
@@ -983,6 +1022,7 @@ impl<D: DataSource> Presenter<D> {
         now_ms: f64,
         event_ms: f64,
     ) -> Result<bool, String> {
+        self.landed = None;
         if self.overlay_pointer(1, x, y, now_ms) || self.scrollbar_pointer(1, x, y) {
             return Ok(true);
         }

@@ -4,6 +4,15 @@ import android.content.Context
 import android.view.GestureDetector
 import android.view.MotionEvent
 
+/** Pointer-count changes cancel only recognition; a system cancel ends the touch and its pending fling. */
+internal fun pointerAction(action: Int): Int = when (action) {
+    MotionEvent.ACTION_DOWN -> 0
+    MotionEvent.ACTION_UP -> 1
+    MotionEvent.ACTION_MOVE -> 2
+    MotionEvent.ACTION_CANCEL -> 5
+    else -> 3
+}
+
 /** LLP 1057.001 §8 on Android: `swipe` is the platform's fling, [GestureDetector.OnGestureListener.onFling], with
  * [android.view.ViewConfiguration]'s slop and velocities, over the view's whole touch, every pointer of it. The
  * detector sees each event before exact2 does, so a fling, which fires at the lift, reaches exact2 ahead of the lift

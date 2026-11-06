@@ -14,6 +14,7 @@ mod held;
 mod keys;
 mod sensors;
 mod stdio;
+mod swipe;
 
 use crate::presenter::Presenter;
 use exact_runner::agent::{error, field_bool, field_num, field_str, num};
@@ -166,6 +167,9 @@ pub(crate) fn answer<D: DataSource>(p: &mut Presenter<D>, line: &str) -> String 
 fn answer_line<D: DataSource>(p: &mut Presenter<D>, line: &str) -> String {
     let id = || field_num(line, "id").map(|n| n as u32);
     let q: serde_json::Value = serde_json::from_str(line).unwrap_or_default();
+    if q["op"] == "tap" && q.get("swipe").is_some() {
+        return swipe::tap(p, &q);
+    }
     if let Some(view) = id() {
         if q["entity"].is_string()
             || field_bool(line, "world")

@@ -459,6 +459,11 @@ export function tapWords(args, held = false) {
       if (rest.length !== 1) refuse('pictureinpicture <control>: minimize, back, close or hover');
       return [first, { pictureInPicture: rest[0] }];
     case 'pinch': return [first, { pinch: number(rest[0], 'pinch'), ...options(rest.slice(1), ['at']) }];
+    case 'swipe':
+      if (!['left', 'right', 'up', 'down'].includes(rest[0])) {
+        refuse('swipe: expected left, right, up or down');
+      }
+      return [first, { swipe: rest[0], ...options(rest.slice(1), ['at']) }];
     // Files dragged in from outside, each a path (studio diary R19).
     case 'drop': if (!rest.length) refuse('drop takes one or more paths'); return [first, { drop: rest.map((path) => resolve(path)) }];
     // A drag of those files from outside comes over the target and stays there (`dragenter`), until a `drop` there
@@ -494,7 +499,7 @@ export function tapWords(args, held = false) {
       if (!['left', 'right'].includes(rest[0]) || !(rest.length === 3 || (rest.length === 5 && rest[3] === 'for'))) refuse('stick takes left or right, x and y in [-1, 1], and optionally for <ms>');
       return [first, { stick: rest[0], value: [number(rest[1], 'stick'), number(rest[2], 'stick')], ...(rest[3] === 'for' ? { for: number(rest[4], 'for') } : {}) }];
     // Most often a target of several words left unquoted (sb4 farm wave 4, 053: `tap Why are my…`).
-    default: refuse(`unknown word ${JSON.stringify(form)}; a target of several words is quoted inside the op (\`tap "${args.join(' ').replace(/["\\]/g, '\\$&')}"\`), and after a target come only: tap <target> [at <x> <y> [modifiers <M>] | modifiers <M> | down [at <x> <y>] [modifiers <M>] | wheel <dx> <dy> [gesture | fling | hold] [at <x> <y>] [modifiers <M>] | wheel 0 0 release | mouse | dblclick | contextmenu | auxclick | clicks <1-3> (each [at <x> <y>] [modifiers <M>]) | hover | drop <path…> | dragenter <path…> | dragleave | into <key> … | pinch <scale> [at <x> <y>] | history <n> | mediasession <action> [seconds] | pictureinpicture <control> | drag …]`);
+    default: refuse(`unknown word ${JSON.stringify(form)}; a target of several words is quoted inside the op (\`tap "${args.join(' ').replace(/["\\]/g, '\\$&')}"\`), and after a target come only: tap <target> [at <x> <y> [modifiers <M>] | modifiers <M> | down [at <x> <y>] [modifiers <M>] | wheel <dx> <dy> [gesture | fling | hold] [at <x> <y>] [modifiers <M>] | wheel 0 0 release | mouse | dblclick | contextmenu | auxclick | clicks <1-3> (each [at <x> <y>] [modifiers <M>]) | hover | drop <path…> | dragenter <path…> | dragleave | into <key> … | pinch <scale> [at <x> <y>] | swipe <left|right|up|down> [at <x> <y>] | history <n> | mediasession <action> [seconds] | pictureinpicture <control> | drag …]`);
   }
 }
 
@@ -515,6 +520,14 @@ export function clockSlices({ bpm, ms }) {
 
 /** A `tap`'s options checked before any host is asked: malformed ones are refused by name. Returns the mouse's button forms given. */
 export function tapArguments(opts) {
+  if (Object.hasOwn(opts, 'swipe')) {
+    if (!['left', 'right', 'up', 'down'].includes(opts.swipe)) {
+      throw new MalformedOperation('swipe: expected left, right, up or down');
+    }
+    if (Object.keys(opts).some(k => !['swipe', 'at'].includes(k))) {
+      throw new MalformedOperation('swipe takes only a direction and optional at <x> <y>');
+    }
+  }
   if (opts.wheel !== undefined && ![opts.wheel?.[0], opts.wheel?.[1]].every(Number.isFinite)) throw new MalformedOperation('wheel: expected two finite deltas');
   if (opts.drag) dragArguments(opts.drag);
   if (opts.mouse && ['contextmenu','dblclick','auxclick','clicks','down','drag','wheel','hover','pinch','history','into','gesture'].some(key => opts[key] !== undefined)) throw new MalformedOperation('mouse cannot be combined with another input mode');
@@ -526,7 +539,7 @@ export function tapArguments(opts) {
   const button = ['mouse', 'contextmenu', 'auxclick', 'dblclick', 'clicks'].filter((k) => opts[k] !== undefined && opts[k] !== false);
   if (button.length > 1) throw new MalformedOperation(`tap: one of mouse, dblclick, contextmenu, auxclick and clicks at a time, not ${button.join(' and ')}`);
   if (opts.clicks !== undefined && ![1, 2, 3].includes(opts.clicks)) throw new MalformedOperation('tap … clicks: 1, 2 or 3');
-  if (opts.at !== undefined && (opts.hover || opts.history !== undefined || opts.drop || opts.dragenter || opts.dragleave || opts.into)) throw new MalformedOperation('at is a point on a press, a click (mouse, dblclick, contextmenu, auxclick, clicks), a wheel, a contact, a pinch or a drag');
+  if (opts.at !== undefined && (opts.hover || opts.history !== undefined || opts.drop || opts.dragenter || opts.dragleave || opts.into)) throw new MalformedOperation('at is a point on a press, a click (mouse, dblclick, contextmenu, auxclick, clicks), a wheel, a contact, a pinch, a swipe or a drag');
   if (opts.at !== undefined && (!Array.isArray(opts.at) || opts.at.length !== 2 || !opts.at.every(Number.isFinite))) throw new MalformedOperation('tap at needs two finite numbers');
   const modifiers = opts.modifiers ?? opts.drag?.modifiers;
   if (modifiers !== undefined && !String(modifiers).split('+').filter(Boolean).every(k => ['Shift', 'Control', 'Alt', 'Meta'].includes(k))) throw new MalformedOperation(`tap … modifiers: ${modifiers} is not Shift, Control, Alt and Meta joined by +`);

@@ -80,6 +80,17 @@ final class DiscreteSwipeIOSTests: XCTestCase {
         XCTAssertFalse(node.swipeRequiresFailure(down, of: scroll.panGestureRecognizer), "its content fits")
         scroll.alwaysBounceVertical = true
         XCTAssertTrue(node.swipeRequiresFailure(down, of: scroll.panGestureRecognizer), "it bounces")
+        scroll.panGestureRecognizer.minimumNumberOfTouches = 2
+        scroll.panGestureRecognizer.maximumNumberOfTouches = 2
+        XCTAssertFalse(node.swipeRequiresFailure(down, of: scroll.panGestureRecognizer), "one finger cannot begin the two-finger scroll pan")
+        p.apply(wireBatch([["op": "props", "id": 1, "set": ["touchCount": "2"]]]))
+        let pair = try XCTUnwrap(swipes(node).first { $0.word == "down" })
+        XCTAssertTrue(node.admitsSwipe(pair, Touch(on: scroll)))
+        XCTAssertTrue(node.swipeRequiresFailure(pair, of: scroll.panGestureRecognizer), "two fingers can begin it")
+        p.apply(wireBatch([["op": "props", "id": 1, "set": ["touchCount": "3"]]]))
+        let three = try XCTUnwrap(swipes(node).first { $0.word == "down" })
+        XCTAssertTrue(node.admitsSwipe(three, Touch(on: scroll)))
+        XCTAssertFalse(node.swipeRequiresFailure(three, of: scroll.panGestureRecognizer), "three fingers exceed its maximum")
     }
 
     func testAFingerPassesAnEditorAndASelectionMovedSinceItWentDownRefusesTheSwipe() throws {
@@ -378,5 +389,159 @@ final class DiscreteSwipeIOSTests: XCTestCase {
         node.swiped(second)
         XCTAssertEqual(sent, ["1 down"], "a recognizer on a view the node no longer has")
     }
+
+    func testTheAgentsSwipeHonorsTheLivePansTouchCountBounds() throws {
+        let session = ExactApp.shared.makeSession(label: "swipe-pan-count")
+        defer { session.destroy() }
+        let p = session.presenter
+        let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene
+        let win = scene.map { UIWindow(windowScene: $0) } ?? UIWindow(frame: CGRect(x: 0, y: 0, width: 400, height: 800))
+        win.frame = CGRect(x: 0, y: 0, width: 400, height: 800)
+        win.rootViewController = UIViewController()
+        win.makeKeyAndVisible()
+        defer { win.isHidden = true }
+        p.viewport.frame = win.bounds
+        win.rootViewController?.view.addSubview(p.viewport)
+        p.apply(wireBatch([
+            ["op": "create", "id": 1, "kind": "view", "handlers": ["swipe", "pan"], "props": ["swipeDirection": "down"], "style": ["touch_action": "none"]],
+            ["op": "roots", "ids": [1]],
+            ["op": "frame", "id": 1, "x": 0.0, "y": 0.0, "w": 300.0, "h": 500.0],
+        ]))
+        p.viewport.layoutIfNeeded()
+        let node = try XCTUnwrap(p.views[1]), pan = try XCTUnwrap(node.layoutPanRecognizer)
+        XCTAssertEqual(pan.minimumNumberOfTouches, 1)
+        XCTAssertEqual(pan.maximumNumberOfTouches, 1)
+        var sent: [String] = []
+        p.onSwipe = { sent.append("\($0) \($1)") }
+        let agent = Agent(session: session)
+        func setCount(_ count: Int) {
+            p.apply(wireBatch([["op": "props", "id": 1, "set": ["touchCount": "\(count)"]]]))
+        }
+        XCTAssertTrue((agent.tap(["id": 1, "swipe": "down"])["error"] as? String)?.contains("drag on the hit path") == true)
+        setCount(2)
+        XCTAssertEqual(agent.tap(["id": 1, "swipe": "down"])["delivery"] as? String, "recognized", "the one-finger layout pan cannot keep a two-finger swipe")
+        XCTAssertEqual(sent, ["1 down"], "the refused one-finger swipe sent nothing")
+
+        node.handlers.remove("pan")
+        node.updateLayoutPan()
+        node.handlers.insert("swiperight")
+        node.updateSwipeGesture()
+        p.apply(wireBatch([
+            ["op": "props", "id": 1, "set": ["swipeDirection": "left"]],
+            ["op": "present", "id": 1, "property": "translate", "x": 80.0, "y": 0.0],
+        ]))
+        let right = try XCTUnwrap(node.swipeRecognizer)
+        XCTAssertEqual(right.maximumNumberOfTouches, 1)
+        setCount(1)
+        XCTAssertTrue((agent.tap(["id": 1, "swipe": "left"])["error"] as? String)?.contains("drag on the hit path") == true)
+        setCount(2)
+        XCTAssertEqual(agent.tap(["id": 1, "swipe": "left"])["delivery"] as? String, "recognized", "the open reply pan also takes one finger")
+        XCTAssertEqual(sent, ["1 down", "1 left"])
+
+        node.handlers.remove("swiperight")
+        node.updateSwipeGesture()
+        p.apply(wireBatch([
+            ["op": "props", "id": 1, "set": ["swipeDirection": "down"]],
+            ["op": "present", "id": 1, "property": "translate", "x": 0.0, "y": 0.0],
+        ]))
+        let scroll = UIScrollView(frame: node.bounds)
+        scroll.contentSize = CGSize(width: 300, height: 1000)
+        scroll.panGestureRecognizer.minimumNumberOfTouches = 2
+        scroll.panGestureRecognizer.maximumNumberOfTouches = 2
+        node.addSubview(scroll)
+        for count in 1...3 {
+            setCount(count)
+            let reply = agent.tap(["id": 1, "swipe": "down"])
+            if count == 2 {
+                XCTAssertTrue((reply["error"] as? String)?.contains("scrolls that way") == true, "\(reply)")
+            } else {
+                XCTAssertEqual(reply["delivery"] as? String, "recognized", "\(reply)")
+            }
+        }
+        XCTAssertEqual(sent, ["1 down", "1 left", "1 down", "1 down"])
+    }
+
+    /// The agent's `tap … swipe` (§8.7): UIKit synthesizes no touch, so the
+    /// swipe is recognized at its start once a finger there would reach the
+    /// node's recognizer, and refused, naming why and sending nothing, when
+    /// it would not; `check` asks only, for the touch runner's real swipe.
+    func testTheAgentsSwipeIsRecognizedWhereAFingersWouldReachTheNode() throws {
+        let session = ExactApp.shared.makeSession(label: "discrete-swipe-agent")
+        defer { session.destroy() }
+        let p = session.presenter
+        let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene
+        let win = scene.map { UIWindow(windowScene: $0) } ?? UIWindow(frame: CGRect(x: 0, y: 0, width: 400, height: 800))
+        win.frame = CGRect(x: 0, y: 0, width: 400, height: 800)
+        win.rootViewController = UIViewController()
+        win.makeKeyAndVisible()
+        defer { win.isHidden = true }
+        p.viewport.frame = win.bounds
+        win.rootViewController?.view.addSubview(p.viewport)
+        p.apply(wireBatch([
+            ["op": "create", "id": 1, "kind": "view", "handlers": ["swipe"], "props": ["swipeDirection": "left right"]],
+            ["op": "create", "id": 2, "kind": "view", "handlers": ["swipe"], "props": ["swipeDirection": "left"]],
+            ["op": "create", "id": 3, "kind": "button", "handlers": ["press"]],
+            ["op": "create", "id": 4, "kind": "view", "style": ["overflow_x": "scroll", "overflow_y": "hidden"]],
+            ["op": "create", "id": 5, "kind": "view"],
+            ["op": "create", "id": 6, "kind": "view", "handlers": ["swipe"], "props": ["swipeDirection": "up", "touchCount": "2"]],
+            ["op": "children", "id": 4, "ids": [5]], ["op": "children", "id": 1, "ids": [2, 3, 4, 6]], ["op": "roots", "ids": [1]],
+            ["op": "frame", "id": 1, "x": 0.0, "y": 0.0, "w": 400.0, "h": 500.0],
+            ["op": "frame", "id": 2, "x": 0.0, "y": 0.0, "w": 400.0, "h": 100.0],
+            ["op": "frame", "id": 3, "x": 0.0, "y": 120.0, "w": 60.0, "h": 40.0],
+            ["op": "frame", "id": 4, "x": 0.0, "y": 200.0, "w": 400.0, "h": 100.0],
+            ["op": "frame", "id": 5, "x": 0.0, "y": 0.0, "w": 800.0, "h": 100.0],
+            ["op": "content", "id": 4, "w": 800.0, "h": 100.0],
+            ["op": "frame", "id": 6, "x": 0.0, "y": 400.0, "w": 400.0, "h": 100.0],
+        ]))
+        p.viewport.layoutIfNeeded()
+        var sent: [String] = []
+        p.onSwipe = { sent.append("\($0) \($1)") }
+        let agent = Agent(session: session)
+        let error = { (req: [String: Any]) in agent.tap(req)["error"] as? String ?? "" }
+        XCTAssertEqual(try AgentSwipeTests.ask(agent, ["id": 2, "swipe": "left"])["delivery"] as? String, "recognized")
+        XCTAssertEqual(sent, ["2 left"], "the routed swipe dispatches before replying")
+        XCTAssertNil(agent.tap(["id": 1, "swipe": "right", "at": [200.0, 180.0]])["error"])
+        XCTAssertNil(agent.tap(["id": 6, "swipe": "up"])["error"], "recognized at its count")
+        XCTAssertEqual(sent, ["2 left", "1 right", "6 up"])
+        XCTAssertTrue(error(["id": 1, "swipe": "left", "at": [200.0, 50.0]]).contains("#2, nearer"))
+        XCTAssertTrue(error(["id": 1, "swipe": "right", "at": [30.0, 140.0]]).contains("keeps the contact"), "the button")
+        XCTAssertTrue(error(["id": 1, "swipe": "left", "at": [200.0, 250.0]]).contains("scrolls that way"))
+        XCTAssertTrue(error(["id": 1, "swipe": "right", "at": [5.0, 180.0]]).contains("left 20"))
+        XCTAssertTrue(error(["id": 1, "swipe": "up"]).contains("takes no swipe"))
+        XCTAssertEqual(try AgentSwipeTests.ask(agent, ["id": 1, "swipe": "right", "at": [200.0, 180.0], "check": true])["checked"] as? Bool, true)
+        XCTAssertTrue(error(["id": 6, "swipe": "up", "check": true]).contains("one finger"))
+        XCTAssertEqual(sent.count, 3, "a refusal or a check sends nothing")
+        sent = []
+        win.semanticContentAttribute = .forceRightToLeft
+        XCTAssertTrue(error(["id": 1, "swipe": "right", "at": [5.0, 180.0]]).contains("left 20"), "Back keeps the physical left edge in RTL too")
+        XCTAssertNil(agent.tap(["id": 1, "swipe": "left", "at": [5.0, 180.0]])["error"], "the other directions may start at the edge")
+        p.apply(wireBatch([["op": "props", "id": 2, "set": ["disabled": "true"]]]))
+        XCTAssertNil(agent.tap(["id": 1, "swipe": "left", "at": [200.0, 50.0]])["error"], "an ineligible inner swipe takes none")
+        let outer = try XCTUnwrap(p.views[1])
+        outer.transform = CGAffineTransform(translationX: 40, y: 0).scaledBy(x: 0.5, y: 0.5)
+        let local = CGPoint(x: 200, y: 180), point = outer.convert(local, to: p.viewport)
+        let checked = agent.tap(["id": 1, "swipe": "right", "at": [200.0, 180.0], "check": true])
+        XCTAssertEqual(checked["at"] as? [Double], [Agent.r2(point.x - p.viewport.pageOrigin.x), Agent.r2(point.y - p.viewport.pageOrigin.y)], "at is local before the transform")
+        XCTAssertNotNil(agent.tap(["id": 1, "swipe": "left", "at": [401.0, 180.0]])["error"], "outside the local box")
+        agent.contact = .zero
+        XCTAssertTrue(error(["id": 1, "swipe": "left"]).contains("already down"))
+        XCTAssertNotNil(agent.contact, "a refusal leaves the contact alone")
+        agent.contact = nil
+        XCTAssertEqual(sent, ["1 left", "1 left"])
+        outer.transform = .identity
+        p.apply(wireBatch([["op": "props", "id": 1, "set": ["swipeDirection": "left right down"]]]))
+        let scroll = UIScrollView(frame: CGRect(x: 200, y: 320, width: 100, height: 60))
+        scroll.contentSize = CGSize(width: 100, height: 180)
+        outer.addSubview(scroll)
+        XCTAssertTrue(error(["id": 1, "swipe": "down", "at": [250.0, 350.0]]).contains("scrolls that way"))
+        scroll.isScrollEnabled = false
+        XCTAssertNil(agent.tap(["id": 1, "swipe": "down", "at": [250.0, 350.0]])["error"], "a disabled scroller takes none")
+        scroll.removeFromSuperview()
+        let pan = UIPanGestureRecognizer()
+        outer.layoutPanRecognizer = pan
+        outer.addGestureRecognizer(pan)
+        XCTAssertTrue(error(["id": 1, "swipe": "down", "at": [200.0, 180.0]]).contains("drag on the hit path"), "the pan's own admission keeps the contact")
+    }
+
 }
 #endif

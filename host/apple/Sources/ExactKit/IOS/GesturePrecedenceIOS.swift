@@ -1,6 +1,17 @@
 #if os(iOS) || os(tvOS)
 import UIKit
 
+extension UIPanGestureRecognizer {
+    /// UIKit's touch-count bounds, shared by swipe preflight and precedence.
+    package func admitsTouches(_ count: Int) -> Bool {
+        #if os(tvOS)
+        return isEnabled
+        #else
+        return isEnabled && count >= minimumNumberOfTouches && count <= maximumNumberOfTouches
+        #endif
+    }
+}
+
 // LLP 1057.001 §1 on UIKit, with UIKit's own relationships: rule 3's boundary
 // (a press handler or text input between the touch and a node keeps the touch
 // from that node's drags; a `pan` passes a press) and innermost-first (an
@@ -22,7 +33,10 @@ extension NodeView {
     /// starts on a button inside it (kanban F6). A finger's `swipe` passes a
     /// text input (`editors: false`, LLP 1057.001 §8.4).
     func pressBoundary(_ touch: UITouch, presses: Bool = true, editors: Bool = true) -> Bool {
-        var view = touch.view
+        pressBoundary(from: touch.view, presses: presses, editors: editors)
+    }
+    func pressBoundary(from hit: UIView?, presses: Bool = true, editors: Bool = true) -> Bool {
+        var view = hit
         while let current = view, current !== self {
             if let node = current as? NodeView, (presses && node.handlers.contains("press")) || (editors && (node.field != nil || node.textArea != nil)) { return true }
             view = current.superview

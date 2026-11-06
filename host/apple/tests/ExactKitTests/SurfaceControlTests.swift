@@ -258,6 +258,37 @@ final class SurfaceControlTests: XCTestCase {
         XCTAssertNotNil(s.surfaceHost.entries[100]!.controls[1]); XCTAssertNil(e.controls[1])
         withExtendedLifetime((window,canvas)) {}
     }
+    func testAMixedSwipeCannotReleaseAHeldCanvasControlThroughTheOuterRouter() throws {
+        let savedEvents = controlEvents, savedBound = boundObjects
+        defer { controlEvents = savedEvents; boundObjects = savedBound }
+        let (s, canvas, button) = fixture()
+        defer { s.destroy() }
+        #if os(macOS)
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 200), styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = s.presenter.viewport
+        defer { window.close() }
+        #else
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 400, height: 200))
+        window.addSubview(s.presenter.viewport)
+        defer { window.isHidden = true }
+        #endif
+        XCTAssertTrue(button.control("down", id: 7))
+        let entry = try XCTUnwrap(s.surfaceHost.entries[canvas.id])
+        let before = controlEvents.count
+        for phase in ["up", "cancel"] {
+            let reply = try AgentSwipeTests.ask(s.agentInstance, ["id": Int(canvas.id), "contact": 7, "phase": phase, "swipe": "down"])
+            XCTAssertEqual(reply["malformed"] as? Bool, true, "\(reply)")
+            XCTAssertEqual(entry.controls[7]?.node, button.id)
+            XCTAssertEqual(controlEvents.count, before, "the malformed input sends no release to the module")
+        }
+        let reply = try AgentSwipeTests.ask(s.agentInstance, ["id": Int(canvas.id), "contact": 7, "phase": "up"])
+        XCTAssertEqual(reply["delivery"] as? String, "recognized", "\(reply)")
+        XCTAssertNil(entry.controls[7])
+        XCTAssertEqual(controlEvents.count, before + 1)
+        XCTAssertEqual(controlEvents.last?["phase"] as? String, "up")
+        XCTAssertEqual(controlEvents.last?["name"] as? String, "jump")
+    }
     func testRestoredContactCancelsWhenItsControlUnmounts() {
         let (s, _, button) = fixture(); defer { s.destroy() }
         let m = s.surfaceHost.modules[""]!, e = s.surfaceHost.entries[100]!

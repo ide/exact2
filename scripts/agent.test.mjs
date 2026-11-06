@@ -107,7 +107,7 @@ test('malformed input is labelled before delivery; a state refusal is not', asyn
     () => s.type('field', { key: 'Enter', phase: 'banana' }),
     () => s.type('missing', { key: 'Banana' }),
     () => s.type('field', { key: 'Enter', for: -1 }),
-    () => s.tap('field', { pinch: 0 }), () => s.tap('field', { drag: { dx: 1, dy: NaN } })]) {
+    () => s.tap('field', { pinch: 0 }), () => s.tap('field', { swipe: 'sideways' }), () => s.tap('field', { swipe: 'down', mouse: true }), () => s.tap('field', { drag: { dx: 1, dy: NaN } })]) {
     await assert.rejects(run, e => e instanceof MalformedOperation && e.malformed === true);
   }
   for (const seconds of [undefined, null, -1, NaN, Infinity])
@@ -123,6 +123,285 @@ test('malformed input is labelled before delivery; a state refusal is not', asyn
   await assert.rejects(() => main(['web', 'resize banana'], { open: async () => ({ close() {} }) }), e => e.malformed === true);
   // A deep link is `type` on the navigation root (euxy FRICTION 11): the refusal names that form.
   await assert.rejects(() => main(['web', 'open euxy://p/1'], { open: async () => ({ close() {} }) }), e => e.malformed === true && e.message.includes('`type <root> euxy://p/1`'));
+});
+
+test('a session refuses web swipes before any input', async () => {
+  const inputs = [], carrier = { host: 'web', browser: 'chrome', launchFacts: launchFacts({}), reset() {},
+    async ask() { return { nodes: [{ id: 7, props: { testId: 'bar' }, depth: 0 }] }; },
+    async input(...args) { inputs.push(args); return {}; },
+    async reveal() { throw new Error('an unsupported swipe must not reveal the target'); } };
+  const s = await open({ reuse: carrier });
+  const r = await s.tap('bar', { swipe: 'down', at: [25, 10] });
+  assert.deepEqual(inputs, []);
+  assert.equal(r.delivery, 'unsupported');
+});
+
+async function decliningContactSession({ host = 'web', replies = {}, noMovePoint = false, world = [], phasedTouch, landError, landPhase = 'up', downBegan = false } = {}) {
+  const calls = [], requests = [];
+  let pending = false;
+  const carrier = {
+    host, browser: 'chrome', launchFacts: launchFacts({}), hostLines: [], phasedTouch,
+    reset() {},
+    async reveal() { return {}; },
+    async ask(req) {
+      requests.push(req);
+      if (req.op === 'tree') { return { nodes: [{ id: 7, depth: 0, props: { testId: 'row' } }] }; }
+      if (req.op === 'layout') { return { nodes: [{ id: 7, x: 0, y: 0, w: 200, h: 40, type: 'View' }], viewport: { w: 400, h: 700 } }; }
+      if (req.op === 'state') { return { world }; }
+      if (req.op === 'logs') { return { lines: [], from: 0, next: 0 }; }
+      if (req.op === 'tap' && req.contact !== undefined) { return { tapped: req.id, phase: req.phase, delivery: 'platform' }; }
+      if (req.op === 'clock' && req.land && landError && calls.at(-1)?.[1] === landPhase) {
+        if (landError instanceof Error) { throw landError; }
+        return { error: landError };
+      }
+      return { clock: req.to ?? 0 };
+    },
+    async input(id, phase, opts) {
+      calls.push([id, phase, opts]);
+      const reply = replies[phase];
+      if (phase === 'down' && (!reply?.error || downBegan) && reply?.delivery !== 'unsupported') {
+        pending = true;
+      }
+      if (reply instanceof Error) { throw reply; }
+      if ((phase === 'up' || phase === 'cancel' || reply?.cancelled === true) && !reply?.error && reply?.delivery !== 'unsupported') { pending = false; }
+      if (reply) { return reply; }
+      if (phase === 'down') { return { contact: true, at: [100, 20], delivery: 'presenter' }; }
+      if (phase === 'move' && replies.down?.contact === false) { return { error: 'carrier: no gesture contact is down' }; }
+      if (phase === 'move') { return { contact: false, at: noMovePoint ? null : [70, 20], delivery: 'presenter' }; }
+      if (phase === 'hold') { return { error: 'carrier: no gesture contact is down' }; }
+      if (phase === 'up' || phase === 'cancel') {
+        return { contact: false, at: null, delivery: 'presenter' };
+      }
+      assert.equal(pending, false, 'the carrier still needs its terminal phase');
+      return { tapped: id, delivery: 'platform' };
+    },
+  };
+  const s = await open({ reuse: carrier });
+  return { s, carrier, calls, requests, pending: () => pending };
+}
+
+test('manual terminal phases reach the carrier after an accepted down declines motion', async () => {
+  for (const phase of ['up', 'cancel']) {
+    for (const noMovePoint of [false, true]) {
+      const d = await decliningContactSession({ noMovePoint });
+      await assert.rejects(() => d.s.pointer(phase), /no contact is down/);
+      assert.deepEqual(d.calls, []);
+      await d.s.tap('row', { down: true });
+      const moved = await d.s.pointer('move', { dx: -30, dy: 0 });
+      assert.equal(moved.contact, false);
+      assert.deepEqual(d.s.contact, noMovePoint ? { x: 100, y: 20 } : { x: 70, y: 20 });
+      const held = await d.s.pointer('hold');
+      assert.equal(held.error, 'carrier: no gesture contact is down');
+      assert.ok(d.s.contact, 'an error leaves terminal cleanup reachable');
+      const ended = await d.s.pointer(phase);
+      assert.equal(ended.contact, false);
+      assert.equal(d.pending(), false);
+      assert.equal(d.s.contact, null);
+      assert.deepEqual(d.calls.map(c => c[1]), ['down', 'move', 'hold', phase]);
+      await assert.rejects(() => d.s.pointer(phase), /no contact is down/);
+      await d.s.tap('row');
+    }
+  }
+});
+
+test('a retired UIKit pan releases the driver when its receipt acknowledges cancellation', async () => {
+  for (const phase of ['move', 'hold']) {
+    const retired = { contact: false, cancelled: true, at: [100, 20], delivery: 'recognized' };
+    const replies = { down: { contact: 7, at: [100, 20], delivery: 'recognized' }, [phase]: retired,
+      up: { delivery: 'unsupported' }, cancel: { delivery: 'unsupported' } };
+    const d = await decliningContactSession({ host: 'ios', replies });
+    await d.s.tap('row', { down: true });
+    const ended = await d.s.pointer(phase, phase === 'move' ? { dx: -30, dy: 0 } : {});
+    assert.equal(ended.cancelled, true);
+    assert.equal(d.pending(), false);
+    assert.equal(d.s.contact, null);
+    for (const terminal of ['up', 'cancel']) {
+      await assert.rejects(() => d.s.pointer(terminal), /no contact is down/);
+    }
+    assert.deepEqual(d.calls.map(c => c[1]), ['down', phase]);
+    await d.s.tap('row');
+  }
+});
+
+test('automatic drags stop at UIKit retirement and keep acknowledged cleanup after a landing failure', async () => {
+  const retired = { contact: false, cancelled: true, at: [100, 20], delivery: 'recognized' };
+  for (const landError of [undefined, 'landing failed', new Error('landing failed')]) {
+    const d = await decliningContactSession({ host: 'ios', landError, landPhase: 'move', replies: {
+      down: { contact: 7, at: [100, 20], delivery: 'recognized' }, move: retired,
+      up: { delivery: 'unsupported' }, cancel: { delivery: 'unsupported' },
+    } });
+    let during = false;
+    await assert.rejects(() => d.s.tap('row', { drag: { dx: -30, dy: 0, over: 10, during: [async () => { during = true; }] } }),
+      landError ? /landing failed/ : /contact was cancelled/);
+    assert.deepEqual(d.calls.map(c => c[1]), ['down', 'move'], 'retirement needs no terminal request');
+    assert.equal(during, false, 'no held operation runs after retirement');
+    assert.equal(d.pending(), false);
+    assert.equal(d.s.contact, null);
+    await d.s.tap('row');
+  }
+});
+
+test('manual terminal phases release a down whose successful receipt already says contact false', async () => {
+  for (const phase of ['up', 'cancel']) {
+    const d = await decliningContactSession({ replies: { down: { contact: false, at: [100, 20], delivery: 'presenter' } } });
+    const down = await d.s.tap('row', { down: true });
+    assert.equal(down.contact, false);
+    assert.equal(down.error, undefined);
+    assert.equal(d.pending(), true);
+    assert.deepEqual(d.s.contact, { x: 100, y: 20 });
+    await assert.rejects(() => d.s.tap('row'), /already down/);
+    await assert.rejects(() => d.s.tap('row', { down: true }), /already down/);
+    const ended = await d.s.pointer(phase);
+    assert.equal(ended.error, undefined);
+    assert.equal(ended.contact, false);
+    assert.equal(d.pending(), false);
+    assert.equal(d.s.contact, null);
+    assert.deepEqual(d.calls.map(c => c[1]), ['down', phase]);
+    await assert.rejects(() => d.s.pointer(phase), /no contact is down/);
+    await d.s.tap('row');
+  }
+});
+
+test('a failed terminal keeps an accepted down until the carrier acknowledges cleanup', async () => {
+  for (const failure of [{ error: 'up refused' }, { delivery: 'unsupported' }, new Error('up transport failed')]) {
+    const d = await decliningContactSession({ replies: { up: failure } });
+    await d.s.tap('row', { down: true });
+    await d.s.pointer('move', { dx: -30, dy: 0 });
+    if (failure instanceof Error) { await assert.rejects(() => d.s.pointer('up'), /transport failed/); }
+    else { await d.s.pointer('up'); }
+    assert.ok(d.s.contact);
+    assert.equal(d.pending(), true);
+    await d.s.pointer('cancel');
+    assert.equal(d.s.contact, null);
+    assert.equal(d.pending(), false);
+  }
+});
+
+test('drag success and exception cleanup release an accepted down after declined motion', async () => {
+  const drag = { dx: -30, dy: 0, over: 10 };
+  const ok = await decliningContactSession();
+  await ok.s.tap('row', { drag });
+  assert.deepEqual(ok.calls.map(c => c[1]), ['down', 'move', 'up']);
+  assert.equal(ok.pending(), false);
+  assert.equal(ok.s.contact, null);
+  for (const replies of [{}, { cancel: { delivery: 'unsupported' } }, { cancel: new Error('cancel failed') }, { up: { error: 'up refused' } }]) {
+    const d = await decliningContactSession({ replies });
+    const during = replies.up ? [] : [async () => { throw new Error('read failed'); }];
+    await assert.rejects(() => d.s.tap('row', { drag: { ...drag, during } }), replies.up ? /up refused/ : /read failed/);
+    assert.deepEqual(d.calls.map(c => c[1]), replies.up ? ['down', 'move', 'up', 'cancel'] : replies.cancel ? ['down', 'move', 'cancel', 'up'] : ['down', 'move', 'cancel']);
+    assert.equal(d.pending(), false);
+    assert.equal(d.s.contact, null);
+  }
+  for (const move of [{ error: 'move refused', contact: false }, new Error('move transport failed')]) {
+    const d = await decliningContactSession({ replies: { move } });
+    await assert.rejects(() => d.s.tap('row', { drag }), /move refused|move transport failed/);
+    assert.deepEqual(d.calls.map(c => c[1]), ['down', 'move', 'cancel']);
+    assert.equal(d.pending(), false);
+    assert.equal(d.s.contact, null);
+  }
+  for (const landError of ['landing failed', new Error('landing failed')]) {
+    const lifted = await decliningContactSession({ landError, replies: { cancel: { delivery: 'unsupported' } } });
+    await assert.rejects(() => lifted.s.tap('row', { drag }), /landing failed/);
+    assert.deepEqual(lifted.calls.map(c => c[1]), ['down', 'move', 'up'], 'an acknowledged up needs no second release');
+    assert.equal(lifted.pending(), false);
+    assert.equal(lifted.s.contact, null);
+  }
+  const unknown = await decliningContactSession({ replies: { down: new Error('down transport failed') } });
+  await assert.rejects(() => unknown.s.tap('row', { drag }), /down transport failed/);
+  assert.deepEqual(unknown.calls.map(c => c[1]), ['down', 'cancel']);
+  assert.equal(unknown.pending(), false);
+  const failed = await decliningContactSession({ replies: { cancel: { error: 'cancel refused' }, up: { delivery: 'unsupported' } } });
+  await assert.rejects(() => failed.s.tap('row', { drag: { ...drag, during: [async () => { throw new Error('read failed'); }] } }), /read failed.*could not be released/);
+  assert.equal(failed.pending(), true);
+  assert.ok(failed.s.contact);
+});
+
+test('automatic drags release a down whose successful receipt already says contact false', async () => {
+  const down = { contact: false, at: [100, 20], delivery: 'presenter' };
+  const still = { dx: 0, dy: 0 };
+  const ok = await decliningContactSession({ replies: { down } });
+  await ok.s.tap('row', { drag: still });
+  assert.deepEqual(ok.calls.map(c => c[1]), ['down', 'up']);
+  assert.equal(ok.pending(), false);
+  assert.equal(ok.s.contact, null);
+  for (const cancel of [undefined, { delivery: 'unsupported' }, new Error('cancel transport failed')]) {
+    for (const moves of [false, true]) {
+      const d = await decliningContactSession({ replies: { down, cancel } });
+      const drag = moves ? { dx: -30, dy: 0, over: 10 } : { ...still, during: [async () => { throw new Error('read failed'); }] };
+      await assert.rejects(() => d.s.tap('row', { drag }), moves ? /no gesture contact is down/ : /read failed/);
+      assert.deepEqual(d.calls.map(c => c[1]), ['down', ...(moves ? ['move'] : []), 'cancel', ...(cancel ? ['up'] : [])]);
+      assert.equal(d.pending(), false);
+      assert.equal(d.s.contact, null);
+      await d.s.tap('row');
+    }
+  }
+  const replies = { down, cancel: { error: 'cancel refused' }, up: { delivery: 'unsupported' } };
+  const failed = await decliningContactSession({ replies });
+  await assert.rejects(() => failed.s.tap('row', { drag: { ...still, during: [async () => { throw new Error('read failed'); }] } }), /read failed.*could not be released/);
+  assert.deepEqual(failed.calls.map(c => c[1]), ['down', 'cancel', 'up']);
+  assert.equal(failed.pending(), true);
+  assert.deepEqual(failed.s.contact, { x: 100, y: 20 });
+  delete replies.cancel;
+  await failed.s.pointer('cancel');
+  assert.equal(failed.pending(), false);
+  assert.equal(failed.s.contact, null);
+});
+
+test('automatic drag cleanup covers error receipts after native down and keeps failed cleanup reachable', async () => {
+  for (const down of [{ error: 'down failed after input began' }, new Error('down transport failed')]) {
+    const replies = { down, cancel: { error: 'cancel refused' }, up: { delivery: 'unsupported' } };
+    const d = await decliningContactSession({ replies, downBegan: true });
+    await assert.rejects(() => d.s.tap('row', { drag: { dx: -30, dy: 0, over: 10 } }), /down .*failed.*could not be released/);
+    assert.deepEqual(d.calls.map(c => c[1]), ['down', 'cancel', 'up']);
+    assert.equal(d.pending(), true);
+    assert.deepEqual(d.s.contact, { x: 100, y: 20 });
+    delete replies.cancel;
+    await d.s.pointer('cancel');
+    assert.equal(d.pending(), false);
+    assert.equal(d.s.contact, null);
+    await d.s.tap('row');
+  }
+});
+
+test('unsupported downs and restored canvas contacts keep their existing terminal routes', async () => {
+  const unsupported = { delivery: 'unsupported', reason: 'no phased touch' };
+  const d = await decliningContactSession({ phasedTouch: false, replies: { down: unsupported, move: unsupported, up: unsupported, cancel: unsupported } });
+  assert.equal((await d.s.tap('row', { down: true })).delivery, 'unsupported');
+  assert.equal(d.s.contact, null);
+  for (const phase of ['move', 'up', 'cancel']) {
+    assert.equal((await d.s.pointer(phase)).delivery, 'unsupported');
+  }
+  assert.ok(!d.requests.some(r => r.op === 'state'));
+  const drag = await decliningContactSession({ replies: { down: unsupported } });
+  assert.equal((await drag.s.tap('row', { drag: { dx: -30, dy: 0 } })).delivery, 'unsupported');
+  assert.deepEqual(drag.calls.map(c => c[1]), ['down']);
+  assert.equal(drag.s.contact, null);
+  assert.equal(drag.pending(), false);
+  for (const down of [{ error: 'down refused' }, unsupported]) {
+    const refused = await decliningContactSession({ replies: { down } });
+    await refused.s.tap('row', { down: true });
+    assert.equal(refused.s.contact, null);
+    assert.equal(refused.pending(), false);
+    await assert.rejects(() => refused.s.pointer('up'), /no contact is down/);
+  }
+  const mouse = await decliningContactSession({ phasedTouch: false, replies: { move: unsupported } });
+  await mouse.s.tap('row', { down: true });
+  assert.equal((await mouse.s.pointer('move', { dx: -30, dy: 0 })).delivery, 'unsupported');
+  assert.ok(mouse.s.contact);
+  await mouse.s.pointer('up');
+  assert.equal(mouse.pending(), false);
+  assert.equal(mouse.s.contact, null);
+  for (const phase of ['up', 'cancel']) {
+    const restored = await decliningContactSession({ world: [{ canvas: 7, input: { controlContacts: [{ id: 9 }] } }] });
+    const reply = await restored.s.pointer(phase);
+    assert.equal(reply.delivery, 'platform');
+    assert.deepEqual(restored.calls, []);
+    assert.deepEqual(restored.requests.find(r => r.op === 'tap'), { op: 'tap', id: 7, contact: 9, phase });
+    const ambiguous = await decliningContactSession({ world: [{ canvas: 7, input: { controlContacts: [{ id: 9 }, { id: 10 }] } }] });
+    await assert.rejects(() => ambiguous.s.pointer(phase), /multiple restored contacts/);
+    assert.deepEqual(ambiguous.calls, []);
+    assert.ok(!ambiguous.requests.some(r => r.op === 'tap'));
+  }
 });
 
 test('accepted pointer, wheel, media and zero-time forms still reach the carrier', async () => {
@@ -282,10 +561,10 @@ test('an app that leaves the foreground fails the pending op and later ones unti
   readable.destroy(); writable.destroy();
 });
 
-test('the driver grammar names an unquoted mediasession action beside pinch', () => {
+test('the driver grammar names swipe and an unquoted mediasession action beside pinch', () => {
   const source = readFileSync(new URL('./agent.mjs', import.meta.url), 'utf8');
   const header = source.split('\n').slice(0, 16).join('\n');
-  const form = 'pinch <scale> [at <x> <y>] | mediasession <action> [seconds]';
+  const form = 'pinch <scale> [at <x> <y>] | swipe <left|right|up|down> [at <x> <y>] | mediasession <action> [seconds]';
   assert.ok(header.includes(form), header);
   const usage = spawnSync(process.execPath, [resolve(import.meta.dir, 'agent.mjs')], { encoding: 'utf8' });
   assert.equal(usage.status, 2, usage.stderr);

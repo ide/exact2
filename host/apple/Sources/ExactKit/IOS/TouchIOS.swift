@@ -356,7 +356,7 @@ extension Agent {
     /// The aim's reply: the window point `p` in the scene's space (`local`
     /// in the viewport's), and where the dispatch log must see it land: the
     /// Exact node `seen` is in, or no node for UIKit's own row (`native`).
-    private func aimed(_ v: NodeView, at p: CGPoint, local: CGPoint, in win: UIWindow, space: UICoordinateSpace, hit seen: UIView?,
+    func aimed(_ v: NodeView, at p: CGPoint, local: CGPoint, in win: UIWindow, space: UICoordinateSpace, hit seen: UIView?,
                        avoided: PressReach? = nil, native: [String: Any]? = nil) -> [String: Any] {
         let vp = presenter.viewport, s = win.convert(p, to: space), fixed = win.convert(p, to: win.screen.fixedCoordinateSpace)
         let origin = vp.convert(vp.pageOrigin, to: space)

@@ -360,6 +360,40 @@ fn hear(name: String) -> impl FnMut(&mut Ears, &Input, &mut Context<'_, Ears>) +
 }
 
 #[test]
+fn a_consumed_scrolling_terminal_sends_no_fresh_hatch_up_or_move() {
+    let mut p = boot::<Ears>(INPUT, &["outer", "inner", "plain", "field"]);
+    p.set_pointer_kind(PointerKind::Touch);
+    first_pixel(&mut p);
+    p.reader_touch(0, 50., 20., 0.).unwrap();
+    assert_eq!(
+        notes(),
+        [
+            "inner Down handled=false inside=true",
+            "inner-again Down handled=false inside=true",
+            "outer Down handled=false inside=true"
+        ]
+    );
+    p.reader_touch(3, 50., 20., 1.).unwrap();
+    assert_eq!(
+        notes(),
+        [
+            "inner Cancel handled=false inside=true",
+            "inner-again Cancel handled=false inside=true",
+            "outer Cancel handled=false inside=true"
+        ]
+    );
+    assert!(p.contact.is_none());
+    assert!(p.landed.is_some());
+    p.reader_touch(5, 50., 20., 2.).unwrap();
+    assert!(p.landed.is_none());
+    assert!(
+        notes().is_empty(),
+        "a consumed terminal rebuilds no hit chain"
+    );
+    assert_eq!(state(&mut p)["slots"]["presses"], 0);
+}
+
+#[test]
 fn input_is_observed_after_exacts_dispatch_with_handled_and_captured_until_it_lifts() {
     let mut p = boot::<Ears>(INPUT, &["outer", "inner", "plain", "field"]);
     first_pixel(&mut p);

@@ -613,6 +613,7 @@ extension Agent {
     }
 
     func tap(_ req: [String: Any]) -> [String: Any] {
+        if req["swipe"] != nil { return swipeTap(req) }
         // Refuse phased replay until its completion can be acknowledged under platform timing
         if !ExactEnv.agentFreezes, req["wheel"] != nil, req["gesture"] as? Bool == true {
             return ["code": "platform-trackpad-replay-unqualified", "error": "Trackpad gesture replay under platform timing has no reliable completion acknowledgement. Use a plain wheel event for an agent drive, or reproduce the gesture in the normally running app."]

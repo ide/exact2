@@ -8,6 +8,34 @@
 
 use super::*;
 
+impl PaintedBox {
+    /// A point from the untransformed box's top left, carried through the
+    /// paint's transforms. Returns the viewport point and local offset;
+    /// an omitted point is the local centre.
+    pub(crate) fn point_at(&self, at: Option<(f32, f32)>) -> Option<((f32, f32), (f32, f32))> {
+        let rect = self
+            .affine
+            .map(|(_, r)| r)
+            .or_else(|| self.projective.map(|(_, r, ..)| r))
+            .unwrap_or(self.rect);
+        let (x, y) = at.unwrap_or((rect.2 / 2., rect.3 / 2.));
+        if !x.is_finite() || !y.is_finite() || x < 0. || y < 0. || x >= rect.2 || y >= rect.3 {
+            return None;
+        }
+        let mut point = Point::from_xy(rect.0 + x, rect.1 + y);
+        if let Some((ts, _)) = self.affine {
+            ts.map_point(&mut point);
+        }
+        let mapped = match self.projective {
+            Some((inv, ..)) => {
+                crate::placement::map(&crate::placement::inverse(inv)?, point.x, point.y)
+            }
+            None => (point.x, point.y),
+        };
+        (mapped.0.is_finite() && mapped.1.is_finite()).then_some((mapped, (x, y)))
+    }
+}
+
 impl Painter {
     /// A `Text` node: its runs' backgrounds, decorations and glyphs, once,
     /// or once in each of its fragments.

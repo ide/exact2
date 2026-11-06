@@ -38,7 +38,8 @@ impl<D: DataSource + Default> CanvasHost<D> {
     /// one that is down has been held still for the system's long-press
     /// time, which the reader measures; what names a context menu there
     /// takes it ([`crate::presenter::Presenter::long_press`]), and the
-    /// touch then presses nothing when it lifts.
+    /// touch then presses nothing when it lifts. Action 5 cancels the whole
+    /// physical touch, including its pending fling; 3 preserves that fling.
     pub fn touch(&mut self, action: i32, x: f32, y: f32, tool: i32) {
         let _s = Section::begin(c"exact touch");
         self.p.set_pointer_kind(match tool {
@@ -55,16 +56,7 @@ impl<D: DataSource + Default> CanvasHost<D> {
         }
         let now = self.now();
         let (x, y) = (x / self.scale, y / self.scale);
-        let r = match action {
-            0 => self.p.pointer_down(x, y, now).map(|_| ()),
-            1 => self.p.pointer_up(x, y, now).map(|_| ()),
-            2 => self.p.pointer_move(x, y, now).map(|_| ()),
-            4 => {
-                self.p.long_press(x, y, now);
-                Ok(())
-            }
-            _ => self.p.pointer_cancel(now),
-        };
+        let r = self.p.reader_touch(action, x, y, now);
         self.touched(action, x, y, now, r);
     }
 

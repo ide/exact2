@@ -156,7 +156,12 @@ internal class Scrolling(private val view: ExactView) {
                 val lifted = e.actionMasked == MotionEvent.ACTION_UP
                 if (lifted) tracker?.addMovement(e)
                 val was = mode
-                if (was == DRAGGING) release(lifted) else mode = IDLE
+                if (was == DRAGGING) {
+                    release(lifted)
+                    if (lifted || e.actionMasked == MotionEvent.ACTION_CANCEL) {
+                        view.forward(5, e.x, e.y, tool, 0L)
+                    }
+                } else mode = IDLE
                 tracker?.recycle(); tracker = null
                 return was == DRAGGING
             }

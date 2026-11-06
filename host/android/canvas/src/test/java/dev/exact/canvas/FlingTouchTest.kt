@@ -1,5 +1,6 @@
 package dev.exact.canvas
 
+import android.view.MotionEvent
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -7,6 +8,15 @@ import org.junit.Test
  * touch had down, unless the reader's scrolling or a hosted field took the touch. */
 class FlingTouchTest {
     private val touch = FlingTouch()
+
+    @Test fun pointerCountChangesPreserveTheTouchUntilItsPhysicalTerminal() {
+        assertEquals(0, pointerAction(MotionEvent.ACTION_DOWN))
+        assertEquals(2, pointerAction(MotionEvent.ACTION_MOVE))
+        assertEquals(3, pointerAction(MotionEvent.ACTION_POINTER_DOWN))
+        assertEquals(3, pointerAction(MotionEvent.ACTION_POINTER_UP))
+        assertEquals(1, pointerAction(MotionEvent.ACTION_UP))
+        assertEquals(5, pointerAction(MotionEvent.ACTION_CANCEL))
+    }
 
     @Test fun aFlingGoesItsVelocitysLargerAxisAndSign() {
         assertEquals("right", FlingTouch.direction(900f, -300f))

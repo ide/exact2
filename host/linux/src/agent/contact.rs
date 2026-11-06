@@ -76,10 +76,15 @@ fn perform<D: DataSource>(p: &mut Presenter<D>, request: &Value) -> Result<Strin
     {
         return Err(InputError::malformed("unexpected field for contact phase"));
     }
-    // An accepted receipt can retire native contact before the shared driver
-    // hears it. Terminal phases acknowledge that state without dispatch/time.
-    if matches!(phase, "up" | "cancel") && p.contact_position().is_none() {
-        return Ok(reply(p, phase, None));
+    if matches!(phase, "up" | "cancel") {
+        if let Some(error) = p.prepare_agent_end() {
+            return Err(error.into());
+        }
+        // An accepted receipt can retire native contact before the shared
+        // driver hears it. With no pointer left, this only acknowledges it.
+        if p.contact_position().is_none() {
+            return Ok(reply(p, phase, None));
+        }
     }
     let from = p.host().now();
     let mut at;

@@ -131,13 +131,18 @@ extension NodeView {
         }
         guard let scroll = other.view as? UIScrollView, other === scroll.panGestureRecognizer,
               let hit = gesture.hit, hit === scroll || hit.isDescendant(of: scroll) else { return false }
-        let travel = gesture.travel, vertical = travel.y != 0
+        return Self.scrolls(scroll, touches: gesture.touches, travel: gesture.travel, from: gesture.location(in: scroll))
+    }
+    /// The scroll pan's admission, shared with the agent's recognized swipe.
+    static func scrolls(_ scroll: UIScrollView, touches: Int, travel: CGPoint, from start: CGPoint) -> Bool {
+        guard scroll.isScrollEnabled, scroll.panGestureRecognizer.admitsTouches(touches) else { return false }
+        let vertical = travel.y != 0
         let size = scroll.bounds.inset(by: scroll.adjustedContentInset).size
         let overflows = vertical ? scroll.contentSize.height > size.height + 0.5 : scroll.contentSize.width > size.width + 0.5
         let bounces = vertical ? scroll.alwaysBounceVertical : scroll.alwaysBounceHorizontal
         guard overflows || bounces else { return false }
         if let area = scroll as? TextArea { return area.pans }
-        if let own = scroll as? ScrollView { return own.wouldPan(travel, from: gesture.location(in: scroll)) }
+        if let own = scroll as? ScrollView { return own.wouldPan(travel, from: start) }
         return true
     }
     /// Whether this node takes a one-finger swipe to the right, which keeps the

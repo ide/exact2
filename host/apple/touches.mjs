@@ -425,15 +425,23 @@ export const DRAG_BOUNDS = { press: 10000, hold: 10000, over: 2000, total: 10000
 // What a lost touch's error advises: the synthesizer, unlike XCTest's public calls, does not wait for the app to go idle
 const SETTLE_FIRST = 'a real touch played while native work still moves (a push, a sheet, the keyboard) can be lost, so `clock settle` first';
 
-export async function realTap({ ask, touches, id, at, rel, drag, abandon }) {
+export async function realTap({ ask, touches, id, at, rel, drag, swipe, abandon }) {
+  if (swipe !== undefined) {
+    const travel = { left: [-120, 0], right: [120, 0], up: [0, -120], down: [0, 120] }[swipe];
+    if (!travel) {
+      throw new Error('swipe: expected left, right, up or down');
+    }
+    drag = { dx: travel[0], dy: travel[1], press: 0, over: 100, hold: 0, during: [] };
+  }
   // A failure of the runner or of the app's carrier: no diagnostic read follows it (`tapRefusal`).
   const transport = (message) => Object.assign(new Error(message), { transport: true });
   const legs = drag?.path ? [drag, ...drag.path].map(({ dx, dy, press = 0, over = 250, hold = 0, during = [], tick }) => ({ dx, dy, press, over, hold, during, tick })) : null;
   let net = drag ? [drag.dx, drag.dy] : [0, 0];
-  const what = drag ? `drag #${id}` : `tap #${id}`;
+  const what = swipe ? `swipe #${id} ${swipe}` : drag ? `drag #${id}` : `tap #${id}`;
   // A plain tap aims at the target's own press (LLP 1012 §1: never a control inside it its middle reaches);
   // `rel` is a point in the target (`tap <target> at <x> <y>`), whatever a finger there reaches; a drag starts at the middle.
-  const aimReq = { op: 'tap', id, aim: at ? { x: at[0], y: at[1] } : rel ? { at: rel } : drag ? true : { press: true } };
+  const aimReq = swipe ? { op: 'tap', id, swipe, ...(rel ? { at: rel } : {}), check: true }
+    : { op: 'tap', id, aim: at ? { x: at[0], y: at[1] } : rel ? { at: rel } : drag ? true : { press: true } };
   // Wait out a fold cloak and a transition before aiming: either takes the touch or moves where it lands (cloak.mjs)
   const { cloaked = 0, transitioned = 0 } = await touches.cloak?.clear() ?? {};
   const waited = [cloaked && `${cloaked} ms for SpringBoard's fold cloak`, transitioned && `${transitioned} ms for a SpringBoard transition`].filter(Boolean).join(' and ');
@@ -441,19 +449,27 @@ export async function realTap({ ask, touches, id, at, rel, drag, abandon }) {
   const touchError = (message) => new Error(`${message}${waited ? ` (after waiting ${waited}, cloak.mjs)` : ''}`);
   const first = await ask(aimReq);
   if (first.error) throw new Error(first.error);
+  if (swipe && (first.checked !== true || !first.aim)) {
+    throw new Error(first.reason ?? 'the host did not admit the swipe');
+  }
   const fg = await touches.ask({ op: 'foreground' });
   if (fg.error) throw transport(`${what}: the touch runner: ${fg.error}`);
   if (fg.state !== 'runningForeground') throw new Error(`${what}: the app is ${fg.state ?? fg.error}, not in the foreground`);
   const aim = (await ask(aimReq));
   if (aim.error) throw new Error(aim.error);
+  if (swipe && (aim.checked !== true || !aim.aim)) {
+    throw new Error(aim.reason ?? 'the host did not admit the swipe');
+  }
   if (!sameAim(first.aim, aim.aim)) throw new Error(`${what}: the screen rotated or moved since aim`);
   const a = aim.aim;
   // `screen`: where XCTest's synthesizer presses a tap, on the display whose size is `display` (touches.swift).
   let request = { op: 'tap', point: a.point, ...(a.fixed ? { screen: a.fixed, display: a.display } : {}) }, moves = false, ms = 0;
   if (drag) {
-    // The end, from the start the host resolved just now, in the viewport it reported with it.
+    // A swipe's host-checked path may cross the viewport edge into the keyboard (LLP 1057.001 §8.7).
     const end = [a.at[0] + drag.dx, a.at[1] + drag.dy], [vw, vh] = a.viewport;
-    if (!(end[0] >= 0 && end[1] >= 0 && end[0] <= vw && end[1] <= vh)) throw new Error(`${what}: the drag would end at (${end}), outside the viewport (${vw} × ${vh})`);
+    if (!swipe && !(end[0] >= 0 && end[1] >= 0 && end[0] <= vw && end[1] <= vh)) {
+      throw new Error(`${what}: the drag would end at (${end}), outside the viewport (${vw} × ${vh})`);
+    }
     moves = drag.dx !== 0 || drag.dy !== 0;
     ms = drag.press + drag.hold + (moves ? drag.over : 0);
     // Points per second: what XCTest's velocity measured as on a 3x simulator, whatever its header says (§11).
