@@ -1409,12 +1409,11 @@ final class MenuHost {
     private func opensConfirmation(_ row: NodeView) -> Bool {
         presenter?.invocation(of: row).map { $0.opens && isConfirmation($0.target) } ?? false
     }
-    /// The menu grammar, extracted (LLP 1021 D3): button rows become
-    /// actions, a row that opens another menu its submenu (§5,
-    /// "Submenus"); any other row is a section boundary. A row's action
-    /// presses it, then presents the confirmation or dialog it opens, or any other popover as
-    /// if by `opener`, the menu's own invoker (exact2's menu rule, LLP 1021: the menu closing
-    /// doesn't take it along). `path` holds the popovers above `pop`, whose rows opened it.
+    /// The menu grammar (LLP 1021 D3): button and link actions, submenus
+    /// for menu openers, section boundaries otherwise. Links use their ordinary
+    /// press default. Other actions press the row, then present what it opens
+    /// as if by `opener`, so closing this menu does not take the new popover along.
+    /// `path` holds the popovers above `pop`, whose rows opened it.
     func items(of pop: NodeView, path: [NodeView] = [], opener: NodeView? = nil) -> [UIMenuElement] {
         var sections: [[UIMenuElement]] = [[]]
         // Under the agent, what UIKit was given, in order (`given`).
@@ -1439,7 +1438,7 @@ final class MenuHost {
                 element.subtitle = face.subtitle
                 sections[sections.count - 1].append(element)
                 rows.append(GivenRow(row, title: element.title, subtitle: element.subtitle))
-            } else if row.handlers.contains("press") || opensConfirmation(row) || presenter?.invocation(of: row).map({ $0.opens && $0.target.props["accessibilityRole"] != "menu" }) == true {
+            } else if row.presses || opensConfirmation(row) || presenter?.invocation(of: row).map({ $0.opens && $0.target.props["accessibilityRole"] != "menu" }) == true {
                 let id = row.id, token = row.incarnation
                 let image = image(of: row)
                 let action = UIAction(title: face.title, image: image) { [weak self] action in
@@ -1450,7 +1449,8 @@ final class MenuHost {
                         return row
                     }
                     guard let self, let presenter = self.presenter, let row = current() else { return }
-                    if row.handlers.contains("press") { self.presenting(row) { presenter.press(id) } }
+                    if row.defaultLink != nil { presenter.press(id); return }
+                    if row.presses { self.presenting(row) { presenter.press(id) } }
                     // Once the menu has gone, what the surviving row opens, from
                     // where UIKit says the menu's presentations come from.
                     guard current() != nil, let invocation = presenter.invocation(of: row), invocation.opens else { return }
@@ -1489,7 +1489,7 @@ final class MenuHost {
     /// toggles (`Invocation`), not a confirmation, not on `path` (a cycle is
     /// no submenu), with at least one item.
     private func submenu(of row: NodeView, path: [NodeView], opener: NodeView?) -> [UIMenuElement]? {
-        guard let invocation = presenter?.invocation(of: row), invocation.action == .show || invocation.action == .toggle else { return nil }
+        guard row.defaultLink == nil, let invocation = presenter?.invocation(of: row), invocation.action == .show || invocation.action == .toggle else { return nil }
         let sub = invocation.target
         guard !isConfirmation(sub), sub.props["accessibilityRole"] == "menu", !path.contains(where: { $0 === sub }) else { return nil }
         let children = items(of: sub, path: path, opener: opener)

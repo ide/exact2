@@ -4,6 +4,8 @@
 //! literal, a template a prop names (a library row's) or an `if` that shows
 //! it (theme2 16:37, stage 13 C). A row that says whether it is selected
 //! is a choice, never one.
+//! A path link's unsaid accessory is the native disclosure; authored
+//! accessories and custom rows keep their own presentation.
 
 use exact_kernel::{Accessory, ColorValue, GroupedRow, Kernel, Offer};
 use exact_runner::{DataError, DataSource, Runner, Value};
@@ -290,4 +292,142 @@ fn a_leading_symbols_slot_and_the_title_after_it_follow_the_text_size() {
             "{body}: the title's inset"
         );
     }
+}
+
+#[test]
+fn navigation_links_infer_disclosure_from_paths_and_keep_their_urls() {
+    let cases = [
+        ("/map", Accessory::Disclosure),
+        ("/", Accessory::Disclosure),
+        ("item/2", Accessory::Disclosure),
+        ("../map", Accessory::Disclosure),
+        ("./map", Accessory::Disclosure),
+        ("/map?tab=2#intro", Accessory::Disclosure),
+        ("item/2?next=https://example.com", Accessory::Disclosure),
+        ("item/name:part", Accessory::Disclosure),
+        ("https://example.com/map", Accessory::None),
+        ("HTTPS://example.com/map", Accessory::None),
+        ("mailto:a@example.com", Accessory::None),
+        ("tel:+14155550101", Accessory::None),
+        ("exact-chat:map", Accessory::None),
+        ("//example.com/map", Accessory::None),
+        ("#intro", Accessory::None),
+        ("?tab=2", Accessory::None),
+        ("", Accessory::None),
+    ];
+    let links: String = cases.iter().enumerate().map(|(i, (href, _))| {
+        format!("          link href={href:?} testId=\"link-{i}\"\n            text \"Destination\"\n")
+    }).collect();
+    let r = boot(&format!(
+        "component App\n  view\n    column testId=\"root\" width=402 height=874\n      list appearance=\"auto\" testId=\"list\" flex=1\n        section\n{links}"
+    ));
+    for (i, (href, expected)) in cases.iter().enumerate() {
+        let test_id = format!("link-{i}");
+        let model = row(&r, &test_id);
+        assert_eq!(model.accessory, *expected, "{href}");
+        assert!(!model.action, "a link is no action cell: {href}");
+        assert_eq!(
+            r.kernel()
+                .node(id(&r, &test_id))
+                .unwrap()
+                .props
+                .str(exact_kernel::PropId::Href),
+            Some(*href),
+            "inference does not resolve or rewrite the URL"
+        );
+    }
+}
+
+#[test]
+fn link_disclosure_preserves_authored_accessories_custom_rows_and_handlers() {
+    let mut r = boot(
+        r#"component App
+  state destination = "/map"
+  state presses = 0
+  action change(href: string)
+    destination = href
+  action chosen
+    presses = presses + 1
+  view
+    column testId="root" width=402 height=874
+      list appearance="auto" testId="list" flex=1
+        section
+          link href=destination testId="plain"
+            text "Map"
+          link href=destination display="flex" flex-direction="column" testId="column"
+            text "Map"
+            text "Subtitle"
+          link href=destination testId="check"
+            text "Chosen"
+            image "symbol:checkmark"
+          link href=destination testId="disclosure"
+            text "Open"
+            image "symbol:forward-chevron"
+          link href=destination testId="toggle"
+            text "Enabled"
+            input type="checkbox" role="switch" checked=true testId="switch"
+          link href=destination testId="radio"
+            input type="radio" name="choice" value="a" checked=true testId="choice"
+            text "Choice"
+          link href=destination testId="detail"
+            text "Details"
+            button press=chosen testId="info" aria-label="Info"
+              image "symbol:sf/info.circle"
+          link href=destination testId="custom"
+            row
+              text "Custom"
+          link href=destination display="flex" flex-direction="column" testId="custom-column"
+            row
+              text "Custom column"
+          link href=destination border-bottom="1px solid red" testId="edge"
+            text "Authored edge"
+          link href=destination disabled=true testId="disabled"
+            text "Disabled"
+          link href=destination press=chosen testId="handled"
+            text "Authored handler"
+"#,
+    );
+    for href in ["/map", "mailto:a@example.com", "item/2"] {
+        r.act("change", vec![Value::str(href)]).unwrap();
+        layout(&mut r);
+        let inferred = if href.starts_with("mailto:") {
+            Accessory::None
+        } else {
+            Accessory::Disclosure
+        };
+        for test_id in ["plain", "column", "disabled", "handled"] {
+            let model = row(&r, test_id);
+            assert!(!model.custom, "{test_id}");
+            assert_eq!(model.accessory, inferred, "{test_id}: {href}");
+        }
+        assert!(row(&r, "column").subtitle);
+        assert!(row(&r, "disabled").disabled);
+        assert!(row(&r, "handled").pressable);
+        assert_eq!(row(&r, "check").accessory, Accessory::Checkmark);
+        assert_eq!(row(&r, "disclosure").accessory, Accessory::Disclosure);
+        assert_eq!(
+            row(&r, "toggle").accessory,
+            Accessory::Toggle(id(&r, "switch"))
+        );
+        assert_eq!(
+            row(&r, "radio").accessory,
+            Accessory::Radio(id(&r, "choice"), true)
+        );
+        assert_eq!(
+            row(&r, "detail").accessory,
+            Accessory::Detail(id(&r, "info"))
+        );
+        for test_id in ["custom", "custom-column", "edge"] {
+            let model = row(&r, test_id);
+            assert!(model.custom, "{test_id}");
+            assert_eq!(
+                model.accessory,
+                Accessory::None,
+                "{test_id}: carried views own the accessory"
+            );
+        }
+    }
+    r.dispatch(id(&r, "handled"), exact_runner::Event::Press)
+        .unwrap();
+    assert_eq!(r.slot("presses"), Some(&Value::Number(1.0)));
 }
