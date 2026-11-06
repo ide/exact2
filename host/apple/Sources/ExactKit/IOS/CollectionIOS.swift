@@ -46,9 +46,9 @@ extension CollectionHost {
     package func geometry(_ id: UInt32) -> CollectionFacts? {
         guard let node = presenter?.views[id], let scroll = node.scroll, !hidden(node) else { return nil }
         // Layout's box, not the one drawn on the pixel grid (`PixelGridIOS.swift`): the runner lays rows to it.
-        // PROTO (safe-area design r2 §5.3): a list that reaches past its laid-out box has the physical scrollport
-        // its scroll view spans, which UIKit's and Exact's insets bring back to the logical port.
-        let bounds = node.reach == .zero ? node.layoutBounds : CGRect(origin: .zero, size: scroll.bounds.size)
+        // A reached node includes the safe-area extent. Its scroll view also includes control bands,
+        // which the port calculation below adds separately.
+        let bounds = node.reach == .zero ? node.layoutBounds : node.bounds
         let insets = scroll.adjustedContentInset, band = node.pageBand
         let content = node.contentBox()
         let portWidth = max(0, bounds.width - insets.left - insets.right)

@@ -463,7 +463,9 @@ extension NavigationHost {
     /// (PROTO) or a list's rows and nothing is owed; then what presentations
     /// inherit and the authored tablist's covers.
     func batchApplied(_ batch: Batch, skipSync: Bool) {
-        if !skipSync || syncOwed { sync(batch) }
+        if !skipSync || syncOwed || presenter.awaitingFrame.contains(where: { entry in
+            entry.view.map { $0.groupedOwner || insetByUIKit($0) } ?? false
+        }) { sync(batch) }
         presenter.modals.inheritFromAncestors()
         followAuthoredTablist()
     }

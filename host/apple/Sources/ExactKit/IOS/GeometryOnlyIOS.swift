@@ -74,7 +74,7 @@ extension Presenter {
         guard !ids.isEmpty else { return }
         let changed = touchedAndAbove(ids)
         swipeActions.sync(changed: changed, reshaped: []); rowCells.sync(changed: changed)
-        groupedLists?.sync(changed: changed); reachPageEdges(); reachSafeEdges()
+        groupedLists?.sync(changed: changed); reachSafeEdges(); reachPageEdges()
         segments.sync()
         controls.sync(contents: false, changed: changed)
         menus.sync()

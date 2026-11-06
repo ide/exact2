@@ -819,6 +819,7 @@ package final class Presenter {
             }
         }
         svg.seek(clock: session?.clock)
+        let skipNavigationSync = canSkipNavigationSync(batch)
         let outermost = !applying
         applying = true
         // Hatched nodes this batch destroys end first, so a reusable hatch has
@@ -827,18 +828,24 @@ package final class Presenter {
         elements.begin(batch)
         var moved = false // create, frame or content ops: rows may have come or moved (`HeavyLeaves.batchApplied`)
         defer {
-            collections.endBatch()
             pool.end()
             PaintOrder.end()
             if outermost {
                 applying = false
+                let q = waiting
+                waiting = []
+                // Finish containment before queued geometry reports, with UIKit's animation still in scope.
+                if !geometryOnly {
+                    let protoNav = ApplyPhases.cpu()
+                    navigation.batchApplied(batch, skipSync: skipNavigationSync)
+                    ApplyPhases.navigation += ApplyPhases.cpu() - protoNav
+                }
+                collections.endBatch() // Sample the new backend only after its containers have laid it out.
                 reaimFixedGradients()
                 paintPresentedText()
                 paintChangedText()
                 if !boxFilters.isEmpty { boxFilters.render() }
                 videoVisibility?.changed()
-                let q = waiting
-                waiting = []
                 for (id, f) in q where id.map({ textHost($0) != nil }) ?? true { f() }
                 scrollPump.batchApplied()
                 leaves.batchApplied(moved: moved)
@@ -851,14 +858,13 @@ package final class Presenter {
                 #if os(iOS)
                 session?.view?.syncKeyboardFocus()
                 #endif
-            }
+            } else { collections.endBatch() }
         }
         var beganGeometry = false, touchedIDs: [UInt32] = [], reshapedIDs: [UInt32] = [], restyledIDs: [UInt32] = []
         // Read once: an animation UIKit has open around the batch is open around each of its ops
         let animating = UIView.inheritedAnimationDuration > 0
         if outermost { placedAnew.removeAll(keepingCapacity: true) } // a flat leaf promoted between batches
         let anewFrom = placedAnew.count
-        let skipNavigationSync = canSkipNavigationSync(batch)
         if batch.controls { controls.facesChanged() }
         // An op inside an animation UIKit has open only if its view showed in the last frame (`moveOrPlace`).
         func applyOp(_ op: BatchOp, _ kind: BatchOp.Kind, _ id: UInt32) {
@@ -1050,8 +1056,10 @@ package final class Presenter {
         // A view the flush promoted and mounted may have moved its children.
         while !gridMoved.isEmpty { regridMoved(); flats.flush() }
         ApplyPhases.regrid += ApplyPhases.cpu() - protoRegrid; let protoReach = ApplyPhases.cpu() // PROTO
-        if geometryOnly { reachMovingTops(); verifyMovingTops() } else { fitDocument(); reachPageEdges(); reachSafeEdges() } // PROTO (UIKit-first measurement): only top reach depth changes during the move
-        placeEdgesAfterBatch() // PROTO (rule 4)
+        if geometryOnly { reachMovingTops(); verifyMovingTops() } else {
+            fitDocument(); placeEdgesAfterBatch() // PROTO (rule 4): test reach at the placed edge, not the resting frame.
+            reachSafeEdges(); reachPageEdges()
+        }
         ApplyPhases.reach += ApplyPhases.cpu() - protoReach // PROTO
         paintCanvas()
         if geometryOnly { deferGeometry(touchedIDs + geometryApplied); geometryApplied = []; return } // PROTO (UIKit-first measurement)
@@ -1070,7 +1078,7 @@ package final class Presenter {
         let deferredIDs = takeDeferredGeometry(), changed = touchedAndAbove(touchedIDs + geometryApplied + deferredIDs) // PROTO (UIKit-first measurement): merge views deferred by geometry batches
         geometryApplied = []
         swipeActions.sync(changed: changed, reshaped: touchedAndAbove(reshapedIDs)); rowCells.sync(changed: changed)
-        groupedLists?.sync(changed: changed); reachPageEdges(); reachSafeEdges() // a list mounted now reaches its bands too
+        groupedLists?.sync(changed: changed); reachSafeEdges(); reachPageEdges() // a list mounted now reaches its bands too
         if !flights.isEmpty { flightsBatchApplied() }
         #if os(tvOS)
         menuKey.sync()
@@ -1103,10 +1111,6 @@ package final class Presenter {
         placedAnew.removeSubrange(anewFrom...)
         // What a node's name, state and focus read: not its box (an autofocus waiting for one is indexed).
         let named = touchedAndAbove(batch.ops.compactMap { [.create, .props, .style, .children, .paragraph, .flow].contains($0.op) ? $0.id : nil } + deferredIDs) // PROTO (UIKit-first measurement): include deferred names and states
-        // PROTO: finish containment and UIKit layout before queued geometry reports read the new views
-        let protoNav = ApplyPhases.cpu() // PROTO
-        navigation.batchApplied(batch, skipSync: skipNavigationSync)
-        ApplyPhases.navigation += ApplyPhases.cpu() - protoNav // PROTO
         afterBatch { [weak self] in
             guard let self else { return }
             keyboardToolbars.finishBackendChange()

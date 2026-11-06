@@ -480,31 +480,29 @@ extension NodeView {
         }
         if let saved = hiddenScroll {
             hiddenScroll = nil
-            writeScrollPosition(in: sv, left: Double(saved.x), top: Double(saved.y), animated: false, titleSlack: false)
+            writeScrollPosition(in: sv, left: Double(saved.x), top: Double(saved.y), animated: false)
         }
         guard pendingScrollTop != nil || pendingScrollLeft != nil else { return }
         // `scroll-behavior: smooth` (CSS) animates a prop write, never a
         // reader's own scroll. Under the agent's frozen clock it lands at once
         // (as a modal presents, LLP 1035.003 D5), so `layout` reads the target.
         let smooth = extras?.pendingScrollTransfer != true && style["scroll_behavior"]?.string == "smooth" && !ExactEnv.agentFreezes
-        writeScrollPosition(in: sv, left: pendingScrollLeft, top: pendingScrollTop, animated: smooth, titleSlack: true)
+        writeScrollPosition(in: sv, left: pendingScrollLeft, top: pendingScrollTop, animated: smooth)
     }
 
     /// Convert a logical write only after native layout. UIKit can
     /// invalidate its offset when that write collapses the navigation title;
     /// settle that one inset transition and apply the same intent once more.
-    private func writeScrollPosition(in sv: UIScrollView, left: Double?, top: Double?, animated: Bool, titleSlack: Bool) {
+    private func writeScrollPosition(in sv: UIScrollView, left: Double?, top: Double?, animated: Bool) {
         func target() -> CGPoint {
             let i = sv.adjustedContentInset, inset = scrollTopInset(sv)
-            // CSS ends where a large title rests collapsed.
-            let slack = titleSlack && scrollOrigin > 0 ? max(0, i.top - scrollCollapsed) : 0
-            let y = top.map { CGFloat($0) - inset == sv.contentOffset.y ? sv.contentOffset.y : min(max(CGFloat($0) - inset, -i.top), max(-i.top, sv.contentSize.height + i.bottom - sv.bounds.height - slack)) } ?? sv.contentOffset.y
+            let y = top.map { CGFloat($0) - inset == sv.contentOffset.y ? sv.contentOffset.y : min(max(CGFloat($0) - inset, -i.top), max(-i.top, sv.contentSize.height + i.bottom - sv.bounds.height)) } ?? sv.contentOffset.y
             let x = left.map { CGFloat($0) == sv.contentOffset.x ? sv.contentOffset.x : min(max(CGFloat($0), -i.left), max(-i.left, sv.contentSize.width + i.right - sv.bounds.width)) } ?? sv.contentOffset.x
             // On the pixel grid inside the range, so the content it scrolls
             // stays on it and UIKit does not clamp it off (`PixelGridIOS.swift`).
             let s = presenter?.gridScale ?? 1
             return CGPoint(x: PixelGrid.clamp(x, -i.left, max(-i.left, sv.contentSize.width + i.right - sv.bounds.width), scale: s),
-                           y: PixelGrid.clamp(y, -i.top, max(-i.top, sv.contentSize.height + i.bottom - sv.bounds.height - slack), scale: s))
+                           y: PixelGrid.clamp(y, -i.top, max(-i.top, sv.contentSize.height + i.bottom - sv.bounds.height), scale: s))
         }
         let initial = target()
         guard sv.contentOffset != initial else { return }

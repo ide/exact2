@@ -887,7 +887,7 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
         controllers = controllers.filter { routeIDs.contains($0.key) }
         presenter.modals.updatePermissions()
         if p.tabs != nil { replayTabs() }
-        window?.layoutIfNeeded() // PROTO: propagate the containers' safe areas to new scrollers before reports
+        if !presenter.awaitingFrame.isEmpty { window?.layoutIfNeeded() } // PROTO: settle new views before reports
         reportCovers()
         refitForBars()
         settled = true

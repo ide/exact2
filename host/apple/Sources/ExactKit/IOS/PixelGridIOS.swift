@@ -169,9 +169,9 @@ extension Presenter {
         v.transform = .identity
         // PROTO (rule 4): keep the outset frame for a box reaching past its laid-out box, set once
         let drawn = groupedLists?.carriesRows == true ? groupedLists?.cellFrame(of: v, at: place) ?? place.drawn : place.drawn
-        // PROTO (UIKit-first measurement): update reach from the box's new place before framing so a
-        // scroller pinned to the allocation's top keeps its native frame, in the modes laid out in the live safe area
-        if ExactSession.protoLive, v.reach.top > 0, let route = v.safeReach.route, let up = v.superview {
+        // PROTO (UIKit-first measurement): update reach before framing, including resting-mode placement,
+        // so a scroller pinned to the allocation's top keeps its native frame.
+        if v.reach.top > 0, let route = v.safeReach.route, let up = v.superview {
             let depth = max(0, up.convert(drawn.origin, to: route).y - route.bounds.minY)
             if abs(depth - v.reach.top) > 0.01 { v.reach.top = depth; v.bounds.origin.y = -depth }
         }

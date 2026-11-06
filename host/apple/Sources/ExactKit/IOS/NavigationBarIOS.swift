@@ -1092,14 +1092,15 @@ extension NavigationHost {
         let flowing = { (v: NodeView) in (!v.isHidden || v.presenter?.menus.isLaidOut(v) == true) && Self.inFlow(v) }
         let node = shape.map { shape in kids.firstIndex { $0 === shape.header }.flatMap { kids[($0 + 1)...].first(where: flowing) } }
             ?? (shows || wantsWholeView ? kids.first(where: flowing) : nil)
-        var riders: [NodeView] = []
+        var bands = Presenter.Bands()
         #if os(iOS)
         if #available(iOS 26.0, *), shape?.level == 1, let scroller,
            scroller.style["scroll_edge_effect"]?.string != "none", !Self.transparentBar(c.node),
-           case let bands = presenter.controlBands(of: scroller, in: c.node, ControlBars(presenter)), !bands.top.isEmpty {
-            riders = bands.top
+           case let found = presenter.controlBands(of: scroller, in: c.node, ControlBars(presenter)), !found.top.isEmpty {
+            bands = found
         }
         #endif
+        let riders = bands.top
         for old in c.ridingBars where !riders.contains(where: { $0 === old }) { old.controlRide = 0; old.applyTransform() }
         c.ridingBars = riders
         c.rideBars()
@@ -1107,8 +1108,7 @@ extension NavigationHost {
         let ordinary = shape?.authored.isEmpty != false && node?.scrollView != nil && node === scroller ? node : nil
         let target = !riders.isEmpty ? (covered ? nil : scroller) : ordinary
         if let target, !riders.isEmpty {
-            let frame = target.convert(target.bounds, to: c.node)
-            let band = UIEdgeInsets(top: max(0, frame.minY), left: 0, bottom: target.pageBand.bottom, right: 0)
+            let band = UIEdgeInsets(top: bands.band.top, left: 0, bottom: target.pageBand.bottom, right: 0)
             var own = band
             own.top += min(band.top, c.view.safeAreaInsets.top)
             if target.pageBand != band || target.bandInset != own { target.setPageBand(band, inset: own) }
@@ -1159,6 +1159,7 @@ extension NavigationHost {
     /// Register a replacement before its first native layout. Resolve only
     /// the containing route, preserving that stack's Back relationships.
     func scrollBackendChanged(_ node: NodeView) {
+        presenter.unshown(node) // A replacement backend has no committed frame, even when its node survives.
         for current in ViewPresentation.controllers(for: node) {
             if let route = current as? RouteController, route.host === self, let stack = route.stack {
                 guard route.collapseScroll === node || route.edgeScroll === node || (node.scrollView != nil && contentScroller(of: route) === node) else { return }

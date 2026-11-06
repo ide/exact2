@@ -38,7 +38,9 @@ extension Presenter {
     }
 
     private func reachSafeEdges(of c: RouteController) {
-        guard let view = c.viewIfLoaded, view.window != nil, case .edges(let e)? = navigation.covers[c.node.id] else {
+        // A retained tab keeps its geometry and UIKit's offset while it is offscreen.
+        guard let view = c.viewIfLoaded, view.window != nil else { return }
+        guard case .edges(let e)? = navigation.covers[c.node.id] else {
             SafeReach.clear(c.node)
             return
         }
