@@ -6,7 +6,9 @@
 // (`var(--exact-viewport-segment-*)`, LLP 1123 D9), the fold band empty between them. Images is a virtualized list of a few
 // hundred image rows over four bundled PNGs (the raster budget's stress).
 // Reflow is one long Markdown document and a dense feed (the text caches'
-// stress from 951 to 466 points and back). Combinations pushes a route with
+// stress from 951 to 466 points and back). Edges holds boxes that depend on the route's
+// top edge while its large title collapses and its bar minimizes, over 60 plain rows or
+// 1,000 virtualized ones, with the safe-area modes and a Run. Combinations pushes a route with
 // an absolutely positioned sheet holding a textarea, so keyboard + sheet +
 // pushed screen + fold is one sequence of taps. Keyboard adds physical-device
 // checks with an app-local geometry recorder and a native share sheet.
@@ -15,7 +17,7 @@ routes nav
   tab fold "/"
   tab images "/images"
   tab reflow "/reflow"
-    edges "/reflow/edges"
+  tab edges "/edges"
   tab combos "/combos"
     note "/combos/note"
   tab keyboard "/keyboard"
@@ -145,8 +147,6 @@ component DuoLab
     selected = id
   action selectTab(name: string)
     nav = select(nav, name)
-  action openEdges
-    nav = push(nav, path("edges"))
   action pickMode(mode: string)
     safeAreaMode = mode
   action runEdges
@@ -312,8 +312,6 @@ component DuoLab
                     text "Reflow" role="heading" aria-level=1 testId="reflow-title"
                   scroll id="reflow-scroll" flex=1 min-height=0 width="100%" box-sizing="border-box" padding-left="var(--exact-readable-content-corners-inset-left)" padding-right="var(--exact-readable-content-corners-inset-right)" testId="reflow-scroll"
                     column width="100%" box-sizing="border-box" padding-top=16 padding-bottom=16 gap=16
-                      button press=openEdges testId="open-edges" padding=14 border-radius=10 background-color="-exact-secondary-background"
-                        text "Edges: boxes that follow a moving bar" font-size=16 font-weight=600 color="AccentColor"
                       text doc.body markup="markdown" testId="document" width="100%" font-size=17 line-height="26px"
                       text "Feed" font-size=22 font-weight=700 testId="feed-title"
                       for post in feed key=post.id
@@ -426,6 +424,9 @@ component DuoLab
         button role="tab" aria-controls="panel-reflow" aria-selected=(nav.tab == "reflow") press=selectTab("reflow") testId="tab-reflow" flex=1
           image "symbol:document"
           text "Reflow"
+        button role="tab" aria-controls="panel-edges" aria-selected=(nav.tab == "edges") press=selectTab("edges") testId="tab-edges" flex=1
+          image "symbol:sf/rectangle.inset.filled"
+          text "Edges"
         button role="tab" aria-controls="panel-combos" aria-selected=(nav.tab == "combos") press=selectTab("combos") testId="tab-combos" flex=1
           image "symbol:layers"
           text "Combos"
