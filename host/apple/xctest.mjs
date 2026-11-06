@@ -333,13 +333,14 @@ export function classesReached(dir, platform, files) {
 
 /** A line that declares and compiles nothing: an import, a diagnostic directive (`#warning`), attributes. */
 const DECLARES_NOTHING = /^\s*(?:(?:@\w+(?:\([^)]*\))?\s+)*import\b|#(?:warning|error|sourceLocation)\b|(?:@\w+(?:\([^)]*\))?\s*)+$)/;
+const DECLARATION = /^(?:@\w+(?:\([^)]*\))?\s+)*((?:\w+\s+)*?)(extension|func|struct|enum|protocol|class|actor|let|var|typealias)\s+(\w+)/;
 
 /** What the Swift files in `dir` declare for `platform`: each class's parent (`parents`), the
  *  test classes (`tests`, sorted), and per file the classes it declares or extends at its top level,
  *  not `private` (`classes`), the capitalized names it uses (`names`), whether it compiles anything
  *  on the platform but what `DECLARES_NOTHING` matches or a block comment holds (`compiles`), and
  *  whether it declares at its top level, not `private`, anything else other files can use
- *  (`shared`). */
+ *  (`shared`), and its active lines with their original numbers (`lines`). */
 function declarations(dir, platform) {
   const ios = platform === 'iOS';
   // 'yes', 'no' or 'maybe' for a condition, worked out with each condition it names that does not
@@ -360,10 +361,10 @@ function declarations(dir, platform) {
   };
   const parents = new Map(), perFile = new Map();
   for (const file of readdirSync(dir).filter(f => f.endsWith('.swift'))) {
-    const branches = [], own = { classes: [], names: new Set(), compiles: false, shared: false };
+    const branches = [], own = { classes: [], names: new Set(), compiles: false, shared: false, lines: [] };
     perFile.set(file, own);
     let comment = false;
-    for (const line of readFileSync(resolve(dir, file), 'utf8').split('\n')) {
+    for (const [i, line] of readFileSync(resolve(dir, file), 'utf8').split('\n').entries()) {
       // Skip a block comment, from the line that opens it to the one that closes it
       if (comment || /^\s*\/\*/.test(line)) { comment = !line.includes('*/'); continue; }
       const directive = /^\s*#(if|elseif|else|endif)\b\s*(.*)/.exec(line);
@@ -378,12 +379,13 @@ function declarations(dir, platform) {
         continue;
       }
       if (/^\s*\/\//.test(line) || branches.some(b => b.now === 'no')) continue;
+      own.lines.push([i + 1, line]);
       for (const name of line.match(/\b[A-Z]\w*/g) ?? []) own.names.add(name);
       if (/\S/.test(line) && !DECLARES_NOTHING.test(line)) own.compiles = true;
       const declaration = /\bclass (\w+)\s*:\s*(\w+)/.exec(line);
       if (declaration) parents.set(declaration[1], declaration[2]);
       // Read a declaration at the file's top level (unindented), after its attributes and modifiers
-      const top = /^(?:@\w+(?:\([^)]*\))?\s+)*((?:\w+\s+)*?)(extension|func|struct|enum|protocol|class|actor|let|var|typealias)\s+(\w+)/.exec(line);
+      const top = DECLARATION.exec(line);
       // Mark the file shared at a top-level line the pattern does not read (an operator,
       // `private(set) var`): it may declare what other files use
       if (!top) { if (/^[^\s}\])]/.test(line) && !DECLARES_NOTHING.test(line)) own.shared = true; continue; }
@@ -403,25 +405,37 @@ function declarations(dir, platform) {
   for (const own of perFile.values()) if (own.classes.some(name => !isTest(name))) own.shared = true;
   // A fixture is a base the test classes share, with no tests of its own
   const tests = [...parents.keys()].filter(name => isTest(name) && !name.endsWith('Fixture')).sort();
-  return { parents, tests, perFile };
+  return { parents, tests, perFile, isTest };
 }
 
-/** The tests in `dir` that need what only an app gives them, `ExactKitTests/<Class>/<test>`:
+/** The iOS tests in `dir` that need what only an app gives them, `ExactKitTests/<Class>/<test>`:
  *  those that throw `missing("scene", …)` (a presentation completes only in a scene's
  *  window) or `missing("accessibility", …)` (UIKit's accessibility runtime), which run
- *  hosted. Each must say so in the test method itself, so a helper's need is not missed. */
+ *  hosted, including methods in known test-class extensions. Each must say so in the test
+ *  method itself, so a helper's need is not missed. */
 export function hostedTests(dir) {
-  const tests = new Set();
-  for (const file of readdirSync(dir).filter(f => f.endsWith('.swift'))) {
-    const lines = readFileSync(resolve(dir, file), 'utf8').split('\n');
-    let className = null, func = null;
-    lines.forEach((line, i) => {
-      className = /class (\w+)\s*:\s*(XCTestCase|\w+Fixture)\b/.exec(line)?.[1] ?? className;
-      func = /\bfunc (\w+)\s*\(/.exec(line)?.[1] ?? func;
-      if (!/missing\("(scene|accessibility)"/.test(line)) return;
-      if (!className || !func?.startsWith('test')) throw new Error(`${file}:${i + 1}: missing(scene or accessibility) outside a test method (${func ?? 'none'}); say it in the test so the test runs hosted`);
-      tests.add(`ExactKitTests/${className}/${func}`);
-    });
+  const tests = new Set(), { perFile, isTest } = declarations(dir, 'iOS');
+  for (const [file, { lines }] of perFile) {
+    const scopes = [];
+    let func = null;
+    for (const [number, line] of lines) {
+      const indent = line.length - line.trimStart().length, declaration = DECLARATION.exec(line.trimStart());
+      const needsHost = /missing\("(scene|accessibility)"/.test(line);
+      if (declaration || needsHost) {
+        while (scopes.length && indent <= scopes.at(-1).indent) { scopes.pop(); }
+      }
+      if (declaration && ['class', 'extension', 'struct', 'enum', 'protocol', 'actor'].includes(declaration[2])) {
+        scopes.push({ name: isTest(declaration[3]) ? declaration[3] : null, indent, func: null });
+        func = null;
+      }
+      const scope = scopes.at(-1), method = /\bfunc (\w+)\s*\(/.exec(line);
+      if (scope?.func && declaration && declaration[2] !== 'func' && indent <= scope.funcIndent) { scope.func = null; }
+      if (method) { func = method[1]; if (scope) { scope.func = func; scope.funcIndent = indent; } }
+      if (!needsHost) { continue; }
+      const name = scope ? scope.func : func;
+      if (!scope?.name || !name?.startsWith('test')) { throw new Error(`${file}:${number}: missing(scene or accessibility) outside a test method (${name ?? 'none'}); say it in the test so the test runs hosted`); }
+      tests.add(`ExactKitTests/${scope.name}/${name}`);
+    }
   }
   return [...tests].sort();
 }

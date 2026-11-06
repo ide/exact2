@@ -42,6 +42,8 @@ extension Presenter {
         guard root.superview !== host else { return }
         host.addSubview(root)
         viewport.isScrollEnabled = !fixed
+        // Hide the empty viewport's scroll indicators while the document is elsewhere
+        viewport.accessibilityElementsHidden = fixed
         placeDocumentMount()
         // A fixed document takes no keyboard range; a scrolling one does again.
         setKeyboardInset(keyboardInset)

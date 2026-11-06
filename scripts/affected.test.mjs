@@ -4,7 +4,7 @@ import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSy
 import { tmpdir } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { GLOBAL, Graph, Repo, auditProfile, cargoTests, commands, jsSources, rustLiterals, rustSource, select, suites } from './affected.mjs';
-import { classesReached } from '../host/apple/xctest.mjs';
+import { classesReached, hostedTests, onlyClasses } from '../host/apple/xctest.mjs';
 
 /** A repository of `files` (path → text) and Cargo packages (`{ name, dir, deps }`), with its metadata given. */
 function fixture(files, packages) {
@@ -263,6 +263,80 @@ test("a change to Swift test files alone reaches their classes and those of the 
     // A file that compiles something yet reaches no class runs every class, whose build shows its error
     expect(reached('iOS', 'Hidden.swift')).toBe(null);
   } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('hosted tests resolve extensions, inherited classes and fixtures through class ownership', () => {
+  const dir = mkdtempSync(resolve(tmpdir(), 'hosted-xctest-'));
+  const files = {
+    'Owners.swift': 'class BaseFixture: XCTestCase {}\nclass ParentTests: BaseFixture {}\nfinal class NavigationBasicsIOSTests: ParentTests {}\nfinal class OtherTests: XCTestCase {}\n',
+    'Mount.swift': 'extension NavigationBasicsIOSTests {\n    func testScene() { throw missing("scene", "a native container") }\n    func testAccessibility() { throw missing("accessibility", "UIKit AX") }\n    func testAfterHelper() {\n        struct Helper {}\n        let skip = missing("scene", "the test owns this guard")\n        throw skip\n    }\n}\n',
+    'Inherited.swift': 'final class InheritedTests: ParentTests {\n    func testScene() { throw missing("scene", "a presentation") }\n}\n',
+    'Fixture.swift': 'final class FixtureTests: ExternalFixture {\n    func testScene() { throw missing("scene", "a presentation") }\n}\n',
+    'Base.swift': 'extension BaseFixture {\n    func testScene() { throw missing("scene", "a presentation") }\n}\n',
+    'Other.swift': 'extension OtherTests {\n    func testScene() { throw missing("scene", "a different owner") }\n}\n',
+    'Mac.swift': '#if os(macOS)\nfinal class MacTests: XCTestCase {\n    func testScene() { throw missing("scene", "compiled out on iOS") }\n}\n#endif\n',
+  };
+  for (const [name, source] of Object.entries(files)) writeFileSync(resolve(dir, name), source);
+  try {
+    const hosted = hostedTests(dir);
+    expect(hosted).toEqual([
+      'ExactKitTests/BaseFixture/testScene',
+      'ExactKitTests/FixtureTests/testScene',
+      'ExactKitTests/InheritedTests/testScene',
+      'ExactKitTests/NavigationBasicsIOSTests/testAccessibility',
+      'ExactKitTests/NavigationBasicsIOSTests/testAfterHelper',
+      'ExactKitTests/NavigationBasicsIOSTests/testScene',
+      'ExactKitTests/OtherTests/testScene',
+    ]);
+    const only = onlyClasses(['--only', 'NavigationBasicsIOSTests'], dir, 'iOS').map(c => `ExactKitTests/${c}`);
+    expect(hosted.filter(t => only.some(c => t.startsWith(`${c}/`)))).toEqual([
+      'ExactKitTests/NavigationBasicsIOSTests/testAccessibility',
+      'ExactKitTests/NavigationBasicsIOSTests/testAfterHelper',
+      'ExactKitTests/NavigationBasicsIOSTests/testScene',
+    ]);
+    expect(() => onlyClasses(['--only', 'Mount'], dir, 'iOS')).toThrow('is no iOS test class');
+    expect(() => onlyClasses(['--only', 'BaseFixture'], dir, 'iOS')).toThrow('is no iOS test class');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('hosted tests reject guards in helpers and unknown owners without carrying a preceding test owner', () => {
+  const dir = mkdtempSync(resolve(tmpdir(), 'hosted-xctest-'));
+  writeFileSync(resolve(dir, 'Owner.swift'), 'final class KnownTests: XCTestCase {}\nclass BaseFixture: XCTestCase {}\n');
+  const cases = [
+    'extension UnknownTests {\n    func testScene() { throw missing("scene", "unknown owner") }\n}\n',
+    'extension UnknownFixture {\n    func testScene() { throw missing("scene", "no declaration") }\n}\n',
+    'final class Helper: NSObject {\n    func testScene() { throw missing("scene", "not a test class") }\n}\n',
+    'extension KnownTests {\n    func helper() { throw missing("scene", "not a test method") }\n}\n',
+    'extension BaseFixture {\n    func helper() { throw missing("accessibility", "a shared helper") }\n}\n',
+    'extension KnownTests {\n    func testBefore() {}\n}\nextension UnknownTests {\n    func testScene() { throw missing("scene", "not the preceding owner") }\n}\n',
+    'extension KnownTests {\n    func testBefore() {}\n}\nfunc testOutside() { throw missing("scene", "a free function") }\n',
+    'extension KnownTests {\n    struct Helper {\n        func testScene() { throw missing("scene", "a nested helper") }\n    }\n}\n',
+    'extension KnownTests {\n    func testBefore() {}\n    var skip: Error { missing("scene", "a property helper") }\n}\n',
+    '// final class FakeTests: XCTestCase {}\nfunc testOutside() { throw missing("scene", "a comment declares no owner") }\n',
+  ];
+  try {
+    for (const source of cases) {
+      writeFileSync(resolve(dir, 'Guard.swift'), source);
+      expect(() => hostedTests(dir)).toThrow(/Guard\.swift:\d+: missing\(scene or accessibility\) outside a test method/);
+    }
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('hosted tests discover the real navigation mount extension and honor class selection', () => {
+  const dir = resolve(import.meta.dir, '../host/apple/tests/ExactKitTests');
+  const expected = [
+    'testReplacingANativeRootWithPageContentAndAnEmptyRootRestoresAccessibility',
+    'testTheDocumentLeavesItsMountWithTheNativeContainerUnderCover',
+    'testViewportAccessibilityFollowsDocumentReplacementAndPlainPageBoot',
+    'testViewportAccessibilityFollowsUnmountingAndANewEnclosingTabHost',
+  ].map(name => `ExactKitTests/NavigationBasicsIOSTests/${name}`);
+  const hosted = hostedTests(dir);
+  expect(hosted).toEqual(expect.arrayContaining(expected));
+  const only = onlyClasses(['--only', 'NavigationBasicsIOSTests'], dir, 'iOS').map(c => `ExactKitTests/${c}`);
+  const selected = hosted.filter(t => only.some(c => t.startsWith(`${c}/`)));
+  expect(selected).toEqual(expect.arrayContaining(expected));
+  expect(selected.every(t => t.startsWith('ExactKitTests/NavigationBasicsIOSTests/'))).toBe(true);
+  expect(() => onlyClasses(['--only', 'NavigationMountIOSTests'], dir, 'iOS')).toThrow('is no iOS test class');
 });
 
 test('the commands run each workspace once, the Bun files together and every app test file', () => {
