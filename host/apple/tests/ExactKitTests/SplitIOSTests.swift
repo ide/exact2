@@ -491,7 +491,9 @@ final class SplitIOSTests: XCTestCase {
         split.controller.traitOverrides.horizontalSizeClass = .compact
         until("collapsed") { split.controller.isCollapsed && !agent.nativeInFlight() && note.specs?.rasterBoxView == nil }
         XCTAssertNil(view.superview)
-        XCTAssertTrue(note.textRasterLayer?.superlayer === note.textBoxLayer, "the ink in a layer for its box")
+        let box = try XCTUnwrap(note.textBoxLayer), lines = try XCTUnwrap(box.lines)
+        XCTAssertTrue(box.superlayer === note.layer, "the collapsed box stays on the paragraph")
+        XCTAssertTrue(lines.superlayer === box && note.textRasterLayer?.superlayer === lines, "the ink in its box's lines layer")
     }
 
     /// A text's box replaced by one of the other kind as it moves (the
