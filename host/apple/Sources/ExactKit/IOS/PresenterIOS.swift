@@ -1102,18 +1102,15 @@ package final class Presenter {
         placedAnew.removeSubrange(anewFrom...)
         // What a node's name, state and focus read: not its box (an autofocus waiting for one is indexed).
         let named = touchedAndAbove(batch.ops.compactMap { [.create, .props, .style, .children, .paragraph, .flow].contains($0.op) ? $0.id : nil } + deferredIDs) // PROTO (UIKit-first measurement): include deferred names and states
-        // Finish controls and frames before UIKit synchronously lays out the destination.
+        // PROTO: finish containment and UIKit layout before queued geometry reports read the new views
+        let protoNav = ApplyPhases.cpu() // PROTO
+        navigation.batchApplied(batch, skipSync: skipNavigationSync)
+        ApplyPhases.navigation += ApplyPhases.cpu() - protoNav // PROTO
         afterBatch { [weak self] in
             guard let self else { return }
-            let protoNav = ApplyPhases.cpu() // PROTO
-            navigation.batchApplied(batch, skipSync: skipNavigationSync)
-            ApplyPhases.navigation += ApplyPhases.cpu() - protoNav // PROTO
             keyboardToolbars.finishBackendChange()
             for id in scrollers.union(pendingScrolls).union(materialNodes) {
                 guard let node = views[id] else { continue }
-                // Navigation can resize a native port after its row projection.
-                // Settle that layout before restoring or authoring an offset.
-                if node.groupedOwner { node.scrollView?.layoutIfNeeded() }
                 if !collections.owns(node.id) { node.restoreScrollPosition() }
                 if node.pendingScrollTop != nil || node.pendingScrollLeft != nil { collections.userIntent(node.id) }
                 node.applyPendingScroll()

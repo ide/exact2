@@ -44,7 +44,6 @@ struct GroupedListModel: Equatable {
     /// How a text is set where its author said so (`TextLook`, LLP 1116.003
     /// D7: author > platform); the defaults leave it the platform's.
     struct Look: Equatable {
-        /// A font as the text's computed rows have it (`TextFont`).
         /// What its author said of its font, each part nil where they said
         /// nothing: that part stays UIKit's own (LLP 1115.000 D2).
         struct Font: Equatable {
@@ -555,8 +554,9 @@ final class GroupedListView: NSObject, UICollectionViewDelegate {
 
     init(owner: NodeView, host: GroupedListHost) {
         self.owner = owner; self.host = host
-        collection = GroupedCollectionView(frame: owner.bounds, collectionViewLayout: UICollectionViewFlowLayout())
+        collection = GroupedCollectionView(frame: owner.scrollFrame, collectionViewLayout: UICollectionViewFlowLayout()) // PROTO
         super.init()
+        owner.addSubview(collection) // PROTO: attach before the layout and snapshot read their environment
         collection.setCollectionViewLayout(layout(), animated: false)
         collection.delegate = self
         collection.accessibilityIdentifier = owner.props["testId"]
@@ -987,16 +987,10 @@ final class GroupedListView: NSObject, UICollectionViewDelegate {
     }
 
     #if os(iOS)
-    /// How far past each side the list's edge meets the collection reaches,
-    /// a safe area there, where nothing between the list and the window
-    /// transforms or clips it away. The window's side safe area: Exact's
-    /// layout keeps a route's content inside it (LLP 1123), where UIKit puts
-    /// an inset-grouped list's cards 20 in, and 16 past it when the list
-    /// spans the screen, as a hand-built one does. Half a fold's band (LLP
-    /// 1078): a hand-built split view's column reaches the band's middle,
-    /// that half its safe area, and its card ends 20 short of the band, where
-    /// a list ending at the band has its card run into it (iPhone Duo, iOS
-    /// 27.1, `~/audits/exact2-no-tells-2026-10-11/duo-fold-probe/`).
+    /// Extend to a window's side safe area or a fold band's middle where the list meets it,
+    /// unless an ancestor transforms or clips that extension (LLP 1078, LLP 1123).
+    /// UIKit places inset-grouped cards 20 points inside a safe edge and 16 past it when
+    /// the collection spans the screen; a fold's half band keeps the card clear of the band.
     private func sideReach() -> (left: CGFloat, right: CGFloat) {
         foldReach = (0, 0)
         guard let window = owner.window else { return (0, 0) }
@@ -1457,10 +1451,7 @@ final class GroupedListView: NSObject, UICollectionViewDelegate {
 
 /// A grouped list's collection view, by type, for the agent's wheel.
 final class GroupedCollectionView: UICollectionView, GroupedScroller {
-    /// The offset, which UIKit itself also sets (keeping the list at its
-    /// start as a safe area reaches it and insets it): inside an animation
-    /// UIKit has open it moves only if the last frame showed the list's node,
-    /// as a `ScrollView`'s does (`Presenter.moveOrPlace`).
+    /// Animate UIKit's offset changes only when the last frame showed the list (`Presenter.moveOrPlace`).
     override var bounds: CGRect {
         get { super.bounds }
         set {
@@ -1468,10 +1459,7 @@ final class GroupedCollectionView: UICollectionView, GroupedScroller {
             presenter.moveOrPlace(node) { super.bounds = newValue }
         }
     }
-    /// The safe area at the sides the collection reaches over (`sideReach`):
-    /// the window's, which the host keeps from the views it lays out (LLP
-    /// 1123), or a fold's half band. UIKit insets the cards from it, as in a
-    /// hand-built list.
+    /// Inset cards from the window's side safe area or a fold's half band (`sideReach`, LLP 1123).
     var sideSafeArea: (left: CGFloat, right: CGFloat) = (0, 0) {
         didSet {
             guard sideSafeArea != oldValue else { return }

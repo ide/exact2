@@ -18,7 +18,7 @@ extension Presenter {
     /// header, a tab or the Back control makes the op count. Read before the batch applies,
     /// while its destroys still have views.
     func canSkipNavigationSync(_ batch: Batch) -> Bool {
-        guard !batch.controls, !batch.ops.isEmpty else { return false }
+        guard awaitingFrame.isEmpty, !batch.controls, !batch.ops.isEmpty else { return false } // PROTO: settle first-frame geometry with its containers
         let back = navigation.container?.props["navigationBack"]
         let scrolls = Set(navigation.controllers.values.compactMap { $0.node.props["navigationScroll"] })
         // The names a route's header buttons invoke (a route's header is a

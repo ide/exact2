@@ -19,9 +19,10 @@ final class GeometryOnlyState {
 
 extension Presenter {
     /// PROTO (UIKit-first measurement): whether `batch` contains only frames, scroll content sizes,
-    /// field text boxes or owner block rects, with no controls, under the `geometry` mode
+    /// field text boxes or owner block rects, with no controls, under the `geometry` mode.
+    /// Finish the full projection before newly mounted views have their first frame.
     func geometryOnly(_ batch: Batch) -> Bool {
-        ExactSession.protoMode == .geometry && !batch.controls && !batch.ops.isEmpty
+        ExactSession.protoMode == .geometry && awaitingFrame.isEmpty && !batch.controls && !batch.ops.isEmpty
             && batch.ops.allSatisfy { op in
                 switch op.op {
                 case .frame, .content, .fieldContent: true

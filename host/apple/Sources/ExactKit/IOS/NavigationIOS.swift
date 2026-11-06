@@ -836,7 +836,6 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
                 recordOwned(nav)
                 // A press that pushed may hand its control's focus to the arriving route's first autofocus (PressHandoffIOS).
                 if pushOrPop || arrives { presenter.pressShows((stack.last as? RouteController)?.node) }
-                nav.view.layoutIfNeeded() // PROTO (stuck bar): lay out the stack only when Exact changed it
             }
         }
         unanimated = false
@@ -887,6 +886,7 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
         controllers = controllers.filter { routeIDs.contains($0.key) }
         presenter.modals.updatePermissions()
         if p.tabs != nil { replayTabs() }
+        window?.layoutIfNeeded() // PROTO: propagate the containers' safe areas to new scrollers before reports
         reportCovers()
         refitForBars()
         // A route that left every stack gives its block back (LLP 1123 D2)
