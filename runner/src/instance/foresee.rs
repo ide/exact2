@@ -31,6 +31,7 @@ impl Ids {
     pub fn after(live: &Ids) -> Ids {
         Ids {
             next: live.next,
+            bootstrap_extent: live.bootstrap_extent,
             ..Default::default()
         }
     }

@@ -100,22 +100,6 @@ pub fn set_lead_scale(scale: f64) {
     );
 }
 
-/// The provisional extent (px along the axis) a list with no port yet
-/// realizes rows for: by default sixteen 32 px rows' worth; a host that knows
-/// its viewport sets it ([`set_bootstrap_extent`]).
-static BOOTSTRAP_EXTENT: std::sync::atomic::AtomicU64 =
-    std::sync::atomic::AtomicU64::new((BOOTSTRAP_ROWS as f64 * ESTIMATED_HEIGHT).to_bits());
-
-/// How far a new list's first rows reach before its port is reported: a
-/// host passes its viewport's extent, so the rows that can show are built
-/// with the list instead of in a second commit after the first layout (at
-/// most sixteen rows; a list's `initial-item-count` still wins).
-pub fn set_bootstrap_extent(px: f64) {
-    if px.is_finite() && px > 0.0 {
-        BOOTSTRAP_EXTENT.store(px.to_bits(), std::sync::atomic::Ordering::Relaxed);
-    }
-}
-
 /// Candidates from one accepted geometry report. The second edge may run only
 /// after a pure no-op first action. State changes defer it until settlement.
 pub(crate) struct CollectionEdges {
@@ -472,11 +456,13 @@ impl Collection {
             region,
             index: SizeIndex::new(estimated_height).map_err(index_error)?,
             estimated_height,
-            // The provisional extent ([`set_bootstrap_extent`]), capped at
-            // sixteen rows, unless the list says how many (`initial-item-count`).
-            // Actual nested-scrollport feedback determines the real window.
+            // Cover the runner's longer viewport side before a port is known,
+            // capped at sixteen rows unless `initial-item-count` says otherwise.
+            // Use 512 px for instance trees built without a viewport.
             bootstrap_rows: initial.unwrap_or(
-                ((f64::from_bits(BOOTSTRAP_EXTENT.load(std::sync::atomic::Ordering::Relaxed))
+                ((u.ids
+                    .bootstrap_extent
+                    .unwrap_or(BOOTSTRAP_ROWS as f64 * ESTIMATED_HEIGHT)
                     / estimated_height)
                     .ceil()
                     .min(

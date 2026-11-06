@@ -359,7 +359,12 @@ fn rows(r: &Runner<Rows>) -> std::collections::BTreeMap<usize, String> {
 
 #[test]
 fn a_limited_report_rebinds_the_rows_it_would_keep() {
-    let (mut fresh, mut reused) = (boot(SOURCE, false), boot(SOURCE, true));
+    // Keep this fill sequence's eight starting rows independent of the viewport
+    let source = SOURCE.replace(
+        "list virtualized=true",
+        "list virtualized=true initial-item-count=8",
+    );
+    let (mut fresh, mut reused) = (boot(&source, false), boot(&source, true));
     let mut rebound = 0;
     for (i, top) in [0., 300., 900., 1500., 2100., 2700., 2500., 1900.]
         .into_iter()

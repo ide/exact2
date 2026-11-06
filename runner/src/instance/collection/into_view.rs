@@ -136,7 +136,10 @@ impl Collection {
         request: &IntoView,
     ) -> Result<Result<(), String>, InstanceError> {
         // Resolve an unmounted row in a disposable tree before moving either list.
-        let mut ids = Ids::default();
+        let mut ids = Ids {
+            bootstrap_extent: u.ids.bootstrap_extent,
+            ..Ids::default()
+        };
         let mut scratch = Update::new(Env { ..u.env }, u.sites, &mut ids);
         scratch.discard = true;
         let mut temporary;

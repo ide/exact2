@@ -243,9 +243,19 @@ pub struct Ids {
     /// Every row that read a theme token (LLP 1121 D7).
     pub theme: theme::ThemeIndex,
     pub(crate) tabs: tabs::Tabs, // tab panels waiting for their first selection (tabs.rs)
+    /// Seed new collections before their port is reported.
+    pub(crate) bootstrap_extent: Option<f64>,
 }
 
 impl Ids {
+    /// Seed the instance context before the runner builds its first tree.
+    pub(crate) fn for_viewport(viewport: crate::Viewport) -> Self {
+        Self {
+            bootstrap_extent: Some(viewport.width.max(viewport.height)),
+            ..Self::default()
+        }
+    }
+
     fn fresh(&mut self) -> ViewId {
         self.next += 1;
         self.next
