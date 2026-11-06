@@ -50,6 +50,9 @@ const SOURCE: &str = r#"component App
           text x
 "#;
 fn report(r: &mut Runner<Rows>, offset: f64, pin: Option<NodeKey>) {
+    report_padded(r, offset, pin, [0.; 2]);
+}
+fn report_padded(r: &mut Runner<Rows>, offset: f64, pin: Option<NodeKey>, padding: [f64; 2]) {
     for c in r.collections() {
         let source = c.view == r.collections()[0].view;
         r.collection_feedback(CollectionFeedback {
@@ -60,7 +63,7 @@ fn report(r: &mut Runner<Rows>, offset: f64, pin: Option<NodeKey>) {
             port_cross: 320.,
             port_main: 100.,
             cross: 320.,
-            padding: [0.; 2],
+            padding,
             focus_view: None,
             interaction_view: pin
                 .filter(|_| source)
@@ -82,6 +85,14 @@ fn fixture(offset: f64) -> (Runner<Rows>, NodeKey) {
     fixture_with(SOURCE, offset, 10)
 }
 fn fixture_with(source: &str, offset: f64, item: usize) -> (Runner<Rows>, NodeKey) {
+    fixture_padded(source, offset, item, [0.; 2])
+}
+fn fixture_padded(
+    source: &str,
+    offset: f64,
+    item: usize,
+    padding: [f64; 2],
+) -> (Runner<Rows>, NodeKey) {
     let mut r = Runner::boot(
         contract::compile(source).unwrap(),
         Rows((0..30).map(|i| i.to_string()).collect()),
@@ -91,12 +102,12 @@ fn fixture_with(source: &str, offset: f64, item: usize) -> (Runner<Rows>, NodeKe
     )
     .unwrap();
     for _ in 0..3 {
-        report(&mut r, 0., None);
+        report_padded(&mut r, 0., None, padding);
     }
-    report(&mut r, offset, None);
+    report_padded(&mut r, offset, None, padding);
     let grip = r.kernel().find_by_test_id(&format!("grip-{item}"))[0];
     for _ in 0..2 {
-        report(&mut r, offset, Some(grip));
+        report_padded(&mut r, offset, Some(grip), padding);
     }
     (r, grip)
 }
@@ -115,6 +126,56 @@ fn dropped_top_row_anchors_its_visible_successor() {
     assert_eq!(r.data_ref().0[14], "10");
     assert_eq!(r.collections()[0].correction.unwrap().offset, 180.);
     assert_eq!(r.reorder_geometry(b.list).unwrap().scroll_top, 180.);
+}
+
+#[test]
+fn a_drop_anchors_the_successor_clear_of_padding_or_a_top_band() {
+    for grouped in [false, true] {
+        for (leading, offset, item, covered, y, expected) in [
+            (150., -60., 0, 0., 40., -80.),
+            (0., 207., 13, 60., 300., 187.),
+        ] {
+            let source = SOURCE.replace(
+                "virtualized=true",
+                &format!(
+                    "virtualized=true padding-top={leading}{}",
+                    if grouped {
+                        " reorderGroup=\"cards\""
+                    } else {
+                        ""
+                    }
+                ),
+            );
+            let (mut r, grip) = fixture_padded(&source, offset, item, [leading, 0.]);
+            let binding = r.reorder_binding(grip).unwrap();
+            assert!(r.set_list_covered(r.collections()[0].view, [covered, 0.]));
+            let g = r.reorder_geometry(binding.list).unwrap();
+            let token = if grouped {
+                r.begin_group_reorder(binding, g.clone(), false)
+            } else {
+                r.begin_reorder(binding, g.clone())
+            }
+            .unwrap()
+            .unwrap()
+            .token;
+            assert!(matches!(
+                r.preview_reorder(token, g.clone(), y).unwrap(),
+                ReorderProgress::Accepted { .. }
+            ));
+            r.drop_reorder(token, g).unwrap().unwrap();
+            let correction = r.collections()[0].correction.unwrap();
+            assert_eq!(
+                correction.offset, expected,
+                "grouped={grouped}, at={offset}"
+            );
+            assert_eq!(correction.from, Some(offset));
+            assert_eq!(
+                r.reorder_geometry(binding.list).unwrap().scroll_top,
+                expected
+            );
+            r.finish_reorder(token).unwrap();
+        }
+    }
 }
 
 #[test]

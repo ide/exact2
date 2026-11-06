@@ -176,14 +176,14 @@ class SizeIndex {
     const raw = offset, max = this.maxOffset(port), at = Math.max(-this.leading, Math.min(offset, max));
     offset = Math.max(0, at);
     const follows = follow && port > 0 && max - at < END_SLACK;
-    // At the start, no anchor unless it follows the end (index.rs
-    // `capture_anchor`): CSS scroll anchoring selects none at a zero offset.
-    let row = offset <= 0 && !follows ? null : find(this.t, offset, false);
-    let within = row === null ? 0 : Math.max(0, offset - this.prefix(row));
+    // At scrollTop 0, the start of the leading padding, no anchor unless
+    // it follows the end (index.rs `capture_anchor`).
+    let row = at <= -this.leading && !follows ? null : find(this.t, offset, false);
+    let within = row === null ? 0 : at - this.prefix(row);
     if (!follows && row !== null && this.order[row] === excluded) {
       row = find(this.t, this.prefix(row + 1), false);
-      if (row !== null && this.prefix(row) >= offset + port) row = null;
-      within = row === null ? offset : offset - this.prefix(row);
+      if (row !== null && this.prefix(row) >= at + port) row = null;
+      within = row === null ? at : at - this.prefix(row);
     }
     // How far past the end the port was (a rubber band under a finger or a fling), kept past the end; and the
     // offset it was taken at, unclamped, where a port with no row to anchor stays.

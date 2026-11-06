@@ -103,12 +103,17 @@ extension Agent {
             return r
         }
         /// The part of box `b` (`v`'s, in the window) that is presented: each clipping view above it (a scroller, a list,
-        /// a box that hides its overflow) cuts it at its edges (LLP 1116.006 D5), and a bar over the screen's top or
+        /// a box that hides its overflow) cuts it at its edges (LLP 1116.006 D5), a scroller's own band covers content
+        /// carried under its controls (LLP 1131 D2), and a bar over the screen's top or
         /// bottom cuts what lies past its inner edge (LLP 1116.007 D3.8).
         func visible(_ v: UIView, _ b: CGRect) -> CGRect {
             var r = b, at = v.superview
             while let cur = at, !r.isNull {
                 if cur.clipsToBounds || cur.layer.masksToBounds { r = r.intersection(cur.convert(cur.bounds, to: nil)) }
+                // Content carried under the scroller's own bars is covered (LLP 1131 D2).
+                if let sv = cur as? UIScrollView, let owner = sv.superview as? NodeView, owner.scrollView === sv, owner.pageBand != .zero {
+                    r = r.intersection(sv.convert(sv.bounds.inset(by: owner.pageBand), to: nil))
+                }
                 at = cur.superview
             }
             for bar in bars where !r.isNull && !v.isDescendant(of: bar.view) {

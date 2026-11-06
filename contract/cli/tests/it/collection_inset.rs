@@ -907,3 +907,62 @@ fn scroll_into_view_expands_the_row_by_its_scroll_margins() {
     let top = into(&mut r, "end", 50.0, top);
     assert_eq!(top, TOP + 5100.0 + 6.0 - (PORT - END));
 }
+
+#[test]
+fn a_prepend_in_leading_padding_keeps_the_first_rows_signed_offset_on_both_axes() {
+    for horizontal in [false, true] {
+        let mut source = APP
+            .replace("  state count = 100", "  state count = 100\n  state before = 0\n  action prepend\n    before = before + 5")
+            .replace("rows(count)", "rows(count + before)")
+            .replace("for x in rows key=x", "for x in rows key=(x - before)");
+        if horizontal {
+            source = source.replace("height=600 width=400 overflow-x=\"hidden\" estimated-item-height=100 padding-top=92 padding-bottom=", "height=400 width=600 display=\"flex\" flex-direction=\"row\" overflow-x=\"scroll\" overflow-y=\"hidden\" estimated-item-width=100 padding-left=92 padding-right=")
+                .replace("height=100 width=\"100%\"", "width=100 height=\"100%\"");
+        }
+        for top in [0.0, 32.0, TOP] {
+            let mut r = boot(&source);
+            assert_eq!(host(&mut r, top), top);
+            r.act("prepend", vec![]).unwrap();
+            if top > 0.0 {
+                let correction = list(&r).correction.expect("the old first row moved");
+                assert_eq!(correction.from, Some(top - TOP));
+                assert_eq!(correction.offset, top - TOP + 5.0 * ROW);
+            }
+            assert_eq!(
+                host(&mut r, top),
+                if top == 0.0 { 0.0 } else { top + 5.0 * ROW },
+                "horizontal={horizontal}, scrollTop={top}"
+            );
+        }
+    }
+}
+
+#[test]
+fn coverage_precedes_measurement_and_clearing_it_changes_the_anchor() {
+    for horizontal in [false, true] {
+        let mut source = APP.to_owned();
+        if horizontal {
+            source = source.replace("height=600 width=400 overflow-x=\"hidden\" estimated-item-height=100 padding-top=92 padding-bottom=", "height=400 width=600 display=\"flex\" flex-direction=\"row\" overflow-x=\"scroll\" overflow-y=\"hidden\" estimated-item-width=100 padding-left=92 padding-right=")
+                .replace("height=100 width=\"100%\"", "width=100 height=\"100%\"");
+        }
+        let mut r = boot(&source);
+        let top = TOP + 100.0;
+        assert_eq!(host(&mut r, top), top);
+        let view = list(&r).view;
+        let before = list(&r);
+        let epoch = r.kernel().epoch();
+        assert!(r.set_list_covered(view, [136.0, 80.0]));
+        assert_eq!(r.kernel().epoch(), epoch, "coverage itself emits no commit");
+        assert_eq!(list(&r), before, "coverage itself moves nothing");
+        let top = host_by(&mut r, top, |i| if i == 1 { 131.0 } else { ROW });
+        assert_eq!(top, TOP + if horizontal { 100.0 } else { 131.0 });
+        // Horizontal remeasurement moves later cards as CSS does; a vertical
+        // list keeps the row below the band still (LLP 1070 H4).
+        assert!(r.set_list_covered(view, [f64::NAN, -1.0]));
+        assert_eq!(
+            host_by(&mut r, top, |i| if i == 1 { 160.0 } else { ROW }),
+            top,
+            "the formerly covered row now anchors its own growth"
+        );
+    }
+}

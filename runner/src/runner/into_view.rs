@@ -128,6 +128,7 @@ impl<D: DataSource> Runner<D> {
     /// UIKit's bars over a list drawn under them, which its host reports as
     /// padding (LLP 1130 D3). A row aligned by `scrollIntoView` or a focus
     /// lands clear of it, as UIKit's `scrollToItem(at:at:animated:)` does.
+    /// The first row clear of the start band anchors content changes.
     /// Nothing moves now. Whether `view` is a mounted list.
     pub fn set_list_covered(&mut self, view: ViewId, covered: [f64; 2]) -> bool {
         match (self.links.lists, self.tree.as_mut()) {
