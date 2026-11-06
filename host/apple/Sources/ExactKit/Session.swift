@@ -1055,8 +1055,7 @@ public final class ExactSession {
         advanceIfDue()
     }
 
-    /// The appearance reports a landing held back (`holdingReports`), asked
-    /// once the batch the owner made before them has applied or skipped.
+    /// Pending appearance and intrinsic reports, after preceding owner batches apply or skip.
     private func drainReports() {
         if colorsOwed, !holdingReports, !awaitingTree { colorsOwed = false; apply(runtime.reportColors(tint: SystemColor.appTint.flatMap { SystemColor.tintPair($0) })) }
         while !holdingReports, !pendingViewDark.isEmpty {
@@ -1068,8 +1067,10 @@ public final class ExactSession {
                 if let q = batch.seq { natives.hatchClock.seq = q.1 }
             } else { apply(batch) }
         }
+    #if os(iOS) || os(tvOS)
+        if !holdingReports, !awaitingTree { presenter.flushIntrinsicSizes() } // PROTO: settle projected heights before collection feedback and the first frame
+    #endif
     }
-
     #if DEBUG
     /// Tests: a tick's slice the owner published, not yet landed.
     func publishTickForTests(_ batch: Batch) { tickInFlight = true; publish(.tick, batch, generation) }

@@ -747,8 +747,8 @@ package final class Presenter {
     /// Work for after the batch being applied, or now: a hatch's act on an
     /// authored element never lands inside a batch (LLP 1075.003 §3.4).
     package func afterBatch(_ work: @escaping () -> Void) { if applying { waiting.append((nil, work)) } else { work() } }
-    /// Symbols and projected controls report after the batch that creates
-    /// them: all sizes from a turn reach the runner under one layout.
+    /// PROTO: drain a batch's projected sizes before its first frame; the
+    /// queued callback also covers changes made outside a batch.
     private struct QueuedIntrinsic { weak var view: NodeView?; let generation: Int; let size: CGSize? }
     private var intrinsicSizes: [QueuedIntrinsic] = []
     func queueIntrinsicSize(_ view: NodeView, generation: Int, _ size: CGSize?) {
@@ -757,7 +757,8 @@ package final class Presenter {
         }
         intrinsicSizes.append(QueuedIntrinsic(view: view, generation: generation, size: size))
     }
-    private func flushIntrinsicSizes() {
+    func flushIntrinsicSizes() {
+        guard !intrinsicSizes.isEmpty else { return } // PROTO: the report drain may have consumed the queued callback's sizes
         let queued = intrinsicSizes
         intrinsicSizes = []
         var latest: [UInt32: CGSize?] = [:], order: [UInt32] = []
