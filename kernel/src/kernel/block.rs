@@ -24,11 +24,11 @@
 //! content as the UA sheet's `fit-content` does. A host's block for the
 //! same box wins, and taking it back leaves the viewport.
 
+use super::cover::HostCover;
 use super::{engine, Kernel};
 use crate::arena::NodeArena;
 use crate::error::{KernelError, LayoutError};
 use crate::id::{Frame, NodeFlags, Offer, ViewId};
-use super::cover::HostCover;
 use crate::layout::{self, LayoutMirror, LayoutReceipt};
 use crate::style::resolve_calc;
 use taffy::style::{BoxSizing, LengthPercentageAuto as Lpa, Position};
@@ -74,7 +74,10 @@ pub(crate) fn inner(arena: &NodeArena, slot: u32, block: HostBlock) -> HostBlock
         BlockAxis::Fit(v) => BlockAxis::Fit((v - by).max(0.0)),
         BlockAxis::Region(v) => BlockAxis::Region((v - by).max(0.0)),
     };
-    HostBlock { width: less(block.width, left + right), height: less(block.height, top + bottom) }
+    HostBlock {
+        width: less(block.width, left + right),
+        height: less(block.height, top + bottom),
+    }
 }
 
 /// A containing block a host gives one node, in points.
@@ -654,7 +657,8 @@ impl Kernel {
         let under = |slot: u32| slot != root && arena.is_ancestor(root, slot);
         let offer = |b: HostBlock| Offer::definite(b.width.length(), b.height.length());
         let held = arena.blocks.0.iter().filter(|b| under(b.slot));
-        held.map(|b| (b.slot, offer(inner(arena, b.slot, b.block)))).collect()
+        held.map(|b| (b.slot, offer(inner(arena, b.slot, b.block))))
+            .collect()
     }
 
     /// Lay `root` out under `offer`, then each subtree with a block under
@@ -741,7 +745,11 @@ impl Kernel {
         ) else {
             return (0.0, 0.0);
         };
-        used_in(block, super::clearance(&self.arena, slot), &tree.layout(node))
+        used_in(
+            block,
+            super::clearance(&self.arena, slot),
+            &tree.layout(node),
+        )
     }
 
     /// The used size `view`'s subtree would have in `block`, had its host
@@ -817,7 +825,11 @@ impl Kernel {
     /// frozen in its settled layout (`LayoutTree::freeze_scroll_content`), and
     /// each place along the range is laid out in the copy
     /// (`ClearanceTrial::frames`): nothing the kernel holds changes.
-    pub fn clearance_trial(&mut self, view: ViewId, far: f32) -> Result<ClearanceTrial<'_>, KernelError> {
+    pub fn clearance_trial(
+        &mut self,
+        view: ViewId,
+        far: f32,
+    ) -> Result<ClearanceTrial<'_>, KernelError> {
         let slot = self
             .arena
             .slot_of(view)
@@ -851,7 +863,18 @@ impl Kernel {
             let (a, b, c, n) = p.get();
             p.set((a + started.elapsed().as_micros() as u64, b, c, n));
         });
-        Ok(ClearanceTrial { settled: &self.arena, measurer: self.measurer.as_mut(), arena, tree: trial, slot, node, block, edges, far, frozen })
+        Ok(ClearanceTrial {
+            settled: &self.arena,
+            measurer: self.measurer.as_mut(),
+            arena,
+            tree: trial,
+            slot,
+            node,
+            block,
+            edges,
+            far,
+            frozen,
+        })
     }
 
     /// PROTO (rule 4): the frames of one trial at `t`, `clearance_trial(view, far)?.frames(t)`.
@@ -898,12 +921,19 @@ impl ClearanceTrial<'_> {
         let started = std::time::Instant::now();
         let mut edges = self.edges;
         edges[0] = top;
-        self.arena.set_cover(self.slot, Some(HostCover::Edges(edges)));
+        self.arena
+            .set_cover(self.slot, Some(HostCover::Edges(edges)));
         self.tree.restyle(&self.arena, self.slot, self.node);
         self.tree.mark_dirty(self.node);
         let room = inner(&self.arena, self.slot, self.block);
         let offer = Offer::definite(room.width.length(), room.height.length());
-        layout::compute(&mut self.arena, &mut self.tree, &mut *self.measurer, self.slot, offer)?;
+        layout::compute(
+            &mut self.arena,
+            &mut self.tree,
+            &mut *self.measurer,
+            self.slot,
+            offer,
+        )?;
         let computed = started.elapsed();
         let slot = self.slot;
         // Each box in its parent's space, as the host places it; the root in the block's
@@ -912,7 +942,12 @@ impl ClearanceTrial<'_> {
             match a.parent(s).filter(|_| s != slot) {
                 Some(p) => {
                     let pf = a.frame(p);
-                    Frame { x: f.x - pf.x, y: f.y - pf.y, width: f.width, height: f.height }
+                    Frame {
+                        x: f.x - pf.x,
+                        y: f.y - pf.y,
+                        width: f.width,
+                        height: f.height,
+                    }
                 }
                 None => f,
             }
@@ -920,13 +955,22 @@ impl ClearanceTrial<'_> {
         let mut out = Vec::new();
         let mut stack = vec![slot];
         while let Some(s) = stack.pop() {
-            out.push((self.settled.local_id(s), relative(self.settled, s), relative(&self.arena, s)));
+            out.push((
+                self.settled.local_id(s),
+                relative(self.settled, s),
+                relative(&self.arena, s),
+            ));
             stack.extend_from_slice(self.arena.children(s));
         }
         let collected = started.elapsed();
         TRIAL_PHASES.with(|p| {
             let (a, b, c, n) = p.get();
-            p.set((a, b + computed.as_micros() as u64, c + (collected - computed).as_micros() as u64, n + 1));
+            p.set((
+                a,
+                b + computed.as_micros() as u64,
+                c + (collected - computed).as_micros() as u64,
+                n + 1,
+            ));
         });
         Ok(out)
     }
@@ -966,7 +1010,13 @@ fn used_in(block: HostBlock, clearance: Option<[f32; 4]>, l: &taffy::tree::Layou
         BlockAxis::Fit(_) | BlockAxis::Region(_) => end.max(0.0),
     };
     (
-        axis(block.width, l.location.x + l.size.width + l.margin.right + left + right),
-        axis(block.height, l.location.y + l.size.height + l.margin.bottom + top + bottom),
+        axis(
+            block.width,
+            l.location.x + l.size.width + l.margin.right + left + right,
+        ),
+        axis(
+            block.height,
+            l.location.y + l.size.height + l.margin.bottom + top + bottom,
+        ),
     )
 }

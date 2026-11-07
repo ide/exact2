@@ -73,15 +73,7 @@ pub(super) fn publish(
     // clearance's left and top, the safe area's origin in the block's space.
     let (cx, cy) = crate::kernel::clearance(arena, root).map_or((0.0, 0.0), |e| (e[3], e[0]));
     let mut stack = if full || has_sources || whole {
-        vec![(
-            root,
-            cx,
-            cy,
-            hidden,
-            full || whole,
-            false,
-            Shift::default(),
-        )]
+        vec![(root, cx, cy, hidden, full || whole, false, Shift::default())]
     } else {
         Vec::new()
     };

@@ -395,7 +395,10 @@ fn a_cover_applies_inside_a_block() {
         .unwrap();
     covered.compute_layout(1, OFFER).unwrap();
     let root = covered.node(3).unwrap().frame;
-    assert_eq!((root.x, root.y, root.width, root.height), (10.0, 44.0, 290.0, 40.0));
+    assert_eq!(
+        (root.x, root.y, root.width, root.height),
+        (10.0, 44.0, 290.0, 40.0)
+    );
     assert_eq!(covered.node(4).unwrap().frame.y, 44.0);
     assert_eq!(covered.host_block_size(3), Some((300.0, 200.0)));
     // The clearance moving with the same inner size republishes the root.
@@ -661,19 +664,71 @@ fn edge_route(rows: u32) -> Kernel {
     let mut ops = Vec::new();
     ops.extend(view(1, NodeType::View, &[(StyleId::Height, n(874.0))]));
     ops.extend(view(2, NodeType::View, &[(StyleId::Height, n(874.0))]));
-    ops.extend(view(3, NodeType::View, &[(StyleId::Display, t("flex")), (StyleId::FlexDirection, t("column")), (StyleId::Height, StyleValue::Percent(100.0))]));
-    ops.extend(view(5, NodeType::View, &[(StyleId::FlexGrow, n(1.0)), (StyleId::FlexBasis, StyleValue::Percent(0.0)), (StyleId::MinHeight, n(0.0)), (StyleId::OverflowX, t("hidden")), (StyleId::OverflowY, t("scroll"))]));
-    ops.extend(view(6, NodeType::View, &[(StyleId::PositionType, t("absolute")), (StyleId::Top, n(12.0)), (StyleId::Left, n(16.0)), (StyleId::Width, n(100.0)), (StyleId::Height, n(28.0))]));
-    ops.extend(view(7, NodeType::View, &[(StyleId::PositionType, t("absolute")), (StyleId::Top, n(0.0)), (StyleId::Bottom, n(0.0)), (StyleId::Right, n(16.0)), (StyleId::Width, n(40.0))]));
+    ops.extend(view(
+        3,
+        NodeType::View,
+        &[
+            (StyleId::Display, t("flex")),
+            (StyleId::FlexDirection, t("column")),
+            (StyleId::Height, StyleValue::Percent(100.0)),
+        ],
+    ));
+    ops.extend(view(
+        5,
+        NodeType::View,
+        &[
+            (StyleId::FlexGrow, n(1.0)),
+            (StyleId::FlexBasis, StyleValue::Percent(0.0)),
+            (StyleId::MinHeight, n(0.0)),
+            (StyleId::OverflowX, t("hidden")),
+            (StyleId::OverflowY, t("scroll")),
+        ],
+    ));
+    ops.extend(view(
+        6,
+        NodeType::View,
+        &[
+            (StyleId::PositionType, t("absolute")),
+            (StyleId::Top, n(12.0)),
+            (StyleId::Left, n(16.0)),
+            (StyleId::Width, n(100.0)),
+            (StyleId::Height, n(28.0)),
+        ],
+    ));
+    ops.extend(view(
+        7,
+        NodeType::View,
+        &[
+            (StyleId::PositionType, t("absolute")),
+            (StyleId::Top, n(0.0)),
+            (StyleId::Bottom, n(0.0)),
+            (StyleId::Right, n(16.0)),
+            (StyleId::Width, n(40.0)),
+        ],
+    ));
     let row_ids: Vec<ViewId> = (0..rows).map(|i| 1000 + i).collect();
     for &id in &row_ids {
         ops.extend(text(id, &format!("Row {id}")));
-        ops.push(style(id, &[(StyleId::PaddingTop, n(12.0)), (StyleId::PaddingBottom, n(12.0)), (StyleId::PaddingLeft, n(16.0))]));
+        ops.push(style(
+            id,
+            &[
+                (StyleId::PaddingTop, n(12.0)),
+                (StyleId::PaddingBottom, n(12.0)),
+                (StyleId::PaddingLeft, n(16.0)),
+            ],
+        ));
     }
-    ops.extend([children(5, row_ids), children(3, [5, 6, 7]), children(2, [3]), children(1, [2]), Op::AttachRoot { id: 1 }]);
+    ops.extend([
+        children(5, row_ids),
+        children(3, [5, 6, 7]),
+        children(2, [3]),
+        children(1, [2]),
+        Op::AttachRoot { id: 1 },
+    ]);
     let mut k = laid_out(ops);
     k.set_host_block(3, is(402.0, 874.0)).unwrap();
-    k.set_host_cover(3, Some(HostCover::Edges([168.0, 0.0, 34.0, 0.0]))).unwrap();
+    k.set_host_cover(3, Some(HostCover::Edges([168.0, 0.0, 34.0, 0.0])))
+        .unwrap();
     k.compute_layout(1, Offer::definite(402.0, 874.0)).unwrap();
     k
 }
@@ -683,12 +738,16 @@ fn far_pass_frames_equal_a_layout_at_the_far_edge() {
     // PROTO (rule 4): the trial at the far end gives each box the frame a layout with the edge there gives it
     let mut k = edge_route(40);
     let far = k.trial_clearance_frames(3, 1.0, 0.0).unwrap();
-    k.set_host_cover(3, Some(HostCover::Edges([0.0, 0.0, 34.0, 0.0]))).unwrap();
+    k.set_host_cover(3, Some(HostCover::Edges([0.0, 0.0, 34.0, 0.0])))
+        .unwrap();
     k.compute_layout(1, Offer::definite(402.0, 874.0)).unwrap();
     for id in [5, 6, 7] {
         let (_, _, trial) = far.iter().find(|(v, _, _)| *v == id).copied().unwrap();
         let real = k.node(id).unwrap().frame;
-        assert!((trial.y - real.y).abs() < 0.01 && (trial.height - real.height).abs() < 0.01, "box {id}: trial {trial:?} against {real:?}");
+        assert!(
+            (trial.y - real.y).abs() < 0.01 && (trial.height - real.height).abs() < 0.01,
+            "box {id}: trial {trial:?} against {real:?}"
+        );
     }
 }
 
@@ -712,7 +771,7 @@ fn far_pass_time() {
             }
             times.sort_unstable();
             let (copy, lay, collect, count) = take_trial_phases();
-            eprintln!("{rows} rows, {places} places: median {} µs (min {}, max {}) · per pass copy {} µs, per place layout {} collect {} µs", times[15], times[0], times[29], copy / 30, lay / count as u64, collect / count as u64);
+            eprintln!("{rows} rows, {places} places: median {} µs (min {}, max {}) · per pass copy {} µs, per place layout {} collect {} µs", times[15], times[0], times[29], copy / 30, lay / count, collect / count);
         }
     }
 }

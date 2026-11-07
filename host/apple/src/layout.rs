@@ -229,14 +229,20 @@ impl<D: DataSource> Host<D> {
     /// with the edge at the block's top, and where a box is not linear in the
     /// edge, its frames at the knots that make it so (`halve`): the host moves
     /// those boxes along them as UIKit moves the edge.
-    fn emit_far(&mut self, batch: &mut Batch, owed: bool, touched: &[NodeKey], changed: &[NodeKey]) {
+    fn emit_far(
+        &mut self,
+        batch: &mut Batch,
+        owed: bool,
+        touched: &[NodeKey],
+        changed: &[NodeKey],
+    ) {
         for route in self.moving_tops.clone() {
             // A layout confined to the content the last pass froze changes nothing a trial lays out
             if !owed && !self.reaches_trial(route, touched, changed) {
                 continue;
             }
             let started = std::time::Instant::now(); // PROTO: the far pass timed
-            // One trial session per pass: the kernel copies once and lays out each place in the copy
+                                                     // One trial session per pass: the kernel copies once and lays out each place in the copy
             let Ok(mut trial) = self.runner.kernel_mut().clearance_trial(route, 0.0) else {
                 // Clear retained frames when a trial cannot start
                 batch.far_reset(route, 0, 0, [0, 0, 0]);
@@ -246,19 +252,41 @@ impl<D: DataSource> Host<D> {
             let Ok(all) = trial.frames(1.0) else {
                 continue;
             };
-            let moving: Vec<_> = all.into_iter().filter(|(_, now, far)| !near(now, far)).collect();
+            let moving: Vec<_> = all
+                .into_iter()
+                .filter(|(_, now, far)| !near(now, far))
+                .collect();
             let ids: Vec<ViewId> = moving.iter().map(|m| m.0).collect();
             let (rest, far): (Vec<Frame>, Vec<Frame>) = moving.iter().map(|m| (m.1, m.2)).unzip();
             // How far the edge travels across the range, read off the boxes it moves furthest
-            let travel = rest.iter().zip(&far).map(|(a, b)| (a.y - b.y).abs().max((a.height - b.height).abs())).fold(0.0, f32::max);
+            let travel = rest
+                .iter()
+                .zip(&far)
+                .map(|(a, b)| (a.y - b.y).abs().max((a.height - b.height).abs()))
+                .fold(0.0, f32::max);
             let mut knots = Vec::new();
-            halve(&mut trial, &ids, (0.0, &rest), (1.0, &far), travel, &mut knots);
+            halve(
+                &mut trial,
+                &ids,
+                (0.0, &rest),
+                (1.0, &far),
+                travel,
+                &mut knots,
+            );
             drop(trial);
             knots.sort_by(|a, b| a.0.total_cmp(&b.0));
             let (copy, lay, collect, _) = exact_kernel::kernel::take_trial_phases(); // PROTO: the trials' phases
-            batch.far_reset(route, started.elapsed().as_micros() as u64, TRIALS.with(|n| n.replace(0)) + 1, [copy, lay, collect]);
+            batch.far_reset(
+                route,
+                started.elapsed().as_micros() as u64,
+                TRIALS.with(|n| n.replace(0)) + 1,
+                [copy, lay, collect],
+            );
             for (i, (id, now, f)) in moving.iter().enumerate() {
-                let inner: Vec<(f32, [f32; 4])> = knots.iter().map(|(t, frames)| (*t, rect(frames[i]))).collect();
+                let inner: Vec<(f32, [f32; 4])> = knots
+                    .iter()
+                    .map(|(t, frames)| (*t, rect(frames[i])))
+                    .collect();
                 batch.far(*id, route, rect(*now), rect(*f), &inner);
             }
         }
@@ -1289,7 +1317,9 @@ thread_local! {
 
 /// PROTO (rule 4): whether two frames are the same within `SLACK`
 fn near(a: &Frame, b: &Frame) -> bool {
-    [a.x - b.x, a.y - b.y, a.width - b.width, a.height - b.height].iter().all(|d| d.abs() <= SLACK)
+    [a.x - b.x, a.y - b.y, a.width - b.width, a.height - b.height]
+        .iter()
+        .all(|d| d.abs() <= SLACK)
 }
 
 fn rect(f: Frame) -> [f32; 4] {
@@ -1305,7 +1335,14 @@ fn rect(f: Frame) -> [f32; 4] {
 /// stays within `SLACK` too. A box between a range's ends that is straight at
 /// its middle is taken to be straight throughout: a `min-*` or `max-*` bound
 /// reached once bends it off the line at the middle.
-fn halve(trial: &mut exact_kernel::kernel::ClearanceTrial<'_>, ids: &[ViewId], (t0, f0): (f32, &[Frame]), (t1, f1): (f32, &[Frame]), travel: f32, knots: &mut Vec<(f32, Vec<Frame>)>) {
+fn halve(
+    trial: &mut exact_kernel::kernel::ClearanceTrial<'_>,
+    ids: &[ViewId],
+    (t0, f0): (f32, &[Frame]),
+    (t1, f1): (f32, &[Frame]),
+    travel: f32,
+    knots: &mut Vec<(f32, Vec<Frame>)>,
+) {
     if ids.is_empty() || (t1 - t0) * travel <= SLACK {
         return;
     }
@@ -1314,10 +1351,24 @@ fn halve(trial: &mut exact_kernel::kernel::ClearanceTrial<'_>, ids: &[ViewId], (
     let Ok(all) = trial.frames(tm) else {
         return;
     };
-    let at: std::collections::HashMap<ViewId, Frame> = all.into_iter().map(|(id, _, f)| (id, f)).collect();
-    let mid: Vec<Frame> = ids.iter().zip(f0).map(|(id, a)| at.get(id).copied().unwrap_or(*a)).collect();
-    let line = |a: &Frame, b: &Frame| Frame { x: (a.x + b.x) / 2.0, y: (a.y + b.y) / 2.0, width: (a.width + b.width) / 2.0, height: (a.height + b.height) / 2.0 };
-    if mid.iter().zip(f0.iter().zip(f1)).all(|(m, (a, b))| near(m, &line(a, b))) {
+    let at: std::collections::HashMap<ViewId, Frame> =
+        all.into_iter().map(|(id, _, f)| (id, f)).collect();
+    let mid: Vec<Frame> = ids
+        .iter()
+        .zip(f0)
+        .map(|(id, a)| at.get(id).copied().unwrap_or(*a))
+        .collect();
+    let line = |a: &Frame, b: &Frame| Frame {
+        x: (a.x + b.x) / 2.0,
+        y: (a.y + b.y) / 2.0,
+        width: (a.width + b.width) / 2.0,
+        height: (a.height + b.height) / 2.0,
+    };
+    if mid
+        .iter()
+        .zip(f0.iter().zip(f1))
+        .all(|(m, (a, b))| near(m, &line(a, b)))
+    {
         return;
     }
     knots.push((tm, mid.clone()));

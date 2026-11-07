@@ -647,19 +647,31 @@ impl LayoutTree {
     pub(crate) fn freeze_scroll_content(&mut self, root: NodeId) -> Vec<u32> {
         use taffy::CompactLength;
         // A length a block-axis room can change: a percentage, or a calc that may hold one
-        let definite = |raw: CompactLength| matches!(raw.tag(), CompactLength::LENGTH_TAG | CompactLength::PERCENT_TAG);
+        let definite = |raw: CompactLength| {
+            matches!(
+                raw.tag(),
+                CompactLength::LENGTH_TAG | CompactLength::PERCENT_TAG
+            )
+        };
         let mut frozen = Vec::new();
         let mut stack = vec![root];
         while let Some(node) = stack.pop() {
-            let Ok(style) = self.taffy.style(node) else { continue };
+            let Ok(style) = self.taffy.style(node) else {
+                continue;
+            };
             let children = self.taffy.children(node).unwrap_or_default();
-            let scrolls = style.overflow.y == taffy::Overflow::Scroll && style.display != taffy::Display::None;
+            let scrolls = style.overflow.y == taffy::Overflow::Scroll
+                && style.display != taffy::Display::None;
             let own_size = definite(style.size.height.into_raw())
                 || (style.flex_grow > 0.0 && definite(style.flex_basis.into_raw()));
             let distributes = match style.display {
                 taffy::Display::Flex => {
-                    matches!(style.flex_direction, taffy::FlexDirection::Column | taffy::FlexDirection::ColumnReverse)
-                        && !(style.justify_content.is_none() || style.justify_content == Some(taffy::JustifyContent::START) || style.justify_content == Some(taffy::JustifyContent::FLEX_START))
+                    matches!(
+                        style.flex_direction,
+                        taffy::FlexDirection::Column | taffy::FlexDirection::ColumnReverse
+                    ) && !(style.justify_content.is_none()
+                        || style.justify_content == Some(taffy::JustifyContent::START)
+                        || style.justify_content == Some(taffy::JustifyContent::FLEX_START))
                 }
                 taffy::Display::Grid => true,
                 _ => false,
@@ -679,11 +691,20 @@ impl LayoutTree {
     /// PROTO (rule 4): whether nothing under `node` takes its layout from `node`'s block size
     fn content_is_settled(&self, node: NodeId) -> bool {
         use taffy::CompactLength;
-        let relative = |raw: CompactLength| matches!(raw.tag(), CompactLength::PERCENT_TAG | CompactLength::CALC_TAG);
+        let relative = |raw: CompactLength| {
+            matches!(
+                raw.tag(),
+                CompactLength::PERCENT_TAG | CompactLength::CALC_TAG
+            )
+        };
         let mut stack = self.taffy.children(node).unwrap_or_default();
         let column = |n: NodeId| {
             self.taffy.style(n).is_ok_and(|s| {
-                s.display == taffy::Display::Flex && matches!(s.flex_direction, taffy::FlexDirection::Column | taffy::FlexDirection::ColumnReverse)
+                s.display == taffy::Display::Flex
+                    && matches!(
+                        s.flex_direction,
+                        taffy::FlexDirection::Column | taffy::FlexDirection::ColumnReverse
+                    )
             })
         };
         while let Some(n) = stack.pop() {
@@ -694,7 +715,7 @@ impl LayoutTree {
                 || relative(s.max_size.height.into_raw())
                 || relative(s.inset.top.into_raw())
                 || relative(s.inset.bottom.into_raw())
-                || (s.flex_grow > 0.0 && self.taffy.parent(n).is_some_and(|p| column(p)))
+                || (s.flex_grow > 0.0 && self.taffy.parent(n).is_some_and(&column))
             {
                 return false;
             }

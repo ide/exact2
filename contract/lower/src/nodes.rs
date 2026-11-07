@@ -339,7 +339,11 @@ impl Lowerer<'_> {
         }
         controls::check_zero_size(tag, expanded, children, *span)?;
         // PROTO (safe-area design r6 §3): extension is `-exact-safe-area="extend"`.
-        if let Some(a) = expanded.iter().rev().find(|a| a.name == "-exact-background-extension") {
+        if let Some(a) = expanded
+            .iter()
+            .rev()
+            .find(|a| a.name == "-exact-background-extension")
+        {
             return err(
                 "lower-attr-value",
                 "`-exact-background-extension` is now `-exact-safe-area=\"extend\"`: the platform mirrors the box's edges into the safe areas it touches",

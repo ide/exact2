@@ -146,7 +146,15 @@ pub(crate) fn name_the_fix(n: &Node, mut e: LowerError) -> LowerError {
 
 /// The props besides ARIA's that any leaf box takes, so a module's too.
 // PROTO (safe-area design r2 §3.7): `-exact-safe-area` is the box's, a module's view the box that takes the edge.
-const BOX_PROPS: [&str; 7] = ["testId", "id", "role", "disabled", "inert", "tabindex", "-exact-safe-area"];
+const BOX_PROPS: [&str; 7] = [
+    "testId",
+    "id",
+    "role",
+    "disabled",
+    "inert",
+    "tabindex",
+    "-exact-safe-area",
+];
 
 /// The events a native view sends its box (`ExactNativeEvents`; the Apple
 /// host's `NativeViews.kinds`), the only handlers a module tag can fire.
