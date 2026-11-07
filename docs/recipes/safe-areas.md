@@ -6,7 +6,7 @@ plain fill touching that area's edge reaches the screen's edge by itself; its co
 at the safe area's edge, not at the platform's margins. A plain list, a header's colour, a
 sheet's list: write nothing.
 
-```contract
+```text
 column navigationKey="inbox" position="absolute" inset=0 display="flex" flex-direction="column"
   // Content at the platform's margins (16 on an iPhone, 20 beside a sidebar); the list
   // still spans the screen and UIKit draws its indicator at the display's edge
