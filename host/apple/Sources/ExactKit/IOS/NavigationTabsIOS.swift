@@ -384,9 +384,9 @@ extension NavigationHost {
             if let requests, presenter.collections.lastRequest(node.id) != requests[node.id] ?? 0 { return }
             presenter.collections.readerMoves(node.id)
         }
-        // At its top under a collapsed title it goes on to the open title's
-        // inset, as UIKit's status-bar tap does, and opens it.
-        let inset = max(sv.adjustedContentInset.top, node != nil && node === c.collapseScroll ? node?.scrollOrigin ?? 0 : 0)
+        // UIKit adjusts the offset as the title opens. Target its current
+        // inset, as the status-bar tap does, without anticipating that growth.
+        let inset = sv.adjustedContentInset.top
         guard sv.contentOffset.y > 0.5 - inset else { return restAtTop(sv, in: c) }
         guard scrollsToTopAnimated else { return restAtTop(sv, in: c) }
         if node?.scrollView === sv { node?.scrollsToTop() }

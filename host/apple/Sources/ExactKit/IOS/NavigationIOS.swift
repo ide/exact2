@@ -642,6 +642,7 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
         guard primaryOwner == nil else { return }
         // Find the containing controller before installing our child.
         guard let parent = ViewPresentation.controller(for: p.root) else { return }
+        defer { primaryOwner?.view.layoutIfNeeded() } // UIKit must mount retained routes in a replacement container too.
         if let tabs = p.tabs {
             installTabs(p, tabs, first: first, in: parent)
             return
@@ -694,7 +695,6 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
         _ = adoptBootCover()
         let parts = NavigationRules.segments(presentations: p.routes[...p.selected].map { $0.props["navigationPresentation"] })
         installPrimary(p, first: Array(p.chosen[parts[0]]))
-        primaryOwner?.view.layoutIfNeeded()
         // The content area the bar leaves reaches layout in this turn, before
         // the first frame (LLP 1075.003 Q3 (c)).
         reportCovers()
