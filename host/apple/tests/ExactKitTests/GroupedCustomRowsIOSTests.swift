@@ -314,5 +314,35 @@ final class GroupedCustomRowsIOSTests: GroupedListFixture {
         XCTAssertTrue(cell.isUserInteractionEnabled, "a tap reaches it")
         XCTAssertFalse(cell.accessibilityElementsHidden, "VoiceOver reads it")
     }
+
+    /// A custom row's peek lifts its cell, as UIKit lifts the cells it draws
+    /// itself: its ground, selected, highlighted or the card's, in its
+    /// background's shape (`ContextMenuHost.targeted`); a plain list's ground
+    /// is the cell's whole width.
+    func testACustomRowsPeekLiftsItsCellInItsGroundsShape() throws {
+        if ExactEnv.agentPaints { throw XCTSkip("the agent paints the popover (D4)") }
+        let p = presenter(props: ["listStyle": "plain"]) { self.model("plain", custom: true) }
+        p.apply(wireBatch([
+            ["op": "create", "id": 30, "kind": "view", "props": ["popover": "auto", "id": "row-menu", "accessibilityRole": "menu"]],
+            ["op": "create", "id": 31, "kind": "button", "handlers": ["press"]],
+            ["op": "children", "id": 30, "ids": [31]],
+            ["op": "children", "id": 3, "ids": [5, 30]],
+            ["op": "props", "id": 21, "set": ["contextPopover": "row-menu"]],
+            ["op": "frame", "id": 30, "x": 0.0, "y": 0.0, "w": 200.0, "h": 44.0],
+            ["op": "frame", "id": 31, "x": 0.0, "y": 0.0, "w": 200.0, "h": 44.0],
+        ]))
+        p.buttonFace = { _ in var face = ButtonFace(); face.title = "Copy"; return face }
+        p.menus.context.sync()
+        let row = try XCTUnwrap(p.views[21]), cell = try cell(p, 21)
+        XCTAssertTrue(row.superview === cell.contentView, "carried into its cell")
+        let host = p.menus.context
+        let interaction = try XCTUnwrap(row.interactions.compactMap { $0 as? UIContextMenuInteraction }.first, "the row's peek is UIKit's context menu")
+        let configuration = try XCTUnwrap(host.contextMenuInteraction(interaction, configurationForMenuAtLocation: CGPoint(x: 20, y: 10)))
+        let lifted = try XCTUnwrap(host.contextMenuInteraction(interaction, configuration: configuration, highlightPreviewForItemWithIdentifier: configuration.identifier))
+        XCTAssertTrue(lifted.view === cell, "the row lifts with its cell")
+        let shape = lifted.parameters.visiblePath?.bounds ?? .null
+        XCTAssertTrue(shape.insetBy(dx: -0.01, dy: -0.01).contains(cell.bounds) && cell.bounds.insetBy(dx: -0.01, dy: -0.01).contains(shape), "its whole width: \(shape)")
+        host.contextMenuInteraction(interaction, willEndFor: configuration, animator: nil)
+    }
 }
 #endif

@@ -456,10 +456,12 @@ final class ContextMenuHost: NSObject, UIContextMenuInteractionDelegate, UIEditM
     }
 
     /// UIKit lifts the node itself, live, clipped to its outline (LLP 1021
-    /// §5.1): it hides the node, lifts it and returns it. A run of text cannot
-    /// lift its paragraph, which UIKit would hide whole: it lifts a picture of
-    /// what lies under the run's lines (`runPreview`), and the paragraph stays
-    /// shown. Both rise over `container(of:)`.
+    /// §5.1): it hides the node, lifts it and returns it, or the list cell
+    /// that draws it, in its background's shape (`cell(drawing:)`), or a node
+    /// painting no ground of its own in the grounds the nodes inside it paint
+    /// (`grounds(in:)`). A run of text cannot lift its paragraph, which UIKit
+    /// would hide whole: it lifts a picture of what lies under the run's lines
+    /// (`runPreview`), and the paragraph stays shown. All rise over `container(of:)`.
     private func targeted(_ configuration: UIContextMenuConfiguration) -> UITargetedPreview? {
         guard let owner = open, let source = owner.source, live(source),
               (configuration.identifier as? NSNumber)?.uint32Value == (owner.inlineID ?? source.id) else { return nil }
@@ -473,9 +475,26 @@ final class ContextMenuHost: NSObject, UIContextMenuInteractionDelegate, UIEditM
             return preview.retargetedPreview(with: lines.target)
         }
         // A view the touch fell on that has left the window gives way to the node
-        let shown = owner.touched.flatMap { $0.window == nil ? nil : $0 } ?? source
+        var shown: UIView = owner.touched.flatMap { $0.window == nil ? nil : $0 } ?? source
         let parameters = UIPreviewParameters()
-        parameters.visiblePath = Self.rounded(shown)
+        // A row a list's cell draws lifts as UIKit lifts the cells it draws
+        // itself: the cell, its ground included (selected, highlighted or the
+        // card's), in its background's shape, one radius UIKit keeps through
+        // the morph as it keeps `rounded`'s.
+        if let cell = Self.cell(drawing: shown), let background = cell.backgroundConfiguration {
+            shown = cell
+            parameters.visiblePath = Self.shape(of: background, in: cell)
+        } else {
+            parameters.visiblePath = Self.rounded(shown)
+        }
+        // A node that paints no ground, whose text and images lie on the
+        // grounds the nodes inside it paint, lifts in their shape: a chat
+        // balloon, its body and its tail, as the platform lifts its own.
+        // Only where UIKit would otherwise lift the bare box: a rounded node
+        // keeps `rounded`'s outline, which UIKit keeps through the morph.
+        if parameters.visiblePath == nil, let node = shown as? NodeView, !Self.paintsGround(node), let grounds = Self.grounds(in: node) {
+            parameters.visiblePath = grounds
+        }
         guard let target = Self.target(shown) else { return nil }
         return UITargetedPreview(view: shown, parameters: parameters, target: target)
     }
@@ -496,6 +515,140 @@ final class ContextMenuHost: NSObject, UIContextMenuInteractionDelegate, UIEditM
             return UIBezierPath(roundedRect: node.bounds, cornerRadius: corner.width)
         }
         return corners.contains(where: { $0.width > 0 }) ? node.roundedPath(in: node.bounds) : nil
+    }
+
+    /// The list cell drawing `view`: the cell itself, or the cell whose content view carries it.
+    private static func cell(drawing view: UIView) -> UICollectionViewCell? {
+        if let cell = view as? UICollectionViewCell { return cell }
+        guard let content = view.superview, let cell = content.superview as? UICollectionViewCell, cell.contentView === content else { return nil }
+        return cell
+    }
+    /// A cell's background as its configuration draws it: the cell's bounds
+    /// less the configuration's insets, with its corner radius.
+    private static func shape(of background: UIBackgroundConfiguration, in cell: UICollectionViewCell) -> UIBezierPath {
+        var insets = background.backgroundInsets
+        let margins = cell.directionalLayoutMargins, edges = background.edgesAddingLayoutMarginsToBackgroundInsets
+        if edges.contains(.top) { insets.top += margins.top }
+        if edges.contains(.leading) { insets.leading += margins.leading }
+        if edges.contains(.bottom) { insets.bottom += margins.bottom }
+        if edges.contains(.trailing) { insets.trailing += margins.trailing }
+        let rtl = cell.effectiveUserInterfaceLayoutDirection == .rightToLeft
+        let box = cell.bounds.inset(by: UIEdgeInsets(top: insets.top, left: rtl ? insets.trailing : insets.leading, bottom: insets.bottom, right: rtl ? insets.leading : insets.trailing))
+        return UIBezierPath(roundedRect: box, cornerRadius: background.cornerRadius)
+    }
+
+    /// The grounds the nodes inside `view` paint, in `view`'s space, joined
+    /// into one region: each where it paints, its box in its corners, cut by
+    /// its clip path and by every box above it that clips (a clip path's
+    /// points beyond the box paint nothing, and a box of no area paints
+    /// nothing). Nil when none paints one, when one is masked by what is not
+    /// a region (a gradient, a filter's picture, a transition's surface),
+    /// itself or by a box above it, or when ink lies
+    /// anywhere off them: a node that paints none and holds none (a
+    /// paragraph, an image, a drawing) or a flat box drawn in a layer
+    /// (`FlatLeaves`), each by its whole box, or a flat box's shadow. A line
+    /// centred on a balloon's body that runs past it lifts the whole box, as
+    /// before, so no ink of it is cut.
+    ///
+    /// The union decides; the path given is the grounds' own outlines, each
+    /// normalized (`CGPath.normalized`: weakly simple, no self-intersection,
+    /// the orientation every normalized path has) and added as a subpath, so
+    /// the nonzero rule fills their union with the authored edges. The
+    /// union's own path does not keep them: its boolean cuts move a corner's
+    /// point by 1e-8 pt, enough to lose a ground pixel whose centre lies on it.
+    private static func grounds(in view: NodeView) -> UIBezierPath? {
+        var shape: CGPath?
+        let outlines = CGMutablePath()
+        var content: [CGRect] = []
+        // Each view, with the region the boxes from `view` down to it clip
+        // it to, and whether one of them, or it, is masked otherwise
+        var stack: [(UIView, CGPath?, Bool)] = [(view, nil, false)]
+        while let entry = stack.popLast() {
+            let (sub, above, maskedAbove) = entry
+            guard !sub.isHidden, sub.alpha > 0.01 else { continue }
+            let node = sub as? NodeView
+            // What it clips what it holds to: its box in its corners when it
+            // clips its overflow, and its clip path, both where both are there
+            // (`BoxMaskIOS.clipMask`)
+            var own: CGPath?
+            if sub.clipsToBounds { own = (node?.roundedPath(in: sub.bounds) ?? UIBezierPath(roundedRect: sub.bounds, cornerRadius: sub.layer.cornerRadius)).cgPath }
+            if let node, let path = node.clipPath {
+                let authored = path.normalized(using: node.clipRule)
+                own = own.map { $0.intersection(authored) } ?? authored
+            }
+            // A mask no region says: `mask-image`, laid over the clip path
+            // (`composedMask`), a filtered box's picture, a layout transition's
+            // surface, a node's mask that is neither of its clips, or any mask
+            // on a view that is not a node (a clip box's shaped corners)
+            let unsaid = node.map { $0.style["mask_image"] != nil || $0.hasBoxFilter || $0.surface != nil || ($0.layer.mask != nil && $0.clipPath == nil && !$0.clipsToBounds) }
+                ?? (sub.layer.mask != nil)
+            let masked = maskedAbove || unsaid
+            var clip = above
+            if let own {
+                let mine = placed(own, transform(from: sub, to: view))
+                clip = above.map { $0.intersection(mine) } ?? mine
+            }
+            stack.append(contentsOf: sub.subviews.map { ($0, clip, masked) })
+            guard let node else { continue }
+            // An outer shadow (`applyShadow`, cast on the node's layer past its
+            // box) or a filter's picture paints past the box: no shape of the
+            // grounds holds that ink, so the whole box lifts
+            if node !== view, node.shadowCaster != nil || node.hasBoxFilter { return nil }
+            guard let flat = flatBoxes(drawnIn: node, in: view) else { return nil }
+            content += flat
+            guard node !== view else { continue }
+            if paintsGround(node) {
+                guard !masked else { return nil }
+                guard !node.bounds.isEmpty else { continue }
+                let box = placed(node.roundedPath(in: node.bounds).cgPath, transform(from: node, to: view))
+                let painted = clip.map { box.intersection($0) } ?? box
+                // The union of the regions, whichever way each path turns
+                shape = shape.map { $0.union(painted) } ?? painted
+                // Its outline as authored where that is what paints: the clip
+                // path itself when nothing above clips and it lies in a
+                // square-cornered box (the box cut by it is it); else the cut
+                if above == nil, let path = node.clipPath, node.cornerSizes(in: node.bounds).allSatisfy({ $0 == .zero }),
+                   node.bounds.contains(path.boundingBoxOfPath) {
+                    outlines.addPath(placed(path, transform(from: node, to: view)).normalized(using: node.clipRule))
+                } else {
+                    outlines.addPath(painted.normalized())
+                }
+            } else if !node.bounds.isEmpty, !node.subviews.contains(where: { $0 is NodeView }) {
+                content.append(view.convert(node.bounds, from: node))
+            }
+        }
+        guard let shape, !shape.isEmpty, !shape.boundingBoxOfPath.isEmpty,
+              content.allSatisfy({ CGPath(rect: $0, transform: nil).subtracting(shape).isEmpty }) else { return nil }
+        return UIBezierPath(cgPath: outlines)
+    }
+    /// The boxes of the flat leaves `node` draws in its layers, in `view`'s
+    /// space; nil when one casts a shadow, whose ink lies outside its box.
+    private static func flatBoxes(drawnIn node: NodeView, in view: UIView) -> [CGRect]? {
+        guard let flats = node.presenter?.flats, var ids = flats.children(of: node.id) else { return [] }
+        var boxes: [CGRect] = []
+        while let id = ids.popLast() {
+            guard let leaf = flats.leaves[id] else { continue }
+            ids.append(contentsOf: flats.children(of: id) ?? [])
+            guard let frame = flats.frameInHost(id), !frame.isEmpty else { continue }
+            if leaf.paint.shadow != nil { return nil }
+            boxes.append(view.convert(frame, from: node.container))
+        }
+        return boxes
+    }
+    /// `sub`'s space mapped into `view`'s, through every transform between them.
+    private static func transform(from sub: UIView, to view: UIView) -> CGAffineTransform {
+        let origin = view.convert(CGPoint.zero, from: sub), x = view.convert(CGPoint(x: 1, y: 0), from: sub), y = view.convert(CGPoint(x: 0, y: 1), from: sub)
+        return CGAffineTransform(a: x.x - origin.x, b: x.y - origin.y, c: y.x - origin.x, d: y.y - origin.y, tx: origin.x, ty: origin.y)
+    }
+    private static func placed(_ path: CGPath, _ transform: CGAffineTransform) -> CGPath {
+        let out = CGMutablePath()
+        out.addPath(path, transform: transform)
+        return out
+    }
+    /// Whether `node` paints a ground: a background colour, a gradient, a material or a border.
+    private static func paintsGround(_ node: NodeView) -> Bool {
+        (node.cgColor("background_color")?.alpha ?? 0) > 0 || node.style["background_image"] != nil || node.materialView != nil
+            || ["border_width", "border_width_top", "border_width_right", "border_width_bottom", "border_width_left"].contains { node.number($0) > 0 }
     }
 
     /// A run's lines where the screen shows them in `container`: their boxes,
