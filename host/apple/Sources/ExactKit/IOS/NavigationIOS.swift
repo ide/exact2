@@ -310,13 +310,11 @@ final class RouteController: UIViewController, UIScrollViewDelegate {
         host?.presenter.elementScrolls.revealEnded(scrollView)
     }
 
-    // A button can remove a route before UIKit starts its pop. Preserve its
-    // outgoing pixels for that transition; an interactive pop uses live views.
+    // A button can remove a route before UIKit starts its pop. Preserve its outgoing pixels for that transition; an interactive pop uses live views.
     func freeze() {
         guard isViewLoaded, let snapshot = view.snapshotView(afterScreenUpdates: false) else { return }
         snapshot.frame = view.bounds
-        // Pinned to the top, never stretched: the viewport can grow under it
-        // as the pop starts (a keyboard going away, see NavigationHost.sync).
+        // Pinned to the top, never stretched: the viewport can grow under it as the pop starts (a keyboard going away, see NavigationHost.sync).
         snapshot.autoresizingMask = [.flexibleWidth, .flexibleBottomMargin]
         view.addSubview(snapshot)
         snapshot.setPaintForeground()
@@ -334,9 +332,11 @@ final class RouteController: UIViewController, UIScrollViewDelegate {
 
     // A held stack's tab bar follows the route's scroll views as a navigation controller's follows its top's.
     override func setContentScrollView(_ scrollView: UIScrollView?, for edge: NSDirectionalRectEdge) {
+        let leaving = contentScrollView(for: edge)
         super.setContentScrollView(scrollView, for: edge)
         (parent as? HeldStack)?.setContentScrollView(scrollView, for: edge)
         if edge == .top { followTopEdge(scrollView) }
+        observeAgain(leaving, leftFrom: edge, for: scrollView)
     }
 
     private var topEdgeWatch: NSKeyValueObservation?

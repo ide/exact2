@@ -373,6 +373,27 @@ final class PageEdgesIOSTests: XCTestCase {
         XCTAssertEqual(ControlBars(p).bars(of: list, in: route.node, top: true)?.isEmpty, false)
     }
 
+    func testTheTitleKeepsFollowingAListThatLeavesTheBottomEdge() throws {
+        guard UIApplication.shared.connectedScenes.first is UIWindowScene else { throw missing("scene", "the title and safe area belong to a scene window") }
+        guard #available(iOS 26.0, *) else { throw XCTSkip("control bars require iOS 26") }
+        let (session, _) = try fixture("CONTROL_BARS")
+        let p = session.presenter
+        p.press(try node(session, "pick-large").id)
+        let list = try node(session, "list"), route = try XCTUnwrap(p.navigation.activeRoute)
+        until("the bar has settled") { !Agent(session: session).nativeInFlight() }
+        let nav = try XCTUnwrap(route.navigationController), sv = try XCTUnwrap(list.scrollView)
+        XCTAssertTrue(route.contentScrollView(for: .top) === sv)
+        // UIKit stops observing the list when it leaves the bottom edge; the navigation controller's layout observes it again.
+        route.setContentScrollView(sv, for: .bottom)
+        route.setContentScrollView(nil, for: .bottom)
+        until("the navigation controller has laid out") { !nav.view.layer.needsLayout() }
+        let expanded = nav.navigationBar.bounds.height
+        XCTAssertGreaterThan(expanded, 80)
+        Agent.rest(sv, at: CGPoint(x: 0, y: 300 - sv.adjustedContentInset.top), x: false, y: true)
+        nav.view.layoutIfNeeded()
+        XCTAssertLessThan(nav.navigationBar.bounds.height, 65, "the large title collapses as the list scrolls")
+    }
+
     func testLargeTitleRidersRequireBothEdgesAndTheBarsPaintOrder() throws {
         guard UIApplication.shared.connectedScenes.first is UIWindowScene else { throw missing("scene", "the title belongs to a scene window") }
         guard #available(iOS 26.0, *) else { throw XCTSkip("control bars require iOS 26") }

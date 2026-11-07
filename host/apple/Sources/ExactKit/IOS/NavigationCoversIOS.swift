@@ -396,6 +396,22 @@ extension RouteController {
         }
     }
 
+    /// Asks the navigation controller to observe again a scroll view that left
+    /// one edge while the other edge may still use it. The controller registers
+    /// once as each content scroll view's scroll observer, and a change on one
+    /// edge removes that registration from the view the edge left, even when
+    /// the view stays the other edge's (`-[UINavigationController
+    /// _observableScrollViewDidChangeFrom:forViewController:edges:]`, iOS 27.0
+    /// and 27.1). Its bar then stops following that view's scrolling (no large
+    /// title collapse or snap, no minimization) until its next layout observes
+    /// the controller's content scroll views again. UIKit resolves an edge set
+    /// to no scroll view itself, possibly to the view that left.
+    func observeAgain(_ leaving: UIScrollView?, leftFrom edge: NSDirectionalRectEdge, for scrollView: UIScrollView?) {
+        guard let leaving, leaving !== scrollView else { return }
+        let other = contentScrollView(for: edge == .top ? .bottom : .top)
+        if other == nil || other === leaving { navigationController?.view.setNeedsLayout() }
+    }
+
     /// A large title at rest stays open when the text size changes. UIKit
     /// draws the title at the new size in the bar's old height, which grows
     /// only when the list is pulled: at the largest size the title ran under
