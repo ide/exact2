@@ -308,6 +308,8 @@ test.skipIf(process.platform !== 'darwin')('the Apple service sends wire.json\'s
     expect(run.status, run.stderr).toBe(0);
     const out = JSON.parse(run.stdout);
     check(out, 'apple');
+    expect(out.initialization.threads.totalOpens).toBeGreaterThan(0);
+    expect(out.initialization.threads.mainOpens).toBe(0);
     // What an app's own screen reads back (`ExactServices.query("observe", …)`):
     // the newest rows first, none sent yet, at most the limit.
     const { session, metrics } = out.recent;

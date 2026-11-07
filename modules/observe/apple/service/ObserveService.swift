@@ -11,7 +11,7 @@ final class ObserveService {
     let queue = DispatchQueue(label: "exact.observe.service")
     let config: [String: Any]
     let session: String
-    let store: ObserveStore?
+    private(set) var store: ObserveStore?
     let clientId: UUID
     let metadata: [String: Any]
     var device: [String: Any] = [:]
@@ -51,7 +51,7 @@ final class ObserveService {
             clientId = UUID(uuidString: id) ?? UUID()
         }
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        store = ObserveStore(directory: root ?? base.appendingPathComponent("exact/\(config["app.CFBundleIdentifier"] as? String ?? Bundle.main.bundleIdentifier ?? "app")/observe", isDirectory: true))
+        let directory = root ?? base.appendingPathComponent("exact/\(config["app.CFBundleIdentifier"] as? String ?? Bundle.main.bundleIdentifier ?? "app")/observe", isDirectory: true)
         crashDirectory = root?.path ?? config["crashDirectory"] as? String
         metadata = Self.metadata(config)
         for record in Self.records(handoff) {
@@ -59,6 +59,7 @@ final class ObserveService {
         }
         if Self.logEnabled { fputs("observe: service started, session \(session)\n", stderr) }
         queue.async { [self] in
+            store = ObserveStore(directory: directory)
             store?.saveSession(session, start: config["sessionStart"] as? Double ?? Date().timeIntervalSince1970, metadata: metadata)
             ingestCrashes()
             scheduleDispatch()
