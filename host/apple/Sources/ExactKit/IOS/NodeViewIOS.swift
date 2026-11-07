@@ -793,8 +793,9 @@ package final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, U
         defer { Presenter.signposts.endInterval("scrolled", post); HostPhases.shared.end(phase) }
         // The kernel's authored frames already include this content room.
         // Keep the physical UI inset basis, but do not count native padding twice.
+        // Vertically that is CSS `scrollTop`, on the basis scroll events use (`scrollTopInset`): UIKit's adjustment included.
         let room = extras?.nativeScrollContentInsets ?? .zero
-        presenter?.onScrolled?(id, Double(scrollView.contentOffset.x + room.left), Double(scrollView.contentOffset.y + room.top + pageBand.top))
+        presenter?.onScrolled?(id, Double(scrollView.contentOffset.x + room.left), Double(scrollView.contentOffset.y + scrollTopInset(scrollView)))
         presenter?.stickies.scrolled(id); presenter?.collections.changed(id, user: true)
         #if os(iOS)
         if swipeOwner, scrollView.isTracking { presenter?.swipeActions.painted.scrolled(self) }
