@@ -83,3 +83,69 @@ component GlassPress
         text "Show"
       button press=showGroup testId="on-group"
         text "Group"
+      ComposerPopovers()
+
+component ComposerPopovers
+  state draft = "Draft selection"
+  state fieldShown = true
+  state fieldDisabled = false
+  state focuses = 0
+  state blurs = 0
+  state choices = 0
+  action edit(v: string)
+    draft = v
+  action focused
+    focuses = focuses + 1
+  action blurred
+    blurs = blurs + 1
+  action choose
+    choices = choices + 1
+    hidePopover("composer-card")
+  action chooseAndBlur
+    blur("card-draft")
+    hidePopover("composer-card")
+  action selectDraft
+    selectText("card-draft")
+  action removeField
+    fieldShown = false
+  action disableField
+    fieldDisabled = true
+  view
+    column position="absolute" left=16 bottom=20 width=320 gap=8
+      row gap=8 glassGroup=12
+        button id="card-open" testId="card-open" appearance="none" backgroundMaterial="glass" border-radius=22 width=44 height=44 popovertarget="composer-card" aria-label="Add"
+          text "+"
+        box backgroundMaterial="glass" border-radius=22 padding=8 flex=1 testId="card-pill"
+          if fieldShown
+            textarea id="card-draft" testId="card-draft" value=draft input=edit focus=focused blur=blurred disabled=fieldDisabled rows=1 aria-label="Draft" background-color="transparent" border="none"
+      row gap=8
+        text `Focus ${focuses}` testId="card-focuses" font-variant-numeric="tabular-nums"
+        text `Blur ${blurs}` testId="card-blurs" font-variant-numeric="tabular-nums"
+        text `Choices ${choices}` testId="card-choices" font-variant-numeric="tabular-nums"
+    column id="composer-card" testId="composer-card" popover="auto" width=280 padding=12 gap=8
+      button testId="card-choose" press=choose
+        text "Choose"
+      button testId="card-blur" press=chooseAndBlur
+        text "Choose and blur"
+      button testId="card-select" press=selectDraft
+        text "Select draft"
+      button id="card-plain-open" testId="card-plain-open" appearance="none" popovertarget="card-plain"
+        text "Plain nested"
+      button testId="card-native-open" appearance="none" backgroundMaterial="glass" border-radius=20 popovertarget="card-native"
+        text "Native nested"
+      button testId="card-manual-open" appearance="none" popovertarget="card-manual"
+        text "Manual nested"
+      input id="card-editor" testId="card-editor" aria-label="Card editor"
+      button testId="card-remove-field" press=removeField
+        text "Remove draft"
+      button testId="card-disable-field" press=disableField
+        text "Disable draft"
+    column id="card-plain" testId="card-plain" popover="auto" width=180 padding=12
+      button popovertarget="card-plain" popovertargetaction="hide" testId="card-plain-close"
+        text "Close nested"
+    column id="card-native" testId="card-native" popover="auto" width=180 padding=12
+      button popovertarget="card-native" popovertargetaction="hide" testId="card-native-close"
+        text "Close native"
+    column id="card-manual" testId="card-manual" popover="manual" width=180 padding=12
+      button popovertarget="card-manual" popovertargetaction="hide" testId="card-manual-close"
+        text "Close manual"

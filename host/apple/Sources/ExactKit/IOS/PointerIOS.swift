@@ -641,6 +641,7 @@ extension NodeView {
     /// dispatch has returned (PressHandoffIOS).
     func focusForPress(target: NodeView?) -> PressHandoff? {
         guard let presenter else { return nil }
+        let target = target ?? presenter.activationButton(from: self)
         let handoff = presenter.beginPress(control: target.map { $0.textArea ?? $0.field ?? $0 })
         guard !presenter.contextRetainsFocus(self) else { return handoff }
         // A press whose `pointerdown` an action prevented moves no focus, nor ends the editing there (LLP 1005 §3);

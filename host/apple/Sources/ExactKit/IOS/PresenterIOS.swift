@@ -192,22 +192,14 @@ package final class Presenter {
     let pinnedRoom = PinnedRoom()
     /// A native prompt outside the session's mounts, associated by its creator.
     package weak var keyboardPrompt: UITextField?
-
-    /// A route's content or its projected search field currently owns text input.
-    func ownsKeyboard(in container: UIView) -> Bool { edits(in: container) || editsInBar(of: container) }
-    /// Whether the keyboard's editor is in `container`'s content.
-    func edits(in container: UIView) -> Bool { keyboardEditor?.isDescendant(of: container) == true }
-    /// Whether the keyboard's editor is the search field of the bar over `container`'s route.
-    func editsInBar(of container: UIView) -> Bool {
-        guard let editor = keyboardEditor else { return false }
-        return (ViewPresentation.controller(for: container) as? RouteController)?.search?.field?.headerField === editor
-    }
+    // `keyboardEditor` and what reads it: OwnersIOS.swift, beside `mounts(_:)`.
     /// The docked keyboard's occupied geometry in its owning container.
     package func keyboardGuideTop(in container: UIView) -> CGFloat? {
         #if os(tvOS)
         return nil
         #else
         guard container.window != nil, hasKeyboardEditor else { return nil }
+        if let held = menus.cards.keys { return container.convert(CGPoint(x: 0, y: held.top), from: nil).y }
         if let view = container as? ExactView, !view.hasKeyboardGuide { return nil }
         let guide = container.keyboardLayoutGuide.layoutFrame
         return guide.height > 0 ? guide.minY : nil
@@ -239,6 +231,7 @@ package final class Presenter {
         let c = NotificationCenter.default
         c.addObserver(self, selector: #selector(keyboardChanged(_:)), name: UIResponder.keyboardWillChangeFrameNotification, object: nil)
         c.addObserver(self, selector: #selector(keyboardSettled(_:)), name: UIResponder.keyboardDidChangeFrameNotification, object: nil)
+        StoodDownKeys.watch()
         #endif
     }
 
@@ -545,6 +538,9 @@ package final class Presenter {
             session?.log("selectText \"\(name)\" refused: not a text editor")
             return
         }
+        #if os(iOS)
+        if let held = menus.cards.keys, held.node === target, !held.returning { held.focus(selectText: selectText); return }
+        #endif
         chooseFocus(target)
         guard responder.canBecomeFirstResponder else {
             session?.log("focus \"\(name)\" refused: not focusable")
@@ -567,6 +563,9 @@ package final class Presenter {
     /// waiting to be delivered; blur(html-id) only when that node holds it.
     func blurElement(_ args: [Any]) {
         pendingFocus = nil
+        #if os(iOS)
+        if let held = menus.cards.keys, args.isEmpty || held.node?.props["id"] == args.first as? String { held.blur(); return }
+        #endif
         if let name = args.first as? String {
             guard let target = views.values.sorted(by: { $0.id < $1.id }).first(where: { $0.props["id"] == name }) else { return }
             let responder: UIView = target.headerField ?? target.textArea ?? target.field ?? target

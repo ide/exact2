@@ -970,7 +970,7 @@ package final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, U
         defer { syncGlassSlot(); syncGlassGroup(); settleVibrancy(); syncDefaultSurfaceScroll() }
         let kind = materialRequest
         let supported = kind != nil
-        let interactive = Materials.glass(kind) && handlers.contains("press") && !disabled
+        let interactive = glassAnswersTouch
         if materialKind != (supported ? kind : nil) {
             let children = container.subviews.compactMap { $0 as? NodeView }
             let old = materialView
@@ -995,8 +995,8 @@ package final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, U
             }
             presenter?.flats.containerChanged(id)
         }
-        guard let materialView else { rehomeMaterialChildren(); return }
-        if cssVisibilityHidden { materialView.effect = nil }
+        guard let materialView else { materialInteractive = false; rehomeMaterialChildren(); return }
+        if cssVisibilityHidden { materialView.effect = nil; materialInteractive = false }
         else if materialView.effect == nil || materialInteractive != interactive || backdropStale {
             showMaterialEffect(backdropEffect() ?? materialEffect(kind ?? "ultra-thin", interactive: interactive))
             materialInteractive = interactive

@@ -28,11 +28,12 @@ final class GlassGroups {
     private var active = false
     private static var noted = Set<String>()
 
-    /// Each glass, joined to its group or isolated by its path. A glass
-    /// inside another glass answers to that one's isolation, so the pass
-    /// repeats while anything changed (a few rounds at most). Nothing to do
-    /// in a presenter that has never had a group.
+    /// Refresh interactive surfaces, then join or isolate grouped glass by its path.
+    /// Repeat isolation for glass nested inside another glass that changed containers.
     func reconcile() {
+        #if os(iOS) || os(tvOS)
+        for node in glass.allObjects where node.materialInteractive != node.glassAnswersTouch { node.updateMaterial() }
+        #endif
         let live = groups.count > 0
         guard live || active else { return }
         active = live
@@ -290,6 +291,24 @@ extension NodeView {
     /// What `container` names without a group: the scroll, the canvas
     /// overlay, a glass's content view, the clip box, or the node.
     var baseContainer: UIView { scroll ?? overlay ?? (Materials.glass(materialKind) || blurHostsChildren ? materialView?.contentView : nil) ?? clipBox ?? self }
+
+    /// Use the control's glass as its touch feedback, including a single field's surface
+    var glassAnswersTouch: Bool {
+        guard #available(iOS 26.0, tvOS 26.0, *), Materials.glass(materialRequest), !disabled, !inert, !isHidden, !cssVisibilityHidden else { return false }
+        if sequence(first: superview, next: { $0?.superview }).contains(where: { $0?.isHidden == true }) { return false }
+        if handlers.contains("press") || presenter?.invocation(of: self)?.opens == true { return true }
+        var fields = 0, seen = 0, stack = container.subviews
+        // Bound the search so a panel cannot become a field's interactive surface
+        while seen < 64, let view = stack.popLast() {
+            seen += 1
+            if let node = view as? NodeView {
+                guard presenter?.views[node.id] === node, !node.isHidden, !node.cssVisibilityHidden, !node.formDisabled, !node.inert else { continue }
+                if node.field != nil || node.textArea != nil { fields += 1; if fields > 1 { return false }; continue }
+                stack.append(contentsOf: node.container.subviews)
+            } else { stack.append(contentsOf: view.subviews) }
+        }
+        return fields == 1 && stack.isEmpty
+    }
 
     /// The group view's place and spacing, or its absence (D2, D6).
     func syncGlassGroup() {
