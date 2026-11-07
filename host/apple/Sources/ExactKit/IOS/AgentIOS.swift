@@ -534,6 +534,9 @@ extension Agent {
             return reply
         }
         if req["scrollDrag"] != nil { return scrollDrag(req) }
+        #if os(iOS)
+        if let reply = projectedTitleContext(req) { return delivered(reply, view(req)) }
+        #endif
         if view(req)?.placedAncestor?.placementHidden == true { return ["error": "placed child is hidden"] }
         if req["phase"] == nil, req["wheel"] == nil,
            let node = view(req), presenter.mounts(node), presenter.groupedLists?.draws(node.id) != true,

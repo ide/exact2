@@ -285,6 +285,14 @@ extension Agent {
             target = field; barred = true
         }
         var inBar = false
+        #if os(iOS)
+        if target === v, let title = presenter.navigation.projectedTitle(for: v) {
+            guard !v.inert, presenter.menus.eligible(v, contextMenu: req["contextmenu"] as? Bool == true, inBar: true) else {
+                return ["error": "title #\(v.id) is disabled, hidden or inert"]
+            }
+            target = title; barred = true
+        }
+        #endif
         if target === v, let item = barItem(v) {
             guard case .success(let (bar, frame)) = item else { return ["error": "tap #\(v.id): its bar item is not placed in the navigation bar; `clock settle` first waits out a push or sheet still moving"] }
             target = bar; region = frame; barred = true; inBar = true

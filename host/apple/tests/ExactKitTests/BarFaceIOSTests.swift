@@ -1,4 +1,5 @@
 #if os(iOS)
+import CoreText
 import UIKit
 import XCTest
 @testable import ExactKit
@@ -61,6 +62,99 @@ final class BarFaceIOSTests: XCTestCase {
         let image = face.image(tint: .systemBlue)
         XCTAssertEqual(image.renderingMode, .alwaysOriginal)
         XCTAssertGreaterThan(image.size.width, 14 + 5)
+    }
+
+    func testAnAvatarsGradientAndAuthoredFontRedrawItsProjectedFace() throws {
+        let session = ExactApp.shared.makeSession(label: "avatar-face")
+        defer { session.destroy() }
+        let p = session.presenter
+        let gradient: [String: Any] = ["linear": 180, "stops": [0, 255, 255, 255, 255, 1, 0, 0, 0, 255],
+                                       "dark": [0, 0, 0, 0, 255, 1, 255, 255, 255, 255]]
+        p.apply(wireBatch([
+            ["op": "create", "id": 1, "kind": "button"],
+            ["op": "create", "id": 2, "kind": "view", "props": ["faceBoxSize": "38x38"],
+             "style": ["background_image": gradient]],
+            ["op": "create", "id": 3, "kind": "text", "props": ["text": "PS"],
+             "style": ["font_size": 17, "font_weight": 600, "font_family": 7, "written": ["font_size", "font_weight", "font_family"]]],
+            ["op": "children", "id": 1, "ids": [2]], ["op": "children", "id": 2, "ids": [3]], ["op": "roots", "ids": [1]],
+        ]))
+        let box = try XCTUnwrap(p.views[2]), ink = try XCTUnwrap(p.views[3])
+        func face(_ authored: Bool = true) throws -> BadgeFace { try XCTUnwrap(BadgeFace(box: box, authored: authored)) }
+        func pixel(_ face: BadgeFace, _ y: CGFloat) throws -> UInt8 {
+            let image = try XCTUnwrap(face.image.cgImage), scale = CGFloat(image.height) / face.size
+            return try XCTUnwrap(SharePictureCase.rgba(image, x: Int(4 * scale), y: Int(y * scale))).0
+        }
+        box.traitOverrides.userInterfaceStyle = .light
+        box.updateTraitsIfNeeded()
+        let light = try face()
+        XCTAssertEqual(light.size, 38)
+        XCTAssertEqual(light.font?.pointSize, 17)
+        let engine = try XCTUnwrap(ink.text)
+        XCTAssertEqual(try XCTUnwrap(light.font).fontName, engine.font(size: 17, weight: 600, family: 7, italic: false).fontName)
+        XCTAssertGreaterThan(try pixel(light, 2), 200)
+        XCTAssertLessThan(try pixel(light, 36), 40)
+        let bar = try face(false)
+        XCTAssertEqual(bar.size, 36)
+        XCTAssertEqual(try XCTUnwrap(bar.font).pointSize, 17 * 36 / 38, accuracy: 0.01)
+        box.traitOverrides.userInterfaceStyle = .dark
+        box.updateTraitsIfNeeded()
+        let dark = try face()
+        XCTAssertNotEqual(light.source, dark.source)
+        XCTAssertLessThan(try pixel(dark, 2), 40)
+        XCTAssertGreaterThan(try pixel(dark, 36), 200)
+        box.applyStyle(["background_image": ["linear": 90, "stops": [0, 255, 0, 0, 255, 1, 0, 0, 255, 255]]])
+        let changed = try face()
+        XCTAssertNotEqual(changed.source, dark.source, "gradient changes invalidate the projected face")
+        ink.applyStyle(["font_size": 13, "font_weight": 400, "font_family": 7, "written": ["font_size", "font_weight", "font_family"]])
+        XCTAssertNotEqual(try face().source, changed.source, "font changes invalidate it independently")
+        XCTAssertEqual(try face().font?.pointSize, 13)
+        ink.applyStyle([:])
+        XCTAssertNil(try face().font, "an unsaid font keeps the platform's avatar type")
+    }
+
+    func testAVariableAvatarWeightRedrawsTheTitleAtTheSameSize() throws {
+        let session = ExactApp.shared.makeSession(label: "avatar-variable-weight")
+        defer { session.destroy() }
+        let p = session.presenter
+        func style(_ weight: Int) -> [String: Any] {
+            ["font_size": 24, "font_weight": weight, "font_family": 0, "text_color": [0, 0, 0, 255], "written": ["font_size", "font_weight", "text_color"]]
+        }
+        p.apply(wireBatch([
+            ["op": "create", "id": 1, "kind": "view"],
+            ["op": "create", "id": 2, "kind": "button", "handlers": ["press"]],
+            ["op": "create", "id": 3, "kind": "view", "props": ["faceBoxSize": "38x38"], "style": ["background_color": [255, 255, 255, 255]]],
+            ["op": "create", "id": 4, "kind": "text", "props": ["text": "HH"], "style": style(645)],
+            ["op": "create", "id": 5, "kind": "text", "props": ["text": "Contact", "accessibilityRole": "heading"]],
+            ["op": "children", "id": 1, "ids": [2]], ["op": "children", "id": 2, "ids": [3, 5]],
+            ["op": "children", "id": 3, "ids": [4]], ["op": "roots", "ids": [1]],
+        ]))
+        let header = try XCTUnwrap(p.views[1]), button = try XCTUnwrap(p.views[2]), heading = try XCTUnwrap(p.views[5])
+        func group() throws -> HeaderTitle { try XCTUnwrap(HeaderTitle(header: header, heading: heading, tap: button, apart: [])) }
+        func wght(_ font: UIFont) throws -> Double {
+            try XCTUnwrap((CTFontCopyVariation(font as CTFont) as? [NSNumber: NSNumber])?[0x77676874 as NSNumber]?.doubleValue)
+        }
+        let first = try group(), firstFace = try XCTUnwrap(first.avatar), firstFont = try XCTUnwrap(firstFace.font)
+        let engine = session.text
+        XCTAssertEqual(firstFont.pointSize, 24)
+        XCTAssertEqual(try wght(firstFont), try wght(engine.font(size: 24, weight: 645, family: 0, italic: false)))
+        let view = HeaderTitleView(host: p.navigation)
+        view.update(first, title: "Contact")
+        let before = try XCTUnwrap(view.avatar.image)
+        view.update(first, title: "Contact")
+        XCTAssertTrue(view.avatar.image === before, "an unchanged request keeps its image")
+        p.apply(wireBatch([["op": "style", "id": 4, "style": style(656)]]))
+        let second = try group(), secondFace = try XCTUnwrap(second.avatar), secondFont = try XCTUnwrap(secondFace.font)
+        XCTAssertEqual(firstFont.pointSize, secondFont.pointSize)
+        XCTAssertNotEqual(try wght(firstFont), try wght(secondFont))
+        XCTAssertEqual(try wght(secondFont), try wght(engine.font(size: 24, weight: 656, family: 0, italic: false)))
+        XCTAssertNotEqual(firstFace.source, secondFace.source)
+        XCTAssertNotEqual(first.source, second.source)
+        view.update(second, title: "Contact")
+        let after = try XCTUnwrap(view.avatar.image)
+        XCTAssertFalse(after === before, "the new weight must replace the projected avatar")
+        let pixels = try XCTUnwrap(after.pngData())
+        XCTAssertNotEqual(try XCTUnwrap(before.pngData()), pixels)
+        XCTAssertEqual(pixels, try XCTUnwrap(secondFace.image.pngData()))
     }
 
     /// A face read while UIKit dims tints takes its colours as written: UIKit keeps the image baked

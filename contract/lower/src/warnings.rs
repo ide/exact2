@@ -111,7 +111,7 @@ pub(crate) fn with_text_styles(checked: &Checked<'_>, lowered: &TextStyles) -> V
                 // A route that says it has no bar (LLP 1115.000 D5.2) draws its header as written.
                 let no_bar = literal(attrs, "navigationBar") == Some("none");
                 if route && !no_bar {
-                    route_header(children, &[], &mut out);
+                    route_header(children, &[], &checked.file.styles, &mut out);
                     nested_header::nested_header(children, &mut out);
                     fixed_beside::fixed_beside((tag, attrs), children, &mut out);
                 }
@@ -340,42 +340,10 @@ fn holds_heading(node: &Node) -> bool {
     })
 }
 
-/// A box with a literal fill: before the heading, the title's avatar.
-fn filled(node: &Node) -> bool {
-    let Node::Element { attrs, .. } = node else {
-        return false;
-    };
-    has(attrs, "background-color") || has(attrs, "background")
-}
-
-/// A passive box of texts and symbol images, one of each at least: a
-/// subtitle's line of glyphs (Signal's "🔕 Muted ⏱ 1w").
-fn glyph_line(node: &Node) -> bool {
-    let (mut symbol, mut text) = (false, false);
-    for k in kids(node) {
-        match (part(k), k) {
-            (Part::Text, _) => text = true,
-            (
-                Part::Other,
-                Node::Element {
-                    tag, positional, ..
-                },
-            ) if tag == "image" => match positional.first() {
-                // A computed source may be a symbol: the benefit.
-                Some(Expr::Str(s, _)) if !s.starts_with("symbol:") => return false,
-                Some(_) => symbol = true,
-                None => return false,
-            },
-            (Part::Hidden, _) => {}
-            _ => return false,
-        }
-    }
-    symbol && text && !filled(node)
-}
-
 /// What the walk of one header has seen.
 #[derive(Default)]
 struct Bar<'a> {
+    styles: &'a [StyleDecl],
     headings: usize,
     /// The last heading counted: the bar's title when it is the one.
     title: Option<&'a Node>,
@@ -408,14 +376,19 @@ const OR_NO_BAR: &str = "; or, for a site's header, say `appearance=\"none\"` on
 /// header is shown as written: `lower-header-no-bar`'s (LLP 1116.003 D2.2).
 /// An `if` first among the route's children is read branch by branch: a branch's first node
 /// is the route's first child while it is taken, and `after` the route's nodes past that `if`.
-fn route_header<'a>(children: &'a [Node], after: &[&'a Node], out: &mut Vec<LowerError>) {
+fn route_header<'a>(
+    children: &'a [Node],
+    after: &[&'a Node],
+    styles: &'a [StyleDecl],
+    out: &mut Vec<LowerError>,
+) {
     if let Some(Node::When {
         then, otherwise, ..
     }) = children.first()
     {
         let rest: Vec<&Node> = children[1..].iter().chain(after.iter().copied()).collect();
-        route_header(then, &rest, out);
-        route_header(otherwise, &rest, out);
+        route_header(then, &rest, styles, out);
+        route_header(otherwise, &rest, styles, out);
         return;
     }
     let Some(header @ Node::Element { tag, attrs, .. }) = children.first() else {
@@ -424,8 +397,11 @@ fn route_header<'a>(children: &'a [Node], after: &[&'a Node], out: &mut Vec<Lowe
     if tag != "header" || nested_header::no_bar(attrs) {
         return;
     }
-    let mut bar = Bar::default();
-    walk(kids(header), &mut bar);
+    let mut bar = Bar {
+        styles,
+        ..Bar::default()
+    };
+    walk(kids(header), &mut bar, false);
     if bar.headings != 1 {
         if !bar.doubt {
             out.push(LowerError {
@@ -455,7 +431,7 @@ fn route_header<'a>(children: &'a [Node], after: &[&'a Node], out: &mut Vec<Lowe
     }
 }
 
-fn walk<'a>(nodes: &'a [Node], bar: &mut Bar<'a>) {
+fn walk<'a>(nodes: &'a [Node], bar: &mut Bar<'a>, grouped: bool) {
     for node in nodes {
         let span = node.span();
         match part(node) {
@@ -477,11 +453,14 @@ fn walk<'a>(nodes: &'a [Node], bar: &mut Bar<'a>) {
             // A pressable box around the heading is the title, tapped.
             Part::Pressable if !bar.tap && has_press(node) && holds_heading(node) => {
                 bar.tap = true;
-                walk(kids(node), bar);
+                walk(kids(node), bar, true);
             }
             Part::Pressable => {}
             // A status around the heading is no readout: walked for it.
-            Part::Status if holds_heading(node) => walk(kids(node), bar),
+            Part::Status if holds_heading(node) => {
+                let grouped = grouped || title::wrapper(node, bar.styles);
+                walk(kids(node), bar, grouped)
+            }
             Part::Status => {}
             Part::Text if bar.passed && !bar.subtitle => bar.subtitle = true,
             Part::Text => bar.unplaced.push((
@@ -492,11 +471,18 @@ fn walk<'a>(nodes: &'a [Node], bar: &mut Bar<'a>) {
                     "this text, before the heading,".into()
                 },
             )),
-            Part::Box if bar.passed && !bar.subtitle && glyph_line(node) => bar.subtitle = true,
-            Part::Box if !bar.passed && !bar.avatar && filled(node) && !holds_heading(node) => {
+            Part::Box if bar.passed && !bar.subtitle && title::glyph_line(node, bar.styles) => {
+                bar.subtitle = true
+            }
+            Part::Box
+                if grouped && !bar.passed && !bar.avatar && title::avatar(node, bar.styles) =>
+            {
                 bar.avatar = true;
             }
-            Part::Box if holds_placed(node) => walk(kids(node), bar),
+            Part::Box if holds_placed(node) => {
+                let grouped = grouped || title::wrapper(node, bar.styles);
+                walk(kids(node), bar, grouped)
+            }
             // A box with nothing in it lays the bar's items out (a spacer).
             Part::Box if kids(node).is_empty() => {}
             Part::Box => bar.unplaced.push((span, "this box".into())),

@@ -43,6 +43,8 @@ struct HeaderTitle: Equatable {
     struct Glyph: Equatable { let symbol: String?; let text: String }
     /// The element a tap on the title presses.
     let tap: UInt32?
+    /// An authored name replaces the group's heading and subtitle in accessibility.
+    let label: String?
     let accessibilityDisabled: Bool
 
     init?(header: NodeView, heading: NodeView, tap: NodeView?, apart: [NodeView]) {
@@ -66,8 +68,9 @@ struct HeaderTitle: Equatable {
         /// A passive box: no button, no press, no fill (a pill or badge
         /// keeps its own look, so it is no line of glyphs).
         func passive(_ node: NodeView) -> Bool {
-            !node.isButton && !node.actsAsButton && !node.handlers.contains("press") && node.channels("background_color") == nil
+            !node.isButton && !node.actsAsButton && !node.handlers.contains("press") && !filled(node)
         }
+        func filled(_ node: NodeView) -> Bool { node.channels("background_color") != nil || !Gradient.layers(node.style["background_image"]).isEmpty }
         var titleGlyphs: [TitleGlyph] = [], headingImages: [NodeView] = []
         if let row = heading.superview as? NodeView, row.style["display"]?.string == "flex",
            (row.style["flex_direction"]?.string ?? "row") == "row" {
@@ -130,7 +133,7 @@ struct HeaderTitle: Equatable {
                 // holds is read alone.
                 if apart.contains(where: { $0.isDescendant(of: child) }) {
                     if passed, subtitle.isEmpty, let pieces = line(child) { take(child, pieces); continue }
-                    if !(passed && child.channels("background_color") != nil) { walk(child) }
+                    if !(passed && filled(child)) { walk(child) }
                     continue
                 }
                 if wrapper != nil, !passed, avatar == nil, !heading.isDescendant(of: child), let face = BadgeFace(box: child, authored: true) {
@@ -140,7 +143,7 @@ struct HeaderTitle: Equatable {
                 if passed, subtitle.isEmpty, let pieces = line(child) { take(child, pieces); continue }
                 // After the heading, a filled box (a pill, a badge) keeps its
                 // own look: nothing in it is the subtitle.
-                if passed, child.channels("background_color") != nil { continue }
+                if passed, filled(child) { continue }
                 walk(child)
             }
         }
@@ -157,6 +160,7 @@ struct HeaderTitle: Equatable {
         self.spoken = spoken ?? subtitle
         self.rtl = rtl
         self.tap = tap?.id
+        label = tap?.authoredLabel
         accessibilityDisabled = tap?.ariaUnavailable == true
     }
 
@@ -170,7 +174,7 @@ struct HeaderTitle: Equatable {
     }
 
     /// Everything the title is drawn from.
-    var source: String { "\(id):\(avatar?.source ?? ""):\(subtitle):\(spoken):\(rtl):\(glyphs.map { "\($0.symbol ?? "")/\($0.text)" }.joined(separator: "\u{1F}")):\(tap ?? 0):\(accessibilityDisabled):\(titleGlyphs.map(\.source).joined(separator: "\u{1F}"))" }
+    var source: String { "\(id):\(avatar?.source ?? ""):\(subtitle):\(spoken):\(rtl):\(glyphs.map { "\($0.symbol ?? "")/\($0.text)" }.joined(separator: "\u{1F}")):\(tap ?? 0):\(label ?? ""):\(accessibilityDisabled):\(titleGlyphs.map(\.source).joined(separator: "\u{1F}"))" }
     static func == (a: HeaderTitle, b: HeaderTitle) -> Bool { a.source == b.source }
 
     static func holdsHeading(_ node: NodeView) -> Bool {
@@ -227,11 +231,20 @@ extension HeaderShape {
 final class HeaderTitleView: UIControl {
     private weak var host: NavigationHost?
     private var tap: UInt32?
+    #if os(iOS)
+    private weak var source: NodeView?
+    private var sourceIncarnation: UInt64?
+    var menuSource: NodeView? {
+        guard let source, source.incarnation == sourceIncarnation, host?.presenter.views[source.id] === source else { return nil }
+        return source
+    }
+    #endif
     #if EXACT_INSPECT
     /// The heading's group this title is drawn from (inspect mode selects it).
     private(set) var groupId: UInt32?
     #endif
     let avatar = UIImageView(), title = UILabel(), subtitle = UILabel()
+    private(set) var avatarFace: BadgeFace?
     private let stack = UIStackView(), texts = UIStackView()
     /// The avatar's box, its face's size: the image's own size is not to be
     /// trusted, as its dark variant from the asset came back at 1x and drew
@@ -351,6 +364,13 @@ final class HeaderTitleView: UIControl {
     private var shownInk: UIColor?
 
     func update(_ group: HeaderTitle, title text: String) {
+        tap = group.tap
+        #if os(iOS)
+        source = group.tap.flatMap { host?.presenter.views[$0] }
+        sourceIncarnation = source?.incarnation
+        // Menu ownership can change without changing the title's drawing.
+        host?.presenter.menus.context.syncTitle(self)
+        #endif
         // Every batch projects the routes again: an unchanged title is left
         // alone, since invalidating its size relaid the whole navigation
         // bar out each time (~1 ms a batch, a fling's every frame).
@@ -360,8 +380,8 @@ final class HeaderTitleView: UIControl {
         #if EXACT_INSPECT
         groupId = group.id
         #endif
-        tap = group.tap
         avatar.image = group.avatar?.image
+        avatarFace = group.avatar
         avatar.isHidden = group.avatar == nil
         avatarWidth.constant = group.avatar?.size ?? 0
         avatarHeight.constant = group.avatar?.size ?? 0
@@ -371,8 +391,8 @@ final class HeaderTitleView: UIControl {
         subtitle.isHidden = group.subtitle.isEmpty
         texts.alignment = group.avatar == nil ? .center : .leading
         isEnabled = group.tap != nil
-        accessibilityLabel = text
-        accessibilityValue = group.subtitle.isEmpty ? nil : group.spoken
+        accessibilityLabel = group.label ?? text
+        accessibilityValue = group.subtitle.isEmpty || group.label != nil ? nil : group.spoken
         accessibilityTraits = group.tap == nil ? .header : group.accessibilityDisabled ? [.button, .notEnabled] : .button
         accessibilityIdentifier = group.testId
         invalidateIntrinsicContentSize()
@@ -382,6 +402,49 @@ final class HeaderTitleView: UIControl {
         if let tap { _ = host?.act(tap, 0) }
     }
 }
+
+#if os(iOS)
+extension NavigationHost {
+    /// The current bar surface for this source. UIKit may hide it during its live lift.
+    func projectedTitle(for node: NodeView) -> HeaderTitleView? {
+        controllers.values.lazy.compactMap { c -> HeaderTitleView? in
+            guard let nav = c.navigationController, nav.topViewController === c,
+                  nav.navigationBar.topItem === c.navigationItem, self.routeShowsBar(c, in: nav), !nav.isNavigationBarHidden,
+                  let title = c.navigationItem.titleView as? HeaderTitleView, title === c.titleView,
+                  title.menuSource === node, title.window != nil, title.isDescendant(of: nav.navigationBar) else { return nil }
+            return title
+        }.first
+    }
+}
+
+extension Agent {
+    func projectedTitleContext(_ req: [String: Any]) -> [String: Any]? {
+        guard req["contextmenu"] as? Bool == true, req["phase"] == nil,
+              ["x", "y", "wheel", "hover", "dblclick", "pinch"].allSatisfy({ req[$0] == nil }),
+              let rawID = req["id"] as? Int, let id = UInt32(exactly: rawID), let source = presenter.views[id],
+              let title = presenter.navigation.projectedTitle(for: source) else { return nil }
+        guard !source.inert, presenter.menus.eligible(source, contextMenu: true, inBar: true),
+              source.props["contextPopover"]?.isEmpty == false, let window = title.window else {
+            return ["error": "title #\(id) has no available context popover"]
+        }
+        var point = CGPoint(x: title.bounds.midX, y: title.bounds.midY)
+        if let at = req["at"] {
+            guard let pair = at as? [Double], pair.count == 2, pair.allSatisfy(\.isFinite) else { return ["error": "tap at needs two finite numbers"] }
+            point = CGPoint(x: pair[0], y: pair[1])
+        }
+        guard title.bounds.contains(point), let hit = window.hitTest(title.convert(point, to: window), with: nil),
+              hit === title || hit.isDescendant(of: title) else { return ["error": "title #\(id) is hidden or covered"] }
+        guard ExactEnv.agentPaints else { return ["error": "title #\(id) contextmenu needs --touch platform for UIKit's menu"] }
+        let token = source.incarnation
+        source.deliverContext(at: source.convert(point, from: title))
+        // The handler can navigate, replace the source, or replace the title through a hatch.
+        if presenter.views[id] === source, source.incarnation == token, !source.inert, presenter.navigation.projectedTitle(for: source) === title {
+            _ = presenter.menus.agentContext(source, inBar: true)
+        }
+        return ["tapped": Int(id), "event": "contextmenu", "delivery": "recognized"]
+    }
+}
+#endif
 
 extension NavigationHost {
     /// What the agent says of a header node the bar leaves out.
