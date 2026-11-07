@@ -384,13 +384,15 @@ extension NavigationHost {
             if let requests, presenter.collections.lastRequest(node.id) != requests[node.id] ?? 0 { return }
             presenter.collections.readerMoves(node.id)
         }
-        // UIKit adjusts the offset as the title opens. Target its current
-        // inset, as the status-bar tap does, without anticipating that growth.
         let inset = sv.adjustedContentInset.top
         guard sv.contentOffset.y > 0.5 - inset else { return restAtTop(sv, in: c) }
         guard scrollsToTopAnimated else { return restAtTop(sv, in: c) }
         if node?.scrollView === sv { node?.scrollsToTop() }
-        sv.setContentOffset(PixelGrid.offset(CGPoint(x: sv.contentOffset.x, y: -inset), in: sv, clamped: false), animated: true)
+        // To the open title's top, as the status bar's tap goes: UIKit opens a large title only past the collapsed
+        // top, which is outside the range while it is collapsed. A view animation, because `setContentOffset(_:animated:)`
+        // is retargeted by the inset as the title opens and stops at the collapsed top (iOS 27).
+        let expanded = max(inset, node != nil && node === c.collapseScroll ? node?.scrollOrigin ?? 0 : 0)
+        UIView.animate(withDuration: 0.35, delay: 0, options: [.curveEaseInOut, .allowUserInteraction]) { sv.contentOffset = CGPoint(x: sv.contentOffset.x, y: -expanded) }
     }
 
     /// Where `scrollToTop` ends, in one turn, under the agent's frozen clock,
