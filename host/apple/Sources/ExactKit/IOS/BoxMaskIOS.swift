@@ -50,15 +50,15 @@ extension NodeView {
                     pixels.image = gradient.image(size: effect.bounds.size, scale: traitCollection.displayScale, dark: drawsDark).map { UIImage(cgImage: $0) }
                     view = pixels
                 } else {
-                    let g = (effect.mask as? GradientMaskView) ?? GradientMaskView()
-                    if g.frame != effect.bounds {
-                        // Inside a layout's animation (the keyboard's) the mask
-                        // moves with the effect it masks
-                        if UIView.inheritedAnimationDuration > 0 { CATransaction.setDisableActions(false) }
-                        g.frame = effect.bounds
-                        CATransaction.setDisableActions(true)
-                    }
+                    let previous = effect.mask as? GradientMaskView
+                    let g = previous ?? GradientMaskView()
+                    // Inside a layout's animation (the keyboard's) the mask moves with the
+                    // effect it masks, its stops in pixels keeping their place as fractions
+                    // of the new height (`GradientMaskView.action`); a first mask lands still
+                    CATransaction.setDisableActions(previous == nil || UIView.inheritedAnimationDuration <= 0 || ExactEnv.agentFreezes)
+                    if g.frame != effect.bounds { g.frame = effect.bounds }
                     gradient.apply(g.gradient, bounds: g.bounds, box: g.bounds, dark: drawsDark)
+                    CATransaction.setDisableActions(true)
                     view = g
                 }
                 view.layer.mask = ClipPath.mask(effectOutline)
@@ -123,5 +123,23 @@ extension NodeView {
 final class GradientMaskView: UIView {
     override class var layerClass: AnyClass { CAGradientLayer.self }
     var gradient: CAGradientLayer { layer as! CAGradientLayer }
+
+    /// The gradient's stops and ends move as UIKit moves the view's bounds:
+    /// the same animation UIKit gives `bounds` inside the layout's animation
+    /// (its duration and curve), from where the stop is on screen now. A
+    /// stop in pixels is a new fraction of a new height; without this it
+    /// jumped there while the box eased.
+    override func action(for layer: CALayer, forKey event: String) -> CAAction? {
+        if ["locations", "startPoint", "endPoint", "colors"].contains(event),
+           let inherited = super.action(for: layer, forKey: "bounds") as? CABasicAnimation,
+           let animation = inherited.copy() as? CABasicAnimation {
+            animation.keyPath = event
+            animation.fromValue = (layer.presentation() ?? layer).value(forKey: event)
+            animation.toValue = nil
+            animation.byValue = nil
+            return animation
+        }
+        return super.action(for: layer, forKey: event)
+    }
 }
 #endif

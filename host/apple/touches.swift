@@ -28,6 +28,8 @@
 //   as app gestures: fixed portrait screen points on the named display.
 //   A swipe also needs `screenTo`; `velocity` (points/s, default 1000) and
 //   `hold` (seconds, default 0) control its move and hold before lifting.
+//   {"op":"type","text":s}       key presses to whatever has keyboard focus (`Synthesizer.type`),
+//                                at most 500 characters → {"done":true}
 //   {"op":"quit"}                ends the test
 // `tap {back:true}` locates UIKit's Back button through XCTest and taps it.
 // A tap's `screen`, the same point in the screen's fixed, portrait space,
@@ -152,6 +154,22 @@ final class ExactTouches: XCTestCase {
                 guard let to = (req["to"] as? String).flatMap({ names[$0] }) else { session.send(["error": "orientation: one of \(names.keys.sorted())"]); continue }
                 XCUIDevice.shared.orientation = to
                 session.send(["device": names.first { $0.value == XCUIDevice.shared.orientation }?.key ?? "other"])
+            case "type":
+                guard let text = req["text"] as? String else { session.send(["error": "type needs text"]); continue }
+                guard target.state == .runningForeground else { session.send(["error": "the app is \(Self.name(target.state)), not in the foreground"]); continue }
+                guard text.count <= 500 else { session.send(["error": "type takes at most 500 characters at a time"]); continue }
+                switch Synthesizer.type(text) {
+                case .injected: session.send(["done": true])
+                case .unfinished: session.send(["error": "XCTest's event synthesizer did not finish typing in time; part of the text may have been typed"])
+                case .refused: session.send(["error": "XCTest's event synthesizer refused the keystrokes"])
+                case .missing:
+                    // XCUIElement.typeText instead, which needs an element its snapshot shows focused and ends the test without one.
+                    guard target.descendants(matching: .any).matching(NSPredicate(format: "hasKeyboardFocus == true")).count > 0 else {
+                        session.send(["error": "no element has keyboard focus; tap a text field first"]); continue
+                    }
+                    target.typeText(text)
+                    session.send(["done": true])
+                }
             case "quit":
                 session.send(["done": true]); session.close(); return
             default:
@@ -318,6 +336,30 @@ enum Synthesizer {
             start = to; offset = lift
         }
         return touch(from, moves: moves, lift: offset, display: display, within: 5 + offset)
+    }
+
+    /// `text` as key presses to whatever has keyboard focus, 60 characters a second, as XCUIElement.typeText
+    /// sends them but without its check, against its own snapshot, that an element has focus: a view that
+    /// takes text without exposing itself focused still gets it, and with nothing focused the keys go nowhere.
+    static func type(_ text: String) -> Outcome {
+        typealias InitText = @convention(c) (AnyObject, Selector) -> AnyObject
+        typealias TypeText = @convention(c) (AnyObject, Selector, NSString, Double, UInt, Bool) -> Void
+        let pathClass: AnyClass? = NSClassFromString("XCPointerEventPath"), recordClass: AnyClass? = NSClassFromString("XCSynthesizedEventRecord")
+        guard let alloc = imp(pathClass, "alloc", Alloc.self, classMethod: true), let recordAlloc = imp(recordClass, "alloc", Alloc.self, classMethod: true),
+              let initText = imp(pathClass, "initForTextInput", InitText.self), let typeText = imp(pathClass, "typeText:atOffset:typingSpeed:shouldRedact:", TypeText.self),
+              let initRecord = imp(recordClass, "initWithName:interfaceOrientation:", InitRecord.self), let add = imp(recordClass, "addPointerEventPath:", Add.self),
+              let synthesizer = imp(XCUIDevice.self, "eventSynthesizer", Get.self), let device = synthesizer.1(XCUIDevice.shared, synthesizer.0) else { return .missing }
+        let syn = NSSelectorFromString("synthesizeEvent:completion:")
+        guard let method = class_getInstanceMethod(object_getClass(device), syn) else { return .missing }
+        let path = initText.1(alloc.1(pathClass!, alloc.0), initText.0)
+        typeText.1(path, typeText.0, text as NSString, 0, 60, false)
+        let record = initRecord.1(recordAlloc.1(recordClass!, recordAlloc.0), initRecord.0, "exact-type" as NSString, UIInterfaceOrientation.portrait.rawValue)
+        add.1(record, add.0, path)
+        var result: Bool?
+        unsafeBitCast(method_getImplementation(method), to: Synthesize.self)(device, syn, record) { ok, _ in DispatchQueue.main.async { result = ok } }
+        let deadline = Date().addingTimeInterval(3 + Double(text.count) / 60)
+        while result == nil, Date() < deadline { RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.005)) }
+        return result.map { $0 ? .injected : .refused } ?? .unfinished
     }
 
     /// One touch: down at `at`, moved to each point at its offset in seconds,

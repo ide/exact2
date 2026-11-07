@@ -158,9 +158,12 @@ final class FieldSelectionIOSTests: XCTestCase {
             changes.append(selection)
         }
         let caret = try XCTUnwrap(editor.position(from: editor.beginningOfDocument, offset: 2))
+        let movedAfter = ProcessInfo.processInfo.systemUptime
         editor.selectedTextRange = editor.textRange(from: caret, to: caret)
         drainSelectTasks()
         XCTAssertEqual(changes.last?.start, 2)
+        XCTAssertGreaterThanOrEqual(node.selectionMovedAt, movedAfter, "bar search records native caret movement for swipe precedence")
+        XCTAssertTrue(editor.isFirstResponder)
         // Ask the real field delegate, as UIKit does before keyboard replacement.
         let range = NSRange(location: 2, length: 0)
         let allowed = editor.delegate?.textField?(editor, shouldChangeCharactersIn: range, replacementString: "X") ?? true

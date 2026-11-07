@@ -45,6 +45,37 @@ final class GesturePrecedenceIOSTests: XCTestCase {
         wait(for: [turn], timeout: 1)
     }
 
+    func testABarSearchSwipeSharesNativeEditingGesturesAndYieldsToTheLoupe() throws {
+        let p = host([
+            ["op": "create", "id": 1, "kind": "input", "props": ["type": "search"]],
+            ["op": "roots", "ids": [1]],
+        ])
+        let source = try XCTUnwrap(p.views[1])
+        let search = HeaderSearch(host: p.navigation), field = search.controller.searchBar.searchTextField
+        let swipe = HeaderSearchSwipe(search, field: source)
+        field.addGestureRecognizer(swipe)
+        let tap = UITapGestureRecognizer(), loupe = UILongPressGestureRecognizer(), selection = UIPanGestureRecognizer()
+        for gesture in [tap, loupe, selection] { field.addGestureRecognizer(gesture) }
+        let outer = UIPanGestureRecognizer()
+        p.viewport.addGestureRecognizer(outer)
+        let authored = DiscreteSwipe(source, word: "down", touches: 1)
+        field.addGestureRecognizer(authored)
+        XCTAssertTrue(swipe.delegate === swipe, "the swipe does not replace UIKit's field delegate")
+        XCTAssertFalse(swipe.cancelsTouchesInView)
+        XCTAssertFalse(swipe.delaysTouchesBegan)
+        XCTAssertFalse(swipe.delaysTouchesEnded)
+        for gesture in [tap, loupe, selection] {
+            XCTAssertTrue(swipe.gestureRecognizer(swipe, shouldRecognizeSimultaneouslyWith: gesture))
+            XCTAssertTrue(gesture.isEnabled, "native editing recognizers stay enabled")
+        }
+        XCTAssertTrue(swipe.gestureRecognizer(swipe, shouldRequireFailureOf: loupe))
+        XCTAssertFalse(swipe.gestureRecognizer(swipe, shouldRequireFailureOf: tap))
+        XCTAssertFalse(swipe.gestureRecognizer(swipe, shouldRecognizeSimultaneouslyWith: outer))
+        XCTAssertFalse(swipe.gestureRecognizer(swipe, shouldRecognizeSimultaneouslyWith: authored), "Contract's swipe keeps its own arbitration")
+        XCTAssertFalse(swipe.gestureRecognizerShouldBegin(swipe), "an unmounted, unfocused search takes no swipe")
+    }
+
+
     /// LLP 1005 §3: a node hearing `pointerdown`/`pointerup` carries an
     /// observer that never recognizes, so it takes nothing from a press or a
     /// scroll; its touch down and up are the two events.

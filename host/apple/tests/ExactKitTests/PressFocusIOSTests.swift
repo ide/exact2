@@ -56,6 +56,110 @@ final class PressFocusIOSTests: XCTestCase {
         override func location(in view: UIView?) -> CGPoint { view.map { $0.convert(point, from: nil) } ?? point }
     }
 
+    private func declarativeComposer(throughOverflow: Bool) -> Presenter {
+        let p = composer()
+        p.views[3]?.handlers = []
+        p.apply(wireBatch([
+            ["op": "props", "id": 3, "set": ["appearance": "none", "popovertarget": "choices"]],
+        ] + node(7, "view", ["id": "choices", "popover": "auto"], handlers: ["toggle"], y: 260, w: 180, h: 80)
+          + node(8, "text", ["text": "Choice"], w: 160)
+          + [["op": "children", "id": 7, "ids": [8]], ["op": "children", "id": 1, "ids": [2, 3, 7]]]))
+        if throughOverflow {
+            p.apply(wireBatch([
+                ["op": "create", "id": 4, "kind": "view", "style": ["overflow_x": "auto", "overflow_y": "hidden"]],
+                ["op": "frame", "id": 4, "x": 0, "y": 0, "w": 120, "h": 44],
+                ["op": "content", "id": 4, "w": 640, "h": 44],
+            ] + node(5, "text", ["text": "Open choices through the scrolling label"], w: 640)
+              + [["op": "children", "id": 4, "ids": [5]], ["op": "children", "id": 3, "ids": [4]]]))
+        }
+        return p
+    }
+
+    func testAHandlerlessDeclarativeButtonRetainsEditingAndActivatesOnce() throws {
+        guard hostedWindowScene() != nil else {
+            throw missing("scene", "a declarative button needs the hosted editor responder chain")
+        }
+        for throughOverflow in [false, true] {
+            let p = declarativeComposer(throughOverflow: throughOverflow), ownedWindow = window
+            defer { p.reset(); ownedWindow?.isHidden = true }
+            let fieldNode = try XCTUnwrap(p.views[2]), field = try XCTUnwrap(fieldNode.field)
+            let button = try XCTUnwrap(p.views[3]), popover = try XCTUnwrap(p.views[7])
+            XCTAssertTrue(button.handlers.isEmpty)
+            XCTAssertNil(button.subviews.first { $0 is InvokerButton })
+            fieldNode.handlers = ["blur"]
+            XCTAssertTrue(field.becomeFirstResponder())
+            field.text = "Draft selection"
+            p.typed(2, "Draft selection", input: false)
+            p.fieldSelections.set(fieldNode, FieldSelection(start: 2, end: 6))
+            var blurs: [UInt32] = [], presses: [UInt32] = [], toggles: [String] = []
+            p.onBlur = { blurs.append($0) }
+            p.onPress = { presses.append($0) }
+            p.onClipboard = { id, kind, value in if id == 7 && kind == 50 { toggles.append(value) } }
+            let source = try XCTUnwrap(p.views[throughOverflow ? 5 : 3])
+            if throughOverflow { XCTAssertTrue(source.superview === p.views[4]?.scroll) }
+            window.layoutIfNeeded()
+            let point = source.convert(CGPoint(x: 20, y: 20), to: nil)
+            XCTAssertTrue(window.hitTest(window.convert(point, from: nil), with: nil) === source)
+            let touch = PointTouch(point, on: source)
+            source.touchesBegan([touch], with: nil)
+            source.touchesEnded([touch], with: nil)
+            waitForDeclarativeCallbacks("declarative activation and toggle delivery")
+            XCTAssertTrue(p.menus.isOpen(popover), "the default toggle opens exactly once")
+            XCTAssertEqual(toggles, ["closed,open"])
+            XCTAssertEqual(presses, [], "the declarative default does not invent a press handler")
+            XCTAssertTrue(field.isFirstResponder)
+            XCTAssertTrue(p.focusedNode === fieldNode)
+            XCTAssertEqual(fieldNode.liveSelection, NSRange(location: 2, length: 4))
+            XCTAssertEqual(blurs, [])
+        }
+    }
+
+    func testUnavailableOrCancelledDeclarativeContactsDoNotActivateOrBlur() throws {
+        guard hostedWindowScene() != nil else {
+            throw missing("scene", "contact cancellation needs the hosted editor responder chain")
+        }
+        for mode in ["disabled", "inert", "cancelled"] {
+            let p = declarativeComposer(throughOverflow: true), ownedWindow = window
+            defer { p.reset(); ownedWindow?.isHidden = true }
+            let fieldNode = try XCTUnwrap(p.views[2]), field = try XCTUnwrap(fieldNode.field)
+            let button = try XCTUnwrap(p.views[3]), source = try XCTUnwrap(p.views[5]), popover = try XCTUnwrap(p.views[7])
+            XCTAssertTrue(button.handlers.isEmpty)
+            XCTAssertNil(button.subviews.first { $0 is InvokerButton })
+            fieldNode.handlers = ["blur"]
+            XCTAssertTrue(field.becomeFirstResponder())
+            field.text = "Draft selection"
+            p.typed(2, "Draft selection", input: false)
+            p.fieldSelections.set(fieldNode, FieldSelection(start: 2, end: 6))
+            var blurs: [UInt32] = [], presses: [UInt32] = [], toggles: [String] = []
+            p.onBlur = { blurs.append($0) }
+            p.onPress = { presses.append($0) }
+            p.onClipboard = { id, kind, value in if id == 7 && kind == 50 { toggles.append(value) } }
+            let touch = PointTouch(source.convert(CGPoint(x: 20, y: 20), to: nil), on: source)
+            source.touchesBegan([touch], with: nil)
+            if mode == "cancelled" {
+                source.touchesCancelled([touch], with: nil)
+            } else {
+                p.apply(wireBatch([["op": "props", "id": 3, "set": [mode: "true"]]]))
+            }
+            source.touchesEnded([touch], with: nil)
+            waitForDeclarativeCallbacks("retired declarative contact callbacks")
+            XCTAssertFalse(p.menus.isOpen(popover), mode)
+            XCTAssertEqual(toggles, [], mode)
+            XCTAssertEqual(presses, [], mode)
+            XCTAssertFalse(button.hasPressContact, mode)
+            XCTAssertTrue(field.isFirstResponder, mode)
+            XCTAssertTrue(p.focusedNode === fieldNode, mode)
+            XCTAssertEqual(fieldNode.liveSelection, NSRange(location: 2, length: 4), mode)
+            XCTAssertEqual(blurs, [], mode)
+        }
+    }
+
+    private func waitForDeclarativeCallbacks(_ description: String) {
+        let turn = expectation(description: description)
+        DispatchQueue.main.async { turn.fulfill() }
+        wait(for: [turn], timeout: 2)
+    }
+
     private func scrollingPress(ownerKind: String = "button", handlers: [String] = ["press"], useSession: Bool = false) -> Presenter {
         presenter(node(1, "view", w: 400, h: 400)
             + node(2, ownerKind, handlers: handlers, y: 100, w: 320)

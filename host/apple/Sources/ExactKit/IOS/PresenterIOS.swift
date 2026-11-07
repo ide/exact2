@@ -195,7 +195,7 @@ package final class Presenter {
     }
     var keyboardEditor: UIView? {
         #if os(iOS)
-        if let editor = heldKeys?.editor, editor.window != nil, mounts(editor) { return editor }
+        if let editor = heldKeys?.editorKeepingRoom { return editor }
         #endif
         guard let responder = FirstResponder.current as? UIView, responder is UIKeyInput,
               mounts(responder) || responder === keyboardPrompt else { return nil }
@@ -318,6 +318,9 @@ package final class Presenter {
     /// A restart: every view goes.
     func reset() {
         resetting = true; defer { resetting = false }
+        #if os(iOS)
+        heldKeys?.finish(restoring: false) // the old tree's keys, told nothing (PopoverCardIOS.swift)
+        #endif
         MainActor.assumeIsolated { HeldState.retire(self) } // before its views leave the map (HeldState.swift)
         WakeLock.hold(self, false) // the new host's first batch says it again
         releaseOrientationLock()
@@ -500,12 +503,6 @@ package final class Presenter {
     /// The node an action's `focus()` last named, delivered yet or not: a field's Return reads it to learn whether its `submit` asked for the keyboard back (LLP 1115.000 D9.2).
     weak var focusAsked: NodeView?
     private func focus(_ target: NodeView, selectText: Bool) {
-        #if os(iOS)
-        // Keys stood down for a card: their editor takes them back as the
-        // card closes, despite a blur asked before. Another field that takes
-        // the focus ends the stand-down then (`focus(_ id:)`).
-        if let held = heldKeys, keysNode === target { held.blurred = false; return }
-        #endif
         focusAsked = target
         let name = target.props["id"] ?? "#\(target.id)"
         let shown: UIView = target.headerField ?? target
@@ -540,6 +537,11 @@ package final class Presenter {
             session?.log("selectText \"\(name)\" refused: not a text editor")
             return
         }
+        #if os(iOS)
+        // Keys stood down for a card: their editor keeps the focus, a blur asked
+        // before undone, and takes them back as the card closes (PopoverCardIOS.swift)
+        if let held = heldKeys, held.node === target, !held.returning { held.focus(selectText: selectText); return }
+        #endif
         chooseFocus(target)
         guard responder.canBecomeFirstResponder else {
             session?.log("focus \"\(name)\" refused: not focusable")
@@ -563,10 +565,8 @@ package final class Presenter {
     func blurElement(_ args: [Any]) {
         pendingFocus = nil
         #if os(iOS)
-        if let held = heldKeys, args.isEmpty || keysNode?.props["id"] == args.first as? String {
-            held.blurred = true
-            return
-        }
+        // Keys stood down for a card: the editing ends now, and the keys go as the card closes (PopoverCardIOS.swift)
+        if let held = heldKeys, args.isEmpty || held.node?.props["id"] == args.first as? String { held.blur(); return }
         #endif
         if let name = args.first as? String {
             guard let target = views.values.sorted(by: { $0.id < $1.id }).first(where: { $0.props["id"] == name }) else { return }
@@ -1091,6 +1091,9 @@ package final class Presenter {
     /// parked row, `NodePool`).
     @discardableResult
     func release(_ id: UInt32, _ leaving: (NodeView) -> Void) -> NodeView? {
+        #if os(iOS)
+        heldKeys?.released(id) // before the node is forgotten (PopoverCardIOS.swift)
+        #endif
         focusEvents.removed(id)
         session?.canvases.destroy(view: id)
         svg.forget(id)

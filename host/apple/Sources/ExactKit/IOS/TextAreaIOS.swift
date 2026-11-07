@@ -693,7 +693,12 @@ extension NodeView {
         presenter?.reveal(self)
         publishMarkupSelection(force: true)
     }
-    package func textViewDidEndEditing(_ textView: UITextView) { presenter?.collections.pinsChanged();
+    package func textViewDidEndEditing(_ textView: UITextView) {
+        #if os(iOS)
+        // Keys standing down for a card: the editing goes on (PopoverCardIOS.swift)
+        if let held = presenter?.heldKeys, held.suspends(self) { held.ended(); return }
+        #endif
+        presenter?.collections.pinsChanged()
         if presenter?.editing === self { presenter?.editing = nil }
         presenter?.commitEdit(id, textView.text ?? "", change: handlers.contains("change"))
         presenter?.blur(id)

@@ -251,6 +251,8 @@ final class PressContact {
     var responderUsesCanvas = false
     /// Whether this contact’s down was taken here rather than forwarded.
     var ownsPress = false
+    /// Terminal delivery owns its resolved hit while focus changes containment.
+    var ending = false
     var cancelled = false
     var cancelledByReparenting = false
     /// A handlerless custom invoker's look, independent of the forwarded press: nil when it owns none.
@@ -424,9 +426,11 @@ extension NodeView {
     package override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
         if canvasTouches(touches, phase: "up", event: event) { return }
         guard let contact = currentPressContact(touches) else { return }
+        contact.ending = true
         // Its press may have removed the overlay that held the look with it,
         // which left the look to this contact: the look is the overlay's alone now.
         defer {
+            contact.ending = false
             if pressContact === contact {
                 setInvokerLook(contact, nil)
                 pressContact = nil
@@ -619,6 +623,7 @@ extension NodeView {
     /// dispatch has returned (PressHandoffIOS).
     func focusForPress(target: NodeView?) -> PressHandoff? {
         guard let presenter else { return nil }
+        let target = target ?? presenter.activationButton(from: self)
         let handoff = presenter.beginPress(control: target.map { $0.textArea ?? $0.field ?? $0 })
         guard !presenter.contextRetainsFocus(self) else { return handoff }
         let bubbled = target.map { presenter.pressBox(of: $0, from: self) !== $0 } ?? false

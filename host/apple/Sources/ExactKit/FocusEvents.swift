@@ -25,12 +25,9 @@ extension Presenter {
     }
     func focus(_ id: UInt32) {
         #if os(iOS)
-        // A field whose keys stand down for a card keeps its focus (PopoverCardIOS.swift);
-        // another field taking it ends the stand-down, which blurs the first
-        if let held = heldKeys {
-            if keysNode?.id == id { return }
-            held.finish()
-        }
+        // A node whose keys stand down for a card keeps its focus (PopoverCardIOS.swift);
+        // another node taking it ends the hold, which ends the first's editing
+        if let held = heldKeys, held.node?.id != id { held.finish(restoring: false) }
         #endif
         #if os(macOS)
         tabStart = nil

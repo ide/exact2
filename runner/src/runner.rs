@@ -902,7 +902,7 @@ impl<D: DataSource> Runner<D> {
             roles: exact_kernel::style::roles::Installed::new(roles.clone()),
             reorder_session: None,
             dropping_from: None,
-            ids: Ids::default(),
+            ids: Ids::for_viewport(viewport),
             orientation: Default::default(),
             now_ms,
             timers: Vec::new(),

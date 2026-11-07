@@ -204,6 +204,74 @@ final class GroupedCustomRowsIOSTests: GroupedListFixture {
         XCTAssertFalse(try cell(p, 21).isHighlighted)
     }
 
+    func testAWindowDetachedCustomRowCancelsItsHeldContactAndAcceptsAFreshPress() throws {
+        let p = presenter { self.model(custom: true) }
+        let ancestor = p.viewport, parent = try XCTUnwrap(p.viewport.superview)
+        let index = try XCTUnwrap(parent.subviews.firstIndex(of: ancestor))
+        defer {
+            if ancestor.superview !== parent { parent.insertSubview(ancestor, at: min(index, parent.subviews.count)) }
+            window.isHidden = true
+        }
+        let row = try XCTUnwrap(p.views[21]), native = try cell(p, 21)
+        let physicalParent = native.contentView
+        XCTAssertTrue(row.superview === physicalParent)
+        XCTAssertTrue(row.window === window)
+        var presses: [UInt32] = []
+        p.onPress = { presses.append($0) }
+        let oldTouch = RowTouch(row, at: CGPoint(x: 100, y: 30))
+        row.touchesBegan([oldTouch], with: nil)
+        let oldContact = try XCTUnwrap(row.pressContact)
+        XCTAssertTrue(oldContact.touch === oldTouch)
+        XCTAssertTrue(oldContact.ownsPress)
+        XCTAssertFalse(oldContact.routesBubbledPress)
+        XCTAssertFalse(oldContact.cancelled)
+        XCTAssertTrue(row.pressed)
+        XCTAssertTrue(native.isHighlighted)
+
+        ancestor.removeFromSuperview()
+        XCTAssertNil(ancestor.window)
+        XCTAssertNil(row.window)
+        XCTAssertTrue(p.views[21] === row)
+        XCTAssertTrue(row.superview === physicalParent, "only the ancestor leaves its window")
+        XCTAssertTrue(row.pressContact === oldContact)
+        XCTAssertTrue(oldContact.touch === oldTouch)
+        XCTAssertTrue(oldContact.cancelled, "window loss retires the still-held direct contact")
+        XCTAssertFalse(row.pressed)
+        XCTAssertFalse(native.isHighlighted)
+        XCTAssertEqual(presses, [])
+        row.touchesEnded([oldTouch], with: nil)
+        XCTAssertEqual(presses, [], "the detached contact's old lift cannot activate")
+        XCTAssertFalse(row.pressed)
+        XCTAssertFalse(native.isHighlighted)
+        let feedbackDeadline = Date().addingTimeInterval(5)
+        while (row.pressPaint.down || row.pressPaint.releaseHeld || !row.press.atRest), Date() < feedbackDeadline {
+            RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.05))
+        }
+        XCTAssertFalse(row.pressPaint.down)
+        XCTAssertFalse(row.pressPaint.releaseHeld)
+        XCTAssertTrue(row.press.atRest)
+        XCTAssertEqual(presses, [])
+
+        parent.insertSubview(ancestor, at: min(index, parent.subviews.count))
+        window.layoutIfNeeded()
+        XCTAssertTrue(row.window === window)
+        XCTAssertTrue(p.views[21] === row)
+        let currentCell = try cell(p, 21)
+        XCTAssertTrue(row.superview === currentCell.contentView)
+        let freshTouch = RowTouch(row, at: CGPoint(x: 100, y: 30))
+        row.touchesBegan([freshTouch], with: nil)
+        let freshContact = try XCTUnwrap(row.pressContact)
+        XCTAssertFalse(freshContact === oldContact)
+        XCTAssertTrue(freshContact.touch === freshTouch)
+        XCTAssertFalse(freshContact.cancelled)
+        XCTAssertTrue(row.pressed)
+        XCTAssertTrue(currentCell.isHighlighted)
+        row.touchesEnded([freshTouch], with: nil)
+        XCTAssertEqual(presses, [21], "a fresh contact after reattachment activates exactly once")
+        XCTAssertFalse(row.pressed)
+        XCTAssertFalse(currentCell.isHighlighted)
+    }
+
     /// A held custom row in a sidebar fades as far as UIKit fades its own
     /// label, unless it peeks: then the lift alone shows the press.
     func testAHeldCustomRowFadesAsUIKitsOwnContentDoesUnlessItPeeks() throws {
@@ -243,6 +311,92 @@ final class GroupedCustomRowsIOSTests: GroupedListFixture {
         XCTAssertEqual(try alpha(.sidebarPlain, highlighted: true, selected: true).ours, 1, "selected, on the accent")
         XCTAssertEqual(try alpha(.sidebarPlain, highlighted: false).ours, 1)
         XCTAssertEqual(try alpha(.plain, highlighted: true).ours, 1, "a plain list's held row fills its ground instead")
+    }
+
+    func testAnAuthoredPressKeepsItsBoundsAcrossCarryAndRestore() throws {
+        let p = presenter { self.model(custom: true) }
+        defer { window.isHidden = true }
+        let row = try XCTUnwrap(p.views[21]), groupedList = try list(p)
+        let original = row.bounds, cellCenter = row.center
+        p.apply(wireBatch([["op": "style", "id": 21, "style": ["press_scale": 0.9]]]))
+        let touch = GeometryTouch(row)
+        var presses: [UInt32] = []
+        p.onPress = { presses.append($0) }
+        row.touchesBegan([touch], with: nil)
+        XCTAssertTrue(row.pressed)
+        let contact = try XCTUnwrap(row.pressContact)
+        for turn in 0..<3 {
+            p.apply(wireBatch([["op": "props", "id": 21, "set": ["testId": "geometry-\(turn)"]]]))
+            XCTAssertTrue(row.superview === (try cell(p, 21)).contentView)
+            XCTAssertTrue(row.pressed && row.pressContact === contact && !contact.cancelled, "the held contact goes on through carry \(turn)")
+            XCTAssertEqual(row.bounds.width, original.width, accuracy: 0.001)
+            XCTAssertEqual(row.bounds.height, original.height, accuracy: 0.001)
+            XCTAssertEqual(row.transform.a, 0.9, accuracy: 0.001)
+            XCTAssertEqual(row.transform.d, 0.9, accuracy: 0.001)
+            XCTAssertEqual(row.center.x, cellCenter.x, accuracy: 0.001)
+            XCTAssertEqual(row.center.y, cellCenter.y, accuracy: 0.001)
+        }
+        let home = try XCTUnwrap(row.grid).drawn
+        groupedList.restore()
+        XCTAssertEqual(row.bounds.size, home.size)
+        XCTAssertEqual(row.center.x, home.midX, accuracy: 0.001)
+        XCTAssertEqual(row.center.y, home.midY, accuracy: 0.001)
+        XCTAssertEqual(row.transform.a, 0.9, accuracy: 0.001)
+        XCTAssertTrue(row.pressed && row.pressContact === contact && !contact.cancelled, "the held contact goes on through an explicit restore")
+        p.apply(wireBatch([]))
+        let native = try cell(p, 21)
+        XCTAssertTrue(row.superview === native.contentView)
+        XCTAssertTrue(row.pressed && row.pressContact === contact && !contact.cancelled, "and through the carry that follows")
+        touch.point = native.contentView.convert(CGPoint(x: cellCenter.x + original.width / 2 + 8, y: cellCenter.y), to: nil)
+        row.touchesMoved([touch], with: nil)
+        XCTAssertTrue(row.pressPaint.outside)
+        row.touchesCancelled([touch], with: nil)
+        row.touchesEnded([touch], with: nil)
+        XCTAssertEqual(presses, [])
+        XCTAssertFalse(row.hasPressContact, "the cancelled contact cannot activate")
+        XCTAssertFalse(row.pressed || native.isHighlighted)
+        let released = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            !row.pressPaint.down && !row.press.releaseHeld && row.press.to == 1
+                && row.transform == .identity
+        }, object: nil)
+        wait(for: [released], timeout: 2)
+        XCTAssertFalse(row.hasPressContact)
+        XCTAssertFalse(row.pressed || native.isHighlighted || row.pressPaint.down || row.press.releaseHeld)
+        XCTAssertEqual(row.press.to, 1)
+        XCTAssertEqual(row.transform, .identity)
+        XCTAssertEqual(row.bounds.size, original.size)
+        XCTAssertEqual(presses, [], "no callback arrives while the young release settles")
+        // A fresh press where the row is drawn now, carried in its cell,
+        // presses it once; its young release is held until the press has
+        // shown, then settles back to identity.
+        let fresh = GeometryTouch(row)
+        row.touchesBegan([fresh], with: nil)
+        XCTAssertTrue(row.pressed)
+        XCTAssertFalse(row.pressContact === contact, "a fresh contact, not the cancelled one")
+        XCTAssertEqual(row.bounds.size, original.size)
+        XCTAssertEqual(row.transform.a, 0.9, accuracy: 0.001)
+        row.touchesEnded([fresh], with: nil)
+        XCTAssertEqual(presses, [21], "a fresh press after the carries activates once")
+        XCTAssertFalse(row.pressed || native.isHighlighted)
+        let settled = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            !row.press.releaseHeld && row.press.to == 1 && row.transform == .identity
+        }, object: nil)
+        wait(for: [settled], timeout: 2)
+        XCTAssertFalse(row.hasPressContact)
+        XCTAssertEqual(row.bounds.size, original.size)
+        XCTAssertEqual(presses, [21])
+    }
+
+    private final class GeometryTouch: UITouch {
+        let target: UIView
+        var point: CGPoint
+        init(_ target: UIView) {
+            self.target = target
+            point = target.convert(CGPoint(x: target.bounds.midX, y: target.bounds.midY), to: nil)
+            super.init()
+        }
+        override var view: UIView? { target }
+        override func location(in view: UIView?) -> CGPoint { view.map { $0.convert(point, from: nil) } ?? point }
     }
 
     private final class NoMenu: NSObject, UIContextMenuInteractionDelegate {

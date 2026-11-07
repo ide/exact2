@@ -15,8 +15,11 @@ extension MenuHost {
 }
 
 /// The dialog sheets that may host it are captured at opening: a later
-/// sheet must cover this layer. Elsewhere it is where BASE put every lifted
-/// popover, the top live route modal's view or the viewport.
+/// sheet must cover this layer. A popover opened while a card shows is the
+/// card's (`cardOwner`): its own card's view, or, for a plain or manual
+/// popover, the current card's presentation container, outside the
+/// platter's clip. Elsewhere it is where BASE put every lifted popover, the
+/// top live route modal's view or the viewport.
 final class PopoverLayer: UIView {
     private struct Host { weak var controller: UIViewController? }
     private var hosts: [Host]
@@ -28,10 +31,19 @@ final class PopoverLayer: UIView {
     /// The UIKit popover it shows in, zoomed out of its opener's glass
     /// (PopoverCardIOS.swift), in place of the document.
     var card: PopoverCard?
-    var cardView: UIView? { card?.view }
-    #else
-    var cardView: UIView? { nil }
+    /// The card hosting it now: its own, or the current card a plain or
+    /// manual popover opened over (`mount`).
+    private(set) weak var cardOwner: PopoverCard?
     #endif
+    /// Hosted outside the session's root, by a sheet or a card.
+    var externalOwner: Bool { sheet != nil || usesNativeCard }
+    var usesNativeCard: Bool {
+        #if os(iOS)
+        cardOwner != nil
+        #else
+        false
+        #endif
+    }
     private var mounting = false
 
     init(presenter: Presenter, order: Int, popover: UIView) {
@@ -53,11 +65,17 @@ final class PopoverLayer: UIView {
     func mount(in presenter: Presenter) {
         mounting = true
         defer { mounting = false }
-        var host: UIView = cardView ?? presenter.modals.coordinateView ?? presenter.documentHost
+        var host: UIView = presenter.modals.coordinateView ?? presenter.documentHost
         sheet = nil
+        #if os(iOS)
+        // Its own card's view; a plain or manual popover's layer goes in the
+        // current card's presentation container, outside the platter's clip.
+        cardOwner = card ?? presenter.menus.cards.top
+        if let cardOwner { host = card == nil ? cardOwner.presentationController?.containerView ?? cardOwner.view : cardOwner.view }
+        #endif
         // A sheet hosts it only while its dialog still holds the popover: a move out of it leaves the sheet.
         let holding = popover.map { presenter.menus.sheets.controllers(holding: $0) } ?? []
-        for candidate in hosts where cardView == nil {
+        for candidate in hosts where !externalOwner {
             if let controller = candidate.controller,
                holding.contains(where: { $0 === controller }),
                controller.presentingViewController != nil,
@@ -74,14 +92,19 @@ final class PopoverLayer: UIView {
             } else { host.addSubview(self) }
         }
         // UIKit orders its own siblings; authored siblings use Exact's paint ranks.
-        setPaintForeground(sheet == nil)
-        if sheet != nil || cardView != nil {
-            // Outside the session's root, in a sheet or a card: its theme and tint, as the sheet's (DialogSheetController).
+        setPaintForeground(!externalOwner)
+        if externalOwner {
+            // Outside the session's root, in a sheet or a card: its theme and tint, as the sheet's (DialogSheetController),
+            // and a touch observer of its own, out of reach of the one on the session's surface (`observeTouches`).
             ThemeRoles.adopt(self, from: presenter.root)
             tintColor = ThemeRoles.color("AccentColor", in: self)
+            if !(gestureRecognizers ?? []).contains(where: { $0 is PopoverTouch }) { addGestureRecognizer(PopoverTouch(host: presenter.menus)) }
         }
-        // Beside its sheet's card, it is hidden from accessibility with that card when a later sheet covers it.
-        let covered = sheet?.viewIfLoaded?.accessibilityElementsHidden ?? false
+        // Beside its sheet's card, or in a card's container, it is hidden from accessibility with that presentation when a later one covers it.
+        var covered = sheet?.viewIfLoaded?.accessibilityElementsHidden ?? false
+        #if os(iOS)
+        covered = covered || cardOwner?.viewIfLoaded?.accessibilityElementsHidden == true
+        #endif
         if accessibilityElementsHidden != covered { accessibilityElementsHidden = covered }
         // Over the document, the page's area: not the bands the viewport is drawn past (LLP 1130).
         let place = (host as? UIScrollView)?.pageBounds ?? host.bounds

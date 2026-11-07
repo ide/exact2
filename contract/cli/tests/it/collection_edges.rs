@@ -717,7 +717,7 @@ fn initial_item_count_sets_the_first_window_apart_from_the_estimate() {
         )
     };
     let r = boot(&tall(""));
-    assert_eq!(r.collections()[0].rows.len(), 3, "ceil(16 × 32 / 200)");
+    assert_eq!(r.collections()[0].rows.len(), 5, "ceil(844 / 200)");
     let mut r = boot(&tall(" initial-item-count=12"));
     assert_eq!(r.collections()[0].rows.len(), 12);
     // 31 rows of 200 by estimate: the first report reaches no end.

@@ -15,6 +15,13 @@ struct CustomLook {
 }
 
 extension GroupedListView {
+    /// Place the untransformed row box before restoring its authored and press transforms.
+    func placeRow(_ row: NodeView, at frame: CGRect) {
+        row.transform = .identity
+        row.frame = frame
+        row.applyTransform()
+    }
+
     /// Its cells, headers and separators follow the list's direction, as
     /// UIKit mirrors its own lists; a view's `semanticContentAttribute`
     /// reaches no subview, a trait does.

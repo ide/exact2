@@ -1,5 +1,6 @@
 #if os(iOS)
 import UIKit
+import UIKit.UIGestureRecognizerSubclass
 import XCTest
 @testable import ExactKit
 import ExactGroupedLists
@@ -558,25 +559,227 @@ final class PushedTitleIOSTests: XCTestCase {
         XCTAssertNil(Presenter.bar(riding: keys, around: field(in: CGRect(x: 20, y: 60, width: 360, height: 50)), in: window, stops: stops), "a search bar at the top")
     }
 
-    /// A swipe down a bar's search field puts the keys away and keeps the query and the open search, as a swipe down
-    /// a composer does; UIKit's own search field has no such swipe.
+    /// The upstream suites' wait (EventWaits.swift `waitFor`), which the pin does not have: the main loop runs in
+    /// 5 ms turns until `done`, failing at `cap` with how long it waited and what `facts` saw.
+    private func waitFor(_ what: String, cap: TimeInterval = 30, facts: () -> String = { "" },
+                         file: StaticString = #filePath, line: UInt = #line, _ done: () -> Bool) {
+        let until = Date().addingTimeInterval(cap)
+        while !done(), Date() < until { RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.005)) }
+        if !done() { XCTFail("\(what): \(facts())", file: file, line: line) }
+    }
+
+    /// Supply delegate input and recognized state; the native touch drive must qualify recognition.
+    private final class SearchTouch: UITouch {
+        let hit: UIView
+        let kind: UITouch.TouchType
+        let time = ProcessInfo.processInfo.systemUptime
+        init(_ hit: UIView, kind: UITouch.TouchType = .direct) { self.hit = hit; self.kind = kind; super.init() }
+        override var view: UIView? { hit }
+        override var type: UITouch.TouchType { kind }
+        override var timestamp: TimeInterval { time }
+    }
+
+    private func recognize(_ swipe: HeaderSearchSwipe, on field: UITextField) {
+        XCTAssertTrue(swipe.gestureRecognizer(swipe, shouldReceive: SearchTouch(field)))
+        XCTAssertTrue(swipe.gestureRecognizerShouldBegin(swipe))
+        swipe.state = .recognized
+        swipe.dismissKeyboard()
+    }
+
     func testASwipeDownABarSearchPutsTheKeysAwayAndKeepsTheQuery() throws {
         guard hostedWindowScene() != nil else {
             throw missing("scene", "native search editing needs the hosted app responder lifecycle")
         }
-        let (_, _, nav) = try fixture()
+        let (session, _, nav) = try fixture()
         try tap("home-open-seek", in: nav, depth: 2)
-        let search = try XCTUnwrap(nav.topViewController?.navigationItem.searchController)
-        let field = search.searchBar.searchTextField
-        until("the bar's search field takes the autofocus") { field.isFirstResponder }
-        field.insertText("fern")
         let header = try XCTUnwrap((nav.topViewController as? RouteController)?.search)
-        let swipe = field.gestureRecognizers?.compactMap { $0 as? UISwipeGestureRecognizer }.first { $0.direction == .down }
-        XCTAssertTrue(swipe === header.swipeDown, "the field takes the search's swipe down")
-        header.swipedDown()
-        until("the keys go away") { !field.isFirstResponder }
-        XCTAssertEqual(search.searchBar.text, "fern", "the query stays")
-        XCTAssertTrue(search.isActive, "the search stays open")
+        let search = header.controller, field = search.searchBar.searchTextField
+        until("native search editing settles") { field.isFirstResponder && header.swipeDown != nil && !Agent(session: session).nativeInFlight() }
+        field.insertText("fern")
+        until("the app hears the query") { slots(session)?["query"] as? String == "fern" }
+        let swipe = try XCTUnwrap(header.swipeDown)
+        XCTAssertTrue(swipe.view === field)
+        XCTAssertEqual(swipe.direction, .down)
+        recognize(swipe, on: field)
+        until("the swipe ends editing and commits the query") {
+            !field.isFirstResponder && slots(session)?["searchBlurs"] as? Int == 1
+        }
+        XCTAssertNil(swipe.view, "ending editing retires the field's recognizer")
+        XCTAssertNil(header.swipeDown)
+        XCTAssertEqual(field.text, "fern")
+        XCTAssertTrue(search.isActive, "dismissing the keys keeps the search open")
+        var state = try XCTUnwrap(slots(session))
+        XCTAssertEqual(state["query"] as? String, "fern")
+        XCTAssertEqual(state["committedQuery"] as? String, "fern")
+        XCTAssertEqual(state["searchChanges"] as? Int, 1)
+        XCTAssertEqual(state["searching"] as? Bool, false)
+
+        XCTAssertTrue(field.becomeFirstResponder())
+        until("reopening installs a new recognizer") { header.swipeDown != nil && field.isFirstResponder }
+        let reopened = try XCTUnwrap(header.swipeDown)
+        XCTAssertFalse(reopened === swipe)
+        swipe.dismissKeyboard()
+        XCTAssertTrue(field.isFirstResponder, "a retired action cannot dismiss the reopened field")
+        XCTAssertEqual(field.text, "fern")
+        XCTAssertEqual(field.gestureRecognizers?.filter { $0 is HeaderSearchSwipe }.count, 1)
+        until("the search presentation settles") { search.transitionCoordinator == nil && !search.isBeingPresented }
+        search.isActive = false
+        until("cancellation still clears the live query") {
+            !search.isActive && !field.isFirstResponder && slots(session)?["query"] as? String == ""
+        }
+        XCTAssertEqual(Agent(session: session).clock(["settle": true])["settled"] as? Bool, true)
+        XCTAssertNil(reopened.view)
+        state = try XCTUnwrap(slots(session))
+        XCTAssertEqual(state["searchBlurs"] as? Int, 2)
+        XCTAssertEqual(state["searchChanges"] as? Int, 2)
+        XCTAssertEqual(state["committedQuery"] as? String, "")
+    }
+
+    /// Forward UIKit's delegate callbacks and observe completion after the original delegate handles it.
+    private final class SearchDismissal: NSObject, UISearchControllerDelegate {
+        let original: UISearchControllerDelegate?
+        private(set) var count = 0
+        init(_ original: UISearchControllerDelegate?) { self.original = original; super.init() }
+        func didDismissSearchController(_ search: UISearchController) {
+            original?.didDismissSearchController?(search)
+            count += 1
+        }
+        override func responds(to selector: Selector!) -> Bool {
+            super.responds(to: selector) || (original?.responds(to: selector) ?? false)
+        }
+        override func forwardingTarget(for selector: Selector!) -> Any? {
+            original?.responds(to: selector) == true ? original : nil
+        }
+    }
+
+    func testABarSearchSwipePreservesSelectionAndRetiresWithItsField() throws {
+        guard hostedWindowScene() != nil else {
+            throw missing("scene", "native search editing needs the hosted app responder lifecycle")
+        }
+        let (session, _, nav) = try fixture()
+        try tap("home-open-seek", in: nav, depth: 2)
+        let route = try XCTUnwrap(nav.topViewController as? RouteController)
+        let header = try XCTUnwrap(route.search)
+        let field = header.controller.searchBar.searchTextField
+        until("native search editing settles") { field.isFirstResponder && header.swipeDown != nil && !Agent(session: session).nativeInFlight() }
+        field.insertText("fern")
+        until("the query reaches the app") { slots(session)?["query"] as? String == "fern" }
+        let source = try XCTUnwrap(header.field), swipe = try XCTUnwrap(header.swipeDown)
+        let heldSource = HeldNode(source)
+        for kind: UITouch.TouchType in [.indirectPointer, .pencil] {
+            XCTAssertFalse(swipe.gestureRecognizer(swipe, shouldReceive: SearchTouch(field, kind: kind)), "pointer selection stays native")
+        }
+        let control = UIButton()
+        field.addSubview(control)
+        XCTAssertFalse(swipe.gestureRecognizer(swipe, shouldReceive: SearchTouch(control)), "the field's nested controls keep their touches")
+        control.removeFromSuperview()
+        let touch = SearchTouch(field)
+        XCTAssertTrue(swipe.gestureRecognizer(swipe, shouldReceive: touch))
+        let caret = try XCTUnwrap(field.position(from: field.beginningOfDocument, offset: 2))
+        field.selectedTextRange = field.textRange(from: caret, to: caret)
+        until("the native selection delegate records the caret move") { source.selectionMovedAt >= touch.time }
+        XCTAssertFalse(swipe.gestureRecognizerShouldBegin(swipe), "the caret owns a contact that moved its selection")
+        XCTAssertTrue(field.isFirstResponder)
+        XCTAssertEqual(source.liveSelection, NSRange(location: 2, length: 0))
+        XCTAssertEqual(slots(session)?["searchBlurs"] as? Int, 0)
+        swipe.state = .failed
+        swipe.dismissKeyboard()
+        XCTAssertTrue(field.isFirstResponder, "a failed recognition does not dismiss the keyboard")
+
+        swipe.reset()
+        XCTAssertTrue(swipe.gestureRecognizer(swipe, shouldReceive: SearchTouch(field)))
+        source.applyProps(set: ["disabled": "true"], clear: [])
+        XCTAssertFalse(swipe.eligible, "eligibility is read again before projection catches up")
+        source.applyProps(set: ["disabled": "false"], clear: [])
+        XCTAssertTrue(swipe.eligible)
+        XCTAssertFalse(swipe.gestureRecognizerShouldBegin(swipe), "reenabling cannot revive a cancelled contact")
+        swipe.reset()
+        XCTAssertFalse(swipe.gestureRecognizerShouldBegin(swipe), "a cancelled contact leaves no pending dismissal")
+
+        try press("seek-disable-search")
+        until("disabled search retires the recognizer") { source.disabled && header.swipeDown == nil }
+        XCTAssertNil(swipe.view)
+        XCTAssertFalse(swipe.eligible)
+        try press("seek-disable-search")
+        until("reenabled search can edit again") { !source.disabled }
+        XCTAssertTrue(field.becomeFirstResponder())
+        until("reenabled editing has a current recognizer") { header.swipeDown != nil }
+        let beforeReplacement = try XCTUnwrap(header.swipeDown)
+        try press("seek-replace-search")
+        until("the authored replacement owns the native field") {
+            header.field?.props["testId"] == "seek-search-replacement" && field.isFirstResponder && header.swipeDown != nil
+        }
+        XCTAssertTrue(route.search === header, "the search controller stays mounted")
+        XCTAssertNil(heldSource.live(in: session.presenter), "the old authored field retires even if its view is reused")
+        XCTAssertNil(beforeReplacement.view)
+        beforeReplacement.dismissKeyboard()
+        XCTAssertTrue(field.isFirstResponder, "the old field cannot dismiss its replacement")
+        XCTAssertEqual(field.text, "fern")
+        let replacement = try XCTUnwrap(header.swipeDown)
+        XCTAssertFalse(replacement === beforeReplacement)
+        let testWindow = try XCTUnwrap(window), dismissal = SearchDismissal(header.controller.delegate)
+        header.controller.delegate = dismissal
+        defer { header.controller.delegate = dismissal.original }
+        func nativeFacts() -> String {
+            func describe(_ search: HeaderSearch?) -> String {
+                guard let search else { return "nil" }
+                let controller = search.controller, editor = controller.searchBar.searchTextField
+                let ancestors = sequence(first: editor as UIView, next: \.superview).map {
+                    "\(type(of: $0)): hidden=\($0.isHidden), interactive=\($0.isUserInteractionEnabled), alpha=\($0.alpha), frame=\($0.frame)"
+                }.joined(separator: " > ")
+                return "controller=\(ObjectIdentifier(controller)), source=\(String(describing: search.field?.id)), projected=\(search.field?.headerField === editor), active=\(controller.isActive), " +
+                    "presenting=\(controller.isBeingPresented), dismissing=\(controller.isBeingDismissed), presenter=\(String(describing: controller.presentingViewController)), transition=\(controller.transitionCoordinator != nil), " +
+                    "mounted=\(editor.window === testWindow), responder=\(editor.isFirstResponder), canFocus=\(editor.canBecomeFirstResponder), enabled=\(editor.isEnabled), " +
+                    "inert=\(String(describing: search.field?.inert)), disabled=\(String(describing: search.field?.formDisabled)), query=\(String(describing: editor.text)), swipe=\(String(describing: search.swipeDown?.eligible)), ancestors=[\(ancestors)]"
+            }
+            let logs = session.agent("{\"op\":\"logs\"}")
+            return "dismissals=\(dismissal.count), old=[\(describe(header))], current=[\(describe(route.search))], " +
+                "focus=\(Presenter.focusHolder(in: testWindow)), pending=\(String(describing: session.presenter.pendingFocusObservation)), " +
+                "navTransition=\(nav.transitionCoordinator != nil), nativeInFlight=\(Agent(session: session).nativeInFlight()), slots=\(String(describing: slots(session))), logs=\(logs)"
+        }
+        try press("seek-toggle-search")
+        waitFor("removing the field retires the search", cap: 5, facts: nativeFacts) { route.search == nil && !field.isFirstResponder }
+        XCTAssertNil(replacement.view)
+        XCTAssertFalse(replacement.eligible)
+        func dismissed() -> Bool {
+            dismissal.count > 0 && !header.controller.isBeingDismissed && header.controller.presentingViewController == nil
+                && header.controller.transitionCoordinator == nil && nav.transitionCoordinator == nil
+        }
+        waitFor("UIKit completes the removed search's dismissal", cap: 5, facts: nativeFacts, dismissed)
+        guard dismissed() else { return }
+        XCTAssertEqual(dismissal.count, 1, "the native dismissal reaches the original delegate once")
+        settle()
+        try press("seek-toggle-search")
+        waitFor("restoring the field projects its native search", cap: 5, facts: nativeFacts) { route.search?.field?.props["testId"] == "seek-search-replacement" }
+        let restored = try XCTUnwrap(route.search)
+        let restoredSource = try XCTUnwrap(restored.field), restoredField = restored.controller.searchBar.searchTextField
+        XCTAssertTrue(restoredSource.headerField === restoredField)
+        func ready() -> Bool {
+            route.search === restored && restoredSource.headerField === restoredField
+                && restoredField.window === testWindow && restoredField.canBecomeFirstResponder && restoredField.isEnabled
+                && !restoredSource.formDisabled && !restoredSource.inert
+                && route.navigationItem.searchController === restored.controller
+                && !restored.controller.isBeingPresented && !restored.controller.isBeingDismissed
+                && restored.controller.transitionCoordinator == nil && nav.transitionCoordinator == nil
+                && sequence(first: restoredField as UIView, next: \.superview).allSatisfy { !$0.isHidden && $0.isUserInteractionEnabled }
+                && !Agent(session: session).nativeInFlight()
+        }
+        waitFor("the restored native field is mounted and ready for focus", cap: 5, facts: nativeFacts, ready)
+        guard ready() else { return }
+        session.presenter.focusNode(restoredSource)
+        func editing() -> Bool {
+            restoredField.isFirstResponder && restored.swipeDown?.eligible == true && !Agent(session: session).nativeInFlight()
+        }
+        waitFor("the restored field edits with an eligible recognizer", cap: 5, facts: nativeFacts, editing)
+        guard editing() else { return }
+        XCTAssertFalse(restored === header)
+        XCTAssertEqual(restored.controller.searchBar.text, "fern")
+        let mounted = try XCTUnwrap(restored.swipeDown)
+        XCTAssertFalse(mounted === replacement)
+        XCTAssertTrue(mounted.view === restoredField)
+        session.view?.removeFromSuperview()
+        XCTAssertFalse(mounted.eligible, "an unmounted search cannot accept a pending swipe")
+        mounted.dismissKeyboard()
     }
 
     private func assertBarSearchKeys(policy: String) throws {

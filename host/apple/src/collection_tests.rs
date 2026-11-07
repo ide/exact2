@@ -96,6 +96,66 @@ fn state(bridge: &Bridge<Rows>) -> (String, String, f64, f64) {
 }
 
 #[test]
+fn collection_boot_and_carried_boot_fill_the_supplied_viewport_in_the_first_batch() {
+    let source = r#"component App
+  view
+    list appearance="none" virtualized=true estimated-item-height=100 scroll-start="end" width="100%" height="100%"
+      for row in range(1000) key=row
+        text `${row}` height=100
+"#;
+    let plan = contract::compile(source).unwrap().encode();
+    let boot = |height| {
+        Host::boot(
+            &plan,
+            (),
+            Box::new(MonospaceMeasurer::default()),
+            200.,
+            height,
+        )
+        .unwrap()
+    };
+    let (small, small_batch) = boot(300.);
+    let (large, large_batch) = boot(900.);
+    let (replacement, replacement_batch) = Host::boot_with(
+        &plan,
+        (),
+        Box::new(MonospaceMeasurer::default()),
+        200.,
+        450.,
+        Some(&large.carry()),
+    )
+    .unwrap();
+    for (host, batch, count) in [
+        (&small, small_batch, 3),
+        (&large, large_batch, 9),
+        (&replacement, replacement_batch, 5),
+    ] {
+        assert_eq!(host.runner().kernel().epoch(), 1);
+        let snapshot = host.runner().collections().remove(0);
+        assert_eq!(snapshot.rows.len(), count);
+        assert_eq!(snapshot.rows[0].index, 1000 - count);
+        assert_eq!(snapshot.rows.last().unwrap().index, 999);
+        assert!(snapshot
+            .rows
+            .iter()
+            .all(|row| { host.runner().kernel().node(row.view).unwrap().frame.height == 100. }));
+        let envelope: serde_json::Value = serde_json::from_str(&batch).unwrap();
+        assert!(envelope["error"].is_null(), "{batch}");
+        let collections = envelope["ops"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|op| op["op"] == "collections")
+            .collect::<Vec<_>>();
+        assert_eq!(collections.len(), 1);
+        assert_eq!(
+            collections[0]["items"][0]["rows"].as_array().unwrap().len(),
+            count
+        );
+    }
+}
+
+#[test]
 fn collection_feedback_submits_edge_request_without_another_bridge_call() {
     use exact_runner::{Answer, Outcome, Request, Store};
     use std::sync::mpsc::{channel, Sender};

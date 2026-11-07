@@ -28,11 +28,16 @@ final class GlassGroups {
     private var active = false
     private static var noted = Set<String>()
 
-    /// Each glass, joined to its group or isolated by its path. A glass
+    /// Each glass's answer to a finger refreshed (`glassAnswersTouch`: the
+    /// batch may have disabled, hidden or removed the one field it framed),
+    /// then each glass joined to its group or isolated by its path. A glass
     /// inside another glass answers to that one's isolation, so the pass
-    /// repeats while anything changed (a few rounds at most). Nothing to do
-    /// in a presenter that has never had a group.
+    /// repeats while anything changed (a few rounds at most); nothing to
+    /// isolate in a presenter that has never had a group.
     func reconcile() {
+        #if os(iOS) || os(tvOS)
+        for node in glass.allObjects where node.materialInteractive != node.glassAnswersTouch { node.updateMaterial() }
+        #endif
         let live = groups.count > 0
         guard live || active else { return }
         active = live
@@ -265,7 +270,9 @@ extension NodeView {
     /// Whether this glass answers a finger: a pressable one or an invoker,
     /// as a glass button does, and one framing a single text field, which
     /// is that field's surface, as the glass of UIKit's own fields is
-    /// (`UIGlassEffect.isInteractive`).
+    /// (`UIGlassEffect.isInteractive`). A field disabled, inert, hidden or
+    /// no longer the tree's is no field a finger could reach, so it and
+    /// what it holds count for nothing.
     var glassAnswersTouch: Bool {
         guard Materials.glass(materialRequest), !disabled else { return false }
         if handlers.contains("press") || props["popovertarget"] != nil || props["commandfor"] != nil { return true }
@@ -274,6 +281,7 @@ extension NodeView {
         while seen < 64, let view = stack.popLast() {
             seen += 1
             guard let node = view as? NodeView else { stack.append(contentsOf: view.subviews); continue }
+            guard presenter?.views[node.id] === node, !node.isHidden, !node.cssVisibilityHidden, !node.formDisabled, !node.inert else { continue }
             if node.kind == "textarea" || node.kind == "input" { fields += 1; if fields > 1 { return false }; continue }
             stack.append(contentsOf: node.container.subviews)
         }

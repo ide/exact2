@@ -1075,9 +1075,6 @@ impl<D: DataSource + Default> CanvasHost<D> {
         // The first frame realizes only the rows that show; the window's lead
         // follows once it is out ([`CanvasHost::frame`]).
         exact_runner::set_lead_scale(0.0);
-        // A new list builds the rows the view can show before its first
-        // layout, not in a second commit after it.
-        exact_runner::set_bootstrap_extent(size.1.max(size.0) as f64 / scale as f64);
         // A retiring row is rebound to the next item instead of a row built
         // for it (LLP 1078), unless `EXACT_ROW_REUSE=0`.
         crate::app::row_reuse_from_env(true);

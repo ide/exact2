@@ -99,6 +99,10 @@ extension NodeView {
         presenter?.fieldSelections.changed(self)
     }
     @objc package func textFieldDidEndEditing(_ textField: UITextField) {
+        #if os(iOS)
+        // Keys standing down for a card: the editing goes on (PopoverCardIOS.swift)
+        if let held = presenter?.heldKeys, held.suspends(self) { held.ended(); return }
+        #endif
         presenter?.collections.pinsChanged()
         if presenter?.editing === self { presenter?.editing = nil }
         presenter?.commitEdit(id, textField.text ?? "", change: handlers.contains("change"))

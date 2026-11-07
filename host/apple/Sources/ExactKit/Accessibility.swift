@@ -1024,7 +1024,10 @@ extension Presenter {
     /// The node holding the focus: itself, its field (through its editor on
     /// AppKit) or its text area.
     var focusedNode: NodeView? {
-        views.values.filter { node in
+        #if os(iOS)
+        if let node = keysNode { return node } // its editor resigned for a card (PopoverCardIOS.swift)
+        #endif
+        return views.values.filter { node in
             #if os(macOS)
             guard let responder = node.window?.firstResponder else { return false }
             return keyTarget(responder) === node

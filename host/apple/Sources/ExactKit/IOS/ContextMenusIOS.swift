@@ -523,29 +523,113 @@ final class ContextMenuHost: NSObject, UIContextMenuInteractionDelegate, UIEditM
     private func previews(_ owner: Open) -> Bool {
         current(owner)?.container.subviews.contains { ($0 as? NodeView)?.props["contextPreview"] == "true" && !$0.isHidden } ?? false
     }
-    /// The grounds the nodes inside `view` paint, in `view`'s space, each in
-    /// its clip path or its corners; nil when none paints one, or when a
-    /// node inside that paints none and holds none lies off them (a
-    /// paragraph, an image, a drawing).
+    /// The grounds the nodes inside `view` paint, in `view`'s space, joined
+    /// into one region: each where it paints, its box in its corners, cut by
+    /// its clip path and by every box above it that clips (a clip path's
+    /// points beyond the box paint nothing, and a box of no area paints
+    /// nothing). Nil when none paints one, when one is masked by what is not
+    /// a region (a gradient, a filter's picture, a transition's surface),
+    /// itself or by a box above it, or when ink lies
+    /// anywhere off them: a node that paints none and holds none (a
+    /// paragraph, an image, a drawing) or a flat box drawn in a layer
+    /// (`FlatLeaves`), each by its whole box, or a flat box's shadow. A line
+    /// centred on a balloon's body that runs past it lifts the whole box, as
+    /// before, so no ink of it is cut.
+    ///
+    /// The union decides; the path given is the grounds' own outlines, each
+    /// normalized (`CGPath.normalized`: weakly simple, no self-intersection,
+    /// the orientation every normalized path has) and added as a subpath, so
+    /// the nonzero rule fills their union with the authored edges. The
+    /// union's own path does not keep them: its boolean cuts move a corner's
+    /// point by 1e-8 pt, enough to lose a ground pixel whose centre lies on it.
     private static func grounds(in view: NodeView) -> UIBezierPath? {
-        let shape = UIBezierPath()
-        var content: [NodeView] = []
-        var stack = view.subviews
-        while let sub = stack.popLast() {
+        var shape: CGPath?
+        let outlines = CGMutablePath()
+        var content: [CGRect] = []
+        // Each view, with the region the boxes from `view` down to it clip
+        // it to, and whether one of them, or it, is masked otherwise
+        var stack: [(UIView, CGPath?, Bool)] = [(view, nil, false)]
+        while let entry = stack.popLast() {
+            let (sub, above, maskedAbove) = entry
             guard !sub.isHidden, sub.alpha > 0.01 else { continue }
-            stack.append(contentsOf: sub.subviews)
-            guard let node = sub as? NodeView else { continue }
+            let node = sub as? NodeView
+            // What it clips what it holds to: its box in its corners when it
+            // clips its overflow, and its clip path, both where both are there
+            // (`BoxMaskIOS.clipMask`)
+            var own: CGPath?
+            if sub.clipsToBounds { own = (node?.roundedPath(in: sub.bounds) ?? UIBezierPath(roundedRect: sub.bounds, cornerRadius: sub.layer.cornerRadius)).cgPath }
+            if let node, let path = node.clipPath {
+                let authored = path.normalized(using: node.clipRule)
+                own = own.map { $0.intersection(authored) } ?? authored
+            }
+            // A mask no region says: `mask-image`, laid over the clip path
+            // (`composedMask`), a filtered box's picture, a layout transition's
+            // surface, a node's mask that is neither of its clips, or any mask
+            // on a view that is not a node (a clip box's shaped corners)
+            let unsaid = node.map { $0.style["mask_image"] != nil || $0.hasBoxFilter || $0.surface != nil || ($0.layer.mask != nil && $0.clipPath == nil && !$0.clipsToBounds) }
+                ?? (sub.layer.mask != nil)
+            let masked = maskedAbove || unsaid
+            var clip = above
+            if let own {
+                let mine = placed(own, transform(from: sub, to: view))
+                clip = above.map { $0.intersection(mine) } ?? mine
+            }
+            stack.append(contentsOf: sub.subviews.map { ($0, clip, masked) })
+            guard let node else { continue }
+            // An outer shadow (`applyShadow`, cast on the node's layer past its
+            // box) or a filter's picture paints past the box: no shape of the
+            // grounds holds that ink, so the whole box lifts
+            if node !== view, node.shadowCaster != nil || node.hasBoxFilter { return nil }
+            guard let flat = flatBoxes(drawnIn: node, in: view) else { return nil }
+            content += flat
+            guard node !== view else { continue }
             if paintsGround(node) {
-                let path = node.clipPath.map { UIBezierPath(cgPath: $0) } ?? node.roundedPath(in: node.bounds)
-                let origin = view.convert(CGPoint.zero, from: node), x = view.convert(CGPoint(x: 1, y: 0), from: node), y = view.convert(CGPoint(x: 0, y: 1), from: node)
-                path.apply(CGAffineTransform(a: x.x - origin.x, b: x.y - origin.y, c: y.x - origin.x, d: y.y - origin.y, tx: origin.x, ty: origin.y))
-                shape.append(path)
+                guard !masked else { return nil }
+                guard !node.bounds.isEmpty else { continue }
+                let box = placed(node.roundedPath(in: node.bounds).cgPath, transform(from: node, to: view))
+                let painted = clip.map { box.intersection($0) } ?? box
+                // The union of the regions, whichever way each path turns
+                shape = shape.map { $0.union(painted) } ?? painted
+                // Its outline as authored where that is what paints: the clip
+                // path itself when nothing above clips and it lies in a
+                // square-cornered box (the box cut by it is it); else the cut
+                if above == nil, let path = node.clipPath, node.cornerSizes(in: node.bounds).allSatisfy({ $0 == .zero }),
+                   node.bounds.contains(path.boundingBoxOfPath) {
+                    outlines.addPath(placed(path, transform(from: node, to: view)).normalized(using: node.clipRule))
+                } else {
+                    outlines.addPath(painted.normalized())
+                }
             } else if !node.bounds.isEmpty, !node.subviews.contains(where: { $0 is NodeView }) {
-                content.append(node)
+                content.append(view.convert(node.bounds, from: node))
             }
         }
-        guard !shape.isEmpty, content.allSatisfy({ shape.contains(view.convert(CGPoint(x: $0.bounds.midX, y: $0.bounds.midY), from: $0)) }) else { return nil }
-        return shape
+        guard let shape, !shape.isEmpty, !shape.boundingBoxOfPath.isEmpty,
+              content.allSatisfy({ CGPath(rect: $0, transform: nil).subtracting(shape).isEmpty }) else { return nil }
+        return UIBezierPath(cgPath: outlines)
+    }
+    /// The boxes of the flat leaves `node` draws in its layers, in `view`'s
+    /// space; nil when one casts a shadow, whose ink lies outside its box.
+    private static func flatBoxes(drawnIn node: NodeView, in view: UIView) -> [CGRect]? {
+        guard let flats = node.presenter?.flats, var ids = flats.children(of: node.id) else { return [] }
+        var boxes: [CGRect] = []
+        while let id = ids.popLast() {
+            guard let leaf = flats.leaves[id] else { continue }
+            ids.append(contentsOf: flats.children(of: id) ?? [])
+            guard let frame = flats.frameInHost(id), !frame.isEmpty else { continue }
+            if leaf.paint.shadow != nil { return nil }
+            boxes.append(view.convert(frame, from: node.container))
+        }
+        return boxes
+    }
+    /// `sub`'s space mapped into `view`'s, through every transform between them.
+    private static func transform(from sub: UIView, to view: UIView) -> CGAffineTransform {
+        let origin = view.convert(CGPoint.zero, from: sub), x = view.convert(CGPoint(x: 1, y: 0), from: sub), y = view.convert(CGPoint(x: 0, y: 1), from: sub)
+        return CGAffineTransform(a: x.x - origin.x, b: x.y - origin.y, c: y.x - origin.x, d: y.y - origin.y, tx: origin.x, ty: origin.y)
+    }
+    private static func placed(_ path: CGPath, _ transform: CGAffineTransform) -> CGPath {
+        let out = CGMutablePath()
+        out.addPath(path, transform: transform)
+        return out
     }
     /// Whether `node` paints a ground: a background colour, a gradient, a material or a border.
     private static func paintsGround(_ node: NodeView) -> Bool {

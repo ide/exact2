@@ -45,7 +45,7 @@ final class MenuHost {
     private var agentOpen: [String: Lifted] = [:]
     var presented: [NodeView] { agentOpen.values.sorted { $0.order < $1.order }.compactMap(\.popover) }
     /// The layers lifted over a dialog's sheet or into a card: outside the viewport and the route mounts.
-    var sheetLayers: [UIView] { agentOpen.values.sorted { $0.order < $1.order }.map(\.layer).filter { ($0.sheet != nil || $0.cardView != nil) && $0.superview != nil } }
+    var sheetLayers: [UIView] { agentOpen.values.sorted { $0.order < $1.order }.map(\.layer).filter { $0.externalOwner && $0.superview != nil } }
     func logicalParent(of view: UIView) -> UIView? {
         #if os(iOS)
         if let parent = context.logicalParent(of: view) { return parent }
@@ -100,6 +100,7 @@ final class MenuHost {
     #if os(iOS)
     /// The context menus (LLP 1021 §5.1, ContextMenusIOS.swift).
     private(set) lazy var context = ContextMenuHost(presenter: presenter!, menus: self)
+    private(set) lazy var cards = PopoverCards(self) // the content cards and their keys (PopoverCardIOS.swift)
     #endif
     /// The focus a native menu sets aside while it shows (MenuFocusIOS.swift).
     private(set) lazy var focus = MenuFocus(presenter: presenter!)
@@ -130,7 +131,7 @@ final class MenuHost {
         observeTouches()
         if let owner = confirmation, !owner.fields.isEmpty { followPrompt(owner) }
         if let owner = confirmation, !valid(owner) { resetConfirmation() }
-        sheets.sync()
+        sheets.sync(); syncCards()
         var popovers: [String: NodeView] = [:]
         for (name, entry) in agentOpen {
             guard let pop = entry.popover, presenter.views[pop.id] === pop, pop.props["id"] == name,
@@ -487,8 +488,8 @@ final class MenuHost {
         }
     }
     func cancelled(_ owner: Confirmation) {
-        // UIKit also delivers this after a selected action's handler. That
-        // notification must not cancel the action awaiting the next turn.
+        // UIKit also delivers this after a selected action's handler: it must not cancel the action awaiting the next turn
+        defer { resumeClosingCards() }
         guard confirmation === owner, !owner.finishing else { return }
         owner.finishing = true
         owner.fields.forEach { $0.end() }
@@ -512,13 +513,12 @@ final class MenuHost {
         guard confirmation === owner, !owner.dismissing else { return }
         owner.dismissing = true
         owner.alert.dismiss(animated: !ExactEnv.agentFreezes) { [weak self, owner] in
-            // A native action arrives after the alert leaves its window;
-            // dismiss can therefore complete synchronously inside UIKit's
-            // selection callback, before its dismissal delegate is called.
-            // Keep the owner until that stack unwinds before app code can
-            // destroy the presenting editor or dismiss its parent sheet.
+            // A native action arrives after the alert leaves its window, so dismiss can complete synchronously
+            // inside UIKit's selection callback, before its dismissal delegate: keep the owner until that stack
+            // unwinds, before app code can destroy the presenting editor or dismiss its parent sheet
             DispatchQueue.main.async { [weak self, owner] in
                 guard let self, self.confirmation === owner else { return }
+                defer { resumeClosingCards() }
                 let action = owner.chosen.flatMap { self.valid(owner) && self.valid(owner, chosen: $0) ? $0 : nil }
                 self.confirmation = nil
                 let pending = self.pendingConfirmation
@@ -545,9 +545,8 @@ final class MenuHost {
         if !owner.finishing, let pop = owner.popover { presenter?.popoverEvents.changed(pop, open: false) }
         owner.finishing = true
         owner.fields.forEach { $0.end() }
-        // Only this session's alert; never dismiss through a containing app's
-        // root controller, which might now present something unrelated.
-        owner.alert.dismiss(animated: false) { _ = owner }
+        // Only this session's alert, never a containing app's root controller, which may present something unrelated
+        owner.alert.dismiss(animated: false) { [weak self] in _ = owner; self?.resumeClosingCards() }
     }
     func retire(over controller: UIViewController, removing route: NodeView) -> () -> Void {
         let endSheets = sheets.retire(over: controller, removing: route)
@@ -578,6 +577,7 @@ final class MenuHost {
     }
     func preservesFocus(_ id: UInt32) -> Bool { sheets.preservesFocus(id) || pendingConfirmation?.fields.contains { $0.node?.id == id && $0.node === presenter?.views[id] && $0.node?.incarnation == $0.incarnation } == true }
     func resumeAfterRouteDismissal() {
+        resumeClosingCards()
         guard let presenter, !presenter.modals.inTransition, !presenter.navigation.inTransition, sheets.resumeAfterRouteDismissal(),
               confirmation == nil, let pending = pendingConfirmation else { return }
         pendingConfirmation = nil
@@ -603,6 +603,7 @@ final class MenuHost {
         nativeMenus.values.forEach(Self.endNativeMenu); nativeMenus.removeAll()
         #endif
         for name in Array(agentOpen.keys) { drop(name) }
+        unmountCards()
         #if os(iOS)
         context.reset()
         #endif
@@ -915,7 +916,7 @@ final class MenuHost {
         if node.isNativeButton { return false } // Native invokers and outside buttons take real UIKit touches.
         if !agentOpen.isEmpty {
             // A card is UIKit's popover, which a real touch reaches (PopoverCardIOS.swift).
-            return agentOpen.values.contains { entry in entry.layer.cardView == nil && entry.source.flatMap { presenter.views[$0] }?.isNativeButton != true }
+            return agentOpen.values.contains { entry in !entry.layer.usesNativeCard && entry.source.flatMap { presenter.views[$0] }?.isNativeButton != true }
         }
         // Under native presentation a closed popover is UIKit's to open.
         if !ExactEnv.agentPaints { return false }
@@ -978,11 +979,10 @@ final class MenuHost {
         }
         return nil
     }
-    /// A card, presented from the window rather than the view, closes with it
-    /// and gives back the keys it stood down (PopoverCardIOS.swift).
-    func unmounted() { focus.reset(); resetConfirmation(); sheets.reset(); for (name, entry) in agentOpen where entry.layer.cardView != nil { drop(name) } }
+    /// A card, presented from the window rather than the view, closes with it and lets go of its keys (PopoverCardIOS.swift).
+    func unmounted() { focus.reset(); resetConfirmation(); sheets.reset(); unmountCards() }
     var inTransition: Bool {
-        if sheets.inTransition || pendingConfirmation != nil { return true }
+        if sheets.inTransition || cardsInTransition || pendingConfirmation != nil { return true }
         guard let owner = confirmation else { return false }
         return owner.finishing || owner.alert.isBeingPresented || owner.alert.isBeingDismissed
     }
@@ -1332,6 +1332,7 @@ final class MenuHost {
         if announce { presenter?.popoverEvents.changed(pop, open: true) }
         controller.present(owner.alert, animated: !ExactEnv.agentFreezes) { [weak self, weak owner] in
             guard let self, let owner else { return }
+            defer { resumeClosingCards() }
             owner.fields.forEach { $0.restoreSelection() }
             guard owner.finishing else { return }
             if self.confirmation === owner { self.dismissConfirmation(owner) }

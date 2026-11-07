@@ -689,7 +689,11 @@ package final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, U
             presenter.autofocusedThisTurn = nil
             presenter.autofocusProcessed.remove(ObjectIdentifier(self))
         }
-        if window == nil, pressContact?.routesBubbledPress == true { cancelPressContact() }
+        // Retire contacts on window loss unless a host move preserves them or their terminal delivery already owns the resolved hit
+        if window == nil, let contact = pressContact,
+           contact.routesBubbledPress || (Self.containerMoves == 0 && !contact.ending) {
+            cancelPressContact()
+        }
         presenter?.transformGeometry.changed()
         presenter?.videoVisibility?.changed()
         if window != nil { presenter?.flushPendingFocus(); presenter?.elementScrolls.flush(); materializeJoiningGlass() }

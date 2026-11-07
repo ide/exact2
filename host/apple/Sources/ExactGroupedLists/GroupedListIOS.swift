@@ -1325,7 +1325,7 @@ final class GroupedListView: NSObject, UICollectionViewDelegate {
             // cell comes back, so the pump paints it (`refreshVisibleText`).
             host.presenter.requestTextPublication()
         }
-        row.frame = drawn
+        placeRow(row, at: drawn)
     }
 
     /// A row whose cell was sized to nothing and that has a box now (the
@@ -1353,7 +1353,7 @@ final class GroupedListView: NSObject, UICollectionViewDelegate {
         for id in carriedOrder.reversed() {
             guard let place = carried[id], let row = host.presenter.views[id] else { continue }
             if row.superview !== place.parent { NodeView.containerMove { place.parent.insertSubview(row, at: min(place.index, place.parent.subviews.count)) } }
-            row.frame = place.frame
+            placeRow(row, at: row.grid?.drawn ?? place.frame)
         }
         carried.removeAll()
         carriedOrder.removeAll()
