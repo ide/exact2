@@ -1103,7 +1103,7 @@ extension NavigationHost {
         c.rideBars()
         let covered: Bool
         if case .edges(let edges)? = covers[c.node.id] { covered = edges.top > 0.5 } else { covered = false }
-        let ordinary = shape?.authored.isEmpty != false && node?.scrollView != nil && node === scroller ? node : nil
+        let ordinary = shape?.authored.isEmpty != false ? node.flatMap { Self.topScroller($0, target: scroller) } : nil
         let arranged = scroller.flatMap { node in arrangementScrollers(in: c, top: true).contains(where: { $0 === node }) ? node : nil }
         let target = !riders.isEmpty ? (covered ? nil : scroller) : (ordinary ?? arranged)
         if let target, !riders.isEmpty {
