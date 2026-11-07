@@ -1,6 +1,6 @@
 # Observe
 
-Sends Expo Observe's performance metrics and custom events from an Exact app, under Observe's metric names. It works on iOS, macOS and the web.
+Sends Expo Observe's performance metrics and custom events from an Exact app, under Observe's metric names. It works on iOS, macOS, Linux and the web.
 
 ## Turning it on
 
@@ -67,7 +67,9 @@ On Apple, the local `recent` query reports `sent: true` only for rows acknowledg
 
 The web exporter drops queued rows when configuration, sampling or development mode prevents dispatch. It retains metadata only for the current session and sessions with queued rows.
 
+On Linux, startup has a 30-second deadline; a pending activation or resource reports a timeout without a TTI value. The exporter subscribes after startup and replays the journal's retained events. Headless runs keep the bounded in-memory journal but do not start the exporter or emit startup metrics. Crash capture records Rust panics, not fatal signals. Refused dispatches drop Linux's pending rows; Apple retains rows with `sent: false`.
+
 ## Tests
 
-`modules/observe/tests/wire.json` is one fixture that both encoders must produce:
-`bun test ./modules/observe/tests/wire.test.mjs` checks Swift and JS.
+`modules/observe/tests/wire.json` is one fixture that all three encoders must produce:
+`bun test ./modules/observe/tests/wire.test.mjs` checks Swift and JS. `cargo test -p exact-linux --test observe` checks Rust, including dispatch, retry, sampling and panic recovery.
