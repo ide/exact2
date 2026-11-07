@@ -160,6 +160,37 @@ final class ListRowsIOSTests: XCTestCase {
         XCTAssertEqual(p.navigation.syncCalls, before + 1, "outside the rows")
     }
 
+    func testARowsRadioGroupSyncsWithoutNavigation() throws {
+        let p = presenter()
+        p.buttonFace = { id in var face = ButtonFace(); face.title = id == 62 ? "Day" : "Week"; return face }
+        let batch = wireBatch([
+            ["op": "create", "id": 61, "kind": "view", "props": ["accessibilityRole": "radiogroup"]],
+            ["op": "create", "id": 62, "kind": "control", "handlers": ["press"],
+             "props": ["type": "button", "accessibilityRole": "radio", "accessibilityChecked": "true"]],
+            ["op": "create", "id": 63, "kind": "control", "handlers": ["press"],
+             "props": ["type": "button", "accessibilityRole": "radio", "accessibilityChecked": "false"]],
+            ["op": "children", "id": 61, "ids": [62, 63]], ["op": "children", "id": 10, "ids": [11, 61]],
+            ["op": "frame", "id": 61, "x": 0, "y": 0, "w": 200, "h": 40],
+        ])
+        XCTAssertTrue(p.canSkipNavigationSync(batch))
+        let before = p.navigation.syncCalls
+        p.apply(batch)
+        let control = try XCTUnwrap(p.segments.control(of: 61))
+        XCTAssertEqual(p.navigation.syncCalls, before)
+        XCTAssertEqual((0..<2).map { control.titleForSegment(at: $0) }, ["Day", "Week"])
+        XCTAssertEqual(control.selectedSegmentIndex, 0)
+
+        p.apply(wireBatch([
+            ["op": "props", "id": 61, "set": ["accessibilityLabel": "Period"]],
+            ["op": "props", "id": 62, "set": ["accessibilityChecked": "false"]],
+            ["op": "props", "id": 63, "set": ["accessibilityChecked": "true"]],
+        ]))
+        XCTAssertEqual(p.navigation.syncCalls, before)
+        XCTAssertTrue(p.segments.control(of: 61) === control)
+        XCTAssertEqual(control.selectedSegmentIndex, 1)
+        XCTAssertEqual(control.accessibilityLabel, "Period")
+    }
+
     /// PROTO (UIKit-first measurement): a batch of geometry alone asks no sync, in every safe-area mode
     func testGeometrySkipsNavigationInEveryMode() {
         let saved = ExactSession.protoMode

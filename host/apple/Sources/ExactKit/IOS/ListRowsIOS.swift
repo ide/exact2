@@ -60,7 +60,7 @@ extension Presenter {
         // What the projection reads by name or role, wherever it is: tab
         // lists (their tint comes from their ancestors), the Back control,
         // each route's named content scroller, the routes themselves.
-        // PROTO (stuck bar): leave a row's radios to SegmentHost, which syncs independently of navigation
+        // Radio groups are SegmentHost's; it syncs independently after each batch.
         var read = chrome.ids("role:tablist").union(chrome.ids("navigationBack"))
         for name in [back].compactMap({ $0 }) + Array(scrolls) { read.formUnion(chrome.named[name] ?? []) }
         let targets = invoked.reduce(into: Set<UInt32>()) { $0.formUnion(chrome.named[$1] ?? []) }

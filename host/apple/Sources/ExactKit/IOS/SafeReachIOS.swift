@@ -26,8 +26,8 @@ struct SafeReachState {
 }
 
 extension NodeView {
-    /// PROTO (UIKit-first measurement): the laid-out box in this view's own coordinates, its bounds less its reach
-    package var boxBounds: CGRect { bounds.inset(by: reach) }
+    /// The drawn border box in the superview, excluding the native safe-area reach.
+    package var boxFrame: CGRect { frame.inset(by: reach) }
 }
 
 extension Presenter {

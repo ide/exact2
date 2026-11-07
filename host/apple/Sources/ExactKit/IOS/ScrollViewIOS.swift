@@ -40,7 +40,7 @@ package class ScrollView: UIScrollView {
     package override var bounds: CGRect {
         get { super.bounds }
         set {
-            guard super.bounds != newValue else { return } // PROTO (stuck bar): skip unchanged bounds before moveOrPlace
+            guard super.bounds != newValue else { return }
             guard UIView.inheritedAnimationDuration > 0, let node = scrollingNode, let presenter = node.presenter else { return super.bounds = newValue }
             presenter.moveOrPlace(node) { super.bounds = newValue }
         }
@@ -161,7 +161,7 @@ package class ScrollView: UIScrollView {
         // `none` gets its band back: off for this drag's `none`, or for an
         // axis this view scrolls under `none`.
         let still = { (axis: String) in owner.style["overscroll_behavior_\(axis)"]?.string == "none" }
-        assign(self, \.bounces, !(behavior == "none" || (scrollsX && still("x")) || (scrollsY && still("y")))) // PROTO (stuck bar)
+        assign(self, \.bounces, !(behavior == "none" || (scrollsX && still("x")) || (scrollsY && still("y"))))
         return chains(velocity)
     }
     /// `handsOff`'s answer without its side effect: whether a drag in
@@ -292,7 +292,7 @@ extension NodeView {
     /// UIKit owns a native list's row geometry, including rows offscreen.
     private func scrollRect(_ node: NodeView, in sv: UIScrollView) -> CGRect? {
         if groupedOwner { return presenter?.groupedLists?.projectedRect(for: node, in: sv) }
-        return node.isDescendant(of: sv) && !node.isHidden ? node.convert(node.bounds, to: sv) : nil
+        return node.isDescendant(of: sv) && !node.isHidden ? node.convert(node.boxBounds, to: sv) : nil
     }
 
     func captureScrollPosition(focused: NodeView?) {
@@ -338,7 +338,7 @@ extension NodeView {
         // Coordinates are in the scroll view's content space, not the window.
         func anchors(in view: UIView) {
             for case let node as NodeView in view.subviews where !node.isHidden {
-                let rect = node.convert(node.bounds, to: sv)
+                let rect = node.convert(node.boxBounds, to: sv)
                 guard rect.width > 0, rect.height > 0, rect.intersects(sv.bounds) else { continue }
                 if !sv.bounds.contains(rect) { anchors(in: node.container) }
                 readingAnchors.append((node, rect.minY))

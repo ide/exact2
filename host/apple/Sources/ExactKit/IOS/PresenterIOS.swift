@@ -295,7 +295,7 @@ package final class Presenter {
     /// page's area (`pageMargins`, PageEdgesIOS.swift).
     var viewportSize: CGSize { viewport.pageSize }
     /// The first root's frame size, zero before the first batch.
-    var rootSize: CGSize { root.subviews.first?.frame.size ?? .zero }
+    var rootSize: CGSize { root.subviews.first.map { ($0 as? NodeView)?.boxFrame.size ?? $0.frame.size } ?? .zero }
 
     /// An asset's bytes changed (LLP 1030 D10): every image showing it loads
     /// it again — the old picture stays until the new one is decoded, as a
@@ -361,8 +361,8 @@ package final class Presenter {
         let m = pageMargins; var size = viewportSize
         for r in root.subviews {
             let v = r as? NodeView, extent = v.flatMap { $0.scrollView == nil && !$0.overflowClips && !$0.isHidden ? $0.content : nil }
-            let reach = extent.flatMap { _ in v?.documentOverflow(in: root) } ?? .zero
-            size = CGSize(width: max(size.width, r.frame.maxX, reach.maxX), height: max(size.height, r.frame.maxY, reach.maxY))
+            let reach = extent.flatMap { _ in v?.documentOverflow(in: root) } ?? .zero, frame = v?.boxFrame ?? r.frame
+            size = CGSize(width: max(size.width, frame.maxX, reach.maxX), height: max(size.height, frame.maxY, reach.maxY))
         }
         let frame = CGRect(origin: CGPoint(x: m.left, y: m.top), size: size)
         if root.frame != frame { root.frame = frame }
@@ -1296,7 +1296,7 @@ package final class Presenter {
     private func contextAnchor(_ target: String, _ source: NodeView) -> ContextAnchor {
         let scroll = contextContent(source)?.scroll, port = port(of: source)
         return ContextAnchor(target: target, source: source, port: port,
-            box: source.convert(source.bounds, to: port), viewportWidth: port.bounds.width,
+            box: source.convert(source.boxBounds, to: port), viewportWidth: port.bounds.width,
             scroll: scroll, scrollBox: scroll.map { $0.convert($0.bounds, to: port) })
     }
 
@@ -1330,8 +1330,8 @@ package final class Presenter {
             guard let target = preview.props["contextTarget"],
                   let source = carrying("id").first(where: { $0.props["id"] == target }),
                   let panel = contextPanel(preview), let parent = panel.superview,
-                  source.window != nil, preview.bounds.width > 0, preview.bounds.height > 0 else { continue }
-            let liveSourceBox = source.convert(source.bounds, to: parent)
+                  source.window != nil, preview.boxBounds.width > 0, preview.boxBounds.height > 0 else { continue }
+            let liveSourceBox = source.convert(source.boxBounds, to: parent)
             // The source is read where it was captured; the preview is kept
             // inside its own port, the viewport or its presentation's mount
             let vp = port(of: preview), insets = vp === viewport ? insets : vp.safeAreaInsets
@@ -1341,7 +1341,7 @@ package final class Presenter {
             }
             let anchor = contextAnchors[preview.id]!
             let sourceBox = (anchor.port ?? viewport).convert(anchor.box, to: parent)
-            let content = preview.convert(preview.bounds, to: parent)
+            let content = preview.convert(preview.boxBounds, to: parent)
             let port = vp.convert(vp === viewport ? vp.bounds.inset(by: pageMargins) : vp.bounds, to: parent)
             // Public UIKit target-preview fixture, iPhone 17 / iOS 26.5.
             let scale = preview.props["contextMagnify"] == "false" ? 1 : min(1.15, 1 + 26 / max(content.width, content.height))
@@ -1353,19 +1353,19 @@ package final class Presenter {
             // Their zero-height layout boxes do not enlarge the balloon row.
             if let row = preview.superview {
                 for sibling in row.subviews.compactMap({ $0 as? NodeView })
-                    where sibling !== preview && abs(sibling.frame.minY - preview.frame.minY) < 0.01 {
-                    if sibling.frame.maxX <= preview.frame.minX + 0.01 {
+                    where sibling !== preview && abs(sibling.boxFrame.minY - preview.boxFrame.minY) < 0.01 {
+                    if sibling.boxFrame.maxX <= preview.boxFrame.minX + 0.01 {
                         project(sibling, CGAffineTransform(translationX: dx - content.width * (scale - 1) / 2, y: 0))
-                    } else if sibling.frame.minX >= preview.frame.maxX - 0.01 {
+                    } else if sibling.boxFrame.minX >= preview.boxFrame.maxX - 0.01 {
                         project(sibling, CGAffineTransform(translationX: dx + content.width * (scale - 1) / 2, y: 0))
                     }
                 }
             }
             var child: NodeView? = preview
             while let current = child, current !== panel, let container = current.superview {
-                let bottom = current.frame.maxY
+                let bottom = current.boxFrame.maxY
                 for sibling in container.subviews.compactMap({ $0 as? NodeView })
-                    where sibling !== current && sibling.frame.minY >= bottom - 0.01 {
+                    where sibling !== current && sibling.boxFrame.minY >= bottom - 0.01 {
                     project(sibling, CGAffineTransform(translationX: 0, y: extra / 2))
                 }
                 child = container as? NodeView
@@ -1382,24 +1382,24 @@ package final class Presenter {
                 guard let ancestor = containing.superview, ancestor is NodeView || ancestor === root else { break }
                 containing = ancestor
             }
-            let region = containing.convert(containing.bounds, to: parent)
+            let region = containing.convert((containing as? NodeView)?.boxBounds ?? containing.bounds, to: parent)
             let minimum = max(region.minY, port.minY + insets.top + 8)
-            let overflow = max(extra / 2, content.maxY + extra - panel.frame.maxY)
-            let maximum = min(region.maxY, port.maxY - insets.bottom - 8) - panel.bounds.height - overflow
-            let wanted = sourceBox.midY - (content.minY - panel.frame.minY) - content.height * scale / 2
+            let overflow = max(extra / 2, content.maxY + extra - panel.boxFrame.maxY)
+            let maximum = min(region.maxY, port.maxY - insets.bottom - 8) - panel.boxBounds.height - overflow
+            let wanted = sourceBox.midY - (content.minY - panel.boxFrame.minY) - content.height * scale / 2
             let top = max(minimum, min(wanted, maximum))
-            if panel.frame.origin.y != top { moveOrPlace(panel) { panel.frame.origin.y = top } }
+            if panel.boxFrame.origin.y != top { moveOrPlace(panel) { panel.frame.origin.y = top - panel.reach.top } }
             // A tall preview can fill the available region. Keep the trailing
             // control group inside it, even when that overlaps the preview
             // (the native 24-line Messages reference does this).
             var branch: UIView = preview
             while let owner = branch.superview, owner !== panel { branch = owner }
             let trailing = panel.subviews.compactMap { $0 as? NodeView }.filter {
-                $0 !== branch && $0.frame.minY >= branch.frame.maxY - 0.01
+                $0 !== branch && $0.boxFrame.minY >= ((branch as? NodeView)?.boxFrame ?? branch.frame).maxY - 0.01
             }
             let bottom = min(region.maxY, port.maxY - insets.bottom - 8)
-            if let last = trailing.map({ $0.convert($0.bounds, to: parent).maxY }).max(),
-               let first = trailing.map({ $0.convert($0.bounds, to: parent).minY }).min() {
+            if let last = trailing.map({ $0.convert($0.boxBounds, to: parent).maxY }).max(),
+               let first = trailing.map({ $0.convert($0.boxBounds, to: parent).minY }).min() {
                 let overflow = min(max(0, last - bottom), max(0, first - minimum))
                 if overflow > 0 {
                     for node in trailing {

@@ -192,7 +192,7 @@ extension NavigationHost {
         }
         // The tablist whose place the tab bar takes takes no room.
         if let list = adoptedTablist.flatMap({ presenter.views[$0] }) {
-            measuredTablist = presenter.session?.view.map { list.convert(list.bounds, to: $0) }
+            measuredTablist = presenter.session?.view.map { list.convert(list.boxBounds, to: $0) }
             if adopts(tablist: list) { wanted[list.id] = .whole }
             else if tablistAppearanceNone, list.style["display"]?.string != "none",
                     wantsWholeView, presenter.viewportFit != "cover",
@@ -201,7 +201,7 @@ extension NavigationHost {
                 // only the edges they reach; leave the viewport and bar
                 // backgrounds full-size. A sheet leaves them where they are
                 // (LLP 1123 D1).
-                let rect = list.convert(list.bounds, to: view)
+                let rect = list.convert(list.boxBounds, to: view)
                 let safe = view.bounds.inset(by: view.safeAreaInsets)
                 let edges = HostCover.Edges(
                     top: max(0, min(rect.height, safe.minY - rect.minY)),
@@ -388,6 +388,14 @@ extension NavigationHost {
 }
 
 extension RouteController {
+    func rideBars() {
+        let offset = node.convert(CGPoint(x: 0, y: view.safeAreaInsets.top), from: view).y
+        for bar in ridingBars where abs(bar.controlRide - offset) > 0.001 {
+            bar.controlRide = offset
+            bar.applyTransform()
+        }
+    }
+
     /// A large title at rest stays open when the text size changes. UIKit
     /// draws the title at the new size in the bar's old height, which grows
     /// only when the list is pulled: at the largest size the title ran under

@@ -1,8 +1,6 @@
 // @ref LLP 1008 §9 — Contract routes projected into UIKit's navigation
-// controller. UIKit owns recognition, arbitration, progress and cancellation.
-// Only a completed pop invokes the Contract back control. The bar a stack
-// shows, what a route projects into it and when the app module's hatches run
-// are LLP 1075.003's (NavigationBarIOS.swift, NativeHatches.swift).
+// controller. UIKit owns recognition, arbitration, progress and cancellation; only a completed pop invokes the Contract back control.
+// The bar a stack shows, what a route projects into it and when the app module's hatches run: LLP 1075.003 (NavigationBarIOS.swift, NativeHatches.swift).
 #if os(iOS) || os(tvOS)
 import UIKit
 
@@ -47,13 +45,6 @@ final class RouteController: UIViewController, UIScrollViewDelegate {
     /// Its insets were last taken with no bar shown (LLP 1130 D3), so a title's are measured afresh.
     var insetsBarless = false
     var ridingBars: [NodeView] = []
-    func rideBars() {
-        let offset = node.convert(CGPoint(x: 0, y: view.safeAreaInsets.top), from: view).y
-        for bar in ridingBars where abs(bar.controlRide - offset) > 0.001 {
-            bar.controlRide = offset
-            bar.applyTransform()
-        }
-    }
     /// The scroller that is the route's last in-flow child, which reaches
     /// the screen's bottom edge (LLP 1116 D2).
     weak var edgeScroll: NodeView?
@@ -276,9 +267,9 @@ final class RouteController: UIViewController, UIScrollViewDelegate {
         let frame = ExactEnv.authoredChrome ? allocation : view.bounds
         if scroll.frame != frame { scroll.frame = frame }
         scroll.keyboardDismissMode = viewportKeyboardDismissal
-        let extent = CGSize(width: max(node.bounds.width, node.style["overflow_x"]?.string == "visible" || node.style["overflow_x"] == nil ? node.content.width : 0),
-                            height: max(node.bounds.height, node.style["overflow_y"]?.string == "visible" || node.style["overflow_y"] == nil ? node.content.height : 0))
-        let size = CGSize(width: max(allocation.width, node.frame.minX + extent.width), height: max(allocation.height, node.frame.minY + extent.height))
+        let extent = CGSize(width: max(node.boxBounds.width, node.style["overflow_x"]?.string == "visible" || node.style["overflow_x"] == nil ? node.content.width : 0),
+                            height: max(node.boxBounds.height, node.style["overflow_y"]?.string == "visible" || node.style["overflow_y"] == nil ? node.content.height : 0))
+        let size = CGSize(width: max(allocation.width, node.boxFrame.minX + extent.width), height: max(allocation.height, node.boxFrame.minY + extent.height))
         if scroll.contentSize != size { scroll.contentSize = size }
         // Keep drawing under the keyboard while the content clears its occupied area
         var overlap = max(0, frame.maxY - allocation.maxY)
@@ -877,8 +868,7 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
             presenter.modals.present(route, navigation: nav, from: background,
                                      preceding: preceding, owner: owner)
         }
-        // A presented navigation fills its sheet; the primary owner the root,
-        // which no presentation resizes (LLP 1123 D1)
+        // A presented navigation fills its sheet; the primary owner fills the root, which no presentation resizes (LLP 1123 D1).
         if primaryOwner != nil {
             fitOwner()
             placeOwner()
@@ -887,7 +877,7 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
         controllers = controllers.filter { routeIDs.contains($0.key) }
         presenter.modals.updatePermissions()
         if p.tabs != nil { replayTabs() }
-        if !presenter.awaitingFrame.isEmpty { window?.layoutIfNeeded() } // PROTO: settle new views before reports
+        if !presenter.awaitingFrame.isEmpty { window?.layoutIfNeeded() } // Lay out new views before reporting their geometry
         reportCovers()
         refitForBars()
         settled = true
@@ -1506,14 +1496,4 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
         presenter.owners.publish()
     }
 }
-#if os(tvOS)
-extension NavigationHost {
-    /// Whether the Siri Remote's Menu goes back: a route to pop and a Back control.
-    var menuGoesBack: Bool { (navigation?.viewControllers.count ?? 0) > 1 && canInvokeBack }
-    func menuBack() {
-        guard menuGoesBack, !changing else { return }
-        goBack()
-    }
-}
-#endif
 #endif

@@ -179,7 +179,7 @@ extension Presenter {
         let framed = drawn.inset(by: outset)
         if v.frame != framed { v.frame = framed }
         v.textRasterGeometryChanged()
-        if let sv = v.scroll, sv.frame != v.scrollFrame { sv.frame = v.scrollFrame } // PROTO (stuck bar)
+        if let sv = v.scroll, sv.frame != v.scrollFrame { sv.frame = v.scrollFrame }
         if v.fieldWaits, rect.width > 0 || rect.height > 0 { v.makeWaitingField() } // its box laid out (MenuHost.waitingFields)
         v.layoutField()
         v.layoutTextArea()

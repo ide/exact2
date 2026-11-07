@@ -1216,8 +1216,7 @@ extension NavigationHost {
         // (a column with a Save button at its foot) and keeps the cover. The
         // laid-out frames say so; the host is not sent the flex direction.
         func alone(_ last: NodeView, among children: [NodeView]) -> Bool {
-            // PROTO (UIKit-first measurement): laid-out boxes, not the native frames a reaching scroller outsets
-            children.allSatisfy { $0 === last || $0.frame.inset(by: $0.reach).maxY <= last.frame.inset(by: last.reach).minY + 0.5 }
+            children.allSatisfy { $0 === last || $0.boxFrame.maxY <= last.boxFrame.minY + 0.5 }
         }
         var parent = route
         while true {
@@ -1227,9 +1226,9 @@ extension NavigationHost {
             // child that box less the cover the kernel may pad it by, a
             // deeper one its parent's bottom, with nothing (a padding, a
             // border) under it.
-            let foot = parent === route ? parent.contentBox().maxY - cover : parent.bounds.maxY
+            let foot = parent === route ? parent.contentBox().maxY - cover : parent.boxBounds.maxY
             if parent !== route, parent.contentBox().maxY < foot - 0.5 { return nil }
-            if parent.convert(last.bounds, from: last).maxY < foot - 0.5 { return nil }
+            if parent.convert(last.boxBounds, from: last).maxY < foot - 0.5 { return nil }
             if last.scrollView != nil { return ["scroll", "auto"].contains(last.style["overflow_y"]?.string ?? "") ? last : nil }
             parent = last
         }

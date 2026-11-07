@@ -31,7 +31,6 @@ private final class KeyboardCheck: NSObject, UINavigationControllerDelegate {
         routes[ObjectIdentifier(route.controller)] = route
         // PROTO (rule 4): a route that says `data-minimize="scroll-down"` minimizes its bar as its scroller scrolls down
         if #available(iOS 27.0, *), route.data[.minimize] == "scroll-down" {
-            // PROTO (stuck bar): keep the current minimization configuration while UIKit uses it
             if route.controller.navigationItem.navigationBarMinimization.minimizationBehavior != .onScrollDown {
                 route.controller.navigationItem.navigationBarMinimization.minimizationBehavior = .onScrollDown
             }

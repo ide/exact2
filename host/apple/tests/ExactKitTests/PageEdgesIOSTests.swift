@@ -56,6 +56,61 @@ final class PageEdgesIOSTests: XCTestCase {
         try XCTUnwrap(session.presenter.views.values.first { $0.props["testId"] == testId }, "no \(testId)")
     }
 
+    func testReachKeepsPublicBoxesAndDocumentExtent() throws {
+        let session = ExactApp.shared.makeSession(label: "reach-boxes")
+        defer { session.destroy() }
+        let p = session.presenter, agent = Agent(session: session)
+        p.viewport.frame = CGRect(x: 0, y: 0, width: 400, height: 600)
+        p.apply(wireBatch([
+            ["op": "create", "id": 1, "kind": "view", "props": ["id": "page"]],
+            ["op": "create", "id": 2, "kind": "view", "props": ["id": "box"]],
+            ["op": "children", "id": 1, "ids": [2]], ["op": "roots", "ids": [1]],
+            ["op": "frame", "id": 1, "x": 0, "y": 0, "w": 400, "h": 600],
+            ["op": "frame", "id": 2, "x": 20, "y": 100, "w": 300, "h": 200],
+        ]))
+        let page = try XCTUnwrap(p.views[1]), box = try XCTUnwrap(p.views[2])
+        let expected = CGRect(x: 20, y: 100, width: 300, height: 200)
+        XCTAssertEqual(agent.box(box), expected)
+        for depth: CGFloat in [182, 82, 0] {
+            SafeReach.apply(UIEdgeInsets(top: depth, left: 10, bottom: 34, right: 20), to: page)
+            SafeReach.apply(UIEdgeInsets(top: depth, left: 30, bottom: 24, right: 40), to: box)
+            XCTAssertEqual(box.frame.minY, 100 - depth)
+            XCTAssertEqual(agent.box(box), expected)
+            XCTAssertEqual(box.topLayerFrame(in: p.viewport), expected)
+            let target = try XCTUnwrap(agent.geometry(box)["target"] as? [String: Double])
+            XCTAssertEqual(target["x"], 20); XCTAssertEqual(target["y"], 100)
+            XCTAssertEqual(target["w"], 300); XCTAssertEqual(target["h"], 200)
+            XCTAssertEqual(box.transformOriginPoint, CGPoint(x: 150, y: 100))
+            box.translatePercent = CGPoint(x: 50, y: 25)
+            XCTAssertEqual(box.translate, CGPoint(x: 150, y: 50))
+            p.fitDocument()
+            XCTAssertEqual(p.viewport.contentSize, CGSize(width: 400, height: 600))
+        }
+    }
+
+    func testBottomScrollerUsesBoxesForEveryEdgeComparison() {
+        let p = Presenter()
+        let route = NodeView(id: 1, kind: "view", presenter: p)
+        let wrapper = NodeView(id: 2, kind: "view", presenter: p)
+        let header = NodeView(id: 3, kind: "view", presenter: p)
+        let scroller = NodeView(id: 4, kind: "view", presenter: p)
+        route.frame = CGRect(x: 0, y: 0, width: 400, height: 600)
+        wrapper.frame = route.bounds
+        header.frame = CGRect(x: 0, y: 0, width: 400, height: 60)
+        scroller.frame = CGRect(x: 0, y: 60, width: 400, height: 540)
+        scroller.style["overflow_y"] = .string("scroll"); scroller.syncScroll()
+        route.addSubview(wrapper); wrapper.addSubview(header); wrapper.addSubview(scroller)
+        SafeReach.apply(UIEdgeInsets(top: 82, left: 0, bottom: 34, right: 0), to: wrapper)
+        SafeReach.apply(UIEdgeInsets(top: 142, left: 0, bottom: 34, right: 0), to: scroller)
+        XCTAssertEqual(scroller.frame.minY, -82)
+        XCTAssertTrue(NavigationHost.bottomScroller(in: route) === scroller)
+
+        SafeReach.apply(.zero, to: wrapper); SafeReach.apply(.zero, to: scroller)
+        scroller.frame.size.height = 520
+        SafeReach.apply(UIEdgeInsets(top: 0, left: 0, bottom: 34, right: 0), to: scroller)
+        XCTAssertNil(NavigationHost.bottomScroller(in: route), "native reach does not fill a layout gap")
+    }
+
     func testThePageKeepsItsAreaAndIsDrawnPastIt() throws {
         guard UIApplication.shared.connectedScenes.first is UIWindowScene else { throw missing("scene", "the status bar and the safe area are a scene window's") }
         let (session, view) = try fixture()

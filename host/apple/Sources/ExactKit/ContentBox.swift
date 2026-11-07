@@ -12,6 +12,15 @@ import AppKit
 #endif
 
 extension NodeView {
+    /// The drawn border box, excluding the native safe-area reach.
+    package var boxBounds: CGRect {
+        #if os(iOS) || os(tvOS)
+        bounds.inset(by: reach)
+        #else
+        bounds
+        #endif
+    }
+
     /// Native fields keep their published editor box for field layout (LLP
     /// 1104 D5) and read their padding rows. Other content uses the published
     /// box, or the bounds of a box sent none.
@@ -28,7 +37,13 @@ extension NodeView {
         #endif
     }
     /// The frame layout sent, where the drawn one is on the pixel grid.
-    package var laidOutFrame: CGRect { grid?.layout ?? frame }
+    package var laidOutFrame: CGRect {
+        #if os(iOS) || os(tvOS)
+        grid?.layout ?? boxFrame
+        #else
+        grid?.layout ?? frame
+        #endif
+    }
 
     package func contentBox() -> CGRect {
         if !isNativeTextControl {

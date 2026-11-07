@@ -481,7 +481,7 @@ extension NavigationHost {
         if ExactEnv.authoredChrome, !syncing { fitOwner() }
         guard tablistAppearanceNone, !syncing, let view = presenter.session?.view,
               let list = adoptedTablist.flatMap({ presenter.views[$0] }) else { return }
-        if list.convert(list.bounds, to: view) != measuredTablist { reportCovers() }
+        if list.convert(list.boxBounds, to: view) != measuredTablist { reportCovers() }
     }
 
     /// A bar visible in its window, including every ancestor's visibility.

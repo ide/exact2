@@ -62,7 +62,7 @@ extension Presenter {
                     if let judge, edgeEffect { found = routeBands(of: v, sv, in: route, judge) }
                     #if os(iOS)
                     if route.edgeScroll === v, let top = keyboardTop,
-                       abs(route.node.convert(route.node.bounds, to: nil).maxY - top) < 1 {
+                       abs(route.node.convert(route.node.boxBounds, to: nil).maxY - top) < 1 {
                         found.band.bottom += keyboardAccessoryHeight
                     }
                     #endif
@@ -109,12 +109,12 @@ extension Presenter {
             at = c.superview
         }
         guard at === root, !root.clipsToBounds, let page else { return Bands() }
-        let r = v.convert(v.bounds, to: root), fits = root.bounds.height <= area.height + 0.5
+        let r = v.convert(v.boxBounds, to: root), fits = root.bounds.height <= area.height + 0.5
         let atTop = r.minY <= 0.5, atFoot = r.maxY >= area.height - 0.5 && fits
         let margins = Bands(band: UIEdgeInsets(top: atTop ? m.top : 0, left: 0, bottom: atFoot ? m.bottom : 0, right: 0))
         guard let judge else { return margins }
         guard let top = atTop ? [] : judge.bars(of: v, in: page, top: true), let bottom = atFoot ? [] : judge.bars(of: v, in: page, top: false),
-              !top.isEmpty || !bottom.isEmpty, page.frame.minY <= 0.5, page.frame.maxY >= area.height - 0.5, fits,
+              !top.isEmpty || !bottom.isEmpty, page.boxFrame.minY <= 0.5, page.boxFrame.maxY >= area.height - 0.5, fits,
               Self.over(top, v), Self.over(bottom, v) else { return margins }
         // Both edges reach the page's: an open one through the root's padding too (D2).
         let band = UIEdgeInsets(top: max(0, r.minY) + m.top, left: 0, bottom: max(0, area.height - r.maxY) + m.bottom, right: 0)

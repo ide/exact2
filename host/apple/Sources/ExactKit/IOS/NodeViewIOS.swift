@@ -1382,18 +1382,18 @@ package final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, U
         // row (itself, or a child wider than the port), and a page a few points too wide keeps its bounce.
         let travel = size.width - portWidth
         let row = { (v: NodeView) in v.style["display"]?.string == "flex" || v.style["flex_direction"] != nil ? !(v.style["flex_direction"]?.string ?? "row").hasPrefix("column") : false }
-        let carousel = travel > 0.5 && (travel > sv.bounds.width / 4 || row(self) || sv.subviews.contains { ($0 as? NodeView).map { $0.frame.width > sv.bounds.width + 0.5 && row($0) } ?? false })
+        let carousel = travel > 0.5 && (travel > portWidth / 4 || row(self) || sv.subviews.contains { ($0 as? NodeView).map { $0.boxFrame.width > portWidth + 0.5 && row($0) } ?? false })
         // One that fits inside an author's scroller that scrolls down leaves
         // the drag to it, as a nested UIScrollView does (an `EmptyState` in a
         // page's `scroll`). The presenter's viewport is no author's.
-        let fits = size.height <= sv.bounds.height + 0.5
+        let fits = size.height <= portHeight + 0.5
         // Pull to refresh needs its own drag.
         var nested = false, up = fits && !handlers.contains("refresh") ? sv.superview : nil
         while let v = up, !nested {
             if let outer = v as? ScrollView, !(outer is Viewport) { nested = outer.scrollsY }
             up = v.superview
         }
-        assign(sv, \.alwaysBounceVertical, sv.scrollsY && !nested && (!fits || !carousel)) // PROTO (stuck bar)
+        assign(sv, \.alwaysBounceVertical, sv.scrollsY && !nested && (!fits || !carousel))
     }
 
     /// Its parts move with its frame: in an animation UIKit has open only if the last frame showed it (`Presenter.moveOrPlace`).

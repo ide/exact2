@@ -331,7 +331,7 @@ final class GroupedListHost: GroupedLists {
         var at: UIView? = node
         while let view = at {
             if let row = view as? NodeView, let list = lists.values.first(where: { $0.model.sections.contains { $0.rows.contains { $0.view == row.id && $0.custom } } }) {
-                return list.reveal(row.id, inner: node.convert(node.bounds, to: row), port: port(list.collection))
+                return list.reveal(row.id, inner: node.convert(node.boxBounds, to: row), port: port(list.collection))
             }
             at = view.superview
         }
@@ -881,7 +881,7 @@ final class GroupedListView: NSObject, UICollectionViewDelegate {
     /// A standard row has a native frame even when its original view is hidden
     /// or its cell is offscreen. A carried descendant keeps its own exact box.
     func projectedRect(for node: NodeView) -> CGRect? {
-        if node.isDescendant(of: collection) { return node.convert(node.bounds, to: collection) }
+        if node.isDescendant(of: collection) { return node.convert(node.boxBounds, to: collection) }
         var at: UIView? = node
         while let view = at {
             if let n = view as? NodeView, let row = rows[n.id] {
@@ -892,7 +892,7 @@ final class GroupedListView: NSObject, UICollectionViewDelegate {
                 if row.custom {
                     // The same row x used by carry; nested scroll offsets are
                     // already represented by this descendant-in-row conversion.
-                    return node.convert(node.bounds, to: n).offsetBy(dx: frame.minX + n.frame.minX, dy: frame.minY)
+                    return node.convert(node.boxBounds, to: n).offsetBy(dx: frame.minX + n.frame.minX, dy: frame.minY)
                 }
                 return frame
             }
@@ -1294,7 +1294,7 @@ final class GroupedListView: NSObject, UICollectionViewDelegate {
         if row.style["box_sizing"]?.string == "border-box" { return least }
         // A percentage padding is of the containing block's width, the card's (CSS 2.2 §8.4)
         let card = host.presenter.logicalParent(of: id).flatMap { host.presenter.views[$0] }
-        let basis = card?.contentBox().width ?? row.bounds.width
+        let basis = card?.contentBox().width ?? row.boxBounds.width
         return ["padding_top", "padding_bottom", "border_width_top", "border_width_bottom"]
             .reduce(least) { $0 + (row.style[$1]?.length(basis: basis) ?? 0) }
     }
