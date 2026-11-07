@@ -7,7 +7,7 @@
 // edge has moved, through the path a frame op takes. A box that reaches the top edge, and
 // what it holds, is UIKit's to inset and is left alone, as a scroll view's content keeps
 // its layout while UIKit collapses a title over it.
-#if os(iOS)
+#if os(iOS) || os(tvOS)
 import UIKit
 
 extension Presenter {

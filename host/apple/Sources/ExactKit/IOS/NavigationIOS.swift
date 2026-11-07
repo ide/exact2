@@ -384,7 +384,7 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
     /// longer than its bar.
     let titleInks = NSMapTable<UINavigationBar, UIColor>.weakToStrongObjects()
     var modalNavigation: UINavigationController? { presentedNavigations.last }
-    private var navigation: UINavigationController? { modalNavigation ?? split?.front ?? primaryNavigation }
+    var navigation: UINavigationController? { modalNavigation ?? split?.front ?? primaryNavigation }
     /// Whether a stack's pushes and pops are the router's: the one in front,
     /// and with a split, either column's.
     private func follows(_ nav: UINavigationController) -> Bool { nav === navigation || (modalNavigation == nil && split?.holds(nav) == true) }
