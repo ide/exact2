@@ -678,6 +678,7 @@ function buildFor(app, platform, sourceRoot, run) {
     env.SDKROOT = sdk.stdout.trim();
     env[apple === 'ios' ? 'IPHONEOS_DEPLOYMENT_TARGET' : 'MACOSX_DEPLOYMENT_TARGET'] = apple === 'ios' ? '17.0' : '14.0';
     env.EXACT_APPLE_LINK = 'plan'; // a compatibility input: link as the production archive does (host/apple/link.mjs)
+    if (apple === 'ios') env.HOST_CXXFLAGS = `${process.env.HOST_CXXFLAGS ?? ''} -isysroot ${spawnSync('xcrun', ['--sdk', 'macosx', '--show-sdk-path'], {encoding:'utf8'}).stdout.trim()}`; // the build scripts' Objective-C++ for the Mac takes the Mac SDK, not SDKROOT's (cc-rs inherits it), as host/apple/build.mjs gives it
   }
   return buildBake(app, platform, target, {env, analysis:true});
 }

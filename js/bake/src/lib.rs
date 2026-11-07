@@ -298,7 +298,8 @@ fn build_sources(
     }
     let manifest = contract::Manifest::read(app)?;
     let target = std::env::var("TARGET").map_err(|e| e.to_string())?;
-    let compat = exact_bake::compatibility_id_sources_with_entries(
+    let module = exact_bake::stored_module(&meta, &manifest, platform)?;
+    let compat = exact_bake::compatibility_id_pinned(
         app,
         platform,
         &target,
@@ -306,6 +307,7 @@ fn build_sources(
         meta["grants"].as_str(),
         mixed_grants(&meta, rust)?,
         Some(&baked.entries),
+        module,
     )?;
     // A TypeScript app's update carries its module pair (`typescript/`); a
     // mixed app's two modules travel as one generation, which no host takes yet.
