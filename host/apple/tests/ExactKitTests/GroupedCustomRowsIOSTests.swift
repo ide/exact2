@@ -4,10 +4,27 @@ import XCTest
 @testable import ExactKit
 @testable import ExactGroupedLists
 
-/// A custom grouped row, its views carried into a list cell, drawn as a
-/// standard cell beside it is (Harmony, 2026-10-21). UIKit, so a simulator
-/// runs it.
+/// Custom grouped rows keep their views and input inside UIKit cells.
+/// A simulator runs the native layout, highlight and selection assertions.
 final class GroupedCustomRowsIOSTests: GroupedListFixture {
+    override func tearDown() {
+        window?.isHidden = true
+        window = nil
+        super.tearDown()
+    }
+
+    /// A stationary finger in window coordinates, independent of a carried
+    /// row's frame and parent.
+    private final class RowTouch: UITouch {
+        let target: UIView
+        var point: CGPoint
+        init(_ target: UIView, at point: CGPoint = CGPoint(x: 100, y: 30)) {
+            self.target = target; self.point = target.convert(point, to: nil); super.init()
+        }
+        override var view: UIView? { target }
+        override func location(in view: UIView?) -> CGPoint { view.map { $0.convert(point, from: nil) } ?? point }
+    }
+
     /// A custom row first, a standard row of the same symbol after it.
     func customFirst() -> GroupedListModel {
         GroupedListModel(style: "inset-grouped", sections: [
@@ -247,6 +264,366 @@ final class GroupedCustomRowsIOSTests: GroupedListFixture {
         host(p).prepare(wireBatch([["op": "props", "id": 10, "set": ["testId": "first"]]]).ops)
         XCTAssertTrue(row.superview === group, "the row read at home")
         XCTAssertTrue(try XCTUnwrap(p.views[11]).superview === b.contentView, "its neighbour still in its cell")
+    }
+
+    func testAHeldCustomRowSurvivesSelectiveMaintenanceAndReleasesOnce() throws {
+        for appearance in ["inset-grouped", "plain"] {
+            let p = presenter { self.model(appearance, custom: true) }
+            let row = try XCTUnwrap(p.views[21]), l = try list(p), native = try cell(p, 21)
+            var presses: [UInt32] = [], selections: [[IndexPath]] = []
+            p.onPress = { id in presses.append(id); selections.append(l.collection.indexPathsForSelectedItems ?? []) }
+            let touch = RowTouch(row), contactBefore = row.pressEpoch
+            row.touchesBegan([touch], with: nil)
+            let contact = try XCTUnwrap(row.pressContact)
+            XCTAssertTrue(native.isHighlighted)
+            let props = wireBatch([["op": "props", "id": 21, "set": ["testId": "held"]]])
+            host(p).prepare(props.ops)
+            XCTAssertTrue(row.superview === p.views[5]?.container, "the changed row is read at home")
+            XCTAssertTrue(row.pressed && native.isHighlighted, "maintenance keeps the contact and its highlight")
+            p.apply(props)
+            for ops: [[String: Any]] in [
+                [["op": "style", "id": 21, "style": ["text_color": [20, 20, 20, 255]]]],
+                [["op": "style", "id": 5, "style": ["text_color": [30, 30, 30, 255]]]],
+                [["op": "children", "id": 5, "ids": [20, 21]],
+                 ["op": "frame", "id": 21, "x": 16.0, "y": 52.0, "w": 354.0, "h": 61.0]],
+                [["op": "props", "id": 1, "set": ["refreshing": "false"]]],
+            ] {
+                p.apply(wireBatch(ops))
+                XCTAssertTrue(row.pressContact === contact)
+                XCTAssertFalse(contact.cancelled)
+                XCTAssertEqual(row.pressEpoch, contactBefore, "maintenance keeps the contact's epoch")
+                XCTAssertTrue(row.superview === (try cell(p, 21)).contentView)
+                XCTAssertTrue(row.pressed)
+                XCTAssertTrue(try cell(p, 21).isHighlighted)
+            }
+            row.touchesEnded([touch], with: nil)
+            row.touchesEnded([touch], with: nil)
+            row.touchesCancelled([touch], with: nil)
+            XCTAssertEqual(presses, [21])
+            XCTAssertEqual(selections, [[IndexPath(item: 1, section: 1)]])
+            XCTAssertFalse(row.pressed)
+            XCTAssertFalse(try cell(p, 21).isHighlighted)
+            XCTAssertEqual(l.collection.indexPathsForSelectedItems ?? [], [])
+            window.isHidden = true
+        }
+    }
+
+    func testAuthoredFeedbackReplacesTheCellHighlightAndTheFingerStillFollows() throws {
+        let p = presenter { self.model(custom: true) }
+        let row = try XCTUnwrap(p.views[21]), native = try cell(p, 21)
+        var presses: [UInt32] = []; p.onPress = { presses.append($0) }
+        let touch = RowTouch(row), inside = touch.point
+        let unpressedBounds = row.bounds, unpressedFrame = row.frame
+        row.touchesBegan([touch], with: nil)
+        XCTAssertTrue(native.isHighlighted)
+        p.apply(wireBatch([["op": "style", "id": 21, "style": ["press_scale": 0.9, "press_background_color": [255, 0, 0, 255]]]]))
+        XCTAssertFalse(native.isHighlighted, "the author owns the pressed look")
+        XCTAssertTrue(row.pressPaint.down)
+        XCTAssertEqual(row.press.to, 0.9, accuracy: 0.001)
+        p.apply(wireBatch([["op": "props", "id": 21, "set": ["testId": "authored"]]]))
+        XCTAssertTrue(row.pressed && row.pressPaint.down)
+        XCTAssertEqual(row.bounds.width, unpressedBounds.width, accuracy: 0.001)
+        XCTAssertEqual(row.bounds.height, unpressedBounds.height, accuracy: 0.001)
+        XCTAssertEqual(row.transform.a, 0.9, accuracy: 0.001)
+        touch.point = native.contentView.convert(CGPoint(x: unpressedFrame.maxX + 8, y: unpressedFrame.midY), to: nil)
+        row.touchesMoved([touch], with: nil)
+        XCTAssertTrue(row.pressPaint.outside, "a finger beyond the unpressed row leaves its authored feedback")
+        XCTAssertTrue(!row.pressPaint.down || row.pressPaint.releaseHeld, "outside paint clears or holds its young release until it has been shown")
+        p.apply(wireBatch([["op": "style", "id": 21, "style": [:]]]))
+        XCTAssertFalse(native.isHighlighted, "a style batch cannot put an outside finger back inside")
+        touch.point = inside
+        row.touchesMoved([touch], with: nil)
+        XCTAssertTrue(native.isHighlighted, "the platform look returns with the finger")
+        row.touchesCancelled([touch], with: nil)
+        row.touchesEnded([touch], with: nil)
+        XCTAssertEqual(presses, [])
+        XCTAssertFalse(native.isHighlighted)
+        waitFor("the authored feedback clears") { !row.pressPaint.down && row.press.to == 1 && !row.press.releaseHeld }
+        row.handlers = ["press", "pointerdown", "pointerup"]
+        let painted = RowTouch(row)
+        row.touchesBegan([painted], with: nil)
+        p.apply(wireBatch([["op": "style", "id": 21, "style": ["background_color": [0, 200, 0, 255]]]]))
+        XCTAssertTrue(row.pressed)
+        XCTAssertFalse(native.isHighlighted, "pointer handlers keep the author's pressed state")
+        XCTAssertEqual(row.style["background_color"], .array([.number(0), .number(200), .number(0), .number(255)]))
+        row.touchesEnded([painted], with: nil)
+        XCTAssertEqual(presses, [21])
+    }
+
+    func testALabelSelectsItsCustomRowAndANestedButtonKeepsItsOwnPress() throws {
+        let p = presenter { self.model(custom: true) }
+        p.apply(wireBatch([
+            ["op": "create", "id": 30, "kind": "text", "props": ["text": "Label"], "style": [:]],
+            ["op": "create", "id": 31, "kind": "button", "handlers": ["press"], "style": ["appearance": "none"]],
+            ["op": "children", "id": 21, "ids": [30, 31]],
+            ["op": "frame", "id": 30, "x": 0.0, "y": 0.0, "w": 200.0, "h": 61.0],
+            ["op": "frame", "id": 31, "x": 240.0, "y": 0.0, "w": 100.0, "h": 61.0],
+        ]))
+        let row = try XCTUnwrap(p.views[21]), label = try XCTUnwrap(p.views[30]), button = try XCTUnwrap(p.views[31])
+        let native = try cell(p, 21), l = try list(p)
+        var presses: [UInt32] = [], selections: [[IndexPath]] = []
+        p.onPress = { presses.append($0); selections.append(l.collection.indexPathsForSelectedItems ?? []) }
+        let labelTouch = RowTouch(label)
+        label.touchesBegan([labelTouch], with: nil)
+        XCTAssertTrue(row.pressed && native.isHighlighted)
+        p.apply(wireBatch([["op": "props", "id": 21, "set": ["testId": "forwarded"]]]))
+        label.touchesEnded([labelTouch], with: nil)
+        let buttonTouch = RowTouch(button, at: CGPoint(x: 20, y: 30))
+        button.touchesBegan([buttonTouch], with: nil)
+        XCTAssertTrue(button.pressed)
+        XCTAssertFalse(row.pressed || native.isHighlighted)
+        p.apply(wireBatch([["op": "style", "id": 5, "style": ["opacity": 1.0]]]))
+        button.touchesEnded([buttonTouch], with: nil)
+        XCTAssertEqual(presses, [21, 31])
+        XCTAssertEqual(selections, [[IndexPath(item: 1, section: 1)], []])
+        XCTAssertFalse(row.pressed || button.pressed || native.isHighlighted)
+    }
+
+    func testCancellationRemovalDisableAndAuthoredMovesCannotLeakAPress() throws {
+        for reason in ["cancel", "disabled", "inert", "removed", "reparented", "cell-ended", "window-detached", "navigation", "list-removed"] {
+            var removed = false
+            let p = presenter {
+                var m = self.model(custom: true)
+                if removed { m.sections[1].rows.removeAll { $0.view == 21 } }
+                return m
+            }
+            let row = try XCTUnwrap(p.views[21]), native = try cell(p, 21), l = try list(p)
+            var presses: [UInt32] = []; p.onPress = { presses.append($0) }
+            let touch = RowTouch(row)
+            row.touchesBegan([touch], with: nil)
+            XCTAssertTrue(row.pressed && native.isHighlighted, reason)
+            switch reason {
+            case "cancel": row.touchesCancelled([touch], with: nil)
+            case "disabled", "inert":
+                let id = reason == "disabled" ? 21 : 5
+                p.apply(wireBatch([["op": "props", "id": id, "set": [reason: "true"]]]))
+                p.apply(wireBatch([["op": "props", "id": id, "set": [:], "clear": [reason]]]))
+            case "removed":
+                removed = true
+                p.apply(wireBatch([["op": "children", "id": 5, "ids": [20]], ["op": "destroy", "id": 21]]))
+            case "reparented":
+                removed = true
+                p.apply(wireBatch([["op": "children", "id": 4, "ids": [10, 11, 12, 21]], ["op": "children", "id": 5, "ids": [20]]]))
+            case "cell-ended":
+                l.collectionView(l.collection, didEndDisplaying: native, forItemAt: IndexPath(item: 1, section: 1))
+            case "window-detached":
+                p.viewport.removeFromSuperview()
+                XCTAssertNil(row.window)
+                XCTAssertTrue(row.superview === native.contentView, "window removal keeps the row in its cell")
+            case "navigation": p.apply(wireBatch([["op": "roots", "ids": [1]]]))
+            default: l.remove()
+            }
+            XCTAssertFalse(row.pressed || native.isHighlighted, reason)
+            row.touchesEnded([touch], with: nil)
+            row.touchesCancelled([touch], with: nil)
+            XCTAssertEqual(presses, [], reason)
+            window.isHidden = true
+        }
+    }
+
+    func testAReboundRowKeepsItsNewHighlightWhenOldCallbacksArrive() throws {
+        let p = presenter { self.model(custom: true) }
+        let row = try XCTUnwrap(p.views[21]), native = try cell(p, 21)
+        var presses: [UInt32] = []; p.onPress = { presses.append($0) }
+        let old = RowTouch(row)
+        row.touchesBegan([old], with: nil)
+        let incarnation = row.incarnation
+        row.rebind(21)
+        row.handlers = ["press"]
+        row.applyStyle([:])
+        XCTAssertNotEqual(row.incarnation, incarnation)
+        XCTAssertFalse(row.pressed || native.isHighlighted)
+        let fresh = RowTouch(row)
+        row.touchesBegan([fresh], with: nil)
+        row.touchesEnded([old], with: nil)
+        row.touchesCancelled([old], with: nil)
+        XCTAssertTrue(row.pressed && native.isHighlighted)
+        row.touchesEnded([fresh], with: nil)
+        XCTAssertEqual(presses, [21])
+        XCTAssertFalse(row.pressed || native.isHighlighted)
+    }
+
+    func testAPressHandlerStartingAnotherContactKeepsTheNewHighlight() throws {
+        let p = presenter { self.model(custom: true) }
+        let row = try XCTUnwrap(p.views[21]), native = try cell(p, 21)
+        var presses: [UInt32] = [], fresh: RowTouch?
+        p.onPress = { id in
+            presses.append(id)
+            if presses.count == 1 {
+                let next = RowTouch(row)
+                fresh = next
+                row.touchesBegan([next], with: nil)
+            }
+        }
+        let old = RowTouch(row)
+        row.touchesBegan([old], with: nil)
+        row.touchesEnded([old], with: nil)
+        row.touchesEnded([old], with: nil)
+        row.touchesCancelled([old], with: nil)
+        XCTAssertTrue(row.pressed && native.isHighlighted)
+        row.touchesEnded([try XCTUnwrap(fresh)], with: nil)
+        XCTAssertEqual(presses, [21, 21])
+        XCTAssertFalse(row.pressed || native.isHighlighted)
+    }
+
+    func testADefaultLinkSelectsItsCellAndActivatesOnceWithAuthoredFeedback() throws {
+        final class Delegate: ExactSessionDelegate {
+            var opened: (() -> Void)?
+            var urls: [String] = []
+            func exactSession(_ session: ExactSession, command name: String, args: [Any]) {
+                if name == "openURL", let url = args.first as? String { urls.append(url); opened?() }
+            }
+        }
+        let delegate = Delegate(), session = ExactApp.shared.makeSession(delegate: delegate, label: "grouped-link-contact")
+        defer { session.destroy() }
+        let p = presenter(on: session.presenter) { self.model("plain", custom: true) }
+        let row = try XCTUnwrap(p.views[21]), native = try cell(p, 21), l = try list(p)
+        row.handlers = []
+        row.applyProps(set: ["href": "https://example.com/row"], clear: [])
+        var selections: [[IndexPath]] = []
+        delegate.opened = { selections.append(l.collection.indexPathsForSelectedItems ?? []) }
+        for authored in [false, true] {
+            p.apply(wireBatch([["op": "style", "id": 21, "style": authored ? ["press_scale": 0.9] : [:]]]))
+            let touch = RowTouch(row)
+            row.touchesBegan([touch], with: nil)
+            XCTAssertEqual(native.isHighlighted, !authored)
+            if authored { XCTAssertEqual(row.press.to, 0.9, accuracy: 0.001) }
+            p.apply(wireBatch([["op": "props", "id": 21, "set": ["testId": "link-held"]]]))
+            row.touchesEnded([touch], with: nil)
+            row.touchesEnded([touch], with: nil)
+            XCTAssertFalse(row.pressed || native.isHighlighted)
+        }
+        XCTAssertEqual(delegate.urls, Array(repeating: "https://example.com/row", count: 2))
+        XCTAssertEqual(selections, Array(repeating: [IndexPath(item: 1, section: 1)], count: 2))
+    }
+
+    func testSelectingACustomRowKeepsTheTouchesFocusDecision() throws {
+        let p = presenter { self.model(custom: true) }
+        let row = try XCTUnwrap(p.views[21])
+        row.handlers.insert("focus")
+        row.applyProps(set: ["tabIndex": "0"], clear: [])
+        var focused: [UInt32] = [], pressed: [UInt32] = []
+        p.onFocus = { focused.append($0) }
+        p.onPress = { pressed.append($0) }
+        let touch = RowTouch(row)
+        row.touchesBegan([touch], with: nil)
+        row.touchesEnded([touch], with: nil)
+        XCTAssertEqual(focused, [21])
+        XCTAssertTrue(row.isFirstResponder)
+        XCTAssertEqual(pressed, [21])
+        XCTAssertFalse(try cell(p, 21).isHighlighted)
+    }
+
+    func testCustomRowsSelectThroughRuntimeBatchesPushAndCancelledReturn() throws {
+        guard let scene = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).first else {
+            throw missing("scene", "UIKit must deliver the list's return appearance and navigation completion")
+        }
+        let path = try XCTUnwrap(ProcessInfo.processInfo.environment["EXACT_NAVIGATION_BARS_PLAN"], "compile scripts/fixtures/navigation-bars.contract")
+        let plan = try Data(contentsOf: URL(fileURLWithPath: path))
+        ExactGroupedLists.install()
+        let session = ExactApp.shared.makeSession(label: "custom-rows-navigation")
+        defer { session.destroy() }
+        let view = ExactView(session: session), root = UIViewController()
+        window = UIWindow(windowScene: scene)
+        window.rootViewController = root
+        window.makeKeyAndVisible()
+        root.view.addSubview(view)
+        XCTAssertNil(session.boot(plan: plan, size: window.bounds.size).error)
+        view.frame = root.view.bounds
+        view.layoutIfNeeded()
+        let p = session.presenter, nav = try XCTUnwrap(p.navigation.primaryNavigation)
+        func node(_ testId: String) throws -> NodeView {
+            try XCTUnwrap(p.views.values.first { $0.props["testId"] == testId }, testId)
+        }
+        func settle(_ count: Int) {
+            waitFor("the navigation stack has \(count) screens and its top is mounted after the native transition") {
+                nav.viewControllers.count == count && nav.transitionCoordinator == nil && !p.navigation.inTransition
+                    && nav.topViewController?.viewIfLoaded?.window === self.window
+            }
+        }
+        XCTAssertTrue(session.navigate("/rows"))
+        settle(2)
+        let rowsController = try XCTUnwrap(nav.topViewController as? RouteController)
+        let l = try XCTUnwrap(host(p).lists[try node("rows-list").id])
+        l.collection.layoutIfNeeded()
+        let selected = { l.collection.indexPathsForSelectedItems ?? [] }
+        var presses: [UInt32] = [], selections: [[IndexPath]] = []
+        let dispatch = p.onPress
+        p.onPress = { id in presses.append(id); selections.append(selected()); dispatch?(id) }
+        let stay = try node("rows-custom-stay"), stayTouch = RowTouch(stay)
+        XCTAssertTrue(stay.isDescendant(of: l.collection), "the kernel chose a custom row")
+        stay.touchesBegan([stayTouch], with: nil)
+        p.apply(wireBatch([["op": "props", "id": stay.id, "set": ["accessibilityLabel": "Held custom row"]]]))
+        stay.touchesEnded([stayTouch], with: nil)
+        stay.touchesEnded([stayTouch], with: nil)
+        XCTAssertEqual(presses, [stay.id])
+        XCTAssertEqual(selections, [[try XCTUnwrap(l.source.indexPath(for: stay.id))]])
+        XCTAssertEqual(selected(), [])
+        let state = try XCTUnwrap(try JSONSerialization.jsonObject(with: Data(session.agent(#"{"op":"state"}"#).utf8)) as? [String: Any])
+        XCTAssertEqual((state["slots"] as? [String: Any])?["stays"] as? Int ?? state["stays"] as? Int, 1)
+
+        let open = try node("rows-custom-open"), openTouch = RowTouch(open)
+        XCTAssertTrue(open.isDescendant(of: l.collection))
+        let openPath = try XCTUnwrap(l.source.indexPath(for: open.id))
+        open.touchesBegan([openTouch], with: nil)
+        open.touchesEnded([openTouch], with: nil)
+        settle(3)
+        XCTAssertEqual(presses, [stay.id, open.id])
+        XCTAssertEqual(selected(), [openPath], "selected under the screen its press pushed")
+        XCTAssertFalse(l.cell(open.id)?.isHighlighted == true)
+        let cancelled = CancelledReturn()
+        l.deselect(alongside: cancelled)
+        XCTAssertTrue(cancelled.animationRan && cancelled.completed)
+        XCTAssertEqual(selected(), [openPath], "a cancelled return restores selection without another press")
+        XCTAssertEqual(presses, [stay.id, open.id])
+        var returned = false
+        let appeared = rowsController.appeared
+        rowsController.appeared = { appeared?(); returned = true }
+        defer { rowsController.appeared = appeared }
+        nav.popViewController(animated: false)
+        settle(2)
+        waitFor("UIKit finished the list's return appearance") { returned }
+        XCTAssertEqual(selected(), [])
+
+        let link = try node("rows-custom-link"), linkTouch = RowTouch(link)
+        XCTAssertNotNil(link.defaultLink)
+        XCTAssertTrue(link.isDescendant(of: l.collection))
+        link.touchesBegan([linkTouch], with: nil)
+        link.touchesEnded([linkTouch], with: nil)
+        link.touchesEnded([linkTouch], with: nil)
+        waitFor("the default link opens the detail") {
+            p.views.values.contains { $0.props["testId"] == "route-detail" }
+                && (nav.topViewController as? RouteController)?.node.props["testId"] == "route-detail"
+                && nav.transitionCoordinator == nil && !p.navigation.inTransition
+                && nav.topViewController?.viewIfLoaded?.window === self.window
+        }
+        XCTAssertEqual(presses, [stay.id, open.id], "the link uses its default navigation, with no press handler")
+        XCTAssertFalse(link.pressed)
+    }
+
+    /// Calls the list's cancelled-transition callbacks without a UIKit gesture.
+    private final class CancelledReturn: NSObject, UIViewControllerTransitionCoordinator {
+        let isAnimated = true, initiallyInteractive = true, isInterruptible = true, isInteractive = true, isCancelled = true
+        let presentationStyle: UIModalPresentationStyle = .none
+        let transitionDuration: TimeInterval = 0.3
+        let percentComplete: CGFloat = 0.4, completionVelocity: CGFloat = 0
+        let completionCurve: UIView.AnimationCurve = .easeInOut
+        let containerView = UIView(), targetTransform = CGAffineTransform.identity
+        var animationRan = false, completed = false
+        func viewController(forKey key: UITransitionContextViewControllerKey) -> UIViewController? { nil }
+        func view(forKey key: UITransitionContextViewKey) -> UIView? { nil }
+        func animate(alongsideTransition animation: ((UIViewControllerTransitionCoordinatorContext) -> Void)?,
+                     completion: ((UIViewControllerTransitionCoordinatorContext) -> Void)?) -> Bool {
+            animation?(self); animationRan = true
+            completion?(self); completed = true
+            return true
+        }
+        func animateAlongsideTransition(in view: UIView?, animation: ((UIViewControllerTransitionCoordinatorContext) -> Void)?,
+                                        completion: ((UIViewControllerTransitionCoordinatorContext) -> Void)?) -> Bool {
+            animate(alongsideTransition: animation, completion: completion)
+        }
+        func notifyWhenInteractionChanges(_ handler: @escaping (UIViewControllerTransitionCoordinatorContext) -> Void) {}
+        func notifyWhenInteractionEnds(_ handler: @escaping (UIViewControllerTransitionCoordinatorContext) -> Void) {}
     }
 
     /// A swipe row inserted while a sheet is up (r25's contacts: the

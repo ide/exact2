@@ -116,11 +116,18 @@ extension NodeView {
     /// the platform's own. A held press (HeldState.swift) shows it as a
     /// real press does, with no haptic.
     func showPress(_ down: Bool) {
+        #if os(iOS)
+        let grouped = presenter?.groupedLists?.highlight(carried: self, down && platformPressFeedback) == true
+        let cellPress = grouped && platformPressFeedback
+        let down = down && (defaultLink == nil || grouped) && !cellPress
+        #else
         let down = down && defaultLink == nil
+        #endif
         // What a press shows goes at its release whatever the style says now:
         // an authored look the style dropped while held included.
         if !down { paintPress(false); aimPress(false, release: true) }
         #if os(iOS)
+        if cellPress { dimPress(false, instantly: true); return }
         // A list's row is its cell: the cell's ground, not the dim (LLP 1115.000 D16).
         if platformPressDims, presenter?.rowCells.press(self, down) == true { return }
         if platformPressDims { dimPress(down); return }
@@ -139,7 +146,13 @@ extension NodeView {
     func pressFollows(inside: Bool) {
         guard pressed else { return }
         pressPaint.outside = !inside
-        if defaultLink != nil { showPress(false); return }
+        #if os(iOS)
+        let grouped = presenter?.groupedLists?.highlight(carried: self, (inside || holds("active")) && platformPressFeedback) == true
+        if grouped && platformPressFeedback { return }
+        #else
+        let grouped = false
+        #endif
+        if defaultLink != nil, !grouped { showPress(false); return }
         if holds("active") { return }
         if !inside { paintPress(false); aimPress(false) }
         #if os(iOS)
@@ -151,6 +164,11 @@ extension NodeView {
         guard inside else { return }
         paintPress(true)
         aimPress(true)
+    }
+
+    /// Reconciles a carried row's feedback after its style or cell changed.
+    package func refreshGroupedPress() {
+        if pressed || holds("active") { showPress(holds("active") || !pressPaint.outside) }
     }
 
     private func aimPress(_ down: Bool, release: Bool = false) {
@@ -414,6 +432,12 @@ extension NodeView {
     /// How long a dim shows at least, so a quick tap still flashes.
     static let dimHold: CFTimeInterval = 0.1
 
+    /// A grouped cell's highlight and the dim share the author's opt-outs.
+    private var platformPressFeedback: Bool {
+        !authorsPress && !isNativeButton && !isSurfaceControl
+            && !handlers.contains("pointerdown") && !handlers.contains("pointerup")
+    }
+
     /// Whether a press shows the platform's dim: a node the host presses
     /// (a `press` handler or a custom invoker's visual contact),
     /// with no pressed look written (a
@@ -423,9 +447,7 @@ extension NodeView {
     /// window (a backdrop that closes a sheet shows nothing in UIKit). A
     /// native button is UIKit's own and never comes here.
     var platformPressDims: Bool {
-        guard !authorsPress, !isNativeButton, !isSurfaceControl,
-              handlers.contains("press") || pressContact?.invokerLook == true || overlayHoldsPress,
-              !handlers.contains("pointerdown"), !handlers.contains("pointerup") else { return false }
+        guard platformPressFeedback, handlers.contains("press") || pressContact?.invokerLook == true || overlayHoldsPress else { return false }
         if let w = window {
             let r = convert(bounds, to: w)
             if r.width >= w.bounds.width, r.height >= w.bounds.height * 0.9 { return false }

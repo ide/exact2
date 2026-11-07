@@ -276,6 +276,8 @@ final class PressContact {
     var responderUsesCanvas = false
     /// Whether this contact’s down was taken here rather than forwarded.
     var ownsPress = false
+    /// Terminal delivery owns its resolved hit while focus changes containment.
+    var ending = false
     var cancelled = false
     var cancelledByReparenting = false
     /// A handlerless custom invoker's look, independent of the forwarded press: nil when it owns none.
@@ -449,9 +451,11 @@ extension NodeView {
     package override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
         if canvasTouches(touches, phase: "up", event: event) { return }
         guard let contact = currentPressContact(touches) else { return }
+        contact.ending = true
         // Its press may have removed the overlay that held the look with it,
         // which left the look to this contact: the look is the overlay's alone now.
         defer {
+            contact.ending = false
             if pressContact === contact {
                 setInvokerLook(contact, nil)
                 pressContact = nil
@@ -508,16 +512,21 @@ extension NodeView {
             return
         }
         let lands = inside && pressContact === contact && incarnation == contact.incarnation && (!contact.cancelled || movedByFocus) && presenter?.views[id] === self
+        let activate: () -> Void = { [self] in
+            guard pressContact === contact, incarnation == contact.incarnation else { return }
+            pressed = overlayHoldsPress
+            presenter?.menus.activating(from: touched, pressing: self) {
+                presenter?.press(id, held: KeyCodes.held(event?.modifierFlags ?? []), at: touches.first?.location(in: nil), bubbled: contact.bubbled)
+            }
+        }
+        // Select a custom row before its activation can push another screen.
+        if lands, presenter?.groupedLists?.select(carried: self, press: activate) == true { return }
         // A tap on a list's row selects its cell before the press runs, and
         // the cell stays selected under a screen the press pushed (LLP 1115.000 D16).
         let cells = presenter?.rowCells, screen = cells?.screen(of: self)
         let row = lands ? cells?.select(self) : nil
         pressed = overlayHoldsPress
-        if lands {
-            presenter?.menus.activating(from: touched, pressing: self) {
-                presenter?.press(id, held: KeyCodes.held(event?.modifierFlags ?? []), at: touches.first?.location(in: nil), bubbled: contact.bubbled)
-            }
-        }
+        if lands { activate() }
         if let row { cells?.ran(row, on: screen) }
     }
     package override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
