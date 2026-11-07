@@ -299,7 +299,7 @@ extension NodeView {
         // UIKit may have pending row geometry and its own offset adjustment.
         // Snapshot both from the same layout before preserving the reader.
         if groupedOwner { scrollView?.layoutIfNeeded() }
-        beforeLayoutScroll = scrollView.map { ($0.contentOffset, scrollTopInset($0)) }
+        beforeLayoutScroll = scrollView.map { ($0.contentOffset, scrollTopInset($0), $0.adjustedContentInset.top - $0.contentInset.top) }
         followedScroll = nil
         readingAnchors.removeAll(keepingCapacity: true)
         scrollAnchor = nil
@@ -358,8 +358,11 @@ extension NodeView {
                     let shift = rect.minY - anchor.y
                     let i = sv.adjustedContentInset
                     // Native layout may already have moved the offset. Restore
-                    // the captured reading position, counting the row shift once.
-                    let top = (beforeLayoutScroll?.offset.y ?? sv.contentOffset.y) + shift
+                    // the captured reading position, counting the row shift once and
+                    // carrying over a change in UIKit's own adjustment (its part of
+                    // `adjustedContentInset`), which UIKit has applied to the offset
+                    // to keep the rows where they were: replaying the raw offset would undo it.
+                    let top = (beforeLayoutScroll.map { $0.offset.y + $0.uikitTop - (sv.adjustedContentInset.top - sv.contentInset.top) } ?? sv.contentOffset.y) + shift
                     let y = sv.isTracking || sv.isDecelerating ? top : min(max(top, -i.top), max(-i.top, sv.contentSize.height + i.bottom - sv.bounds.height))
                     // An element reveal heads for where its target now is instead (`IntoView.swift`).
                     if presenter?.elementScrolls.revealing(sv) != nil { presenter?.elementScrolls.retarget(sv) }
