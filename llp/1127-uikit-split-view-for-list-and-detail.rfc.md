@@ -125,6 +125,7 @@ A completed native pop is classified by how many visits the router steps back fr
 6. **No coordinator, no Back.** UIKit's collapse and expansion reached N0 and N1 only as changes without a coordinator (§1.2); they never dispatch. Exact's own unanimated changes, a context menu's commit included, never did and do not.
 7. **Ends.** A completed pop dispatches what item 5 says, and only once; a cancelled one, nothing; a pop that a fold interrupts is judged by its coordinator's end.
 8. **Settlement.** A split stack is in transition while a coordinator of N0, N1 or the split itself runs (the split's follows `show(_:)`, per the SDK header), and from UIKit's collapse or expansion question to its `didCollapse` or `didExpand`: focus waits, and `clock settle` waits (`nativeInFlight`).
+9. **Expanding after a clearing.** A clearing made while collapsed leaves UIKit's own N1 holding the page the person left, which the next expansion shows beside the list (§1, item 4). Exact's router went back with the person, so when the split expands with the stack at its root, the host asks the router for that page again, the one dispatch an expansion makes: the root's `navigate` with the page's location, else the runner's `go` (`SplitIOS.left`, `NavigationHost.noteDetail`). A page the router itself took away while the split was expanded and settled is not asked for again.
 
 ### D6 — When Exact calls `show(_:)`
 
