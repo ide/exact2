@@ -65,6 +65,9 @@ pub(crate) struct Presence {
     /// Each virtualized list's data generation, and whether it runs along
     /// x, at the last layout.
     pub(super) generations: Vec<(ViewId, u64, bool)>,
+    /// Each list's revision when its rows' sizes were last taken in
+    /// (`Host::measure_collections`).
+    pub(super) measured: IdMap<ViewId, u64>,
     /// The lists whose data this layout's commit did not change: their rows'
     /// moves are the list's own (`LayoutMotion::observe_unauthored`).
     settled: IdSet<ViewId>,

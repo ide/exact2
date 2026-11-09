@@ -437,6 +437,7 @@ impl<D: DataSource> Host<D> {
         }
         self.layout_withheld = false;
         self.emit_ranks(batch);
+        self.measure_collections(&moved)?;
         self.emit_collections(batch)
     }
 
@@ -467,6 +468,7 @@ impl<D: DataSource> Host<D> {
         }
         if !self.height_layout_if_needed(batch)? && committed {
             self.judge_list_moves();
+            self.measure_collections(&IdSet::default())?;
             self.emit_collections(batch)?;
         }
         Ok(())
@@ -475,6 +477,53 @@ impl<D: DataSource> Host<D> {
     /// The lists' metadata, when it moved. Layout and receipt work may change
     /// the live window; motion-only ticks and stale feedback never traverse
     /// the tree to collect it.
+    /// @ref LLP 1072 §8.7 — each list's mounted rows, at the sizes the
+    /// layout gave them as the presenter reads them from their frames, taken
+    /// in before the lists' snapshots go out: rows laid out at other sizes
+    /// than the list's estimates move the rows after them, and the batch
+    /// that moves them carries the extent and the anchor's correction that
+    /// move implies, where the presenter's next report would land a frame
+    /// later. Only a list the runner changed since its last measurement (a
+    /// report, rows mounted or retired, data), or a row wrapper of which
+    /// this layout moved or resized (`moved`).
+    fn measure_collections(&mut self, moved: &IdSet<ViewId>) -> Result<(), String> {
+        if self.native_mode() {
+            return Ok(());
+        }
+        let wire = |n: f32| {
+            let mut s = String::new();
+            style::push_num(&mut s, n);
+            s.parse::<f64>().unwrap_or(f64::from(n))
+        };
+        let mut revisions = IdMap::default();
+        let mut mounted = Vec::new();
+        for head in self.runner.collections_shallow() {
+            let list = head.view;
+            let mut revision = head.revision;
+            self.runner.collection_mounted(list, &mut mounted);
+            if self.presence.measured.get(&list) != Some(&revision)
+                || mounted.iter().any(|(wrapper, _)| moved.contains(wrapper))
+            {
+                let horizontal = head.axis == exact_runner::ListAxis::Horizontal;
+                let rows: Vec<_> = (mounted.iter())
+                    .filter_map(|(wrapper, _)| {
+                        let (_, _, w, h) = self.mirror.get(wrapper)?.frame?;
+                        let (along, across) = if horizontal { (w, h) } else { (h, w) };
+                        Some((*wrapper, wire(along), wire(across)))
+                    })
+                    .collect();
+                if !rows.is_empty() {
+                    let measured = (self.runner.collection_measured(list, &rows))
+                        .map_err(|e| format!("collection measurement: {e:?}"))?;
+                    revision = measured.unwrap_or(revision);
+                }
+            }
+            revisions.insert(list, revision);
+        }
+        self.presence.measured = revisions;
+        Ok(())
+    }
+
     fn emit_collections(&mut self, batch: &mut Batch) -> Result<(), String> {
         let collections = if self.native_mode() {
             self.collection_heads = None;

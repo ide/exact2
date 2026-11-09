@@ -4,6 +4,7 @@ mod api;
 mod index;
 mod inset;
 mod into_view;
+mod measured;
 mod nest;
 mod reach;
 mod rekey;

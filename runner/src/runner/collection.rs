@@ -260,6 +260,26 @@ impl<D: DataSource> Runner<D> {
         result.now_ms = self.now_ms;
         Ok(result)
     }
+    /// The sizes the host laid list `view`'s mounted rows out at, each a
+    /// wrapper with its size along the list's axis and across it, taken in
+    /// before the batch that laid them out is presented (LLP 1072 §8.7):
+    /// the list's extent and its anchor's correction follow them in that
+    /// batch's snapshot. The list's revision after them, which moves when
+    /// its snapshot changed; none when no list is `view`. No commit:
+    /// measuring a mounted row moves nothing the kernel lays out.
+    pub fn collection_measured(
+        &mut self,
+        view: ViewId,
+        rows: &[(ViewId, f64, f64)],
+    ) -> Result<Option<u64>, RunnerError> {
+        if self.poisoned {
+            return Err(RunnerError::Poisoned);
+        }
+        let tree = self.tree.as_mut().expect("booted");
+        tree.measure_collection(view, rows)
+            .inspect_err(|_| self.poison())
+            .map_err(Into::into)
+    }
     /// List `view`'s port is at `offset` (from its first row, as a report's):
     /// the rows mounted out of the port that now show stop holding what
     /// waits for them (LLP 1055 D13), in a commit of their own. No report:
