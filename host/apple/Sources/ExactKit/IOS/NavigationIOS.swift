@@ -1253,26 +1253,26 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
     func popMayBegin(_ gestureRecognizer: UIGestureRecognizer, from start: CGPoint?, in view: UIView?, velocity: CGPoint) -> Bool {
         // tvOS has no interactive pop gesture.
         #if os(tvOS)
-        let owner: UINavigationController? = nil
+        let owner: UINavigationController? = nil, toList = false
         #else
         let pops = { (nav: UINavigationController) -> Bool in
             if nav.interactivePopGestureRecognizer === gestureRecognizer { return true }
             if #available(iOS 26.0, *) { return nav.interactiveContentPopGestureRecognizer === gestureRecognizer }
             return false
         }
-        // Let More's swipe back to its list from a plain tab begin: it is UIKit's own, and no route pops
-        if let more, more.topViewController is PlainTab, pops(more) { return !changing && !presenter.modals.inTransition }
-        let owner = (allNavigations + [split?.detail].compactMap { $0 }).first(where: pops)
+        let owner = (allNavigations + [split?.detail, more].compactMap { $0 }).first(where: pops)
+        // Let More's swipe back to its list from a tab's root or a plain tab begin: it is UIKit's own, and no route pops.
+        // On More's list alone there is nothing to pop.
+        let toList = owner != nil && owner === more && (more?.topViewController is PlainTab || (navigation === more && more?.stackRoutes.count == 1))
         #endif
-        if let owner, !follows(owner) { return false }
+        if let owner, !follows(owner), !toList { return false }
         // Of a split's two stacks, one pops: the detail's while it has a route
         // beneath its top, else (collapsed) the list's, which holds the
         // detail's stack. The other, under the same finger, would take the swipe.
         if let owner, let split, split.holds(owner),
            owner !== (split.controller.isCollapsed && split.detail.viewControllers.count < 2 ? split.list : split.detail) { return false }
-        let depth = backBar?.depth ?? 0
-        // Let More's swipe from a tab's root to its list begin: it is UIKit's own, and no route pops
-        let goes = back != nil || (navigation === more && navigation?.stackRoutes.count == 1)
+        let depth = toList ? (owner?.viewControllers.count ?? 0) : (backBar?.depth ?? 0)
+        let goes = toList || back != nil
         guard NavigationRules.popMayBegin(depth: depth, changing: changing, modalActive: presenter.modals.inTransition,
                                           hasBackControl: goes,
                                           contextPreviewActive: !presenter.chrome.ids("contextTarget").isEmpty) else {
@@ -1350,8 +1350,10 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
     }
 
     func navigationController(_ navigationController: UINavigationController, didShow viewController: UIViewController, animated: Bool) {
-        // Select the router's tab again when a row's press left the router on another tab: the app declined the row
+        // Select the router's tab again when a row's press left the router on another tab: the app declined the row,
+        // so More shows its list again rather than the declined tab the next time it shows
         if navigationController === more, let index = tabIndex(ofShown: viewController), index != routerTab, tabStack(routerTab) != nil {
+            navigationController.popToRootViewController(animated: false)
             return showRouterTab(declining: index)
         }
         guard follows(navigationController), navigationController.topViewController === viewController else {
@@ -1440,7 +1442,7 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
         }
         // More went back to its list (its Back on the tab's root, or More tapped again): the list is no
         // route, and the router keeps its tab. Routes above the root that went with it count as a Back to the root.
-        if navigationController === more, !(viewController is RouteController) {
+        if navigationController === more, viewController === navigationController.viewControllers.first {
             if let top = selectedKey, let root = shownKeys.first, top != root { goBack(from: top, to: root) }
             return
         }

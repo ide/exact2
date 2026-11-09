@@ -6,9 +6,10 @@
 // navigation owner per tab"), so a scroll offset, a draft or a pushed screen
 // survives a switch. The authored `tablist` supplies the items — a symbol
 // over a label, its `-fill` symbol when selected — and takes no room while
-// the bar shows. A tap on the bar is UIKit's: it selects the tab, or pops the
-// selected one to its root, and Exact presses the authored tab inside
-// `shouldSelect`, so the router follows (`TabDelegateProxy`). Under the agent
+// the bar shows. A tap on the bar is UIKit's (`TabDelegateProxy`): on another
+// tab, Exact presses that tab's authored tab inside `shouldSelect`, so the
+// router follows; on the selected tab above its root, UIKit pops the stack,
+// which the router follows as a Back. Under the agent
 // the authored tablist paints and the bar stays hidden. A tab not yet
 // selected has no routes: the runner builds a tab when it is first selected,
 // as UIKit loads a tab's view, or when More's list is about to show its row
@@ -176,6 +177,8 @@ extension NavigationHost {
             return
         }
         natives.tabsHatch(container, event: 1)
+        // Release More with Exact's container: the next sync writes the routes UIKit moved into it to their tab's own controller
+        if let more, stacks[ObjectIdentifier(more)] != nil { release(more) }
         container.delegate = nil
         tablistRoot = nil
         tablistHidBar = false
@@ -251,9 +254,9 @@ extension NavigationHost {
         // @ref LLP 1038 D6 — a tab change swaps immediately. UIKit's selection
         // is the state (LLP 1075.003 §3.7): it is written only when the
         // router's own tab changes (a link, the agent's authored tablist, a
-        // tapped tab's press that selects another), by controller, not by
-        // index, because More's Edit reorders tabs, so no batch undoes a tap.
-        // A tab UIKit is selecting (`tapping`) is left to UIKit.
+        // tapped tab's press that selects another), so no batch undoes a tap.
+        // It is written by controller, not by index, because More's Edit
+        // reorders tabs. A tab UIKit is selecting (`tapping`) is left to UIKit.
         if routerTab != p.at {
             routerTab = p.at
             if let container = tabController, container.selectedViewController !== navs[p.at], navs[p.at] !== tapping {
@@ -460,8 +463,8 @@ extension NavigationHost {
         let screen = reselected
         reselected = nil
         if tapping != nil {
-            // The press's sync waited for a transition on the tab the tap leaves: it runs now that
-            // UIKit selected the tab, before the tab's first frame.
+            // Sync again when the press's sync waited for a transition still running on the tapped tab or a sheet,
+            // now that UIKit selected the tab, before the tab's first frame
             if pendingSync {
                 tapping = nil
                 sync(Batch(ops: [], timers: false, motion: false, clock: nil, error: nil))
@@ -520,7 +523,7 @@ extension NavigationHost {
     /// `select` pops; another tab's tap selects it: nil for both. Read before
     /// the tab's press, scrolled after it (`scrollToTop`).
     func reselectedRoot(_ index: Int) -> RouteController? {
-        guard index == routerTab, let routes = tabStack(index)?.stackRoutes,
+        guard index == routerTab, let routes = routesStack(index)?.stackRoutes,
               routes.count == 1, presentedNavigations.isEmpty else { return nil }
         return routes.last as? RouteController
     }

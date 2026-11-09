@@ -3,11 +3,11 @@
 // controllers as the root view controller for a tab" (UITabBarController): a
 // tab whose panel draws a stack is a navigation controller, its bar hidden
 // where its first route shows none; a tab whose panel shows one fixed route is
-// a plain view controller, as a hand-built app shows such a tab
-// (`Runner::panels_draw_stacks` reads which from the plan, so it is known for
-// a tab not built yet). A plain tab has no navigation bar of its own: its
-// route's header is its content. A tab the runner has not built yet (§9.14)
-// has its controller from launch, empty until its routes arrive.
+// a plain view controller (`Runner::panels_draw_stacks` reads which from the
+// plan, so it is known for a tab not built yet). A plain tab has no
+// navigation bar of its own: its route's header is its content, never a bar.
+// A tab the runner has not built yet (§9.14) has its controller from launch,
+// empty until its routes arrive.
 #if os(iOS) || os(tvOS)
 import UIKit
 
@@ -56,7 +56,8 @@ extension UIViewController {
     }
 
     /// What UIKit keeps before a navigation controller's routes in
-    /// `viewControllers`: More's list (iOS). Every write of the routes keeps it.
+    /// `viewControllers`: More's list, and a plain tab More pushed over it
+    /// (iOS). Every write of the routes keeps it.
     var stackFront: [UIViewController] {
         (self as? UINavigationController).map { Array($0.viewControllers.prefix { !($0 is RouteController) }) } ?? []
     }

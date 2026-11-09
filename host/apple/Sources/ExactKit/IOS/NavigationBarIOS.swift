@@ -620,6 +620,8 @@ extension NavigationHost {
         if tabBarShows, let root = container, let tabs = NavigationTabs.of(root, presenter), let index = tabs.tabs.firstIndex(where: { $0 === node }) {
             guard !node.disabled else { return ["error": "tab #\(id) is disabled"] }
             guard before(nil), !node.disabled, !node.inert, presenter.views[node.id] === node else { return ["error": "tab #\(id) changed during its pointer handlers"] }
+            // Refuse the selected tab above its root where Back does not go, as the bar's own tap pops only where it goes (`mayShow`)
+            if index == routerTab, (routesStack(index)?.stackRoutes.count ?? 0) > 1, !canInvokeBack { return ["error": "tab #\(id): \(backRefusal)"] }
             // As the bar's own tap: the selected tab at its root scrolls to the top
             pressTab(node, scrolling: reselectedRoot(index))
             return ["tapped": id, "pressed": id, "delivery": "host-activation", "native": barItem(ofTab: index) != nil ? "tab-bar-item" : "more-list-row"]

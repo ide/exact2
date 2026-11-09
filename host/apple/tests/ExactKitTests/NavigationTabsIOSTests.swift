@@ -4,11 +4,12 @@ import XCTest
 @testable import ExactKit
 
 /// LLP 1075.003 Stage 2 over the native fixture's tabs: Exact's
-/// `UITabBarController`, one navigation controller a tab, items from the
-/// authored tablist, a tab the bar selects pressing its authored tab, every
-/// tab's stack kept — its pushed screen, its scroll offset, its draft — and
-/// reselecting a tab popping it to its root. The bar is driven as a tap on
-/// it drives it, through the delegate Exact keeps.
+/// `UITabBarController`, one controller per tab, items from the authored
+/// tablist, UIKit's selection with the router following through the tab's
+/// authored tab, every tab's stack kept — its pushed screen, its scroll
+/// offset, its draft — and a reselected tab popped to its root by UIKit.
+/// The bar is driven as a tap on it drives it (`tapTab`), through the
+/// delegate Exact keeps.
 final class NavigationTabsIOSTests: XCTestCase {
     private var window: UIWindow?
     private var sessions: [ExactSession] = []

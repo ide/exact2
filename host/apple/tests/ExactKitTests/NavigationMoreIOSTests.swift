@@ -180,9 +180,10 @@ final class NavigationMoreIOSTests: XCTestCase {
     }
 
     /// A row whose tab's press leaves the router where it was is the app
-    /// declining: UIKit shows the router's tab again, as for a tap on the bar.
+    /// declining: UIKit shows the router's tab again, as for a tap on the
+    /// bar, and More its list.
     func testARowWhosePressIsDeclinedShowsTheRoutersTabAgain() throws {
-        let (session, tabs, _) = try moreFixture("more-declined")
+        let (session, tabs, more) = try moreFixture("more-declined")
         let navigation = session.presenter.navigation
         try node(session, "tab-six").handlers.remove("press")
         let home = try XCTUnwrap(tabs.viewControllers?[0])
@@ -190,6 +191,22 @@ final class NavigationMoreIOSTests: XCTestCase {
         pickRow(tabs, 5)
         waitFor("UIKit shows Home again") { tabs.selectedViewController === home }
         XCTAssertEqual(navigation.routerTab, 0)
+        XCTAssertEqual(more.viewControllers.count, 1, "More shows its list again, not the declined tab")
+    }
+
+    /// More's list is no route: a swipe there pops nothing, though the
+    /// router's tab has a route pushed and its Back goes.
+    func testASwipeOnMoresListPopsNothing() throws {
+        let (session, tabs, more) = try moreFixture("more-list-swipe")
+        let navigation = session.presenter.navigation
+        let home = try XCTUnwrap(tabs.viewControllers?[0] as? UINavigationController)
+        try tapNode(session, "open-detail")
+        waitFor("Home pushed Detail") { home.viewControllers.count == 2 && !navigation.changing }
+        XCTAssertTrue(navigation.canInvokeBack)
+        tapTab(tabs, of: more)
+        waitFor("More shows its list") { tabs.selectedViewController === more && more.viewControllers.count == 1 }
+        let swipe = try XCTUnwrap(more.interactivePopGestureRecognizer)
+        XCTAssertFalse(navigation.popMayBegin(swipe, from: nil, in: nil, velocity: .zero), "More's list has nothing to pop")
     }
 
     /// A plain tab's row: More pushes the tab's own controller, empty, and
