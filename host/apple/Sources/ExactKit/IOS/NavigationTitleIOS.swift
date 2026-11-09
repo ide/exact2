@@ -409,11 +409,18 @@ extension NavigationHost {
     func projectedTitle(for node: NodeView) -> HeaderTitleView? {
         controllers.values.lazy.compactMap { c -> HeaderTitleView? in
             guard let nav = c.navigationController, nav.topViewController === c,
-                  nav.navigationBar.topItem === c.navigationItem, self.routeShowsBar(c, in: nav), !nav.isNavigationBarHidden,
+                  self.routeShowsBar(c, in: nav), !nav.isNavigationBarHidden,
                   let title = c.navigationItem.titleView as? HeaderTitleView, title === c.titleView,
-                  title.menuSource === node, title.window != nil, title.isDescendant(of: nav.navigationBar) else { return nil }
+                  title.menuSource === node, title.window != nil, Self.barShowing(title)?.topItem === c.navigationItem else { return nil }
             return title
         }.first
+    }
+
+    /// The bar a title view is shown in. A collapsed split shows a route
+    /// pushed in its column in that column's own bar, not its navigation
+    /// controller's `navigationBar`.
+    static func barShowing(_ title: UIView) -> UINavigationBar? {
+        sequence(first: title.superview, next: { $0?.superview }).lazy.compactMap { $0 as? UINavigationBar }.first
     }
 }
 
