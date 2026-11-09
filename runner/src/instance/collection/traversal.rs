@@ -387,11 +387,12 @@ impl Tree {
     /// none when no list is `view`.
     pub(crate) fn measure_collection(
         &mut self,
+        u: &Update<'_>,
         view: ViewId,
         rows: &[(ViewId, f64, f64)],
     ) -> Result<Option<u64>, InstanceError> {
         find_collection_mut(&mut self.children, view)
-            .map(|collection| collection.take_measured(rows))
+            .map(|collection| collection.take_measured(u, rows))
             .transpose()
     }
     /// [`Collection::reveal_at`] for list `view`.

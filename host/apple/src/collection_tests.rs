@@ -350,6 +350,58 @@ fn a_batch_that_lays_rows_out_above_the_anchor_keeps_it_in_place() {
     );
 }
 
+/// The same for a row a commit adds and takes into view (a sent message
+/// at a followed end): the batch aims at the end the row's laid-out size
+/// makes, not its estimate, which the presenter would scroll to first and
+/// then come back from on the next report.
+#[test]
+fn a_batch_that_lays_a_row_out_aims_its_scroll_into_view_at_its_size() {
+    let source = SOURCE
+        .replace(
+            "action toggle",
+            "state count = 30\n  action add\n    let n = count\n    count = n + 1\n    scrollIntoView(\"history\", n, block=\"end\")\n  action toggle",
+        )
+        .replace(
+            "      if showing\n",
+            "      button press=add testId=\"add\"\n        text \"add\"\n      if showing\n",
+        )
+        .replace(
+            "list virtualized=true",
+            "list id=\"history\" virtualized=true scroll-start=\"end\" estimated-item-height=40",
+        )
+        .replace("for row in rows key=row", "for row in range(count) key=row");
+    let (mut bridge, _, _) = fixture(&source);
+    // Reports until the window rests at the end
+    let mut top = 0.;
+    for now in 1..=8 {
+        let before = snapshot(&bridge);
+        top = before.correction.map_or(top, |c| c.offset);
+        send(&mut bridge, &facts(&before, top), f64::from(now) / 10.);
+        if snapshot(&bridge).revision == before.revision {
+            break;
+        }
+    }
+    let host = bridge.host.as_ref().unwrap();
+    let kernel = host.runner().kernel();
+    let add = kernel
+        .node_by_key(kernel.find_by_test_id("add")[0])
+        .unwrap()
+        .id;
+    let len = bridge.dispatch(add, 0, 0, 1.);
+    let added = String::from_utf8_lossy(bridge.output_bytes(len as usize)).into_owned();
+    assert!(added.contains("\"error\":null"), "{added}");
+    let after = snapshot(&bridge);
+    assert_eq!(after.count, 31);
+    assert_eq!(after.rows.last().map(|r| r.index), Some(30), "{after:?}");
+    assert_rows_where_laid_out(&bridge, &after);
+    let correction = after.correction.expect("the new row's end");
+    assert!(
+        (correction.offset - (after.total_extent - 160.)).abs() < 0.01,
+        "{correction:?} for an extent of {}",
+        after.total_extent
+    );
+}
+
 /// A commit that moves a list's rows has the presenter ride the move
 /// (`"rides"`), as a collection view's batch update moves its cells; a
 /// report that moves nothing and a resize, which takes places without

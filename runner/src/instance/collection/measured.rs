@@ -7,29 +7,29 @@
 //! the batch that moves them carry the extent and the correction that move
 //! implies, where the host's next report would come a frame later. A
 //! measurement changes no layout: spacers stand only for rows not mounted.
-//! Nothing else a report does happens here: no window, edge, target or pin.
+//! A row being taken into view is aimed at from the sizes taken in, as a
+//! report's settle aims at it, so the batch that adds a row and scrolls to
+//! it carries the offset its real size makes. Nothing else a report does
+//! happens here: no window, edge, report count or pin.
 use super::*;
 
 impl Collection {
     /// Take in each row's size, from `rows` (a mounted row's wrapper, its
     /// size along the list's axis and its size across it), and restore the
-    /// anchor; the list's revision after them. A row laid out across other
-    /// than the reported cross size is left out, as the host's report
-    /// leaves it out. A list the host has not reported, or one opening at a
-    /// kept position, previewing a reorder or taking a row into view, waits
-    /// for the host's report, which owns those.
+    /// anchor, or aim again at a row being taken into view; the list's
+    /// revision after them. A row laid out across other than the reported
+    /// cross size is left out, as the host's report leaves it out. A list
+    /// the host has not reported, or one opening at a kept position or
+    /// previewing a reorder, waits for the host's report, which owns those.
     pub(super) fn take_measured(
         &mut self,
+        u: &Update<'_>,
         rows: &[(ViewId, f64, f64)],
     ) -> Result<u64, InstanceError> {
         let Some(cross) = self.geometry.as_ref().map(|g| g.cross) else {
             return Ok(self.revision);
         };
-        if self.target.is_some()
-            || self.restored_at.is_some()
-            || self.preview.is_some()
-            || self.incoming.is_some()
-        {
+        if self.restored_at.is_some() || self.preview.is_some() || self.incoming.is_some() {
             return Ok(self.revision);
         }
         let by_view: BTreeMap<ViewId, usize> = (self.mounted.iter().enumerate())
@@ -70,6 +70,14 @@ impl Collection {
             return Ok(self.revision);
         }
         let previous = self.snapshot();
+        if self.target.is_some() {
+            // The destination, not the reader's place, is what the sizes move
+            for measurement in fresh {
+                self.measure(&by_view, measurement)?;
+            }
+            self.aim_into_view(u);
+            return self.advance_if_changed(previous);
+        }
         // @ref LLP 1070 H4 — a row list anchors only an estimate replaced by
         // a first measurement; a row measured again moves what follows it
         if self.axis == ListAxis::Horizontal {
@@ -87,6 +95,12 @@ impl Collection {
             self.measure(&by_view, measurement)?;
         }
         self.restore(anchor)?;
+        self.advance_if_changed(previous)
+    }
+
+    /// The list's revision, moved when its snapshot differs from `previous`
+    /// by more than the report's sequence.
+    fn advance_if_changed(&mut self, previous: CollectionSnapshot) -> Result<u64, InstanceError> {
         let mut now = self.snapshot();
         now.scroll_sequence = previous.scroll_sequence;
         if previous != now {

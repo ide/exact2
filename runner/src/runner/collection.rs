@@ -275,10 +275,24 @@ impl<D: DataSource> Runner<D> {
         if self.poisoned {
             return Err(RunnerError::Poisoned);
         }
-        let tree = self.tree.as_mut().expect("booted");
-        tree.measure_collection(view, rows)
-            .inspect_err(|_| self.poison())
-            .map_err(Into::into)
+        let mut tree = self.tree.take().expect("booted");
+        let mut ids = std::mem::take(&mut self.ids);
+        let result = {
+            // A row taken into view aligns as a report's settle aligns it
+            let cell_margins = |view| super::collection::cell_margins(&self.kernel, view);
+            let scroll_margin = |view| scroll_margin(&self.kernel, view);
+            let scroll_padding = |view| scroll_padding(&self.kernel, view);
+            let mut update = Update::new(self.env(&[], &[]), &self.sites, &mut ids);
+            update.scroll_padding = Some(&scroll_padding);
+            update.scroll_margin = Some(&scroll_margin);
+            if self.kernel.arena().env().cell_spaces {
+                update.cell_margins = Some(&cell_margins);
+            }
+            tree.measure_collection(&update, view, rows)
+        };
+        self.tree = Some(tree);
+        self.ids = ids;
+        result.inspect_err(|_| self.poison()).map_err(Into::into)
     }
     /// List `view`'s port is at `offset` (from its first row, as a report's):
     /// the rows mounted out of the port that now show stop holding what

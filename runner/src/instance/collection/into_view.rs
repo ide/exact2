@@ -290,6 +290,34 @@ impl Collection {
         }
         None
     }
+    /// After the sizes of rows a commit laid out are taken in, before the
+    /// host moves: where the target now aligns, as the correction the batch
+    /// carries. Not a report: the host's next one still judges whether it
+    /// landed.
+    pub(super) fn aim_into_view(&mut self, u: &Update<'_>) {
+        let Some(target) = self.target.clone() else {
+            return;
+        };
+        let (Some(position), Some(current)) = (
+            self.index.position(&target.key),
+            self.geometry.as_ref().map(|g| g.offset),
+        ) else {
+            return;
+        };
+        let desired = self.aligned(u, position, target.align, current, target.offset);
+        if (desired - current).abs() <= 0.5 {
+            return;
+        }
+        if let Some(g) = &mut self.geometry {
+            g.offset = desired;
+            self.correction = Some(AnchorCorrection {
+                scroll_sequence: g.scroll_sequence,
+                offset: desired,
+                from: None,
+                smooth: target.smooth,
+            });
+        }
+    }
     /// After a report's measurements: where the target now aligns.
     pub(super) fn settle_into_view(
         &mut self,
