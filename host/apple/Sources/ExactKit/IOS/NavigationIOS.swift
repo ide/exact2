@@ -356,9 +356,8 @@ final class RouteController: UIViewController, UIScrollViewDelegate {
     // A held stack's tab bar follows the route's scroll views as a navigation controller's follows its top's.
     override func setContentScrollView(_ scrollView: UIScrollView?, for edge: NSDirectionalRectEdge) {
         if !projectingContentScrollView { nativeContentScrollEdges.formUnion(edge) }
-        // Read the view a single edge leaves: `contentScrollView(for:)` takes one edge, and a write that moves
-        // both edges off a view leaves no edge still using it
-        let leaving = edge == .top || edge == .bottom ? contentScrollView(for: edge) : nil
+        // What leaves each single edge, read before UIKit takes the new view (`observeAgain`)
+        let leaving = [NSDirectionalRectEdge.top, .bottom].filter { edge.contains($0) }.map { ($0, contentScrollView(for: $0)) }
         super.setContentScrollView(scrollView, for: edge)
         (parent as? HeldStack)?.setContentScrollView(scrollView, for: edge)
         if edge.contains(.top) {
@@ -367,7 +366,7 @@ final class RouteController: UIViewController, UIScrollViewDelegate {
             if !projectingContentScrollView { host?.presenter.syncScrollsToTop() }
             #endif
         }
-        observeAgain(leaving, leftFrom: edge, for: scrollView)
+        for (single, view) in leaving { observeAgain(view, leftFrom: single, for: scrollView) }
     }
 
     private var topEdgeWatch: NSKeyValueObservation?

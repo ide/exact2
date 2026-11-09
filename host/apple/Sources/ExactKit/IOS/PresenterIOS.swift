@@ -1119,6 +1119,7 @@ package final class Presenter {
         let named = touchedAndAbove(batch.ops.compactMap { [.create, .props, .style, .children, .paragraph, .flow].contains($0.op) ? $0.id : nil } + deferredIDs) // PROTO (UIKit-first measurement): include deferred names and states
         afterBatch { [weak self] in
             guard let self else { return }
+            // The projection ran inside the batch (`batchApplied`); arranged panes follow it
             #if os(iOS)
             if #available(iOS 27.1, *) { arrangements.sync() }
             #endif

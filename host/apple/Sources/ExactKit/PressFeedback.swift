@@ -291,7 +291,7 @@ extension NodeView {
     /// `transform-origin` in the box's own coordinates (LLP 1061 D6): each
     /// axis points or `{"pct": n}` of the border box; the centre when unset.
     var transformOriginPoint: CGPoint {
-        Self.resolveTransformOrigin(style, in: bounds)
+        Self.resolveTransformOrigin(style, in: boxBounds)
     }
 
     package static func resolveTransformOrigin(_ style: NodeStyle, in bounds: CGRect) -> CGPoint {
@@ -302,7 +302,7 @@ extension NodeView {
             if case .object(let o) = axes[i], let pct = o["pct"]?.number { return size * pct / 100 }
             return size / 2
         }
-        return CGPoint(x: boxBounds.minX + axis(0, boxBounds.width), y: boxBounds.minY + axis(1, boxBounds.height))
+        return CGPoint(x: bounds.minX + axis(0, bounds.width), y: bounds.minY + axis(1, bounds.height))
     }
 
     #if os(iOS) || os(tvOS)
