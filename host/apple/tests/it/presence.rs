@@ -2,8 +2,8 @@
 //! view is kept and animated until its exit ends, then destroyed once; the
 //! sibling that takes its place slides there as a `layout` offset.
 
-use exact_apple::Host;
-use exact_kernel::MonospaceMeasurer;
+use exact_apple::{Claims, Host};
+use exact_kernel::{MonospaceMeasurer, OwnerValues};
 use exact_runner::{DataError, DataSource, Event, Value};
 
 struct NoData;
@@ -129,6 +129,55 @@ fn a_resize_takes_new_places_without_sliding() {
     assert!(
         presented(&resized, second, "layout").is_none_or(|o| o == (0.0, 0.0)),
         "{resized}"
+    );
+}
+
+/// A content owner's first values (LLP 1123 D9) end the layout its subtree
+/// had with the document's: a box they move takes its place, as on a resize.
+/// A later change of the values moves it.
+#[test]
+fn an_owners_first_values_place_a_box_without_sliding() {
+    let mut host = boot_source(
+        "component App\n  view\n    column testId=\"owner\" width=\"100%\" height=\"100%\"\n      column padding-left=\"max(16px, var(--exact-layout-margins-inset-left))\"\n        view testId=\"box\" width=40 height=40 -exact-layout-transition=\"300ms ease-in-out\"\n",
+    );
+    let (owner, box_id) = (view(&host, "owner").unwrap(), view(&host, "box").unwrap());
+    // A split's detail under a sidebar 320 points wide: its margins begin past it
+    let values = |left: f32| OwnerValues {
+        regions: Some([
+            [0.0; 4],
+            [0.0, 20.0, 0.0, left],
+            [0.0, 20.0, 0.0, left],
+            [0.0; 4],
+            [0.0; 4],
+        ]),
+        cols: 1,
+        rows: 1,
+        size: (390.0, 844.0),
+        ..OwnerValues::default()
+    };
+    let x = |host: &Host<NoData>| host.runner().kernel().node(box_id).unwrap().frame.x;
+    assert_eq!(x(&host), 16.0, "the document's margins");
+    let first = host.set_claims(&Claims {
+        owners: &[(owner, Some(values(340.0)))],
+        ..Claims::default()
+    });
+    assert_eq!(x(&host), 340.0, "{first}");
+    let shown = host.tick(100.0);
+    assert!(
+        layout(&shown, box_id).is_none_or(|v| v == [0.0; 4]),
+        "{first}\n{shown}"
+    );
+    assert!(host.engine().quiescent(), "{first}\n{shown}");
+    let later = host.set_claims(&Claims {
+        owners: &[(owner, Some(values(20.0)))],
+        ..Claims::default()
+    });
+    assert_eq!(x(&host), 20.0, "{later}");
+    let moving = host.tick(250.0);
+    assert_ne!(
+        layout(&moving, box_id).unwrap(),
+        [0.0; 4],
+        "{later}\n{moving}"
     );
 }
 

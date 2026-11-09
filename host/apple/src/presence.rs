@@ -54,6 +54,11 @@ pub(crate) struct Presence {
     layout: LayoutMotion,
     /// A resize lays out next: positions are taken, not animated.
     pub(super) snap: bool,
+    /// Content owners given their first values since the last layout. Their
+    /// subtrees were laid out with the document's values until now, so the
+    /// boxes the next layout moves under them take their places, as on a
+    /// resize (`Host::set_claims`).
+    pub(super) arrived: Vec<ViewId>,
     /// The presented frame a motion tick is for (LLP 1003.001 D5): every
     /// present while it is set starts what waits for it.
     pub(super) frame: Option<f64>,
@@ -312,6 +317,11 @@ impl<D: DataSource> Host<D> {
                         .and_then(|p| kernel.node(p))
                         .is_some_and(|p| wraps(p) && settled(p.parent))
             });
+        let arrived = !self.presence.arrived.is_empty()
+            && kernel.node_by_key(key).is_some_and(|n| {
+                std::iter::successors(Some(n), |n| n.parent.and_then(|p| kernel.node(p)))
+                    .any(|n| self.presence.arrived.contains(&n.id))
+            });
         let retired = if unauthored {
             self.presence
                 .layout
@@ -319,7 +329,7 @@ impl<D: DataSource> Host<D> {
         } else {
             self.presence
                 .layout
-                .observe(kernel, key, &mut self.engine, false)
+                .observe(kernel, key, &mut self.engine, arrived)
         };
         self.retire_layout(retired, batch);
     }

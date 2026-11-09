@@ -108,6 +108,7 @@ impl<D: DataSource> Host<D> {
         // An owner's values lay out again only where a row reads them, and
         // those rows' native styles are sent again as the owner resolves them.
         for (view, values) in owners {
+            let first = values.is_some() && !self.runner.kernel().has_owner_values(*view);
             match self
                 .runner
                 .kernel_mut()
@@ -115,6 +116,9 @@ impl<D: DataSource> Host<D> {
             {
                 Ok(true) => {
                     read = true;
+                    if first {
+                        self.presence.arrived.push(*view);
+                    }
                     for id in self.env_readers(*view) {
                         self.update(id, &mut batch);
                     }

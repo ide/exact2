@@ -424,6 +424,7 @@ impl<D: DataSource> Host<D> {
                 self.observe_layout(key, batch);
             }
         }
+        self.presence.arrived.clear();
         self.emit_fitted(&visited, &moved, batch);
         self.emit_extents(!visited.is_empty(), batch);
         self.snap_layout(batch);

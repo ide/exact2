@@ -108,6 +108,13 @@ impl Kernel {
         self.replace_env(next)
     }
 
+    /// Whether the host has published values for the content owner rooted at
+    /// `view` (`set_owner_values`). Until it does, the owner's subtree reads
+    /// the document's.
+    pub fn has_owner_values(&self, view: ViewId) -> bool {
+        (self.arena.slot_of(view)).is_some_and(|slot| self.arena.owner_values(slot).is_some())
+    }
+
     /// Publish the values of the content owner rooted at `view` (LLP 1123
     /// D9), or take them back (`None`): its safe area, layout regions and
     /// segments in its content root's coordinates, and the content root's
