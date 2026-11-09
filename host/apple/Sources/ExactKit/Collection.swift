@@ -227,7 +227,7 @@ package final class CollectionHost {
         /// (`portInsets`): one that changed under it moved the port.
         var batchInsets: [Double]?
         /// Where each mounted row showed along the list's axis when the batch
-        /// began: the rows a removal moves ride from there (`rideRemoval`).
+        /// began: the rows a removal or a commit moves ride from there (`rideBatch`).
         var batchRows: [UInt32: CGFloat] = [:]
         init(_ snapshot: CollectionSnapshot) { self.snapshot = snapshot }
     }
@@ -240,9 +240,11 @@ package final class CollectionHost {
     var correcting = false
     #if os(iOS) || os(tvOS)
     /// The exits under way when the batch began, and the lists whose rows
-    /// this batch's removal moves (`rideRemoval`).
+    /// this batch's removal or commit moves (`rideBatch`).
     private var batchLeaving = Set<UInt32>()
     var riding = Set<UInt32>()
+    /// The lists the batches under way say a runner commit moved (`Batch.rides`).
+    private var rideOwed = Set<UInt32>()
     #endif
     private var dirty = Set<UInt32>()
     private(set) var budget = CollectionTurnBudget()
@@ -411,6 +413,9 @@ package final class CollectionHost {
             }
         }
         batchDepth += 1
+        #if os(iOS) || os(tvOS)
+        rideOwed.formUnion(batch.rides)
+        #endif
         for op in batch.ops where op.op == .collections {
             guard let items = op.payload["items"] as? [[String: Any]] else { continue }
             let snapshots = items.compactMap(CollectionSnapshot.init)
@@ -441,7 +446,7 @@ package final class CollectionHost {
             guard let port = geometry(view) else { continue }
             // A removal's rows move once, at the outermost batch's end
             #if os(iOS) || os(tvOS)
-            if batchDepth == 1, removes(view, began: batchLeaving) { riding.insert(view) }
+            if batchDepth == 1, removes(view, began: batchLeaving) || rideOwed.contains(view) { riding.insert(view) }
             #endif
             let dimensions = [port.portCross, port.portMain, port.cross]
             let planned = entry.cursor.sequence, jumped = entry.cursor.jumpedAt
@@ -491,19 +496,23 @@ package final class CollectionHost {
                    sequence: correction.sequence == planned ? entry.cursor.sequence : correction.sequence) {
                 correcting = true
                 #if os(iOS) || os(tvOS)
-                correct(view, top: correction.offset, extent: entry.snapshot.extent, smooth: correction.smooth, from: entry.batchStart)
+                // A list riding the batch lands at once: its rows move from where they showed
+                correct(view, top: correction.offset, extent: entry.snapshot.extent, smooth: correction.smooth && !riding.contains(view), from: entry.batchStart)
                 #else
                 correct(view, top: correction.offset, extent: entry.snapshot.extent, smooth: correction.smooth)
                 #endif
                 correcting = false
             }
             #if os(iOS) || os(tvOS)
-            if riding.remove(view) != nil { rideRemoval(view) }
+            if riding.remove(view) != nil { rideBatch(view) }
             #endif
             entry.batchStart = nil
             dirty.insert(view)
         }
         batchDepth = max(0, batchDepth - 1)
+        #if os(iOS) || os(tvOS)
+        if batchDepth == 0 { rideOwed.removeAll() }
+        #endif
     }
     /// The collection whose mounted row holds `descendant`: the nearest row
     /// wrapper at or above it names the owner, as the web host's `liveView`

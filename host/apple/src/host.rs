@@ -1379,7 +1379,7 @@ impl<D: DataSource> Host<D> {
         } else if inert {
             self.inert_layout(&mut batch, !receipts.is_empty()).err()
         } else {
-            self.layout(&mut batch).err()
+            self.commit_layout(&mut batch, receipts).err()
         };
         if layout_error.is_some() && !receipts.is_empty() {
             self.emit_ranks(&mut batch);

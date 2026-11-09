@@ -330,7 +330,7 @@ extension CollectionHost {
             // forth in one turn, which the list reads as the reader scrolling
             // (filmed: the typing indicator's row dropped out until the next
             // batch). A removal with an exit animation moves its rows itself
-            // (`rideRemoval`). Inside an animation (the keyboard's) the pull
+            // (`rideBatch`). Inside an animation (the keyboard's) the pull
             // already rides that one.
             var shown = target
             if horizontal { shown.x = CGFloat(start) - insets.left + content.minX } else { shown.y = CGFloat(start) - insets.top + node.pageBand.top + content.minY }
@@ -387,14 +387,16 @@ extension CollectionHost {
         guard let presenter, let rows = entries[id]?.batchRows else { return false }
         return presenter.leaving.keys.contains { !began.contains($0) && rows[$0] != nil }
     }
-    /// Moves each row a removal shifted on the screen, the leaving ones too,
-    /// from where it showed to where it is, additively, as a collection
-    /// view's batch update moves them: rows after a removal at a followed
-    /// end stay put, and the rows before it come down over the gap with the
-    /// leaving row as it fades. A row the batch mounted moves as the row it
-    /// is nearest to. Inside an animation (the keyboard's) the rows already
-    /// ride that one.
-    func rideRemoval(_ id: UInt32) {
+    /// Moves each row a removal or a runner commit shifted on the screen,
+    /// the leaving ones too, from where it showed to where it is,
+    /// additively, on one spring from one frame, as a collection view's
+    /// batch update moves them: rows after a removal at a followed end stay
+    /// put, and the rows before it come down over the gap with the leaving
+    /// row as it fades; rows above a row that grows at a followed end go up
+    /// as the port takes the new end at once. A row the batch mounted moves
+    /// as the row it is nearest to. Inside an animation (the keyboard's) the
+    /// rows already ride that one.
+    func rideBatch(_ id: UInt32) {
         guard UIView.inheritedAnimationDuration == 0, let presenter, let entry = entries[id], let scroll = presenter.views[id]?.scroll else { return }
         let horizontal = entry.snapshot.horizontal, key = "removal-\(CACurrentMediaTime())"
         let offset = horizontal ? scroll.contentOffset.x : scroll.contentOffset.y

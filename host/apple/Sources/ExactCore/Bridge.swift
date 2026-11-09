@@ -38,6 +38,9 @@ public struct Batch {
     public var canvas = false
     /// A frame task wants every display frame (LLP 1073 D5).
     public var frames = false
+    /// The lists whose rows a runner commit moved: each of their rows
+    /// moves from where it showed, as a collection view's batch update.
+    public var rides: [UInt32] = []
     /// A canvas draw is owed to a turn of its own (LLP 1072 §8.5).
     public var canvasOwed = false
     /// A control's viewless contents changed (LLP 1069.011 §9).

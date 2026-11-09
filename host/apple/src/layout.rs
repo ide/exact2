@@ -97,6 +97,17 @@ impl<D: DataSource> Host<D> {
     /// Lay every root out under the viewport and emit the parent-relative
     /// frames and scroll content sizes that changed. One that fails is
     /// owed (`layout_owed`) until one succeeds.
+    /// [`Host::layout`] after `receipts`: the lists whose rows a runner
+    /// commit moves ride the move (`Presence::committed`).
+    pub(super) fn commit_layout(
+        &mut self,
+        batch: &mut Batch,
+        receipts: &[exact_runner::Timed],
+    ) -> Result<(), String> {
+        self.presence.committed = !receipts.is_empty();
+        self.layout(batch)
+    }
+
     pub(super) fn layout(&mut self, batch: &mut Batch) -> Result<(), String> {
         let laid = self.layout_pass(batch);
         self.layout_owed = laid.is_err();
@@ -239,6 +250,7 @@ impl<D: DataSource> Host<D> {
     /// The parent-relative frames and scroll content sizes that changed since
     /// the presenter last heard them.
     fn emit_layout(&mut self, batch: &mut Batch) -> Result<(), String> {
+        let snapping = self.presence.snap;
         self.judge_list_moves();
         // Preserve publication order without a tree insertion for each touch.
         let mut pending: Vec<_> = std::mem::take(&mut self.pending_layout)
@@ -437,7 +449,7 @@ impl<D: DataSource> Host<D> {
         }
         self.layout_withheld = false;
         self.emit_ranks(batch);
-        self.measure_collections(&moved)?;
+        self.measure_collections(&moved, !snapping, batch)?;
         self.emit_collections(batch)
     }
 
@@ -458,6 +470,7 @@ impl<D: DataSource> Host<D> {
         batch: &mut Batch,
         committed: bool,
     ) -> Result<(), String> {
+        self.presence.committed = committed;
         let fonts = self
             .font_hook
             .as_ref()
@@ -468,7 +481,7 @@ impl<D: DataSource> Host<D> {
         }
         if !self.height_layout_if_needed(batch)? && committed {
             self.judge_list_moves();
-            self.measure_collections(&IdSet::default())?;
+            self.measure_collections(&IdSet::default(), false, batch)?;
             self.emit_collections(batch)?;
         }
         Ok(())
@@ -485,8 +498,16 @@ impl<D: DataSource> Host<D> {
     /// move implies, where the presenter's next report would land a frame
     /// later. Only a list the runner changed since its last measurement (a
     /// report, rows mounted or retired, data), or a row wrapper of which
-    /// this layout moved or resized (`moved`).
-    fn measure_collections(&mut self, moved: &IdSet<ViewId>) -> Result<(), String> {
+    /// this layout moved or resized (`moved`). Such a list rides the move
+    /// (`Batch::rides`) when a runner commit made it and `rides` allows:
+    /// not a resize, which takes places without motion.
+    fn measure_collections(
+        &mut self,
+        moved: &IdSet<ViewId>,
+        rides: bool,
+        batch: &mut Batch,
+    ) -> Result<(), String> {
+        let rides = std::mem::take(&mut self.presence.committed) && rides;
         if self.native_mode() {
             return Ok(());
         }
@@ -501,9 +522,11 @@ impl<D: DataSource> Host<D> {
             let list = head.view;
             let mut revision = head.revision;
             self.runner.collection_mounted(list, &mut mounted);
-            if self.presence.measured.get(&list) != Some(&revision)
-                || mounted.iter().any(|(wrapper, _)| moved.contains(wrapper))
-            {
+            let moved_row = mounted.iter().any(|(wrapper, _)| moved.contains(wrapper));
+            if rides && moved_row {
+                batch.rides.push(list);
+            }
+            if self.presence.measured.get(&list) != Some(&revision) || moved_row {
                 let horizontal = head.axis == exact_runner::ListAxis::Horizontal;
                 let rows: Vec<_> = (mounted.iter())
                     .filter_map(|(wrapper, _)| {

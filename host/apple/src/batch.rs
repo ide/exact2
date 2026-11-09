@@ -36,6 +36,10 @@ pub struct Batch {
     /// A frame task wants each display frame (LLP 1073 D5): the display
     /// link runs and each tick is `exact_frame`.
     pub frames: bool,
+    /// The lists whose rows a runner commit moved, `"rides":[…]`: the
+    /// presenter moves each of their rows from where it showed, as a
+    /// collection view's batch update does (`Host::measure_collections`).
+    pub rides: Vec<u32>,
     /// The kernel transactions this batch carries, `"seq":[first,last]`,
     /// when the runner measures (LLP 1079 D3): the frame sampler's join.
     pub seq: Option<(u64, u64)>,
@@ -873,6 +877,16 @@ impl Batch {
         }
         if self.frames {
             s.push_str(",\"frames\":true");
+        }
+        if !self.rides.is_empty() {
+            s.push_str(",\"rides\":[");
+            for (i, id) in self.rides.iter().enumerate() {
+                if i != 0 {
+                    s.push(',');
+                }
+                let _ = write!(s, "{id}");
+            }
+            s.push(']');
         }
         if self.canvas_owed {
             s.push_str(",\"canvasOwed\":true");
