@@ -309,12 +309,21 @@ package final class CollectionHost {
     var riding = Set<UInt32>()
     /// The lists the batches under way say a runner commit moved (`Batch.rides`).
     private var rideOwed = Set<UInt32>()
+    /// The lists whose last fling UIKit projected to an edge as the finger
+    /// left (`flingProjected`).
+    var edgeBoundFlings = Set<UInt32>()
     #endif
     private var dirty = Set<UInt32>()
     private(set) var budget = CollectionTurnBudget()
     /// Lists whose uncovered port a rescue reports first, whatever the
     /// turn has spent (`CollectionTurnBudget.begin(rescue:)`).
     private var rescuing = Set<UInt32>()
+    /// The passes one rescue takes whatever the turn has spent: one builds
+    /// what shows, the next reports its measurements. A port they leave
+    /// uncovered is rescued again by the next scroll callback. Feedback work
+    /// is bounded per callback (LLP 1010 §6.5): a rescue whose every batch
+    /// dirtied its list again would otherwise hold the main thread for good.
+    static let rescuePasses = 2
     /// Each turn of the main run loop gets its passes: a continuation
     /// (`schedule`) or a slice is not the only start of a turn.
     private var turnObserver: CFRunLoopObserver?
@@ -517,7 +526,7 @@ package final class CollectionHost {
         refreshPins = false; lastVisited = 0
         #if os(iOS) || os(tvOS)
         focusFound = nil
-        batchLeaving.removeAll(); riding.removeAll()
+        batchLeaving.removeAll(); riding.removeAll(); edgeBoundFlings.removeAll()
         #endif
     }
     func beginBatch(_ batch: Batch) {
@@ -883,11 +892,14 @@ package final class CollectionHost {
         // Each list once per flush, at most, without a report (bounded
         // even if a visit re-dirties its list).
         var free = entries.count
+        // Passes a rescue takes past the turn's (`rescuePasses`).
+        var rescues = 0
         while !dirty.isEmpty {
             // A slice in flight holds every report until it lands (T4).
             if filling?() == true { return }
-            let rescue = !rescuing.isDisjoint(with: dirty)
+            let rescue = rescues < Self.rescuePasses && !rescuing.isDisjoint(with: dirty)
             guard budget.begin(rescue: rescue) else { return }
+            if rescue { rescues += 1 }
             #if os(iOS) || os(tvOS)
             let focus = focusFound ?? focusedView()
             focusFound = focus

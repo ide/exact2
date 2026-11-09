@@ -209,15 +209,18 @@ extension CollectionHost {
         let moved = horizontal ? target.x - scroll.contentOffset.x : target.y - scroll.contentOffset.y
         let startMoved = entries[id]?.startMoved ?? false
         scroll.contentOffset = target
-        if startMoved, scroll.isDecelerating, !scroll.isTracking {
-            // Rows came or went before the reader under a fling (a page of a
-            // chat's history landed): the fling ends where they put the
-            // reader. A deceleration that will meet an edge computes each
-            // frame from the last offset it set itself, not this one, and
-            // would carry the reader back by the page to the new first row,
-            // where the start edge that just fired waits for the reader to
-            // leave before it fires again. Rows measured under a fling move
-            // the offset and the fling goes on.
+        if startMoved, scroll.isDecelerating, !scroll.isTracking, edgeBoundFlings.contains(id) {
+            // Rows came or went before the reader under a fling UIKit
+            // projected to an edge (a page of a chat's history landed near
+            // its first row): the fling ends where they put the reader.
+            // UIKit decides as the finger leaves whether a deceleration
+            // will meet an edge; one that will computes each frame from the
+            // last offset it set itself, not this one, and would carry the
+            // reader back by the page to the new first row, where the start
+            // edge that just fired waits for the reader to leave before it
+            // fires again. A fling projected to rest short of the edges
+            // reads the offset each frame and goes on from here at its
+            // velocity (LLP 1010 §6.5), as it does for rows measured under it.
             if #available(iOS 17.4, tvOS 17.4, *) { scroll.stopScrollingAndZooming() }
             else { scroll.setContentOffset(target, animated: false) }
             presenter?.scrollPump.forgetTravel(id)
@@ -225,6 +228,24 @@ extension CollectionHost {
         }
         // Not the reader's travel: the fill's velocity reads on from here.
         presenter?.scrollPump.shifted(id, by: moved)
+    }
+    /// UIKit's projected rest for a fling on `id` as the finger leaves
+    /// (`scrollViewWillEndDragging`'s target), recorded for a page that
+    /// lands under the deceleration (`shift`).
+    func flingProjected(_ id: UInt32, to target: CGPoint, in scroll: UIScrollView) {
+        guard let entry = entries[id] else { return }
+        if Self.meetsEdge(target, in: scroll, horizontal: entry.snapshot.horizontal) { edgeBoundFlings.insert(id) } else { edgeBoundFlings.remove(id) }
+    }
+    /// Whether a projected rest is at an edge of what the scroll view
+    /// reaches on the list's axis, where UIKit clamps a deceleration that
+    /// would pass it.
+    static func meetsEdge(_ target: CGPoint, in scroll: UIScrollView, horizontal: Bool) -> Bool {
+        let i = scroll.adjustedContentInset
+        let to = horizontal ? target.x : target.y
+        let low = horizontal ? -i.left : -i.top
+        let high = max(low, horizontal ? scroll.contentSize.width + i.right - scroll.bounds.width
+            : scroll.contentSize.height + i.bottom - scroll.bounds.height)
+        return to <= low + 0.5 || to >= high - 0.5
     }
     /// The content size the list's extent needs.
     private func fit(_ node: NodeView, _ scroll: UIScrollView, extent: Double) {

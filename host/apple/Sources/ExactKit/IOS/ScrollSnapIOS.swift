@@ -14,6 +14,8 @@ extension NodeView {
         defer { if swipeOwner { presenter?.swipeActions.painted.willEnd(self, scrollView, target: targetContentOffset) } }
         #endif
         targetContentOffset.pointee = snappedOffset(targetContentOffset.pointee, in: scrollView)
+        // Where a list's fling will rest, for a page that lands under it (`CollectionHost.shift`)
+        presenter?.collections.flingProjected(id, to: targetContentOffset.pointee, in: scrollView)
     }
 
     /// The native resting position, optionally constrained to the snap area

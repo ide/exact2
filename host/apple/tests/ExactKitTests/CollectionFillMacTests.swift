@@ -99,6 +99,25 @@ final class CollectionFillMacTests: XCTestCase {
         XCTAssertEqual(p.collections.budget.refusedSpent, 0)
     }
 
+    /// A rescue takes its passes and returns, even when each report's batch
+    /// leaves its list with news to report (here, a port that grows a point
+    /// each time): the scroll callback that started it ends, and the list's
+    /// next report waits for the next turn.
+    func testARescueWhoseBatchesKeepItsListDirtyEndsAfterItsPasses() throws {
+        let (p, list, _) = fixture(rows: 4)
+        defer { p.collections.reset() }
+        var wires: [Data] = []
+        p.collections.onFeedback = { wire in
+            wires.append(wire)
+            // Bounded here too, so that the loop this guards against ends the test
+            guard wires.count < 50 else { return }
+            p.apply(self.batch([["op": "frame", "id": 1, "x": 0.0, "y": 0.0, "w": 300.0, "h": 200.0 + Double(wires.count)]]))
+        }
+        let clip = try XCTUnwrap(list.scroll?.contentView)
+        clip.scroll(to: NSPoint(x: 0, y: 200))
+        XCTAssertEqual(wires.count, CollectionHost.rescuePasses, "what shows is built, then measured, and the callback returns")
+    }
+
     private func flags(_ wire: Data) -> UInt32 {
         wire.subdata(in: 92..<96).withUnsafeBytes { $0.loadUnaligned(as: UInt32.self) }
     }

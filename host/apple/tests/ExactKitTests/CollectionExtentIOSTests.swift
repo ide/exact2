@@ -37,5 +37,21 @@ final class CollectionExtentIOSTests: XCTestCase {
             XCTAssertEqual(length(), 5100, accuracy: 0.5, "longer laid-out content still reaches further")
         }
     }
+
+    /// A fling meets an edge when UIKit projects it to rest there, clamped
+    /// to what the scroll view reaches; space before the rows moves the
+    /// start edge away from the same projection.
+    func testAFlingMeetsTheEdgeUIKitProjectsItToRestAt() {
+        let scroll = UIScrollView(frame: CGRect(x: 0, y: 0, width: 300, height: 600))
+        scroll.contentInsetAdjustmentBehavior = .never
+        scroll.contentSize = CGSize(width: 300, height: 10_000)
+        XCTAssertTrue(CollectionHost.meetsEdge(CGPoint(x: 0, y: 0), in: scroll, horizontal: false), "the start")
+        XCTAssertTrue(CollectionHost.meetsEdge(CGPoint(x: 0, y: 9_400), in: scroll, horizontal: false), "the end")
+        XCTAssertFalse(CollectionHost.meetsEdge(CGPoint(x: 0, y: 2), in: scroll, horizontal: false), "short of the start")
+        scroll.contentInset.top = 6_000
+        XCTAssertFalse(CollectionHost.meetsEdge(CGPoint(x: 0, y: 0), in: scroll, horizontal: false), "6,000 points before the rows")
+        XCTAssertTrue(CollectionHost.meetsEdge(CGPoint(x: 0, y: -6_000), in: scroll, horizontal: false))
+        XCTAssertTrue(CollectionHost.meetsEdge(CGPoint(x: 0, y: 0), in: scroll, horizontal: true), "a row list's start")
+    }
 }
 #endif
