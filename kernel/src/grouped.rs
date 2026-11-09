@@ -224,6 +224,15 @@ impl TextLook {
     }
 }
 
+/// Whether the URL has the shape of an app path, excluding schemes, hosts
+/// and fragment/query-only links. This does not decide how a route presents.
+fn in_app(href: &str) -> bool {
+    let scheme = href
+        .split_once(':')
+        .is_some_and(|(s, _)| !s.is_empty() && !s.contains(['/', '?', '#']));
+    !scheme && !href.starts_with("//") && !href.is_empty() && !href.starts_with(['#', '?'])
+}
+
 /// A symbol image's Apple name: an `sf/` name as written, a role by the
 /// symbol table; `None` for any other node or source.
 fn apple_symbol(node: &NodeRef<'_>) -> Option<String> {
@@ -373,6 +382,9 @@ impl Kernel {
                 .collect()
         };
         let parts = shown(row);
+        // The platform supplies a disclosure for an internal link when the
+        // author left its accessory unsaid (LLP 1084 D4).
+        let leads_in = row.props.link().is_some_and(in_app);
         // A row that lays out as a column (a `column`, LLP 1116 D2) stacks
         // its parts: one or two texts are the subtitle cell's lines, and
         // anything else is its own layout.
@@ -391,6 +403,9 @@ impl Kernel {
                     custom: true,
                     ..out
                 };
+            }
+            if leads_in {
+                out.accessory = Accessory::Disclosure;
             }
             return out;
         }
@@ -475,6 +490,9 @@ impl Kernel {
         }
         if out.title.is_none() {
             out.custom = true;
+        }
+        if out.accessory == Accessory::None && leads_in {
+            out.accessory = Accessory::Disclosure;
         }
         // UIKit's content configuration draws none of the row's box: a row
         // whose author wrote an edge of it, or its background image, is its
