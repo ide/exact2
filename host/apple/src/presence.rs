@@ -68,6 +68,10 @@ pub(crate) struct Presence {
     /// Each list's revision when its rows' sizes were last taken in
     /// (`Host::measure_collections`).
     pub(super) measured: IdMap<ViewId, u64>,
+    /// The layout under way follows a runner commit (`Host::commit_tree`),
+    /// not a motion tick or the host's geometry: the lists whose rows it
+    /// moves ride that move (`Batch::rides`).
+    pub(super) committed: bool,
     /// The lists whose data this layout's commit did not change: their rows'
     /// moves are the list's own (`LayoutMotion::observe_unauthored`).
     settled: IdSet<ViewId>,

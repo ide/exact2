@@ -36,6 +36,7 @@ extension BatchReader {
         var waits: [Double] = [], waitContinue = false
         var nativeTimers: [NativeTimerWake]?
         var images: [String] = []
+        var rides: [UInt32] = []
         var seq: (UInt64, UInt64)?
         var alerts: [String] = []
         var journal: [String] = []
@@ -55,6 +56,7 @@ extension BatchReader {
             case "waits": waits = try r.array { try $0.number() }
             case "waitContinue": waitContinue = try r.bool()
             case "frames": frames = try r.bool()
+            case "rides": rides = try r.array { try $0.number() }.compactMap { UInt32(exactly: $0) }
             case "canvasOwed": canvasOwed = try r.bool()
             case "controls": controls = try r.bool()
             case "layoutProvisional": layoutProvisional = try r.bool()
@@ -98,6 +100,7 @@ extension BatchReader {
         batch.timerWaits = waits
         batch.nativeTimers = nativeTimers
         batch.waitContinue = waitContinue
+        batch.rides = rides
         batch.canvasOwed = canvasOwed
         batch.controls = controls
         batch.layoutProvisional = layoutProvisional

@@ -383,7 +383,7 @@ extension CollectionHost {
             // animation of the difference, which later batches move under
             // without stopping it. Animating the offset with `UIView.animate`
             // would write the old model position again and report that write
-            // as reader travel. An exit moves its rows instead (`rideRemoval`).
+            // as reader travel. An exit moves its rows instead (`rideBatch`).
             // Inside an enclosing animation, such as the keyboard's, the
             // offset already follows that animation.
             var shown = target
@@ -440,14 +440,16 @@ extension CollectionHost {
         guard let presenter, let rows = entries[id]?.batchRows else { return false }
         return presenter.leaving.keys.contains { !began.contains($0) && rows[$0] != nil }
     }
-    /// Moves each row a removal shifted on the screen, the leaving ones too,
-    /// from where it showed to where it is, additively, as a collection
-    /// view's batch update moves them: rows after a removal at a followed
-    /// end stay put, and the rows before it come down over the gap with the
-    /// leaving row as it fades. A row the batch mounted moves as the row it
-    /// is nearest to. Inside an animation (the keyboard's) the rows already
-    /// ride that one.
-    func rideRemoval(_ id: UInt32) {
+    /// Moves each row a removal or a runner commit shifted on the screen,
+    /// the leaving ones too, from where it showed to where it is,
+    /// additively, on one spring from one frame, as a collection view's
+    /// batch update moves them: rows after a removal at a followed end stay
+    /// put, and the rows before it come down over the gap with the leaving
+    /// row as it fades; rows above a row that grows at a followed end go up
+    /// as the port takes the new end at once. A row the batch mounted moves
+    /// as the row it is nearest to. Inside an animation (the keyboard's) the
+    /// rows already ride that one.
+    func rideBatch(_ id: UInt32) {
         guard !DisplayPreferences.reducedMotion, !ExactEnv.agentFreezes, UIView.inheritedAnimationDuration == 0,
               let presenter, let entry = entries[id], let scroll = presenter.views[id]?.scroll else { return }
         let horizontal = entry.snapshot.horizontal, key = "removal-\(CACurrentMediaTime())"
