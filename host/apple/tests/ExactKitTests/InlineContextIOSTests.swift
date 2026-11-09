@@ -6,6 +6,13 @@ import CoreVideo
 @testable import ExactKit
 
 final class InlineContextIOSTests: XCTestCase {
+    /// Runs the main loop until `done` holds, at most `seconds`.
+    private func until(_ what: String, _ seconds: Double = 5, _ done: () -> Bool) {
+        let deadline = Date().addingTimeInterval(seconds)
+        while !done(), Date() < deadline { RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.02)) }
+        XCTAssertTrue(done(), what)
+    }
+
     private var window: UIWindow!
     private var session: ExactSession?
 
