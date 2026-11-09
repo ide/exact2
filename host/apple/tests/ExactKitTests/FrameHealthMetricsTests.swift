@@ -44,6 +44,7 @@ final class FrameHealthMetricsTests: XCTestCase {
                 ctx.translateBy(x: -corner.minX, y: -corner.minY)
                 draw(ctx)
             }
+            XCTAssertTrue(CapturePixels.hasPaint(pixels), "the face drawing contains paint")
             return pixels
         }
         func fills(_ outline: (CGRect, CGFloat) -> CGPath) -> [UInt8] {
@@ -60,6 +61,7 @@ final class FrameHealthMetricsTests: XCTestCase {
         XCTAssertEqual(apart(face, fills { FrameHealthCardDrawing.continuous($0, radius: $1) }), 0, "the track and the chip take the continuous outline")
         XCTAssertGreaterThan(apart(face, fills { CGPath(roundedRect: $0, cornerWidth: $1, cornerHeight: $1, transform: nil) }), 100,
                              "and circular corners would draw other pixels")
+        XCTExpectFailure("an empty picture cannot establish a different outline") { _ = picture { _ in } }
     }
 
     /// The outline `path` traces, its curves divided into 64 lines each
@@ -270,20 +272,23 @@ final class FrameHealthMetricsTests: XCTestCase {
         XCTAssertEqual(chart.latest, 140.27)
         chart.tick(at: 140.3)
         XCTAssertEqual(chart.head, 140.27, "not within a column of the spell, which moved them")
-        // Held, the layers keep their picture while frames arrive; let go, they show the present
+        // Held, the layers keep their picture and the charts take no frames, so the paused span is a gap; let go, they
+        // show the present
         chart.present()
         let shown = lines[0].position.x
         chart.hold(true, at: 140.4)
         XCTAssertNil(chart.clock, "a held picture does not follow the time")
         chart.frame(at: 141)
+        chart.busy(start: 141.1, end: 141.2, budget: 1 / 120)
         chart.present()
         XCTAssertEqual(lines[0].position.x, shown)
-        XCTAssertEqual(chart.picture.latest, 140.27, "the picture is the moment it was held")
-        XCTAssertEqual(chart.latest, 141, "frames still arrive")
+        XCTAssertEqual(chart.latest, 140.27, "the picture is the moment it was held")
+        XCTAssertFalse(chart.columns.contains { $0.index >= 1410 })
         chart.hold(false, at: 150)
-        XCTAssertEqual(chart.head, 150, "the present, past what arrived while it was held")
-        XCTAssertEqual(chart.picture.latest, 141)
+        XCTAssertEqual(chart.head, 150, "the present, past the pause")
         XCTAssertEqual(lines[0].position.x, 0, "drawn whole at the present")
+        chart.frame(at: 150.15)
+        XCTAssertEqual(chart.columns.first { $0.index == 1501 }?.joined, false, "the next frame begins a new run")
         chart.follow(false)
         XCTAssertNil(chart.clock)
         // A dotted line's dashes keep their place in time as the plot moves on
@@ -341,10 +346,11 @@ final class FrameHealthMetricsTests: XCTestCase {
                 var bytes = [UInt8](repeating: 0, count: width * height * 4)
                 bytes.withUnsafeMutableBytes { buffer in
                     let ctx = CGContext(data: buffer.baseAddress, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4,
-                        space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue)!
+                        space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
                     ctx.scaleBy(x: 2, y: 2)
                     layer.render(in: ctx)
                 }
+                XCTAssertTrue(CapturePixels.hasPaint(bytes), "the chart layer draws")
                 return bytes
             }
             func shown() {
@@ -398,6 +404,9 @@ final class FrameHealthMetricsTests: XCTestCase {
                 }
                 XCTAssertGreaterThan(dark.count, 20, "the last second's frame-rate line")
             }
+            let empty = CALayer()
+            empty.bounds = layers[0].bounds
+            XCTExpectFailure("an empty chart layer cannot establish matching redraws") { _ = pixels(empty) }
         }
     }
 
@@ -507,14 +516,41 @@ final class FrameHealthMetricsTests: XCTestCase {
         XCTAssertLessThan(4 * card + 48_776, 256 * 1024, "within the process's 256 KiB")
     }
 
-    func testAReleasedCardRestsInTheCornerItsGlideReaches() {
-        typealias Corner = FrameHealthCardFace.Corner
-        let area = CGRect(x: 8, y: 8, width: 400, height: 800), size = CGSize(width: 320, height: 416)
-        XCTAssertEqual(Corner(nearest: CGPoint(x: 20, y: 500), velocity: .zero, size: size, in: area), Corner(maxY: true),
-            "at rest, the corner nearest the card's center")
+    func testAReleasedCardRestsAnywhereAlongTheNearestEdge() {
+        typealias Position = FrameHealthCardFace.Position
+        let area = CGRect(x: 8, y: 8, width: 800, height: 1000), size = CGSize(width: 320, height: 416)
+        for fraction: CGFloat in [0.17, 0.5, 0.83] {
+            let x = area.minX + fraction * (area.width - size.width)
+            let y = area.minY + fraction * (area.height - size.height)
+            for (release, target) in [
+                (CGPoint(x: 20, y: y), CGPoint(x: 8, y: y)),
+                (CGPoint(x: 470, y: y), CGPoint(x: 488, y: y)),
+                (CGPoint(x: x, y: 20), CGPoint(x: x, y: 8)),
+                (CGPoint(x: x, y: 580), CGPoint(x: x, y: 592))
+            ] {
+                let position = Position(nearest: release, velocity: .zero, size: size, in: area)
+                let landed = position.origin(of: size, in: area)
+                XCTAssertEqual(landed.x, target.x, accuracy: 0.001)
+                XCTAssertEqual(landed.y, target.y, accuracy: 0.001)
+            }
+        }
         // Normal deceleration carries a release at 1,000 points a second 499 points
-        XCTAssertEqual(Corner(nearest: CGPoint(x: 20, y: 500), velocity: CGVector(dx: 0, dy: -1000), size: size, in: area), Corner())
-        XCTAssertEqual(Corner(maxX: true, maxY: true).origin(of: size, in: area), CGPoint(x: 88, y: 392))
+        let glide = Position(nearest: CGPoint(x: 20, y: 500), velocity: CGVector(dx: 0, dy: -1000), size: size, in: area)
+        XCTAssertEqual(glide.origin(of: size, in: area), CGPoint(x: 20, y: 8))
+        let side = Position(nearest: CGPoint(x: 20, y: 300), velocity: CGVector(dx: 1000, dy: 100), size: size, in: area)
+        XCTAssertEqual(side.origin(of: size, in: area).x, 488)
+        XCTAssertEqual(side.origin(of: size, in: area).y, 349.9, accuracy: 0.001)
+        let middle = Position(nearest: CGPoint(x: 20, y: 300), velocity: .zero, size: size, in: area)
+        let smaller = CGRect(x: 8, y: 8, width: 600, height: 708)
+        XCTAssertEqual(middle.origin(of: size, in: smaller), CGPoint(x: 8, y: 154))
+        XCTAssertEqual(middle.origin(of: CGSize(width: 900, height: 1200), in: area), area.origin)
+        XCTAssertEqual(middle.origin(of: size, in: area), CGPoint(x: 8, y: 300), "a temporary size constraint preserves the chosen position")
+        XCTAssertEqual(Position(nearest: CGPoint(x: -1000, y: 2000), velocity: .zero, size: size, in: area).origin(of: size, in: area), CGPoint(x: 8, y: 592))
+        XCTAssertEqual(Position(nearest: .zero, velocity: .zero, size: size, in: CGRect(x: 8, y: 8, width: 0, height: 0)).origin(of: size, in: area), area.origin)
+    }
+
+    func testADragKeepsItsReleaseVelocityAndResistsPastTheEdges() {
+        let area = CGRect(x: 8, y: 8, width: 400, height: 800), size = CGSize(width: 320, height: 416)
         var drag = FrameHealthCardFace.Drag(at: .zero, time: 1, origin: .zero, control: nil)
         drag.track(CGPoint(x: 10, y: 0), at: 1.01)
         // A lift at the last point keeps the momentum; one after the press held still has none
@@ -929,11 +965,11 @@ final class FrameHealthMetricsTests: XCTestCase {
         XCTAssertEqual(exactCore["frameIntervals"] as? String, "0")
     }
 
-    func testEachReadTakesTheMainThreadsWorkAndAPausedCardsCopyReadsNoMore() {
+    func testEachReadTakesTheMainThreadsWorkAndTheReadAfterAPauseCoversIt() {
         let health = FrameHealth(enabled: true)
         defer { health.destroy() }
         let reader = FrameHealthCardReader()
-        XCTAssertTrue(reader.start(claim: false))
+        XCTAssertTrue(reader.start())
         defer { reader.stop() }
         var taken = 0
         reader.sample(health, now: 1, force: true, main: { taken += 1; return (0.004, 0) })
@@ -942,11 +978,12 @@ final class FrameHealthMetricsTests: XCTestCase {
         XCTAssertEqual(taken, 2, "each read takes the main thread's work, the baseline's too, so none carries over")
         XCTAssertEqual(reader.window(5).mainLongest, 61, accuracy: 1e-9)
         XCTAssertEqual(reader.window(5).counts.long, 2)
-        let copy = reader.copy()
-        XCTAssertFalse(copy.reading, "a paused card's copy holds no reader's place")
+        // A paused card reads nothing; its first read after covers the paused span, from the last read before it
         health.record(arrival: 1.7, target: 1.71, period: 0, finished: 1.705)
-        reader.sample(health, now: 2.2, force: true, main: { (0.001, 0) })
-        XCTAssertEqual(copy.samples.count, 1)
+        health.record(arrival: 3.7, target: 3.71, period: 0, finished: 3.705)
+        reader.sample(health, now: 4.6, main: { (0.001, 0) })
+        XCTAssertEqual(reader.window(0.5).from, 1.6, accuracy: 1e-9)
+        XCTAssertEqual(reader.window(0.5).counts.callbacks, 2)
         XCTAssertEqual(reader.samples.count, 2)
     }
 

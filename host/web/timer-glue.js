@@ -10,7 +10,7 @@ export function timerWake(due, now, agent = false, tolerance = 0) {
 
 // @ref LLP 1073 D5 — while the batch says `frames`, every animation frame is
 // `present(timestamp)` (timers, then frame tasks); timeouts still wake timers.
-export function createTimerScheduler({ now, advance, present = null, release = null, agentMode = false, paint = () => {},
+export function createTimerScheduler({ now, advance, present = null, release = null, agentMode = false, paint = () => {}, scrollPending = () => false,
   raf = requestAnimationFrame, cancel = cancelAnimationFrame, delay = setTimeout, clearDelay = clearTimeout }) {
   let due = null, frames = false, frame = null, timeout = null, requested = false, running = false, disposed = false;
   let waits = [], admission = null, earliest = null, tolerance = 0;
@@ -44,7 +44,7 @@ export function createTimerScheduler({ now, advance, present = null, release = n
     update(deadline, wantsFrames = false, waiting = [], slack = 0) {
       earliest = deadline ?? null; tolerance = slack; due = deadline == null ? null : deadline + slack; frames = !!wantsFrames; waits = waiting;
       if (waiting.length && release && !admission && typeof document !== 'undefined') {
-        admission = createWaitObserver({ now, read: () => waits, release, demand: () => frames, next: () => earliest, requestFrame: () => { requested = true; schedule(); } });
+        admission = createWaitObserver({ now, read: () => waits, release, demand: () => frames, next: () => earliest, scrollPending, requestFrame: () => { requested = true; schedule(); } });
       }
       admission?.update(); schedule();
     },

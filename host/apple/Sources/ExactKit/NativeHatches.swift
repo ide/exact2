@@ -11,7 +11,7 @@
 //
 // The host's table, handed to the module once (`module_connect`):
 //
-//    0  u32 size                168
+//    0  u32 size                184
 //    8  resolve(host, routeKey, keyLen, id, idLen) → node (0: none)
 //   16  act(host, node, action) → 0 done   action 0 click, 1 focus, 2 blur
 //   24  log(host, text, len)
@@ -48,9 +48,14 @@
 //  160  invoke(host, body, len, reply, ctx): a package's call of the app's
 //        handler (LLP 1133.016 D15 item 1), answered once through
 //        `reply(ctx, answer, len)` with the runner's JSON
+//  168  arrangement(host, node, controller): arrange authored siblings, or restore their layout
+//  176  service(host, module, moduleLen, json, len, ctx, reply): a module's
+//        service query (`ExactServices.query`); replies once on any thread,
+//        with len 0 for no answer
 //
 // `host` is the session's runtime handle, as for `changed` and `now`: a
-// destroyed session's is answered with nothing.
+// destroyed session's is answered with nothing. Service queries use the
+// process registry and do not require a live session.
 import CExact
 #if os(iOS) || os(tvOS)
 import AVFoundation
@@ -132,6 +137,20 @@ private typealias HatchFramesFn = @convention(c) (UnsafeMutableRawPointer?, UInt
 private typealias HatchAfterFn = @convention(c) (UnsafeMutableRawPointer?, UInt64, Double) -> Void
 private let hatchFrames: HatchFramesFn = { host, token, on in hatchSession(host)?.natives.hatchClock.frames(token, on: on != 0) }
 private let hatchAfter: HatchAfterFn = { host, token, ms in hatchSession(host)?.natives.hatchClock.after(token, ms: ms) }
+
+private typealias HatchArrangementFn = @convention(c) (UnsafeMutableRawPointer?, UInt32, UnsafeMutableRawPointer?) -> Int32
+private let hatchArrangement: HatchArrangementFn = { host, node, object in
+    #if os(iOS)
+    if #available(iOS 27.1, *), let presenter = hatchSession(host)?.presenter {
+        let controller = object.map { Unmanaged<AnyObject>.fromOpaque($0).takeUnretainedValue() }
+        guard object == nil || controller is UIArrangementViewController else { return 1 }
+        return presenter.arrangements.set(node, controller: controller as? UIArrangementViewController) ? 0 : 1
+    }
+    return 1
+    #else
+    return 1
+    #endif
+}
 
 private typealias HatchOwnsFn = @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<UInt8>?, UInt32, UInt32, UInt32, UnsafeMutableRawPointer?, UnsafePointer<UInt8>?, UInt32, UInt32) -> Int32
 private typealias HatchPartsFn = @convention(c) (UnsafeMutableRawPointer?, UInt32, UnsafePointer<UInt8>?, UInt32, UnsafePointer<UnsafeMutableRawPointer?>?, UInt32) -> Int32
@@ -387,10 +406,21 @@ private let hatchDiagnosticsTable: UnsafeRawPointer = {
     return UnsafeRawPointer(t)
 }()
 
+/// Queries a loaded service and returns its JSON answer to the app module.
+private let hatchService: @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<UInt8>?, UInt32, UnsafePointer<UInt8>?, UInt32, UnsafeMutableRawPointer?,
+                                          @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<UInt8>?, UInt32) -> Void) -> Void = { _, module, moduleLength, json, length, context, reply in
+    let name = hatchText(module, moduleLength)
+    let request = json.flatMap { (try? JSONSerialization.jsonObject(with: Data(bytes: $0, count: Int(length)))) as? [String: Any] } ?? [:]
+    ExactServices.query(name, request) { answer in
+        guard let answer, let data = try? JSONSerialization.data(withJSONObject: answer) else { return reply(context, nil, 0) }
+        data.withUnsafeBytes { reply(context, $0.bindMemory(to: UInt8.self).baseAddress, UInt32(data.count)) }
+    }
+}
+
 /// The host's callbacks, one table for the process: each finds its session
 /// by the handle it is called with.
 private let hatchHostTable: UnsafeRawPointer = {
-    let size = 168
+    let size = 184
     let t = UnsafeMutableRawPointer.allocate(byteCount: size, alignment: 8)
     t.initializeMemory(as: UInt8.self, repeating: 0, count: size)
     t.storeBytes(of: UInt32(size), as: UInt32.self)
@@ -414,6 +444,8 @@ private let hatchHostTable: UnsafeRawPointer = {
     t.storeBytes(of: unsafeBitCast(hatchSurfaceHas, to: UnsafeRawPointer.self), toByteOffset: 144, as: UnsafeRawPointer.self)
     t.storeBytes(of: unsafeBitCast(hatchSurfaceSensor, to: UnsafeRawPointer.self), toByteOffset: 152, as: UnsafeRawPointer.self)
     t.storeBytes(of: unsafeBitCast(hatchInvoke, to: UnsafeRawPointer.self), toByteOffset: 160, as: UnsafeRawPointer.self)
+    t.storeBytes(of: unsafeBitCast(hatchArrangement, to: UnsafeRawPointer.self), toByteOffset: 168, as: UnsafeRawPointer.self)
+    t.storeBytes(of: unsafeBitCast(hatchService, to: UnsafeRawPointer.self), toByteOffset: 176, as: UnsafeRawPointer.self)
     return UnsafeRawPointer(t)
 }()
 
@@ -431,6 +463,17 @@ extension NativeViews {
         session?.log("hatch tabs: \(["built", "retired", "the router selected tab \(index) in the app's container", "the app's container retired"][Int(min(event, 3))])")
         timedHatch("tabs", event == 0 ? "built" : event == 2 ? "changed" : "ended") {
             tabs(instance, event, controller.map { Unmanaged.passUnretained($0).toOpaque() }, UInt32(index))
+        }
+    }
+
+    /// Refresh an app-owned container's click targets without rebuilding its stacks
+    func tabNodesChanged(_ nodes: [UInt32]) {
+        guard hatchesConnected, let instance, let (_, container) = tabCalls,
+              let json = try? JSONSerialization.data(withJSONObject: ["refresh": true, "nodes": nodes]) else { return }
+        timedHatch("tabContainer", "changed") {
+            _ = json.withUnsafeBytes { bytes in
+                container(instance, bytes.bindMemory(to: UInt8.self).baseAddress, UInt32(json.count), nil, 0)
+            }
         }
     }
 

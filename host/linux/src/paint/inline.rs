@@ -220,7 +220,7 @@ fn moving_color(walk: &super::Walk<'_, '_>, node: &NodeRef<'_>) -> Option<[u8; 4
 
 /// The press colour a text shows (LLP 1061 D7), and how far: the nearest
 /// node from it up to where its `color` comes from (that node included)
-/// that is pressed with a `-exact-press-color`, as CSS's `color` reaches a
+/// whose `:active` sets `color`, as CSS's `color` reaches a
 /// subtree. A text with a colour of its own takes only its own press's.
 fn pressed_ink(
     walk: &super::Walk<'_, '_>,

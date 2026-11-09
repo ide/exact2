@@ -113,8 +113,7 @@ fn attrs<'a>(tag: &str, attrs: impl IntoIterator<Item = &'a Attr>, errors: &mut 
         let fail = |id, edit: &str| refusal(id, format!("`{}` on `{tag}`: {edit}", a.name), a.span);
         // A state part's row (`:disabled opacity`, LLP 1121 D8). The runner's states
         // fold into ordinary rows, checked as they are; a host state (`:active`,
-        // `:hover`, `:focus-visible`) is paint the driver does not draw, as
-        // `-exact-press-background-color` would be.
+        // `:hover`, `:focus-visible`) is paint the driver does not draw.
         if let Some((state, row)) = contract_syntax::state::state_of(&a.name) {
             if matches!(state, "disabled" | "checked") {
                 let plain = Attr {

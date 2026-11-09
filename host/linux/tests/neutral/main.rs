@@ -383,6 +383,7 @@ fn a_host_with_no_toolkit_under_it_draws_the_webs_neutral_look() {
     route_header_context_changes_invalidate_retained_nodes();
     route_header_effective_rows_reach_layout_admission_and_motion();
     tabs::narrow_tab_bars_follow_the_neutral_paint_rules();
+    tabs::active_tab_background_has_one_native_paint_owner();
     tabs::narrow_tab_geometry_follows_root_metrics_and_authored_rows();
 }
 

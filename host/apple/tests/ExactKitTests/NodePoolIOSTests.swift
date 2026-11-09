@@ -226,9 +226,9 @@ final class NodePoolIOSTests: XCTestCase {
         XCTAssertNotNil(p.inlineText(22))
     }
 
-    /// A row whose text shows one-colour ink (`TintInk`) parks, and the ink
-    /// does not come back with it: a chat's bubbles, every one tinted ink.
-    func testARowWhoseTextShowsTintedInkParks() throws {
+    /// A row whose text shows one-colour ink (`CoverageImageView`) parks, and the ink
+    /// does not come back with it; its empty UIKit hierarchy does.
+    func testARowWhoseTextShowsDrawnInkParks() throws {
         let p = Presenter()
         window = UIWindow(frame: CGRect(x: 0, y: 0, width: 400, height: 400))
         p.viewport.frame = window.bounds; window.addSubview(p.viewport); window.makeKeyAndVisible()
@@ -246,19 +246,52 @@ final class NodePoolIOSTests: XCTestCase {
                ["op": "frame", "id": 1, "x": 0.0, "y": 0.0, "w": 300.0, "h": 300.0],
                ["op": "content", "id": 1, "w": 300.0, "h": 2000.0]]))
         let text = try XCTUnwrap(p.views[11])
-        let context = try XCTUnwrap(CGContext(data: nil, width: 300, height: 20, bitsPerComponent: 8, bytesPerRow: 0,
-            space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
         let key = TextRasterKey(spec: text.paragraphSpec(), size: text.bounds.size, box: text.paragraphBox(), scale: 1)
-        var ink = TextRasterImage(try XCTUnwrap(context.makeImage()), frame: text.bounds, covered: text.bounds, headroom: 0)
-        ink.tint = UIColor.red.cgColor
+        let ink = TextRasterImage(TextDrawing("Ink", color: UIColor.red.cgColor, baseline: 14, frame: text.bounds), covered: text.bounds)
         text.textRasterKey = key; text.textRasterReady = false
         text.showTextRaster(ink, for: key)
-        XCTAssertTrue(text.textRasterLayer is TintInk)
+        let view = try XCTUnwrap(text.textRasterLayer?.delegate as? CoverageImageView)
+        let holder = try XCTUnwrap(text.specs?.rasterView)
+        let resize = CABasicAnimation(keyPath: "bounds.size")
+        resize.duration = 1
+        holder.box.add(resize, forKey: "bounds.size")
+        holder.box.show(from: key.spec, to: key.spec)
+        view.layer.add(CATransition(), forKey: "exact.numeric")
+        TextShadowLayer.apply([1, 1, 2, 255, 0, 0, 255], to: view.layer)
+        view.layer.applyTextCast(view.coverage?.mask, headroom: 2, limit: nil)
         p.apply(wireBatch([collections([(20, 20)])] + destroy([10, 11]) + row(20, "Bye")
             + [["op": "children", "id": 1, "ids": [20]]]))
         XCTAssertTrue(p.views[21] === text, "the text's view came back")
-        XCTAssertFalse(text.textRasterLayer is TintInk, "without the last row's ink")
-        XCTAssertFalse(text.layer.sublayers?.contains { $0 is TintInk } ?? false)
+        XCTAssertTrue(text.textRasterLayer?.delegate === view)
+        XCTAssertTrue(text.specs?.rasterView === holder)
+        XCTAssertTrue(holder.superview === text)
+        XCTAssertNil(view.image)
+        XCTAssertNil(view.coverage)
+        XCTAssertNil(view.drawing)
+        XCTAssertNil(text.textRaster)
+        XCTAssertNil(view.layer.textCast)
+        XCTAssertEqual(view.layer.shadowOpacity, 0)
+        XCTAssertFalse(view.layer.shouldRasterize)
+        XCTAssertTrue(holder.box.animationKeys()?.isEmpty ?? true)
+        XCTAssertTrue(holder.lines.layer.animationKeys()?.isEmpty ?? true)
+        XCTAssertTrue(view.layer.animationKeys()?.isEmpty ?? true)
+        XCTAssertEqual(holder.lines.layer.speed, 1)
+        XCTAssertEqual(holder.lines.layer.timeOffset, 0)
+        XCTAssertEqual(text.textRasterFrame, .zero)
+        let next = TextRasterKey(spec: text.paragraphSpec(), size: text.bounds.size, box: text.paragraphBox(), scale: 1)
+        text.textRasterKey = next
+        text.showTextRaster(TextRasterImage(TextDrawing("Bye", color: UIColor.blue.cgColor, baseline: 14, frame: text.bounds), covered: text.bounds), for: next)
+        XCTAssertTrue(text.specs?.rasterView === holder)
+        XCTAssertTrue(text.textRasterLayer?.delegate === view)
+        XCTAssertNotNil(view.image)
+        XCTAssertEqual(view.coverage?.color, UIColor.blue.cgColor)
+        XCTAssertEqual(text.subviews.filter { $0 is TextBoxView }.count, 1)
+        p.apply(wireBatch([["op": "create", "id": 30, "kind": "view"], ["op": "children", "id": 21, "ids": [30]]]))
+        XCTAssertTrue(text.subviews.first === holder)
+        XCTAssertTrue(text.subviews.last === p.views[30])
+        text.dropTextRaster()
+        XCTAssertNil(holder.superview, "a full drop still releases the pooled text hierarchy")
+        XCTAssertNil(text.specs?.rasterView)
     }
 
     func testARowWhoseNodeMovesAwayIsDestroyedAsBefore() throws {

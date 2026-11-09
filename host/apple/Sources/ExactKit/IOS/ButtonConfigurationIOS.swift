@@ -4,6 +4,82 @@ import UIKit
 
 /// No defaults of ours: dictionary membership is the kernel's authored mask.
 enum ButtonConfigurationIOS {
+    static func titleLayout(_ rows: NodeStyle, on button: UIButton) {
+        let clamp = rows["line_clamp"]?.number.map(Int.init) ?? 0
+        if clamp > 0 && rows["white_space"]?.string != "nowrap" {
+            button.titleLabel?.numberOfLines = clamp
+            button.titleLabel?.lineBreakMode = .byTruncatingTail
+        }
+    }
+    static func background(_ rows: NodeStyle, configuration: inout UIBackgroundConfiguration, traits: UITraitCollection, accent: UIColor?) {
+        if let fill = platformColor(rows["background_color"], color(rows["background_color"], traits: traits, accent: accent)) {
+            configuration.backgroundColor = fill
+            configuration.backgroundColorTransformer = nil
+        }
+    }
+    static func activeColor(_ value: BatchValue, on button: NativeButtonIOS) -> UIColor {
+        if followsAccent(value) { return UIColor { [weak button] traits in button?.tintColor.resolvedColor(with: traits) ?? .clear } }
+        if let native = SystemColor.native(value) { return native }
+        return UIColor { [weak button] traits in color(value, traits: traits, accent: button?.tintColor) ?? .clear }
+    }
+    /// Keep only the transformer slot each authored property owns. Its input
+    /// remains UIKit's live state value, including the platform's own defaults.
+    private static func transform<Value>(_ current: inout Value?, slot: inout NativeButtonIOS.TransformerBase<Value>?,
+                                         needed: Bool, wrap: (Value?) -> Value) {
+        if needed {
+            if slot == nil { slot = .init(value: current); current = wrap(current) }
+        } else if let previous = slot {
+            current = previous.value
+            slot = nil
+        }
+    }
+    static func removeActive(from button: NativeButtonIOS) {
+        guard var config = button.configuration else { return }
+        let owned = button.activeBackground != nil || button.activeTitle != nil || button.activeSubtitle != nil || button.activeSymbol != nil
+        if let previous = button.activeBackground { config.background.backgroundColorTransformer = previous.value }
+        if let previous = button.activeTitle { config.titleTextAttributesTransformer = previous.value }
+        if let previous = button.activeSubtitle { config.subtitleTextAttributesTransformer = previous.value }
+        if let previous = button.activeSymbol { config.imageColorTransformer = previous.value }
+        button.activeBackground = nil; button.activeTitle = nil; button.activeSubtitle = nil; button.activeSymbol = nil
+        if owned { button.applyActiveConfiguration(config) }
+    }
+    private static func activeValue(_ button: NativeButtonIOS?, row: KeyPath<ButtonFaceRows, NodeStyle>, key: String) -> UIColor? {
+        guard let button, button.isEnabled, button.isHighlighted, let written = button.written,
+              let value = written.active.properties(over: written.face.rows)[keyPath: row][key] else { return nil }
+        return activeColor(value, on: button)
+    }
+    static func syncActive(on button: NativeButtonIOS, requestUpdate: Bool = true) {
+        guard var config = button.configuration, let written = button.written else { return }
+        let rows = written.active.properties(over: written.face.rows)
+        let before = (button.activeBackground != nil, button.activeTitle != nil, button.activeSubtitle != nil, button.activeSymbol != nil)
+        transform(&config.background.backgroundColorTransformer, slot: &button.activeBackground, needed: rows.button["background_color"] != nil) { base in
+            UIConfigurationColorTransformer { [weak button] incoming in
+                activeValue(button, row: \.button, key: "background_color") ?? base?(incoming) ?? incoming
+            }
+        }
+        transform(&config.titleTextAttributesTransformer, slot: &button.activeTitle, needed: rows.title["text_color"] != nil) { base in
+            UIConfigurationTextAttributesTransformer { [weak button] incoming in
+                var outgoing = base?(incoming) ?? incoming
+                if let color = activeValue(button, row: \.title, key: "text_color") { outgoing.uiKit.foregroundColor = color }
+                return outgoing
+            }
+        }
+        transform(&config.subtitleTextAttributesTransformer, slot: &button.activeSubtitle, needed: rows.subtitle["text_color"] != nil) { base in
+            UIConfigurationTextAttributesTransformer { [weak button] incoming in
+                var outgoing = base?(incoming) ?? incoming
+                if let color = activeValue(button, row: \.subtitle, key: "text_color") { outgoing.uiKit.foregroundColor = color }
+                return outgoing
+            }
+        }
+        transform(&config.imageColorTransformer, slot: &button.activeSymbol, needed: rows.symbol["tint_color"] != nil) { base in
+            UIConfigurationColorTransformer { [weak button] incoming in
+                activeValue(button, row: \.symbol, key: "tint_color") ?? base?(incoming) ?? incoming
+            }
+        }
+        let after = (button.activeBackground != nil, button.activeTitle != nil, button.activeSubtitle != nil, button.activeSymbol != nil)
+        if before != after { button.applyActiveConfiguration(config) }
+        if requestUpdate { button.setNeedsUpdateConfiguration() }
+    }
     /// The title, subtitle or symbol font where its author wrote a size or a
     /// weight. A written size is the kernel's number and is drawn at it (LLP
     /// 1115.000 D12.1): an absolute `font-size` is the author's, the same on
@@ -140,8 +216,10 @@ enum ButtonConfigurationIOS {
     /// has none and takes the face's.
     static func apply(_ face: ButtonFace, to button: UIButton, traits: UITraitCollection, accent: UIColor?, destructive: Bool = false,
                       padding: [CGFloat?]? = nil, raster: UIImage? = nil) {
+        (button as? NativeButtonIOS)?.resetActiveConfiguration()
         let rows = face.rows
         var (config, drawn, _) = ControlHost.configuration(face)
+        background(rows.button, configuration: &config.background, traits: traits, accent: accent)
         config.title = face.title
         config.subtitle = face.subtitle
         config.image = face.symbol.flatMap { FaceSymbol.image($0) } ?? raster ?? ButtonRasterIOS.image(face, lease: nil)
@@ -215,7 +293,6 @@ enum ButtonConfigurationIOS {
             }
         }
         let nowrap = rows.title["white_space"]?.string == "nowrap"
-        let clamp = rows.title["line_clamp"]?.number.map(Int.init) ?? 0
         if nowrap { config.titleLineBreakMode = .byTruncatingTail }
         switch rows.title["text_align"]?.string {
         case "start": button.contentHorizontalAlignment = .leading; config.titleAlignment = .leading
@@ -302,10 +379,8 @@ enum ButtonConfigurationIOS {
         }
         // Only an authored clamp changes UIKit's line count. Configuration owns
         // wrapping and nowrap; replacing it restores the factory's default.
-        if clamp > 0 && !nowrap {
-            button.titleLabel?.numberOfLines = clamp
-            button.titleLabel?.lineBreakMode = .byTruncatingTail
-        }
+        if let native = button as? NativeButtonIOS { syncActive(on: native) }
+        titleLayout(rows.title, on: button)
     }
 }
 #endif

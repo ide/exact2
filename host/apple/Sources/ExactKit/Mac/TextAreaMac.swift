@@ -66,8 +66,8 @@ package final class TextArea: NSTextView {
     package override var focusRingMaskBounds: NSRect {
         guard let owner else { return super.focusRingMaskBounds }
         if !owner.isNativeTextControl { return convert(owner.focusRingMaskBounds, from: owner) }
-        guard let scroll = owner.textAreaScroll else { return super.focusRingMaskBounds }
-        return convert(scroll.bounds, from: scroll)
+        guard let scroll = owner.textAreaScroll else { return uncovered(super.focusRingMaskBounds) }
+        return uncovered(convert(scroll.bounds, from: scroll))
     }
     package override func drawFocusRingMask() {
         guard let owner else { super.drawFocusRingMask(); return }
@@ -89,7 +89,8 @@ package final class TextArea: NSTextView {
     package override func mouseDown(with event: NSEvent) {
         guard let owner else { return super.mouseDown(with: event) }
         if owner.pressesUntracked(self, event) { return }
-        owner.tracksPointer(event) { super.mouseDown(with: event) }
+        guard let fields = owner.presenter?.fieldSelections else { return owner.tracksPointer(event) { super.mouseDown(with: event) } }
+        fields.pressing(owner, event) { owner.tracksPointer(event) { super.mouseDown(with: event) } }
     }
     // The agent's window is never key: its every click counts, as at a node (`NodeView.everyClickCounts`).
     package override func acceptsFirstMouse(for event: NSEvent?) -> Bool { NodeView.everyClickCounts || super.acceptsFirstMouse(for: event) }
@@ -682,7 +683,7 @@ final class Field: NSTextField {
     override func accessibilityPerformDecrement() -> Bool { numberOwner?.step(up: false) ?? super.accessibilityPerformDecrement() }
     override class var cellClass: AnyClass? { get { FieldCell.self } set {} }
     override func becomeFirstResponder() -> Bool { focused(delegate) { super.becomeFirstResponder() } }
-    override var focusRingMaskBounds: NSRect { bareFieldMask(self) ?? super.focusRingMaskBounds }
+    override var focusRingMaskBounds: NSRect { uncovered(bareFieldMask(self) ?? super.focusRingMaskBounds) }
     override func drawFocusRingMask() { if !drawBareFieldMask(self) { super.drawFocusRingMask() } }
 }
 /// The editor an `input`'s field edits in (`FieldCell.fieldEditor(for:)`):
@@ -799,7 +800,7 @@ final class SecureField: NSSecureTextField {
     override var acceptsFirstResponder: Bool { currentEditor() == nil && super.acceptsFirstResponder }
     override class var cellClass: AnyClass? { get { SecureFieldCell.self } set {} }
     override func becomeFirstResponder() -> Bool { focused(delegate) { super.becomeFirstResponder() } }
-    override var focusRingMaskBounds: NSRect { bareFieldMask(self) ?? super.focusRingMaskBounds }
+    override var focusRingMaskBounds: NSRect { uncovered(bareFieldMask(self) ?? super.focusRingMaskBounds) }
     override func drawFocusRingMask() { if !drawBareFieldMask(self) { super.drawFocusRingMask() } }
 }
 extension NSTextField {
@@ -847,7 +848,8 @@ private func drawBareFieldMask(_ field: NSTextField) -> Bool {
 private func pressingField(_ owner: Any?, _ event: NSEvent, _ editor: NSView, _ track: () -> Void) {
     guard let node = owner as? NodeView else { return track() }
     if node.pressesUntracked(editor, event) { return }
-    node.tracksPointer(event, track)
+    guard let fields = node.presenter?.fieldSelections else { return node.tracksPointer(event, track) }
+    fields.pressing(node, event) { node.tracksPointer(event, track) }
 }
 /// The field editor selects the whole value as it takes a field, which is
 /// no `select` of the person's; a selection a script set while the field

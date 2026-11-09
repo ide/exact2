@@ -255,7 +255,13 @@ impl BoxPaint {
                 paint = paint.looked(l, current, dark);
             }
         }
-        paint.pressed(node.style, shown.press_paint, dark)
+        if node.node_type == exact_kernel::NodeType::Control
+            && node.props.str(exact_kernel::PropId::Type) == Some("button")
+        {
+            paint
+        } else {
+            paint.pressed(node.style, shown.press_paint, dark)
+        }
     }
 
     /// The box with a look's rows in place of its own: its background, its

@@ -174,7 +174,7 @@ fn the_pressed_paint_is_three_rows_set_only_where_authored() {
         "  action soften\n    firm = not firm\n",
         "  view\n    column testId=\"root\"\n",
         "      button press=soften -exact-press-opacity=(firm ? 1 : 0.5) testId=\"dim\"\n        text \"a\"\n",
-        "      view press=soften -exact-press-background-color=\"light-dark(#e5e5ea, #3a3a3c)\" -exact-press-color=\"-exact-secondary-label\" testId=\"wash\"\n        text \"b\"\n",
+        "      view press=soften testId=\"wash\"\n        :active\n          background-color=\"light-dark(#e5e5ea, #3a3a3c)\"\n          color=\"-exact-secondary-label\"\n        text \"b\"\n",
     ));
     let dim = style(&r, "dim");
     assert!(dim.mask.has(StyleId::PressOpacity));
@@ -208,7 +208,7 @@ fn the_pressed_paint_is_three_rows_set_only_where_authored() {
         ("-exact-press-opacity=-0.1", "lower-attr-value"),
         ("-exact-press-padding=4", "lower-unknown-attr"),
         (
-            "-exact-press-background-color=\"currentcolor\"",
+            "\n      :active\n        background-color=\"currentcolor\"",
             "lower-attr-value",
         ),
     ] {

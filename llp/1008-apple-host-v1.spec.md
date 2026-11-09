@@ -5,30 +5,24 @@
 **Systems:** Apple host (AppKit and UIKit presenters), Kernel (layout, text measurement), Runner (seam), Motion (native executor), C ABI, Boot
 **Author:** Claude (Fable 5) for Charlie Cheever
 **Date:** 2026-08-29
-**Revised:** 2026-08-29 (§9: iOS — the UIKit presenter over the same archive, the Swift the two presenters share, the simulator as the run; §7 and the summary follow); 2026-08-30 (§9: `viewport-fit=cover` with the insets to the kernel, and the keyboard's inset on the viewport; §4: `exact_insets`); 2026-09-04 (§4: the update store's entries — `exact_update_*`, per process, no handle but `exact_update_sync`; the ABI stays v2; `exact_boot` boots the store's selection); 2026-08-31 (§9: macOS `viewport-fit=cover` is a full-size-content window, titlebar height as `safe-area-inset-top`; §5: Edit menu so the field editor's command keys work); **2026-09-03 (LLP 1031 D2/D1 landed: the C ABI is v2 — every export takes a runtime handle from `exact_create`, callbacks are set per runtime, a destroyed or busy handle is refused by name, never a trap — and the Swift is one package, `host/apple/Package.swift`: the `ExactKit` library (`ExactApp` / `ExactSession` / `ExactView`, the presenters, text per session, canvases and web views per session over modules loaded once, the agent, the dev connection) with `ExactMac` and `ExactIOS` as adapters over it and `ExactHostMac` as the sample host; §4 and §5 describe the shape before that landing where they name `exact_boot(measure, …)`, the static `enum Exact`, `host/apple/macos/Package.swift`, or `host/apple/swift/`; the header comment in `include/exact.h` and LLP 1031 are current)**
-**Implementer:** Claude (Fable 5), landing 2026-08-29 (this document transcribes the landing; iOS the same day, §9)
-**Related:** LLP 1007 (the web host whose shape this repeats), LLP 1001 §5–6 (layout is a host call; text measurement is an injected trait object) and §9 (the C ABI waited for its consumer — this is it), LLP 1002 D2/§4 (every host but the web runs `exact-motion`; Core Animation delegation is a measured question), LLP 1003 §4 (the seam), LLP 1000 (the map: web first, then Apple, then Linux), `rules/RULES.md` §Time budgets, `rules/DEFERRED.md` §Motion (no CA executor yet). Research, never authority, whose lessons this applies: exact1's LLP 0113/0116/0169 (SwiftUI's delivery hop measured), 0223 (the AppKit/UIKit cutover), 0418/0430/0432 (CoreText as the one text engine), 0323 (measurement caching — shelved there, adopted here at its cheap end).
+**Authority:** Runtime handles and per-session ownership follow `include/exact.h` and LLP 1031. Swift lives in `host/apple/Sources/ExactKit`; platform adapters own their windows and input. The header and source govern ABI names and signatures.
+**Implementer:** Claude
+**Related:** LLP 1007 (web host), LLP 1001 §5–6 (layout and text measurement), LLP 1002 D2/§4 and LLP 1003 §4 (motion), LLP 1031 (runtime/session ownership), LLP 1000 (system map), `rules/RULES.md`, `rules/DEFERRED.md`. Research references: LLP 0113/0116/0169 (delivery), 0223 (AppKit/UIKit), 0418/0430/0432 (CoreText), 0323 (measurement caching).
 
 ## Summary
 
-`host/apple/` is the second host and the first native one: the runner and
-kernel as a static library with a C ABI, driving AppKit. **The view tree
-mirrors the kernel tree** (the web host's rule). This is where three things
-run for real for the first time: the kernel's own layout (Taffy), text
-measurement injected from the platform (CoreText, through a callback the app
-registers at boot), and `exact-motion` as the executor. After every commit
-the host lays the roots out, emits every parent-relative frame that changed,
-seeks the engine to the app's clock, and emits every presentation value that
-changed; the presenter (`host/apple/macos`, SwiftPM, AppKit — no SwiftUI)
-applies typed batches to one `NSView` per node. Measured on the Caltrain app
-in smoke mode, warm: **process start → first frame 56–70 ms**, of which
-**45–58 ms is NSApplication and the window** and **8–9 ms is the runner,
-layout, and 746 text measurements (399 from cache)**; apply is ~3 ms. **iOS is
-the same host** (§9): the same archive built for the simulator's target, a
-UIKit presenter of the same shape applying the same batches, and the Swift
-that is not about a window — the bridge, CoreText, the agent's clock, the GPU
-module's ABI — shared between the two presenters rather than copied. Where
-this document and the code disagree, the code and its tests are the authority.
+`host/apple/` links the Rust runner and kernel as a static library behind a
+runtime-scoped C ABI. AppKit and UIKit presenters apply typed batches to native
+views, while the kernel owns layout, CoreText supplies text measurement, and
+`exact-motion` evaluates presentation values. Each commit emits changed
+parent-relative frames and presentation values. Bridge, text, agent and GPU
+module code is shared; platform adapters own window and input behavior.
+
+Caltrain warm-smoke measurements on macOS 26.6 / Swift 6.3 give process start
+to first frame of **56–70 ms**: **45–58 ms** in NSApplication/window setup and
+**8–9 ms** in runner, layout and 746 text measurements (399 cache hits), with
+about 3 ms apply time. These measurements have the scope described in §6.
+The source and tests govern behavior where examples differ.
 
 ## 1. The seams and the batch (`host/apple/src/host.rs`, `batch.rs`)
 
@@ -51,7 +45,7 @@ has any) and `motion` (the engine is not quiescent): the presenter runs its
 250 ms clock only for the first and its display link only for the second.
 
 The `content` op carries natural scrollable overflow, including the end padding
-correction, without flooring it to the node's frame (2026-09-10). The platform
+correction, without flooring it to the node's frame. The platform
 presenter applies the ordinary client-size minimum: UIKit already does this;
 AppKit retains the extent and recomputes the document size on both content and
 frame changes. This preserves sub-client content changes for native containers
@@ -73,11 +67,10 @@ The root lays out under `Offer::definite(viewport)`, and a root that is a
 block is as tall as its content — so, as in a browser, **the window is a
 viewport over a document**: the presenter's window content is an
 `NSScrollView` whose document holds the roots, sized to them and never
-smaller than the viewport. The first run of the Caltrain app on this host
-found `width=100%` + `padding=20` under CSS's `box-sizing: content-box`
-overflowing its parent by 40 pt — true on the web too, quietly; the app now
-says `boxSizing="border-box"` (a tag attribute added for it) and the host's
-`content` op holds it at the viewport's width.
+smaller than the viewport. Under CSS's `box-sizing: content-box`,
+`width=100%` plus `padding=20` overflows the parent by 40 pt. Caltrain uses
+`boxSizing="border-box"`, and the host's `content` op holds it at the
+viewport's width.
 
 ## 2. The style dictionary (`host/apple/src/style.rs`)
 
@@ -89,7 +82,7 @@ presentation values from `present` ops — and `transition` is the engine's.
 Gradient and grid rows are named as skipped. The presenter carries CSS's
 defaults for the rows it paints (`font_size` 16, `font_weight` 400, black
 text, no background, no border). Effective overflow and CSS inheritance
-also cross even without an own row (LLP 1035.000, landed 2026-09-09): a
+also cross even without an own row (LLP 1035.000): a
 `text` node or an editor gets every inherited row's computed value — the
 font rows, alignment and colour it measures and paints with — and any other
 node its computed colour, through `NodeRef::computed_style` (LLP 1001 §6); a
@@ -138,9 +131,7 @@ AppKit and UIKit, through the paragraph's viewport conversion (LLP 1051.000
 D1). Collapsed whitespace at a soft wrap contributes no width to that union. The padded
 paragraph/container comparison, padding mutation and recreation, and Messages
 quoted replies and empty results are recorded in `/tmp/messages-text-padding/`.
-**The line box is rounded in device pixels on the Mac** (2026-11-04,
-Daehyeon's ruling that clone text not sit up to a device pixel off Chrome's on
-a Retina Mac). Chrome rounds a face's ascent and descent, floors the
+**The line box is rounded in device pixels on the Mac.** Chrome rounds a face's ascent and descent, floors the
 half-leading and ceils a `normal` paragraph's height in device pixels, so at
 device scale 2 a 14 px `normal` line is 16.5 tall with its baseline at 13.5,
 where at scale 1 it is 17 and 14 (`CSSLineBox`). The engine rounds at its
@@ -153,20 +144,17 @@ kernel measure every paragraph again (`exact_text_scale_changed`,
 pixels its line box was rounded to (`Paragraph.lineScale`), so on a 2x Mac a
 baseline can sit on a half point; a textarea's lines and the agent's range
 frames follow the same box. A headless session and a 1x display keep scale 1:
-whole points, as before, so a headless test lays text out the same on any
+whole points, so a headless test lays text out the same on any
 machine; the agent driving a Mac app sees its window's scale. A single-line
-input's line box rounds the same way (2026-11-04, Daehyeon's ruling "fix it;
-it is plain CSS"): `NSTextFieldCell` sets its baseline the font's ascent,
+input's line box rounds the same way: `NSTextFieldCell` sets its baseline the font's ascent,
 rounded to a point, below its title rect's top, so the rect's top is the
 CSS baseline less that ascent, on a half point where the baseline is.
-Not changed: iOS, which keeps scale-1 line boxes and device-pixel baselines;
-the Linux and Windows hosts. Those are decided separately.
+This device-scale rule is macOS-specific. iOS keeps scale-1 line boxes and
+device-pixel baselines; Linux and Windows use their own host policies.
 `TextParityMacTests` holds Chrome 156's numbers at both scales.
-**Every box is drawn on the device's pixel grid on the Mac** (2026-11-04,
-Daehyeon's ruling "build it"), as on iOS since `e79cd153f2`. Layout's frames
-are fractional (LLP 1001 §6); a view drawn where its frame fell left its layer
-a fraction of a device pixel off the grid, and Core Animation blended its
-edges and its text across two device rows. Chromium rounds each painted box's
+**Every box is drawn on the device's pixel grid on the Mac and iOS.**
+Layout frames are fractional (LLP 1001 §6). Pixel snapping avoids Core Animation
+blending a fractional layer edge or text baseline across two device rows. Chromium rounds each painted box's
 edges half up at their absolute positions (`PhysicalRect::PixelSnappedIntRect`),
 and so does the presenter: each node view keeps its absolute layout origin and
 its drawn origin in whole device pixels, a device pixel being the backing scale
@@ -176,8 +164,8 @@ Text, fields and collections measure at layout's size (`layoutBounds`); a
 scroller's extent ends on its last edge's pixel. A paragraph is placed from
 where layout put its box, and each baseline rounds at its place on the page,
 as Chromium rounds a glyph run's (`TextEngine.paintedLine`), not in a content
-box that padding leaves off the grid: a 17.875 px line in a `pre` with 12.8 px
-of padding sat a device pixel low. `PixelGridMacTests`.
+box whose padding can leave it off the grid. The fixture includes a
+17.875 px line in a `pre` with 12.8 px padding. `PixelGridMacTests`.
 The macOS paragraph raster includes glyph ink outside that layout box. Overflow
 uses a positioned child layer, preserving descenders and italic overhang without
 changing layout; authored clipping still applies. Fitting ink stays on the
@@ -188,21 +176,18 @@ first baseline is reported so Taffy's baseline alignment works; `line_clamp`
 adds `…` when later text is hidden, then truncates the final visible line to
 make room. The candidate retains paragraph-global UTF-16 indices for selection;
 trailing breaks/spaces are removed before the token. A box narrower than the
-token keeps the clipped first character. Previously CoreText received an
-already-fitting line and omitted the token. The Swift regressions and iOS/web
+token keeps the clipped first character. The Swift regressions and iOS/web
 long-reply drive are in `/tmp/messages-line-clamp/verification.json`. Mixed-run
 token styling still differs from the browser's paragraph-styled ellipsis, and
 the browser fixture does not show the token on a right-aligned line; full text raster
 parity remains open. `overflow-wrap` travels through `ExactMeasureRequest`
 and the paragraph cache. Every mode breaks at the last of Chrome's
 line-break opportunities whose content fits, the shared walker's
-(`exact_text_line_breaks`, `textflow/src/walker.rs`; 2026-10-06, #128: the
-public Unicode boundaries broke a path after each `/`); when none fits,
+(`exact_text_line_breaks`, `textflow/src/walker.rs`); when none fits,
 normal lets the word overflow, and `break-word` and `anywhere` split it at
 the last cluster that fits. `anywhere` measures min-content by
 composed-character clusters; the other modes measure the widest piece
-between those same opportunities, not only between spaces (2026-10-05: a URL in a chat bubble had sized its box to
-the whole URL, then overflowed it). A forward cursor consumes line
+between those same opportunities, including URL punctuation boundaries. A forward cursor consumes line
 boundaries once rather than searching the whole list for every line.
 The normal/break-word/anywhere/restored fixture agrees with the browser's
 finite-width and flex minimum behavior (`/tmp/messages-overflow-wrap/`).
@@ -218,14 +203,11 @@ and 15.5 in CoreText, half a pixel a line and nothing else. (On the Linux
 host the font is another — DejaVu Sans, pinned — so its wrapping is its
 own.)
 
-This is exact1's conclusion applied without re-deriving it: measuring with
-CoreText for layout while painting with TextKit was a "dual-engine
-correctness tax" (0418), CoreText wraps ~5× faster than TextKit per
-paragraph, `CATextLayer` and TextKit-only were rejected there for body text,
-and a size cache hit ~97% under live resize (0322/0323). Here the numbers
-came out the same shape on the first measurement: 746 requests for 128 text
-nodes at boot (Taffy asks several times per node across its passes), 399
-answered from cache, ~17 µs per miss.
+CoreText supplies both layout and paint, avoiding separate engines with
+independent geometry. The boot measurement contains 746 requests for 128 text
+nodes: Taffy requests metrics across multiple passes, 399 requests hit the
+cache, and an uncached request costs about 17 µs. See LLP 0418 and LLP 0322/0323
+for the engine and caching comparisons.
 
 On macOS, if a raster needs line breaks that measurement no longer retains,
 the fallback paragraph supplies both its attributed source and its lines.
@@ -234,22 +216,121 @@ background jobs copy the source and still create their own CoreText lines.
 No additional paragraph or width history is retained by the rasterizer.
 
 When measured breaks are present, urgent rendering also uses the engine's
-existing exact-painted `TextShape` cache for its typesetter. The source/paint
-key, catalog lifetime, cold-entry cap and 64 MiB soft target are unchanged;
+exact-painted `TextShape` cache for its typesetter. The source/paint
+key, catalog lifetime, cold-entry cap and 64 MiB soft target bound reuse;
 workers still receive copied attributed source and construct their own lines.
-Six alternating hidden-reader pairs at `5cf0e873` measured median landing
+Six alternating hidden-reader pairs at `5cf0e873` measure median landing
 8.85 → 8.40 ms, and a repeated 128-span fixture 13.59 → 12.47 ms. New-content
-forward scrolling was approximately flat; its estimated cold holdings grew
+forward scrolling is approximately flat; estimated cold holdings are
 25,533,706 → 27,197,669 bytes (not RSS). This is a bounded reuse trade, not
 physical 120 Hz evidence. Temporary probes and paired results are in
 `/tmp/exact-raster-shape-5cf0e873/`; changed pixels or unbounded source ownership
 remain disqualifying.
 
+### UIKit text coverage
+
+**Decision.** The native UIKit presenter displays eligible single-color SDR
+text as an 8-bit alpha image in a public `UIImageView` with template rendering.
+The mask contains shape and per-operation opacity; an opaque `UIColor` retains
+the authored `CGColor` and its profile. P3 does not require a colored bitmap
+merely because its profile differs from sRGB. Multicolor, HDR and paint that
+cannot share one tint retain the pixel path and [LLP 1100 D8](1100-color-spaces-and-hdr.rfc.md#d8--dynamic-range-limit-as-css-color-hdr-defines-it)'s
+range handling. CoreText remains the geometry and glyph-paint engine. This
+decision concerns the native presenter, not the painted renderer of LLP 1149.
+
+**Ownership and reuse.** `TextInk` distinguishes pixels, glyph values and
+coverage. A drawing-backed coverage result carries its mask with its glyph
+values between rendering and publication. Publication and the kept cache
+normalize that result to the canonical drawing; a view's coverage refers to
+that drawing. `TextCoverage.reusing(for:)` proves matching glyph paint,
+placement, scale, smoothing and opacity before sharing a mask. A profile-only
+change can then reuse shape without applying opacity twice.
+
+Drawing-backed coverage strongly owns its drawing; the drawing's `liveCoverage`
+link is weak and main-actor confined. For drawing-backed text, the kept cache owns
+glyph values without retaining masks. Pixel and general-coverage entries retain
+and charge their images. All entries charge their keys and values within a
+64 KiB entry limit and 4 MiB total limit. A drawing-backed row whose last
+coverage owner releases it may need its mask repainted when it returns. A
+strong mask cache changes that lifetime and byte charge; it is not equivalent
+to the selected glyph-value cache.
+
+The worker mailbox claims, finishes, abandons and consumes under one lock.
+Cancellation can win before a claim; publication transfers a completed result
+once and rejects stale node incarnations, keys and font namespaces. Worker
+results cannot re-seed an obsolete cache or overwrite a recycled row.
+
+Lead workers prepare masks before publication. Urgent batches admit serial
+jobs while a 2 ms budget has room, then prepare the remainder concurrently;
+individual jobs are not preempted. Urgent glyph masks paint on the main thread
+after reuse checks. That budget governs preparation, not publication. Pooled
+rows retain an empty text hierarchy, with pixels, animations, clocks,
+shadow/cast state, dynamic range and geometry cleared.
+Eviction and off-window release drop the hierarchy. These are ownership
+boundaries, not permissions to retain a parked bitmap.
+
+**Why this representation.** The [text-rendering comparison](https://md.ocho.app/s/_72m_TyOSYBnITJbDchR84fAapg)
+measures fourteen implementations on an M6, with three interleaved primary,
+native-scroll and fresh-process repeated-label runs per implementation. P3
+loading has three process blocks of ten sessions. All use one Swift Release
+fixture and one optimized Rust host archive; the source identifiers are
+`ac130989` for main, `26a0c8d` for DrawnInk and `47636c3` for shared coverage.
+They isolate rendering strategies, not complete application builds.
+
+| Workload and metric | Measured tradeoff |
+|---|---|
+| P3 inertial scrolling, app + server + helpers, CPU-ms/s | Main 850; shared coverage 417 (51% less). Server 298 / 141; helpers 380 / 101. |
+| Forced P3 row replacement, CPU-ms/update | Main 12.93; shared coverage 7.51. Main-thread p95 is 4.62 / 5.26 ms. |
+| 120 distinct P3 labels, app/server footprint charges, MiB | Main 11.53; DrawnInk with P3 bitmap fallback 55.73; wide-SDR glyph drawing 5.86; shared coverage 11.53. |
+| 120 identical labels, app/server footprint charges, MiB | Main 1.17; wide-SDR glyph drawing 4.88; unshared coverage 9.03; shared coverage 1.55. Template-mask count is 120 / 1 for unshared/shared coverage. |
+| First P3 load in a fresh process, elapsed / main-thread ms | Main 18.69 / 17.37; wide-SDR glyph drawing 19.53 / 18.16; shared coverage 26.34 / 24.66. |
+
+Shared coverage is not the minimum native-P3 CPU option: DrawnInk with a P3
+bitmap fallback measures 370 CPU-ms/s and the remount-trim variant 367. Their
+forced-update costs are higher, and the bitmap fallback uses more memory.
+Coverage adds about 7 ms of main-thread work per cold 120-label P3 load versus
+main, with approximately equal whole-app CPU. Later sessions are bimodal;
+mixed-mode medians do not erase the consistent first-load cost. The choice
+rests on repeated-shape memory, forced-update CPU and explicit ownership,
+not a claim that one representation wins every workload.
+
+The profiles attribute lower server cost to rendering and command serialization;
+the P3 bitmap fallback also spends app time in image preparation and vImage
+conversion. Sharing removes duplicate source masks, and pooling removes view
+insertion/removal work. These inclusive samples establish where work occurs,
+not additive speed estimates. Asynchronous drawing, strong mask retention,
+UIImage memoization, urgent parallel prepainting and remount trimming remain
+measured alternatives without a consistent combined win. Public UIKit
+colorization does not require a private Core Animation property, a global mask
+registry or a custom Metal text renderer.
+
+**Measurement limits.** The testbed is macOS 27.2, Xcode 27.1 release and an
+iPhone Duo simulator on iOS 27.1 RC `24A94232`, with one persistent render
+server. Native scrolling uses a 400 × 600 point viewport at 3×, 50 live rows
+and about 800 points per fling. CPU windows select deceleration plus a 100 ms
+tail. App counters include startup/common activity: the early idle control
+charges 129–156 CPU-ms/s and is not a steady-state baseline. Its idle-adjusted
+app values cannot resolve incremental text CPU; server/helper idle rates are
+near zero. Helpers cover both booted simulators. Footprint sums are process
+charges, not deduplicated RAM; negative helper deltas are pool releases.
+Instruments runs are separate from timing aggregates.
+
+All tested profile/alpha cases match a `UILabel` oracle within tolerance,
+including a profile-sensitive negative control. No capture establishes
+extended-gamut output. The observed 60 Hz callback cadence does not qualify
+phone presentation, 120 Hz deadlines, GPU pass counts, texture formats or
+energy. The measurement archive is
+`Exact-Text-Approaches-Matrix-20261107.zip`, SHA-256
+`3ada6918f3d9ef782d9cb6e94ad3f2357bd65b2771ed7daa03b592f26439527d`;
+the linked report supplies source/fixture hashes, raw counters, profiles,
+environment and exclusion records. Behavioral coverage is in
+`ProfiledCoverageIOSTests`, `NodePoolIOSTests` and `InlineContextIOSTests`.
+
 ## 4. The C ABI (`host/apple/src/abi.rs`, `include/exact.h`)
 
-**Requests (LLP 1016 D2, built 2026-08-30).** A request never reaches the
-presenter. `exact_boot`/`exact_boot_plan` take a wake callback
-(`ExactWakeFn`, with its context) beside the measure callback; the library
+**Requests (LLP 1016 D2).** A request never reaches the
+presenter. `exact_set_wake` registers the runtime's wake callback
+(`ExactWakeFn`, with its context); the library
 runs an **executor thread** (`host/apple/src/executor.rs`) that owns one
 `ibex2::host::Host` — the platform transport, `NSURLSession` — and the app's
 `Bindings`, endowed from the data crate's grants (ibex LLP 0067/0068;
@@ -268,12 +349,13 @@ main-queue block, so the wake's own main-queue pump cannot run until it
 returns) and reports `settled: false` after twenty seconds of a request
 still out.
 
-**The update store (LLP 1026 D9/D11; LLP 1030 D7; built 2026-09-04).**
+**The update store (LLP 1026 D9/D11; LLP 1030 D7).**
 `host/apple/src/update.rs` holds one `exact_update::Client` per process
 behind a lock — the app's container holds the store and every runtime
 boots from its selection, and the runtime registry is thread-local — so
 the entries take no handle except `exact_update_sync(rt)`, and the
-version stays 2. `exact_update_open(len)` reads
+ABI version is defined by `EXACT_ABI_VERSION` in `include/exact.h`.
+`exact_update_open(len)` reads
 `{"base":…,"assets":…}` from the store's own input buffer
 (`exact_update_in`; `exact_update_out` answers) and puts the store at
 `<base>/exact/<app id>/update` from `compat.json`'s facts;
@@ -289,31 +371,26 @@ logs it, and calls `exact_update_sync` per session so the `delivery`
 resource follows. `exact_update_activate` hands the staged plan's bytes
 over and `ExactApp.apply` restarts every session with carry. Swift holds
 no networking for updates; `Updates.swift` is the whole face. The dev
-policy fold (1026 D12) is owed: `EXACT_DEV_PLAN` and `PlanURL` are as
-they were.
+policy fold (1026 D12) remains outside this contract; `EXACT_DEV_PLAN` and
+`PlanURL` retain their own selection policies.
 
-LLP 1001 §9 left the C ABI "waiting for the consumer that would make its spec
-transcription rather than speculation"; this is that consumer, and the ABI
-is the web host's buffer discipline over `extern "C"`: `exact_in(len)`
-resizes a host-owned input buffer and returns its address; `exact_out()`
-returns the output buffer's; `exact_boot(measure, ctx, width, height)`,
-`exact_boot_plan(len, …)`, `exact_dispatch(view, kind, len, now_ms)`,
-`exact_advance(now_ms)`, `exact_resize(width, height)`, `exact_insets(top,
-right, bottom, left)` (the safe-area insets under `viewport-fit=cover`, §9;
-2026-08-30), and `exact_tick(now_ms)` each return the output's length, a
-UTF-8 JSON batch. `exact_dispatch` gives every kind `include/exact.h` lists
-its own arm — 18 is a collection move, decoded as the web decodes it — and
-refuses any other kind with an error batch, where it once read every
-unlisted kind as a change and overwrote a text value with reorder bytes
-(2026-09-23). The app never hands the
+The ABI uses the web host's buffer discipline over `extern "C"`:
+`exact_in(rt, len)` resizes the runtime's input buffer and returns its
+address; `exact_out(rt)` returns the output buffer's address. Boot, dispatch,
+advance, resize, inset and tick operations return the length of a UTF-8 JSON
+batch. `include/exact.h` defines their signatures and callback registration.
+`exact_dispatch` gives every declared kind its own arm — 18 is a collection
+move, decoded as the web decodes it — and refuses other kinds with an error
+batch. The app never hands the
 host a pointer the host did not give out; the one call the other way is the
-measure function. All calls on one thread; the bridge is thread-local.
+measure function. Runtime calls follow the serial ownership contract in
+LLP 1072; the bridge is thread-local.
 `exact_apple::host!(DataType, PLAN)` instantiates the exports for one app;
 `apps/caltrain/apple` is that one line plus the same `build.rs` as the web
-crate, producing `libcaltrain_apple.a`. The header is written by hand (ten
-functions, three structs); a header generated from `schema.json` — enum
+crate, producing `libcaltrain_apple.a`. The header is written by hand;
+a header generated from `schema.json` — enum
 values for rows, node types, props — waits for a consumer that reads
-binary batches instead of names, as §9 of LLP 1001 said it should.
+binary batches instead of names (LLP 1001 §9).
 
 ## 5. The presenter (`host/apple/macos`)
 
@@ -343,9 +420,8 @@ HTML `readonly` lowers to the inverse of the existing `editable` prop,
 keeping the text selectable while refusing edits. The app gives this bounded
 editor its width and height; rich text is outside this control.
 A textarea's lines (AppKit and UIKit, plain and Markdown) are the authored
-`line-height` apart with each baseline where CoreText's CSS line box puts it
-(2026-11-03, Daehyeon's ruling that the T3 Code composer's typed text not sit
-below the browser's). TextKit puts all of a forced line's leading above its
+`line-height` apart with each baseline where CoreText's CSS line box puts it.
+TextKit puts all of a forced line's leading above its
 glyphs, so the paragraph's minimum and maximum height end the line the font's
 descent (AppKit rounds it to a point, UIKit does not) below the CSS baseline,
 and the rest of the line height is TextKit's line spacing, which it sets
@@ -361,27 +437,27 @@ A line holding a run of a larger descent than the field's font (an emoji)
 sits higher by the difference, where CSS keeps the field font's baseline.
 Clearing `line-height` restores TextKit's natural spacing. Storage and typing
 attributes update in place, preserving text and selection.
-`field-sizing="content"` (2026-09-09, Messages) instead measures the current
+`field-sizing="content"` measures the current
 value/placeholder, constrained by CSS min/max dimensions. Fixed controls use a
 preferred size independent of value; explicit dimensions still win. The browser
-receives the CSS property itself. A trailing textarea Return now measures its
-empty caret line without inserting content into the value (2026-09-10, kernel
-text measurement). Browser/iOS growth and shrink drives and public XCTest typing
-cover both Messages composers; physical typing and internal scrolling keep the
-last line visible (`/tmp/messages-composer-growth/`). The later real-Paste drive
-also keeps it visible. Driver bulk replacement's clipped capture was premature:
-UIKit continues revealing the caret after insertion returns. `clock settle` now
-observes that editor within its existing native bound, using its actual caret
-and reachable scroll range. Blur, logical removal/replacement, an inactive route
-or user tracking ends the observation; it holds the native editor weakly and
-never scrolls it (`/tmp/messages-editor-paste/`, LLP 1035.003 D5). A subsequent
-viewport repair observes geometry animations in the session's mounted view
-hierarchy, including groups, and requires an idle native turn after native work
-finishes. That turn catches keyboard work queued by responder or sheet completion.
-Immediate/later captures now remain stable; session isolation, the two-second
-bound and physical manual-scroll retention are exercised in
-`/tmp/messages-viewport-settle/`. Opacity-only animation and containing-app views
-are outside this geometry observation; the driver never seeks UIKit's clock.
+receives the CSS property itself. A trailing textarea Return measures its empty caret line without inserting
+content into the value. Browser/iOS drives and public XCTest typing cover
+composer growth and shrinkage; physical typing and internal scrolling keep
+the last line visible (`/tmp/messages-composer-growth/`).
+
+UIKit can continue revealing the caret after insertion returns. `clock settle`
+observes the editor within its native time bound using the actual caret and
+reachable scroll range. Blur, logical removal/replacement, an inactive route
+or user tracking ends the observation. It holds the editor weakly and never
+scrolls it (`/tmp/messages-editor-paste/`, LLP 1035.003 D5).
+Viewport settlement observes geometry animations in the session's mounted
+view hierarchy and waits for an idle native turn after native work finishes,
+including keyboard work queued by responder or sheet completion. Session
+isolation, the two-second bound and physical manual-scroll retention are
+covered in `/tmp/messages-viewport-settle/`. Opacity-only animations and
+containing-app views are outside this observation; the driver never seeks
+UIKit's clock.
+
 Changed `scrollTop` and `scrollLeft` props are DOM-style
 assignments after the complete batch’s geometry/children are mounted. Each
 axis clamps independently to its content extent; an unchanged axis retains its
@@ -425,8 +501,7 @@ submission). An input's `type="password"` is an `NSSecureTextField`, remade
 in place if the type changes (a different class on AppKit); `inputMode` has
 no meaning on a Mac keyboard. The menu bar always carries a standard Edit
 menu so the field editor hears ⌘A/X/C/V/Z — AppKit does not bind those keys
-itself (`StandardKeyBinding.dict` has no `selectAll`), and a bar of only app
-and Develop items left them unmatched (Weird Castle's login, 2026-08-31).
+itself (`StandardKeyBinding.dict` has no `selectAll`).
 App commands are declared on buttons with `aria-keyshortcuts`, for example
 `"Meta+S Control+S"`. Hosts bind a space-separated list of chords with one
 character key and explicit `Meta` or `Control`; `Alt` and `Shift` may also
@@ -444,7 +519,7 @@ commands appear in File. The standalone adapter supplies About, Services,
 Hide, Quit, Close Window, Full Screen, Minimize, Zoom and Bring All to Front
 through AppKit. Reconciliation preserves those static commands and unchanged
 declared menu items. Menus revalidate mounted, enabled, non-inert nodes in
-the key window and refuse under a native sheet (2026-09-15, Interview).
+the key window and refuse under a native sheet.
 An action may issue `focus("html-id")` to move focus after its batch has
 mounted nodes and applied values. It resolves the existing HTML `id` within
 that session/root, never `testId`; missing, disabled, hidden, or inert targets
@@ -459,7 +534,7 @@ anchored to the command's `source` view, a menu row's popover invoker, or the
 window's centre; the outcome is a journal line. No activation is required.
 
 `saveFile` (LLP 1069.010 D3) is `ExactKit/SaveFile.swift`: after the same
-ruling, macOS shows an `NSSavePanel` sheet and copies the `app:/` file (its
+runner validation, macOS shows an `NSSavePanel` sheet and copies the `app:/` file (its
 path from the `appFile` op) to the chosen URL; iOS copies it under the
 suggested name into a scratch directory and presents
 `UIDocumentPickerViewController(forExporting:asCopy:)`. `change` carries the
@@ -549,10 +624,10 @@ true.
 a scroll container is a `ChainingScrollView` made from the node's
 effective `overflow` rows, a wheel it can take it applies itself and one it
 cannot chains to the next responder (the web's `overscroll-behavior:
-auto`). The AppKit-first fallback this paragraph once described is gone
-(a nested `NSScrollView` may move the enclosing view or animate later, so
-"did it move?" can double a delta); see LLP 1010 §3–§4 for the rule and
-the smoke that holds it.
+auto`). Routing uses the scroll container's ability to consume a delta.
+Inferring consumption from an immediate offset change is unsafe: a nested
+`NSScrollView` may move its enclosing view or animate later, allowing the
+same delta to be applied twice. LLP 1010 §3–§4 defines routing and its smoke check.
 
 **Clipping.** `clip_path` carries validated absolute path commands from the
 kernel (LLP 1001 §1). The shared `ClipPath.swift` makes one `CGPath`; UIKit and
@@ -590,21 +665,20 @@ the Caltrain header's `assets/caltrain.png` (a generated 320×120 PNG)
 loads at 320×120 and lays out 96×36 from `width=96`; and by
 `host/apple/tests/host.rs` (the batches after `set_intrinsic`).
 
-**The dev loop** landed here too (LLP 1007 §6's shape): `EXACT_DEV_PLAN`
+**The dev loop** (LLP 1007 §6): `EXACT_DEV_PLAN`
 names the plan `host/web/dev.mjs` writes on every save; the app restarts
 from it with state carried (`exact_boot_plan`, `Runner::carry`) in ~7 ms.
 `node host/apple/build.mjs --run` sets it. `build.mjs` also forces the
-Swift relink, since `swift build` does not see the Rust archive change —
-a stale link that hid two lanes' changes before it was found. `EXACT_SMOKE=1` prints the boot phases and a summary and exits;
+Swift relink because `swift build` does not detect Rust archive changes. `EXACT_SMOKE=1` prints the boot phases and a summary and exits;
 `EXACT_SHOT=<path>` writes a PNG of the window — the run and the picture
-`host/apple/smoke.mjs` and a reviewer read. Under a script (`EXACT_AGENT=1`)
+`host/apple/smoke.mjs` verifies. Under a script (`EXACT_AGENT=1`)
 the app is an **accessory** — no Dock tile, never activated, its window
 ordered front regardless so it is seen and its canvases render — and takes
 the focus from no one; a `type` makes the window key itself, which does not
 activate the app. The agent's `screenshot` (`cacheDisplay` of the viewport)
 paints every canvas's picture, read back from the module, where a Metal
 layer would otherwise be blank — the same path a capture takes — so the
-sky is in it without asking for `window` (2026-08-30).
+sky is included without requesting `window`.
 
 ## 6. Building and measuring (`build.mjs`, `smoke.mjs`, `scripts/metrics.mjs --long`)
 
@@ -622,15 +696,14 @@ host/apple/smoke.mjs` — launches the app in smoke mode and asserts the
 landmarks. `node scripts/metrics.mjs --long` — the short run plus the macOS
 host: a warm build, the budget row "touch one line, rebuild that crate"
 (touching `host/apple/src/host.rs`), and the boot phases from a warmed-up
-smoke run (the first launch of a fresh binary is a cold outlier, exact1's
-harness lesson). The long run exists because a macOS build cannot honestly
+smoke run (the first launch of a fresh binary is a cold outlier). The long run exists because a macOS build cannot honestly
 be promised under 30 s. On 2026-08-29, warm: **build 1.7 s** (cargo 1.2 s,
 swift 0.4 s; budget 5 min), **touch one line in `host.rs`, rebuild 1.8 s**
 (budget 30 s — a static archive is `ar`, not a link; the link is the Swift
 step), **process → first frame 56–76 ms** across runs (budget 100 ms p50):
 before boot 40–62 ms, runner + layout 8–11 ms, apply 3 ms. 
 
-**Startup, understood (2026-08-29).** With stamps from exec (`sysctl`
+**Startup, understood.** With stamps from exec (`sysctl`
 `p_starttime`) to the first `draw`, the honest end to end is **main → first
 paint ≈ 190–235 ms** on this machine, of which **ours is ~11 ms** (runner +
 layout + 746 measurements + 202 views). The rest was measured against
@@ -672,24 +745,23 @@ identifier, `accessibilityLabel`, and the roles VoiceOver reaches on macOS (a
 pressable is a button, or a link by its role, and a leaf; a labelled image an
 image; `aria-level` a heading; 2026-09-23) — iOS gives pressables the button
 trait only; justified text; iOS text selection; scroll position
-across a reload; a generated header (§4). Per-corner radii landed on macOS
-2026-09-23: each corner its own radius, CSS's overlap reduction, as iOS
-draws them.
+across a reload; a generated header (§4). Both Apple hosts draw per-corner
+radii with CSS's overlap reduction.
 
-**2026-09-05, LLP 1033:** Apple paints nested text runs with their own fonts,
+**Nested text (LLP 1033).** Apple paints nested text runs with their own fonts,
 colors, and decoration, using the same CoreText paragraph as measurement.
 macOS supports drag selection across paragraphs, select-all and copy; inline
 link activation goes to the embedding session's `openURL` command delegate.
 A paragraph takes the first responder for that selection but is never a Tab
 stop, as plain text is not on the web; Tab from a selected paragraph goes on
-to the next stop after it (2026-09-23).
+to the next stop after it.
 Selection is presenter state. `ExactSession.change(testId:value:)` lets a native
 embedder deliver file data to an existing change handler without compiling UI.
-Changing an embedded `ExactApp.assetRoot` now updates its resolver; a complete
+Changing an embedded `ExactApp.assetRoot` updates its resolver; a complete
 signed generation retains its pinned resolver. The macOS Markdown viewer drives
 these paths; the iOS document interaction work remains in LLP 1033.
 
-**2026-09-05, long-document pass:** inline text identities stay in the presenter
+**Long documents.** Inline text identities stay in the presenter
 map as run data, but only paragraphs mount in the Apple view hierarchy. Text
 changes invalidate the owning paragraph; frame-only changes retain its spec and
 reuse its painted layout at the same width. CoreText typesetters are cached across
@@ -710,21 +782,16 @@ as its content, nothing overflowing sideways); later batches carry only what
 changed and frames follow a resize; a spring arrives as presentation values
 frame by frame and settles exactly; text is measured through the registered
 callback (a Rust `extern "C"` fn) and the bridge's other calls answer.
-`node host/apple/smoke.mjs` green on macOS 26.6 / Swift 6.3 on 2026-08-29,
-with the PNG reviewed. Under the five checks the same day. `node
-scripts/smoke.mjs ios` green the same day on the iPhone 17 Pro simulator (§9).
-The macOS smoke wants the display on: a window on a display that has turned
-off is occluded — no canvas renders or is read back, by LLP 1009 D4, so the
-deck's placements stand still until a timer redraws text — and
-`screencapture -l` refuses it (`screencapture exited 1`); a run while the
-display slept, 2026-08-29, showed both, and HEAD's own presenter the same.
+`host/apple/smoke.mjs` verifies the Caltrain geometry and canvas image;
+`scripts/smoke.mjs ios` exercises the UIKit surface. macOS capture requires
+an active display: an occluded window does not render or read back canvases
+(LLP 1009 D4), so display-sleep runs cannot qualify visual output.
 
-## 9. iOS: the UIKit presenter (`host/apple/ios`, `host/apple/swift`; 2026-08-29)
+## 9. iOS: the UIKit presenter (`host/apple/Sources/ExactKit/IOS`)
 
-**Scene and display ownership (2026-09-30, iOS 27 / iPhone Duo).** Both
+**Scene and display ownership.** Both
 standalone and two-session sample adapters connect a `UIWindowScene` and
-create `UIWindow(windowScene:)`; the sample no longer uses app-lifecycle
-window creation. `ExactView` follows its own bounds and asymmetric safe-area
+create `UIWindow(windowScene:)`. `ExactView` follows its own bounds and asymmetric safe-area
 insets across resize. Its local display-scale trait updates Canvas 2D and
 image decode resolution even when logical bounds do not change; its scene,
 not the process's first connected scene, supplies system appearance. Raster
@@ -737,8 +804,8 @@ allocation while surviving charges exceed the new capacity; growth wakes
 queued decodes. AppKit follows its view's backing-properties callback through
 the same capacity seam. The iOS deployment floor remains 17.
 
-*Exercised on the iPhone Duo simulator (Xcode 27.1 27A9275, iOS 27.1
-24A94425, 2026-10-19)*, headlessly, by `bun scripts/smoke.mjs duo`: the hinge
+*Simulator fixture: iPhone Duo, Xcode 27.1 27A9275, iOS 27.1
+24A94425.* Headless verification uses `bun scripts/smoke.mjs duo`: the hinge
 and the turns through the vendor HID events Device Hub's controls send
 (`scripts/duo/hinge_helper.c`), captures through `devicectl`, the apps through
 the agent socket. Closed, the outer display is 466×678 pt; fully open and
@@ -759,7 +826,7 @@ do (the `web` leg). `devicectl device
 orientation set` is accepted and turns nothing, so the turns go through the
 helper. Not exercised: Split View with another app beside this one (QUEUE).
 
-*Reserved regions, evaluated.* UIKit 27.1 adds `UIView.reservedRegions(kind:)`
+*Reserved regions.* UIKit 27.1 adds `UIView.reservedRegions(kind:)`
 and `UIHingeInteraction`. On the inner panel the simulator reports two
 `occlusion` regions (the camera, 58×37 at (677, 21); the status strip, 84×120
 at the right edge) and one `division` region, the fold: a 40-pt band at
@@ -796,27 +863,14 @@ once per key (1035.001 D6).
 
 LLP 1039 passes the session’s layout viewport to the runner before first settlement; `resize` re-answers `exactViewport` and merges that commit with the existing relayout batch. Under `interactive-widget="resizes-content"`, where no native navigation holds the editor, the keyboard-adjusted frame is therefore both the kernel’s viewport and the app’s `height`; with native navigation the editing route’s block ends at the keyboard and both keep the window’s (the keyboard, below).
 
-iOS is this host on its fourth surface, not a fifth host. **The archive is the
-same**: `cargo build --release -p caltrain-apple --target aarch64-apple-ios-sim`
-(x86_64-apple-ios on an Intel Mac) builds `libcaltrain_apple.a` — the runner,
-the kernel, the data crate, the baked plan, the C ABI of §4 — with nothing in
-`host/apple/src` or the header changed; `caltrain-gpu` builds for the same
-target as the dylib the bundle carries in `Frameworks/`. **The presenter is
-the same shape**: `host/apple/ios` is a SwiftPM package (tools 5.9, iOS 17, a
-`CExact` system-library target over `exact.h`) whose executable target holds
-`main.swift`, `Presenter.swift`, `Gpu.swift`, and `AgentIOS.swift`, and links
-the archive the way `macos` does. **What is not about a window is shared, not
-copied**: `host/apple/swift/` holds `Bridge.swift` (verbatim), `Text.swift`
-(CoreText for both — a `PlatformFont`/`PlatformColor` alias, the italic
-trait per platform, the context passed to `draw`), `Agent.swift` (the
-request loop, `reply`, `settle`, the `clock` fixed point — everything of
-LLP 1012's presenter half that is not `layout`/`tap`/`type`/`screenshot`),
-and `GpuModule.swift` (the dylib's ABI, `dlopen`); both packages symlink
-them into their target (SwiftPM follows the link). `AgentMac.swift` is what
-remained of the macOS agent file. The macOS smoke is the regression check
-for the split and stayed green through it.
+iOS uses the same Rust host archive: `cargo build --release -p caltrain-apple
+--target aarch64-apple-ios-sim` builds `libcaltrain_apple.a`; the GPU module
+uses the same target and ships in `Frameworks/`. Shared bridge, CoreText,
+agent and GPU ABI code lives in `host/apple/Sources/ExactKit`, with `Mac/`
+and `IOS/` supplying platform view, window and input behavior. Runtime and
+session ownership follow LLP 1031; the iOS deployment floor is 17.
 
-**Short vertical scroll containers** (2026-09-09, Messages): effective vertical
+**Short vertical scroll containers**: effective vertical
 `overflow: scroll` enables UIKit's `alwaysBounceVertical`, so a list that fits
 still responds elastically to a finger drag. Non-scrolling axes remain locked;
 content size and programmatic offset clamping are unchanged. This is the host's
@@ -827,26 +881,23 @@ reversal and release. Exact's current drag-to-offset response still differs
 from the native Messages large-title list; enabling bounce does not establish
 matching native title motion.
 
-**Orthogonal carousels** (2026-09-19, Shop): `fitScroll` now derives forced
+**Orthogonal carousels:** `fitScroll` derives forced
 vertical bounce from the current content geometry. It remains enabled for
 vertical overflow and for short containers without horizontal overflow; it is
 disabled when only the horizontal axis has travel (a half-point tolerance
 ignores subpixel extent noise). CSS makes the carousel's otherwise-visible
-vertical axis compute to auto, represented here as scroll. Unconditionally
-forcing vertical bounce on that axis swallowed Mac-hosted iOS wheel input.
-The source Shop page scrolled under that same input. Direct CUA checks verify
-vertical wheel scrolling in both directions over review cards, horizontal
-dragging, preserved horizontal position after page scrolling, and vertical
-wheel scrolling over the product gallery. UIKit still owns all motion; no
-pan recognizer, offset forwarding or deceleration change was added. A first
-candidate that rejected perpendicular pan starts did not fix the wheel case
-and was removed. AgentIOS wheel tests explicitly route to an ancestor and do
+vertical axis compute to auto, represented here as scroll. Forcing vertical bounce on a horizontal-only carousel can consume Mac-hosted
+iOS wheel input. CUA fixtures cover vertical wheel scrolling over cards and
+product galleries, horizontal dragging and offset retention during page
+scrolling. UIKit owns motion; the presenter adds no pan recognizer, offset
+forwarding or deceleration policy.
+AgentIOS wheel tests explicitly route to an ancestor and do
 not establish this physical UIKit behavior. Physical-iPhone acceptance,
 measured frame pacing and comprehensive nested boundary behavior remain open.
 Evidence is the Shop task's `.evidence/nested-scroll-checkpoint.json` and
 `work/reference/nested-scroll-fixed-*.png` captures.
 
-**Native swipe rows** (2026-09-10, Messages; `SwipeActionsIOS.swift`). An
+**Native swipe rows** (`SwipeActionsIOS.swift`). An
 explicit `swipeContent` id on a scroll node requests a UIKit cell around that
 full-size descendant. `swipeLeading` and `swipeTrailing` list descendant press
 control ids, outermost first. Each action uses the control's accessible name,
@@ -866,7 +917,7 @@ configured control is disabled, another control does not silently acquire the
 full-swipe gesture. UIKit owns recognition, progress, reversal and release.
 
 The parent authored scroll view retains vertical scrolling. The kernel retains
-row dimensions. A row is projected only while a swipe can start (2026-09-25):
+row dimensions. A row is projected only while a swipe can start:
 at rest the authored scroll holds its content and a batch moves nothing. A
 touch landing on the row projects it from the row's hit test, before UIKit
 gathers the touch's recognizers, so the table's own swipe sees the first pan;
@@ -884,7 +935,7 @@ native surface.
 Invalid or ambiguous references, missing accessible names and nonmatching row
 dimensions retain the authored fallback with a diagnostic.
 A swipe owner's scroll container keeps no `UIScrollView` until something needs
-it (2026-09-25): the swipe cell takes the row's touches, and a closed row sits
+it: the swipe cell takes the row's touches, and a closed row sits
 at its scroll start, as at rest on the web, so its children live in the owner,
 clipped as the scroll clips them. The scroll view is made when the row is
 refused (the authored fallback is then the swipe), for an authored
@@ -903,19 +954,15 @@ button's accessible name is attached during presentation, not by inspection.
 
 For a named button used as the row content, the native cell exposes that
 button's declared accessible name, identifier and button/disabled traits, and
-forwards accessibility activation to the live authored control. Without this
-projection, UIKit's cells around custom-painted content omitted all six Messages
-conversation names from public accessibility snapshots. Ordinary-launch captures
-now expose the names; direct public accessibility activation opens the intended
-conversation and refuses a retained cell after filtering removes its control.
-Eight physical swipe cases and eight ordinary Tapback entry/dismissal pairs pass
-with the projection (`/tmp/messages-swipe-accessibility/verification.json`).
-This verifies the named-button boundary, not a complete VoiceOver interaction.
+forwards accessibility activation to the live authored control. The public accessibility snapshot exposes conversation names, and activation
+opens the live authored control while refusing a retained cell whose control
+is removed. Eight physical swipe cases and eight Tapback entry/dismissal pairs
+cover this named-button boundary (`/tmp/messages-swipe-accessibility/verification.json`).
+These checks do not qualify a complete VoiceOver interaction.
 
-**Horizontal scroll snap** (2026-09-09, Messages): the admitted CSS subset is
+**Horizontal scroll snap**: the admitted CSS subset is
 `scroll-snap-type: none | x mandatory` and `scroll-snap-align: none | start | end`
-(`end` 2026-10-03, asked for by the Signal Clone's swipe row before native swipe
-actions: a narrower area rests with its end at the viewport's end).
+An `end`-aligned area narrower than the viewport rests with its end at the viewport's end.
 The browser executes these as CSS. UIKit's `scrollViewWillEndDragging` finds
 the nearest captured position to its projected destination and adjusts
 `targetContentOffset`; UIKit owns dragging and deceleration, using its fast
@@ -927,7 +974,7 @@ AppKit and Linux snapping remain unimplemented. Messages' single resting
 position and vertical-scroll coexistence have been driven on web and iOS;
 matching Messages' exact settling curve remains open.
 
-**Scroll events** (2026-09-09, Messages): a declared `scroll` handler receives
+**Scroll events**: a declared `scroll` handler receives
 `scrollLeft` and `scrollTop` as two numbers. UIKit delivers tracked/decelerating
 user offsets synchronously outside a presenter batch, before painting: deferring
 these made authored scroll-linked positions visibly lag the scrolling surface.
@@ -940,7 +987,7 @@ independent resets and unrelated updates. Messages uses this event to highlight
 the revealed inbox row and reset the other rows without resetting the active drag,
 and to resist timestamp travel while keeping date labels stationary.
 
-**Following the end** (2026-09-09, Messages): `scrollFollowEnd=true` records
+**Following the end**: `scrollFollowEnd=true` records
 whether a scroll view is at its bottom (within one point) before a batch and
 restores the new bottom after layout. Above it, iOS records the first visible
 descendant, descending into partially visible boxes, and compensates for its
@@ -957,13 +1004,12 @@ until the returning viewport can accommodate it. This covers both a detached
 route and one still attached during a push animation. A new drag or explicit
 vertical scroll assignment discards that saved intent. Anchoring remembers the
 offset UIKit actually stored, so its fractional quantization cannot masquerade
-as a user scroll. Messages contact-details Back now preserves the reading
+as a user scroll. Messages contact-details Back preserves the reading
 position with the keyboard restored, including ordinary-launch button returns
 and cancelled/completed native swipes; top/end following remains intact.
 macOS retains the numeric offset. Explicit `scrollTop`
 assignments apply afterwards and win. Web’s end-following code lets the browser
-anchor an unpinned reader. A shared fixture first demonstrated a 100-point jump
-on both hosts, then verified stable content after growth and shrink above the
+anchor an unpinned reader. Shared fixtures cover stable content through growth/shrinkage above the
 reader, plus explicit and automatic end following. This remains an opt-in
 application policy, not the full CSS anchoring selection/suppression algorithm. The iOS transcript may also
 request `keyboardDismissMode="interactive"`; UIKit owns the drag and dismissal.
@@ -983,8 +1029,7 @@ the first layout pass that has a size, following every later size
 same `CTLineDraw` into the UIKit context; an `input` is a `UITextField`
 reporting `.editingChanged` — a value that arrives while text is marked
 waits, and is written only after the committed text has been reported, the
-textarea's order (2026-09-23: before, 你好 committed as the echoed
-"nihao"; `FieldCompositionIOSTests`, run on a simulator); a scroll container is a `UIScrollView` whose
+textarea's order (`FieldCompositionIOSTests` on the simulator); a scroll container is a `UIScrollView` whose
 content size is held to the box on an axis that does not scroll (UIKit would
 pan it otherwise); presentation values go on `transform` about the center,
 the frame set untransformed first (UIKit's `frame` is undefined under a
@@ -1030,18 +1075,18 @@ are read — happens on every capture (the deck in the sky moves on every
 seek, as it does on macOS through `settle`, LLP 1014.000 §1c; the smoke pins
 it at `+100` on both). No starvation guard: iOS has no window occlusion, a
 backgrounded app is `visible == false`, and on the simulator a surface's
-first render — its pipelines compiling — honestly takes over 200 ms. The GPU module's device request now takes
+first pipeline compilation can take over 200 ms. The GPU module's device request takes
 wgpu's default limits where the adapter meets them and its downlevel
 defaults (with the adapter's resolution) where it does not
 (`gpu/src/lib.rs` `load_gpu`): the simulator's Metal device is below the
 Apple4 family and offers 15 inter-stage variables to the default's 16; an
 iPhone since the A11 offers 31, and every other host meets the defaults.
 
-**The safe areas and `viewport-fit` (revised 2026-08-30).** The layout
+**Safe areas and `viewport-fit`.** The layout
 viewport is the safe area (above) — a browser's rule for a page without
 `viewport-fit=cover` — and what a phone paints behind the status bar and
 the home indicator is **the first root's `background`**, as Safari paints
-the root element's background under both; white where the root sets none
+the root element's background under both; the platform background where the root sets none
 (the macOS presenter paints the same colour beyond a document shorter than
 its viewport). The Caltrain app sets its `main` to the sky's dark when the
 sky is on and white when it is off. When the first root's `viewportFit`
@@ -1063,16 +1108,16 @@ re-sent by the batch that changes the insets. `layout` reports the insets
 given as `env` (LLP 1012 §1) — zero when the viewport is the safe area, as
 `env()` is zero on a page without the meta.
 
-> **Amended by LLP 1115 D2.** Where the root sets none it is the platform's background
-> (`systemBackground` on iOS, `windowBackgroundColor` on the Mac), never a fixed white.
+The platform background is `systemBackground` on iOS and
+`windowBackgroundColor` on macOS (LLP 1115 D2).
 
 The standalone macOS adapter also applies the current `viewport-fit` when it
 installs its window callback: mounting the view can already have booted the
 embedded plan. Every successful session boot re-sends the view's insets,
 as a dev reload does, even if the new root keeps the same viewport mode
-(2026-09-04: the external cover-root app exposed both initialization gaps).
+(the external cover-root fixture).
 
-**The keyboard (revised 2026-10-24).** `interactive-widget="resizes-visual"`
+**Keyboard geometry.** `interactive-widget="resizes-visual"`
 keeps the layout size and adds the keyboard overlap to the editing scrollport's
 bottom content and indicator insets. Each writer removes only its contribution,
 preserving space added for pinned content. The default is `resizes-content`,
@@ -1091,7 +1136,7 @@ as far as necessary within its bounds, with 8 pt of clearance. A focus handoff
 also requests layout when the keyboard's frame does not change. Keyboard overlap
 remains available through `layout.env["keyboard-inset-height"]`.
 
-**`interactive-widget="resizes-content"` (revised 2026-10-24).** An ordinary
+**`interactive-widget="resizes-content"`.** An ordinary
 page's layout viewport ends at the docked keyboard's top, with no bottom safe-area
 inset at that edge. Native navigation keeps the document and its UIKit container
 full size: only the route containing the live keyboard editor receives a shorter
@@ -1114,22 +1159,18 @@ waits while UIKit's stack is a shorter prefix of
 Exact's last write: keyboard guides and blur handlers can run inside a pop before
 `willShow`. The completed pop is recorded before pending work is replayed.
 
-**`resizes-content` is iOS's default (2026-10-10, LLP 1116 D2).** A hand-built
-app keeps a focused field and the content under it above the keyboard (UIKit's
-keyboard layout guide, SwiftUI's keyboard safe area); the web's default left the
-fields under it covered and panned the whole page, header and all, so the bake-off
-graders marked it down. A root without `interactive-widget` now has the
-`resizes-content` reading above (`Presenter.keyboardPolicy`; the agent's
-`state.keyboard.policy` reports it); `interactive-widget="resizes-visual"` is the
-opt-out to the inset reading, and `overlays-content` stays as below. The web keeps
-the browser's default.
+**`resizes-content` is iOS's default (LLP 1116 D2).** A hand-built app
+keeps its focused field and nearby content above the keyboard through UIKit's
+layout guide or SwiftUI's safe area. `Presenter.keyboardPolicy` and
+`state.keyboard.policy` use this reading unless authored otherwise.
+`resizes-visual` opts into scrollport insets; `overlays-content` preserves
+layout. The web keeps the browser's default.
 
-**`interactive-widget="overlays-content"` and the keyboard toolbar
-(2026-10-03, §9.1).** CSS's third value: the keyboard covers the viewport and
-nothing is resized. Its consumer, the Signal Clone app (an outside app,
-`~/.tuft/projects/signal-exact2`), wanted Signal's own technique: its input
-toolbar pinned to the keyboard's top while the transcript keeps its layout
-and only gains a bottom inset. Under this mode `ExactView.fit`
+**`interactive-widget="overlays-content"` and the keyboard toolbar (§9.1).**
+CSS's third value: the keyboard covers the viewport and nothing is resized.
+The Signal Clone fixture (`~/.tuft/projects/signal-exact2`) pins its input
+toolbar to the keyboard's top while the transcript keeps its layout and gains
+only a bottom inset. Under this mode `ExactView.fit`
 neither insets the viewport nor has `fit` frame it; `KeyboardToolbars.ride`
 lifts each `role="toolbar" toolbarPlacement="keyboard"` by the keyboard's
 overlap less the gap below the toolbar and its own bottom padding (which
@@ -1147,7 +1188,7 @@ browser defines it (a declared difference; Safari ignores
 keyboard could not be shown on this Mac's Xcode 27 simulators (no
 Simulator.app to clear *Connect Hardware Keyboard*), so the real keyboard
 drive is owed on a phone.
-**Authored inertness (2026-09-11, LLP 1035.001 D3):** a node becoming inert
+**Authored inertness:** a node becoming inert
 ends editing within its subtree and excludes that subtree from UIKit input and
 accessibility. Direct activation checks the entire ancestor chain before choosing
 an action; editor delegates also refuse renewed editing. Clearing the prop
@@ -1158,7 +1199,7 @@ its own action eligibility and identity checks remain. AppKit's existing focus
 checks do not establish complete subtree input/accessibility support. Evidence:
 `/tmp/messages-inert-ownership/verification.json`.
 
-**Focus handoffs (revised 2026-10-24).** The keyboard layout guide is the geometry
+**Focus handoffs.** The keyboard layout guide is the geometry
 source for each layout pass. A plain UIKit form constrained to the guide renders
 transient text/password height changes, including with username/password content
 types. Exact follows those changes directly, without a debounce or retained guide
@@ -1246,16 +1287,15 @@ the display matches the app's drawing at the plain points the reply names
 (`opaque`: a 16-point grid less the status bar, the bottom safe area, the
 keyboard and every glass, blur, portal or filtered layer that draws), to within
 2 levels in each 5x5-pixel patch the app drew in one colour: there the two
-matched exactly on euxy's screens, and a notification banner's frosted
-material over the page was 3 or 4 levels off it. A launch and such a capture hold the
+match exactly in the display fixtures, while a notification banner's frosted
+material differs by 3 or 4 levels. A launch and such a capture hold the
 simulator's display lock (`simulatorDisplay`), so another drive's app does not
 come to the front between them. Otherwise the picture stays the app's, with
 the status bar's rows and the keyboard's band taken only where all three reads
 agree on them, and the reply's `pixels: "app"` and `pixelsWhy` say why. The
 status bar's rows stay the app's unless asked for (`window status`); `window
 app` asks for the app's own drawing, as does a capture that strikes through
-header nodes the bar leaves out. This distinction landed
-with LLP 1021 D2's confirmation integration (2026-09-10). The driver's `ios` carrier (`scripts/agent.mjs`
+header nodes the bar leaves out (LLP 1021 D2). The driver's `ios` carrier (`scripts/agent.mjs`
 `openIOS`) installs the bundle, launches it with `simctl launch --console
 --terminate-running-process` and keeps that attached for the app's stdout
 and stderr (simctl's `--stdout=`/`--stderr=` files stay empty on Xcode
@@ -1289,9 +1329,8 @@ fixture stopping at **652** (the same number as macOS and the web: the same
 CoreText, the same font), the canvas readback matching its recorded
 reference `scripts/fixtures/canvas-sky.ios.png` **to the pixel** (0.00%),
 seven captures, the deck's placements and focus, the motion fixture's 75 /
-86.55 / 1500. The `--shot` pictures were reviewed: the aurora behind the
-station, the boards refracted through the glass, the line map's stations
-laid out by the kernel.
+86.55 / 1500. Visual fixtures cover the aurora behind the station,
+refraction through the boards and kernel-laid-out map stations.
 
 **A phone** (`--device`, 2026-08-30): the same script builds the archive
 and the GPU dylib for `aarch64-apple-ios`, the presenter for
@@ -1306,104 +1345,62 @@ keychain's Apple Development identity for that team (`EXACT_IDENTITY`),
 entitlements written from them (`application-identifier`, the team,
 `get-task-allow`), the profile embedded — then `devicectl device install
 app` and, with `--run`, `process launch`. No Xcode project: the profile is
-one Xcode once put on the Mac for any app of the team. Verified
-2026-08-30: `codesign --verify --deep --strict` passes and the entitlements
-read back; the bundle installed on the iPhone 17 Pro Max this Mac has
-paired (iOS 26.6) **over Wi-Fi** — `devicectl`'s `localNetwork` transport,
-no cable — in 8.1 s, launched, and stayed running (`devicectl device info
-processes` shows it). A phone that is asleep, on another network, or with
+an Xcode-managed development profile. Validation uses
+`codesign --verify --deep --strict` and entitlement readback. The physical
+fixture is an iPhone 17 Pro Max on iOS 26.6 over `devicectl`'s `localNetwork`
+transport: installation 8.1 s, launch and running-process verification.
+A phone that is asleep, on another network, or with
 Wi-Fi off is `unavailable` to `devicectl`; the script says so and stops
 after signing.
 
-**The frame rate on the phone, measured (2026-08-30).** (`EXACT_FPS` was
-deleted on 2026-10-03 for `perf frames` and Save Trace, LLP 1079 D7; this is
-how the measurement below was taken.) `EXACT_FPS=1` made
-the display link run always and report once a second — frames delivered,
-the longest gap, the canvases' renders and captures with their times — to
-stderr (which `devicectl device process launch --console` relays), to
-`Documents/fps.log` in the app's container, and to a readout across the
-top of the screen; the app grew a "Sky off / Sky on" button for the
-comparison (`state sky`, `component Content`, `when sky` choosing the
-canvas or a plain scroll — `apps/caltrain/app.contract`). On the iPhone 17
-Pro Max (iOS 26.6, a 120 Hz display; the bundle's plist opts in with
-`CADisableMinimumFrameDurationOnPhone`, and in fps mode the link asks for
-80–120, or a display link there is held to 60 and measures nothing above
-it — the first trace read a flat "60" with the sky off for that reason):
-**with the sky off, scrolling, 120 fps, the longest gap 8.3 ms — every
-frame**. **With the sky on, scrolling, 42–64 fps: 30–40 captures a second
-at 20–25 ms each** — the whole app rasterized into a 1206×2334 bitmap and
-uploaded (11 MiB) on every scroll frame, because the scroll container lives
-inside the canvas and each scroll repaints through it (LLP 1014 D4 c) —
-while the aurora's renders cost **0.1–0.2 ms** a frame. Idle with the sky
-on, 111–114 fps with a 55–75 ms gap once a second: the countdown's tick
-changes text, and one text change re-captures the whole sky. So the cost
-is the children capture, not the shader. Two ways down were tried the same
-day and are declined: **capturing at 2× on the 3× phone is slower** — 28–39
-ms a capture, 34–45 fps — because `layer.render(in:)` then resamples every
-view's 3× backing store instead of blitting it (the cost is per-layer work,
-not pixels), so the scale stays the screen's; and **`CARenderer`** cannot
-render the overlay — assigning it a layer takes the layer out of the
-window's tree, and UIKit's next `superview` walk faults (a layer is in one
-tree only); and **the render server's snapshot** — the overlay composited
-under the Metal layer at alpha 1 and `drawHierarchy(afterScreenUpdates:
-false)` into the bitmap — costs the same 26–27 ms and is refused
-intermittently. Three rounds, so the loop stopped there (`rules/RULES.md`),
-and the answer was a design, built the same day:
+**Canvas capture and rendering.** The UIKit overlay remains in its window
+tree for touches, keyboard and accessibility. A shadow tree of plain
+`CALayer`s mirrors geometry, opacity, clipping, corner radius, contents and
+shape/text/gradient state. Layers are keyed by source identity; properties and
+sublayer lists update only when changed. Invalidated views display before
+mirroring so newly loaded images appear in the capture.
 
-**The shadow-layer capture** (`host/apple/ios/…/Shadow.swift`). The
-overlay stays in the window's tree, where UIKit needs it — touches, the
-keyboard, accessibility — and a **shadow tree of plain `CALayer`s mirrors
-it** on every capture: geometry, opacity, clipping, corner radius, and the
-same `contents` objects (the views' backing stores, shared, never copied;
-a shape, text, or gradient layer's own state besides), each property set
-only where it differs, the sublayer lists re-attached only when they
-changed, layers kept by the source layer's identity. **`CARenderer`
-renders that tree on the GPU** into a Metal texture (`rgba8Unorm`,
-private) on a command queue the presenter owns; the texture is cleared by
-a render pass on that queue first (the renderer composites over what the
-texture holds — the previous frame appeared as ghosts of every text), a
-blit on the same queue reads it back into the capture bitmap, and the rows
-go in bottom-up (with a flipped root the renderer's picture is upside down
-as a whole). A view the batch just invalidated is displayed before it is
-mirrored (`displayIfNeeded`), so the capture is not one frame behind it —
-the logo, as it loaded, was the tell. A nested canvas contributes its
-readback picture as its layer's contents, as it does through `draw` in the
-CPU capture, which remains the fallback where there is no Metal device
-(`EXACT_CAPTURE=cpu` forces it, the fixture's oracle;
-`EXACT_CAPTURE_DUMP=<dir>` writes both captures of a frame as PNGs, the
-way the orientation and the ghosts were found). The smoke's readback
-fixture, recorded from the CPU capture, holds the GPU one at 0.37% beyond
-the band, mean 0.11. With the readback still in the loop, scrolling with
-the sky on measured 110 fps on average (86–120), a capture 10.7 ms — the
-mirror 4.5, the GPU 1.8, the readback 2.1 — against 20–25 ms and 42–64 fps
-before.
+`CARenderer` renders the mirror on the GPU into a private `rgba8Unorm` Metal
+texture. The presenter owns the queue and clears the target first to avoid
+compositing over the preceding frame. A readback uses the same queue and
+bottom-up rows. The CPU capture remains the no-Metal fallback
+(`EXACT_CAPTURE=cpu`); `EXACT_CAPTURE_DUMP=<dir>` writes both paths for image
+comparison. The readback fixture differs from the CPU reference in 0.37% of
+pixels beyond the allowed band, mean 0.11.
 
-**Two more steps took it to the display's rate.** A nested canvas's
-readback is cached (`Canvases.picture(of:)`): the line map, once drawn,
-is rendered again and read back only when the module reports it dirty or
-its surface wants a frame at a new clock — it had been re-rendered on every
-capture of the sky. And **the texture is handed to the module as it is**:
-`gpu_texture_metal(id, w, h, texture)` (Apple targets; `gpu/src/lib.rs`
-`texture_from_metal`) retains the `MTLTexture` and imports it through
-wgpu-hal's Metal backend (`Device::texture_from_raw`,
-`create_texture_from_hal`) as the canvas's children — no readback, no
-upload; the previous children are copied out of it at each hand-over for a
-surface that crossfades. Two things about that hand-over were found on the
-phone, not the simulator: the renderer's queue option must be the real
-constant (`kCARendererMetalCommandQueue`, read by `dlsym` — its Swift name
-is not exported on iOS; passed as a guessed string the renderer used its
-own queue and the module sampled half-drawn textures), and **it must be one
-texture**, imported once: two in turn made the module re-import and
-re-bind every capture, and a surface takes a new children view as a fresh
-set — the glass crossfaded on every capture, a flicker with the alpha in
-between. The module's reads of the one texture are complete before it is
-drawn into again: `gpu_sync()` (`device.poll(Wait)`), which the capture
-calls first. **On the phone, scrolling with the sky on: 119 fps on
-average (101–120), 18 of 19 seconds at 110 or more, the longest gap 13
-ms on average; a capture 7.1 ms** — the mirror 1.9, the GPU 1.6, the rest
-the wait for the module's last frame — against 20–25 ms and 42–64 fps
-where this began. The deck's per-child textures still take the byte path
-(a texture each; not on the scroll path).
+Nested-canvas readbacks are cached by `Canvases.picture(of:)` and refreshed
+only when the module reports dirtiness or needs a frame at a new clock.
+`gpu_texture_metal(id, w, h, texture)` imports the retained texture through
+wgpu-hal (`Device::texture_from_raw`, `create_texture_from_hal`), avoiding
+readback and upload for scrolling capture. Crossfades copy the preceding
+children before each hand-over. Per-child deck textures use the byte path.
+
+The queue option must be `kCARendererMetalCommandQueue`, resolved with `dlsym`
+on iOS; a guessed string does not select the shared queue. Reuse one imported
+texture so its identity does not trigger repeated rebinding or crossfades.
+`gpu_sync()` (`device.poll(Wait)`) completes the module's reads before the
+capture writes that texture again. A renderer must not adopt the live overlay
+layer: one layer cannot belong to both the window and renderer trees.
+
+Physical capture comparison: iPhone 17 Pro Max, iOS 26.6, 120 Hz,
+1206×2334 capture, Caltrain sky scene. The plist sets
+`CADisableMinimumFrameDurationOnPhone`; the display link requests 80–120 Hz.
+These are capture-workload measurements, not text-renderer or general 120 Hz
+acceptance. Frame diagnostics use `perf frames` and Save Trace (LLP 1079 D7).
+
+| Capture strategy | Scroll fps | Capture cost |
+|---|---|---|
+| Sky disabled | 120; longest gap 8.3 ms | No children capture |
+| CPU view capture, 3× | 42–64 | 20–25 ms; 11 MiB upload about 1 ms |
+| CPU view capture, 2× | 34–45 | 28–39 ms; resampling 3× backing stores |
+| Render-server bitmap snapshot | Intermittently unavailable | 26–27 ms |
+| GPU mirror with readback | 110 average (86–120) | 10.7 ms: mirror 4.5, GPU 1.8, readback 2.1 |
+| Cached nested capture and imported texture | 119 average (101–120); 18/19 seconds ≥110; mean longest gap 13 ms | 7.1 ms: mirror 1.9, GPU 1.6, remainder synchronization |
+
+The sky shader itself costs 0.1–0.2 ms per frame. CPU capture with the sky
+idle measures 111–114 fps with a 55–75 ms gap on the countdown's one-second
+text update, because that update captures the children. Capture cost, not the
+shader, explains this scene's bottleneck.
 
 **Not in v1 (iOS):** a synthesized touch for `tap`; a pan chaining out of a nested scroll view at its edge
 (UIKit's own behavior stands; the agent's wheel chains); rotation is handled
@@ -1411,7 +1408,7 @@ but untested; `scripts/metrics.mjs` has no iOS row; the agent API on a
 phone (the socket is a simulator's; a phone would want the same lines over
 `devicectl`'s tunnel or USB).
 
-### tvOS (Doug Lowder, landed 2026-10-03)
+### tvOS
 
 tvOS is the UIKit presenter compiled for Apple TV, not another presenter
 (`rules/DEFERRED.md` §Surfaces). Shared Swift admits it beside `os(iOS)` and
@@ -1462,7 +1459,7 @@ files a break against the range since the last commit it checked. Not yet:
 the agent driver and the smoke on a TV, and scripted remote presses
 (QUEUE.md "tvOS, what is owed").
 
-## 10. The store (LLP 1018, as built 2026-08-30)
+## 10. The store (LLP 1018)
 
 Nothing crosses the ABI: `host/apple/src/store.rs` endows the app's
 `ibex2::host::Bindings` once at boot (`EXACT_AGENT=1` selects a memory store
@@ -1508,7 +1505,7 @@ physical checks and the two-session dialog fixture pass on the rebuilt host
 (`/tmp/messages-modal-confirmation/`). AppKit hides the declared dialog and
 journals that its projection is unsupported.
 
-**Native navigation** (2026-09-09, Messages): the first root's `navigationKey`
+**Native navigation**: the first root's `navigationKey`
 and `navigationBack` project its keyed direct child routes into a UIKit
 navigation controller, contained by the nearest owning view controller. The
 kernel still lays out the same Contract views. Generic child-list reconciliation
@@ -1525,20 +1522,18 @@ are ignored. Intent received during a native transition is projected when it end
 An interactive sheet's completed callback returns to UIKit before restoring its
 viewport and releasing its modal-navigation slot. Only the same live, selected
 source may then invoke Back. Keeping that route selected or requesting another
-sheet rebuilds presentation ownership; reusing the old slot previously moved
-the primary view under a sheet with the wrong controller parent. The second
-candidate passes retained/replacement-route and mid-gesture permission cases
-(`/tmp/messages-dismissal-owner/`, LLP 1035.001 D2).
-This prevents a rapid Back → Compose from cancelling the new sheet; the iOS drive
-passes twice with recipient focus, keyboard, saved drafts and physical Back gestures
+sheet rebuilds presentation ownership with the correct controller parent.
+Retained/replacement-route and mid-gesture permission cases are covered in
+`/tmp/messages-dismissal-owner/` (LLP 1035.001 D2). A rapid Back → Compose must
+preserve the new sheet's recipient focus, keyboard and saved draft
 (`/tmp/messages-navigation-completion/`). Both gesture
 recognizers refuse to begin when the named Back control is missing or disabled;
 the completion callback uses that same enabled-control lookup, scoped to the
 selected route. A retained inactive route's control cannot authorize a pop or
 sheet dismissal; sheets check permission at sync and through UIKit's delegate
 (`/tmp/messages-back-owner/`, LLP 1035.001 D1). Messages disables
-its conversation Back while the forwarding sheet is open. Previously an edge
-swipe could pop the source route underneath that sheet. The presenter
+its conversation Back while the forwarding sheet is open; an edge swipe
+cannot pop the source route underneath the sheet. The presenter
 freezes outgoing pixels only when a button's action deletes its route before
 UIKit can animate it. In agent mode, programmatic navigation settles immediately;
 physical gesture verification must also run outside that mode. There is no
@@ -1550,25 +1545,22 @@ native presentation; remount installs owners from current intent. Focus requeste
 offscreen stays bound to its actual editor and waits from window attachment
 through controller installation. Physical sheet-drag unmount/destruction and an
 offscreen route replacement verify retained state, remount, focus and independent
-session use (`/tmp/messages-unmounted-owner/`, LLP 1031 D3). A subsequent
-same-window transfer to a different UIKit controller also passes with the current
-host, including a physical sheet drag and offscreen replacement with queued focus
+session use (`/tmp/messages-unmounted-owner/`, LLP 1031 D3). Same-window transfer to a different UIKit controller is covered, including a physical sheet drag and offscreen replacement with queued focus
 (`/tmp/messages-reparent-owner/`, 2026-09-11). The old parent loses its navigation
 child and the new parent owns it. Unmount ends current focus; explicit queued
 focus reaches the new editor. Continuous editing and cross-window moves are not
 established by these checks.
 
-**Gesture retirement (2026-09-10, LLP 1035.001 D8):** removing a route can
+**Gesture retirement:** removing a route can
 cancel a child's recognizer before that child's destroy operation reaches Swift.
 The kernel has already removed the target. A drag's motion update and final
 Reply dispatch therefore use the presenter's existing post-batch event queue,
 with the originating view's identity checked at delivery. A destroyed or replaced
-view receives neither. The production held-reply → Back reproduction previously
-reported `drag target is gone`; it now completes without that write. Public XCTest
-touches also verify a short release returning to rest and a completed Reply
-dispatching once, with draft and keyboard retained (`/tmp/messages-gesture-retirement/`).
+view receives neither. Held-reply → Back, a short release returning to rest
+and completed Reply dispatch exercise this rule with draft and keyboard
+retained (`/tmp/messages-gesture-retirement/`).
 
-**Initial ownership and refits (2026-09-10, LLP 1035.001 D8/D9):** the presenter
+**Initial ownership and refits:** the presenter
 installs the initial native owner after logical mounting and the root's frame,
 before applying child geometry. Initial installation resolves the controller's
 layout, but does not present a sheet or flush focus. Initial and later updates
@@ -1588,8 +1580,8 @@ own navigation controller, including when a later push or nested sheet is active
 On iOS 18+, UIKit's public zoom transition resolves that live source at use;
 removed or unmounted sources return nil, replacements resolve by their new identity.
 Without the prop, UIKit uses its ordinary fullscreen transition. The existing
-Back and `closedby` rules govern dismissal. R4 native owner/gesture verification
-and R5 browser verification are recorded under `/tmp/messages-fullscreen/`.
+Back and `closedby` rules govern dismissal. Native owner/gesture and browser
+verification fixtures are recorded under `/tmp/messages-fullscreen/`.
 Navigation tracks route transitions, excluding enclosing presentation appearance
 callbacks that have no corresponding route completion. The owning `ExactView`
 stays in its embedder. The presenting navigation controller keeps its parent,
@@ -1604,7 +1596,7 @@ deferred frames and content extents. In particular, a scroll created while the
 sheet is open must not consume its initial offset against a zero-size extent
 (Messages' new inbox row, verified on iOS and the browser).
 Style updates and UIKit appearance propagation still reach its actual controls,
-fixing the stale light/dark background caused by the former screenshot. Source
+so live controls retain correct light/dark backgrounds. Source
 interaction and accessibility are disabled while covered and restored on close.
 Forwarding's backdrop shows selection already closed. UIKit owns presentation,
 interactive dismissal and spring-back.
@@ -1618,8 +1610,8 @@ weakly. `state.navigation.transition` and `clock settle` include that retirement
 and pending projection. Focus readiness is separate: an already-mounted destination
 editor can focus while the outgoing sheet dismisses. Timed reopening, reload during
 dismissal/presentation, two-session destruction and nine physical sheet cases pass
-(`/tmp/messages-modal-retirement/`, LLP 1035.001 D3). The editor-retirement repair
-below subsequently addresses first-Send keyboard continuity.
+(`/tmp/messages-modal-retirement/`, LLP 1035.001 D3). Editor lifetime during
+dismissal follows the retirement contract below.
 The sheet's local keyboard guide supplies its available layout height; the
 horizontal-pop viewport freeze does not apply to modal transitions. Focus
 commands during navigation, sheet presentation or native window mounting share the presenter's single
@@ -1632,18 +1624,16 @@ presenting session with a filled sheet open while the other stays editable
 An unmounted focus target stays in that identity-bound slot even before UIKit
 announces the next navigation transition. A window-mount callback and the end of
 the outermost batch retry delivery; a partially applied batch cannot focus it.
-The production physical New Message Send now focuses its conversation composer
-automatically. Reload and destruction with focus queued preserve the other
-session's editor (`/tmp/messages-send-focus/`). Selection leaving a sheet now
-installs the selected primary stack before starting dismissal. The conversation
-is mounted behind the departing sheet, removing the earlier inbox flash and
-subsequent push. Two real-touch first-Send drives focus the composer and send once;
-Back/sheet gestures, rapid Compose, reload and two-session destruction pass
-(`/tmp/messages-compose-handoff/`). Those runs still lacked keyboard continuity:
-three hidden samples span 247/204 ms in those runs, and recorded video shows the
-keyboard dropping and returning. This does not establish native first-Send motion.
+New Message Send focuses its conversation composer automatically. Reload and
+destruction with focus queued preserve the other session's editor
+(`/tmp/messages-send-focus/`). Selection leaving a sheet installs the selected
+primary stack before starting dismissal, mounting the conversation behind the
+departing sheet. Real-touch checks cover first-Send focus and a single dispatch,
+Back/sheet gestures, rapid Compose, reload and two-session destruction
+(`/tmp/messages-compose-handoff/`). These checks alone do not establish keyboard
+continuity or native first-Send motion.
 
-**Editor retirement (2026-09-10, LLP 1035.001 D3):** when a modal route is
+**Editor retirement:** when a modal route is
 destroyed, its child navigation hierarchy stays in the retiring sheet. Each
 destroyed node is forgotten and removed from the live map immediately; its view
 stays mounted under the frozen outgoing surface until native dismissal completes.
@@ -1659,8 +1649,8 @@ keyboard movement appear in the uninstrumented first-Send check
 (`/tmp/messages-editor-retirement/`); native first-Send reference motion is still
 unestablished.
 The modal controller and route use the system's secondary grouped surface
-behind transparent authored corners. UIKit supplies the dimming outside it;
-painting an app backdrop inside this surface had left a dark corner seam.
+behind transparent authored corners. UIKit supplies the dimming outside it,
+avoiding a second app-painted backdrop at the corner seam.
 
 The route's `closedby="none"` prevents platform close requests through
 `isModalInPresentation`; `closerequest` permits the sheet gesture. Explicit
@@ -1679,8 +1669,7 @@ can announce a notification edge four points above the guide; the guide owns the
 occupied geometry. Keyboard visibility and top-edge inspection use that active guide,
 scoped to the session's editor or retained inset; notifications supply animation
 timing. The production XCTest drive retains inset 335 and viewport height 539
-through a held and cancelled multiline draft, without the previous zero-inset
-sample. Completion still saves the draft and hides the keyboard; populated sheets
+through a held and cancelled multiline draft. Completion still saves the draft and hides the keyboard; populated sheets
 and two-session focus/destruction also pass (`/tmp/messages-keyboard-guide/`).
 The rotation drive retains the draft and first responder in both landscape
 orientations: viewport 874×198 and composer y=141.667, matching native Messages'
@@ -1691,7 +1680,7 @@ establish compact-header or keyboard-control parity. A competing horizontal tran
 still takes rightward gestures in its content area; that arbitration remains an
 open limitation, not a completed iMessage parity claim.
 
-**Emoji selection** (2026-09-09, Messages): an `input` with `emojiPicker=true`
+**Emoji selection**: an `input` with `emojiPicker=true`
 uses the existing text field with an enabled emoji `textInputMode` preferred on
 iOS. The system owns Search Emoji and its results. The delegate and the
 editing-changed path (also used by driver insertion) share `EmojiSelection`:
@@ -1705,7 +1694,7 @@ separate and captures its entry focus state. Close restores the reaction strip
 without actions; double-tap entry restores a previously active composer,
 long-press entry keeps it closed until selection or final dismissal.
 
-**Context previews** (2026-09-09, Messages): `contextTarget` on a preview node
+**Context previews**: `contextTarget` on a preview node
 references the original content's HTML `id`. After layout and navigation
 projection, the presenter finds the preview's nearest enclosing absolute panel.
 iOS magnifies the preview without reflow by 15%, capped at 26 added points on
@@ -1768,7 +1757,7 @@ Visible overflow also participates in iOS hit testing:
 children painted beyond a row's width can be selected after scrolling them
 into view, while each non-visible overflow axis still clips hit participation.
 
-The Messages inline reply surface now consumes `backgroundMaterial="ultra-thin"`
+The Messages inline reply surface consumes `backgroundMaterial="ultra-thin"`
 (LLP 1001): a non-interactive `UIVisualEffectView` underneath authored children.
 The presenter restores that underlay order after child-list reconciliation;
 removing the prop removes the effect. UIKit supplies its appearance changes.
@@ -1795,7 +1784,7 @@ pressed node handles `touchesEnded` without forwarding it. A containing node's
 key handler therefore cannot take focus from an editor retained by a reaction
 button. Unhandled taps still traverse ancestors; ordinary blank-ground taps
 still end editing. The Insets fixture checks retained-button activation under
-a key handler and the editor's actual UIKit first-responder state (2026-09-09).
+a key handler and the editor's actual UIKit first-responder state.
 
 ### Right-swipe actions
 

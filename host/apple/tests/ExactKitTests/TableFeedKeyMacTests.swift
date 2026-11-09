@@ -102,7 +102,7 @@ final class TableFeedKeyMacTests: XCTestCase {
         view.window?.displayIfNeeded()
         let rep = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: view.bounds))
         view.cacheDisplay(in: view.bounds, to: rep)
-        return try XCTUnwrap(rep.colorAt(x: Int(view.bounds.width) - 14, y: Int(view.bounds.midY))?.usingColorSpace(.sRGB))
+        return try XCTUnwrap(rep.paintedColorAt(x: Int(view.bounds.width) - 14, y: Int(view.bounds.midY))?.usingColorSpace(.sRGB))
     }
     /// How far a colour is from grey: the accent's fill is far, the unemphasized one is grey.
     private func chroma(_ c: NSColor) -> CGFloat { max(c.redComponent, c.greenComponent, c.blueComponent) - min(c.redComponent, c.greenComponent, c.blueComponent) }
@@ -542,7 +542,7 @@ final class TableFeedKeyMacTests: XCTestCase {
             var most: CGFloat = 0, least: CGFloat = 1
             for y in Int(box.minY)..<Int(box.maxY) {
                 for x in Int(box.minX)..<Int(box.maxX) {
-                    guard let c = rep.colorAt(x: x, y: y)?.usingColorSpace(.sRGB) else { continue }
+                    guard let c = rep.paintedColorAt(x: x, y: y)?.usingColorSpace(.sRGB) else { continue }
                     let luma = (c.redComponent + c.greenComponent + c.blueComponent) / 3
                     most = max(most, luma); least = min(least, luma)
                 }
@@ -633,8 +633,26 @@ final class TableFeedKeyMacTests: XCTestCase {
         XCTAssertTrue(try f.node("title-2").inEmphasizedRow)
     }
 
+    func testAFirstTargetAppearingDuringTheTablesClickPaintsTheHeldRow() throws {
+        let f = try keyed(count: 20)
+        let row = try f.node("row-1"), title = try f.node("title-1")
+        XCTAssertFalse(row.authorsPress)
+        click(title, in: f) {
+            XCTAssertTrue(row.pressed)
+            f.presenter.apply(wireBatch([["op": "style", "id": row.id, "style": ["press_background_color": [255, 0, 0, 255]]]]))
+            XCTAssertTrue(row.pressPaint.down)
+            XCTAssertEqual(row.style["background_color"], .array([.number(255), .number(0), .number(0), .number(255)]))
+        }
+        XCTAssertFalse(row.pressed)
+        XCTAssertEqual(f.table.selectedRow, 1)
+    }
+
     func testAuthoredPressedPaintFollowsTheTablesClickWithoutReplacingSelection() throws {
-        let source = TableFixture.source(count: 20).replacingOccurrences(of: "row press=open(r)", with: "row press=open(r) -exact-press-opacity=0.4 -exact-press-background-color=\"#ff0000\" -exact-press-color=\"#00ff00\"")
+        let source = TableFixture.source(count: 20).split(separator: "\n", omittingEmptySubsequences: false).map { line in
+            guard line.contains("row press=open(r)") else { return String(line) }
+            let indent = line.prefix { $0 == " " }
+            return "\(line) -exact-press-opacity=0.4\n\(indent)  :active\n\(indent)    background-color=\"#ff0000\"\n\(indent)    color=\"#00ff00\""
+        }.joined(separator: "\n")
         let f = try keyed(count: 20, source: source)
         let row = try f.node("row-1"), title = try f.node("title-1")
         XCTAssertTrue(row.authorsPress)

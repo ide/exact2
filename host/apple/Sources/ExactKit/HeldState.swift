@@ -239,9 +239,10 @@ extension NodeView {
     /// A native button's highlight again, as the platform's tracking and a
     /// held press have it (`NativeButtonIOS`, `NativeButtonCellMac`).
     func heldHighlight() {
-        #if os(iOS)
+        #if os(iOS) || os(tvOS)
         if let button = presenter?.controls.controls[id] as? NativeButtonIOS { button.isHighlighted = button.isTracking && button.isTouchInside }
         #elseif os(macOS)
+        (presenter?.controls.controls[id] as? NativeButtonMac)?.applyActiveState()
         presenter?.controls.controls[id]?.needsDisplay = true
         #endif
     }

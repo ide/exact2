@@ -1,20 +1,16 @@
-// Excord's channel follows its address: the address changes the test language cannot make (the browser's
-// Forward and Back landing in the middle of a step), and typed addresses at a standing clock, driven on the REAL app: its web
-// build (host/web/dist, built for apps/excord: `bun host/web/build.mjs excord-web`) in Chromium, its
-// routing.contract's derives and tasks running in the page as they ship. Nothing is modelled: each step is
-// the agent's own page operation (`exact.agentSettled`, as `agent.mjs web` sends it), or the browser's own
-// history (`page.goBack`/`goForward`, which reach the app through its root's `navigate`, as a person's Back
-// and Forward do). The page's clock stands still between operations, as in a test file, so two steps taken
-// without a clock step between are both taken before the first one resolved.
+// Drive the compiled Excord app through browser navigation and the agent adapter
+// The agent clock stands still between operations; held-history cases use the live clock,
+// delaying page responses and scroll completion to reproduce overlapping motion
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { existsSync, readFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import { resolve } from 'node:path';
+import process from 'node:process';
 import { untilClock } from '../../../scripts/agent-held.mjs';
 import { startFixture } from './server.ts';
 
 const ROOT = resolve(import.meta.dir, '../../..');
-const DIST = resolve(ROOT, 'host/web/dist');
+const DIST = resolve(process.env.EXACT_WEB_DIST ?? resolve(ROOT, 'host/web/dist'));
 const EPOCH = Date.parse('2026-10-22T18:00:00Z');
 const GENERAL = '1191168914235588608', HELP = '1191168914235588609', RANDOM = '1191168914235588610';
 const DM = '1191168914239782912';
@@ -23,8 +19,10 @@ const built = existsSync(resolve(DIST, '.exact-build.json'))
   && readFileSync(resolve(DIST, '.exact-build.json'), 'utf8').includes('com.exact.excord');
 
 let fixture: ReturnType<typeof startFixture>, server: Server, browser: any, base = '', pages = 0, fixtureOrigin = '';
+let slotNames: string[];
 beforeAll(async () => {
   if (!built) return;
+  slotNames = (await import(resolve(DIST, '.gen/names.js'))).default[0];
   const { serveBuildTree } = await import(resolve(ROOT, 'host/web/serve.mjs'));
   const { bootedGeneration, leaseGeneration } = await import(resolve(ROOT, 'host/web/generations.mjs'));
   // The fixture listens where the build was baked to reach it: this checkout's fixture port (main d7e95a567d),
@@ -40,7 +38,8 @@ beforeAll(async () => {
   await new Promise<void>(ok => server.listen(0, '127.0.0.1', ok));
   base = `http://127.0.0.1:${(server.address() as any).port}`;
   const { suiteBrowser } = await import(resolve(ROOT, 'scripts/agent-launch.mjs'));
-  browser = await suiteBrowser();
+  const engine = process.env.EXACT_WEB_BROWSER ?? 'chromium';
+  browser = await suiteBrowser(engine === 'chrome' ? 'chromium' : engine);
 });
 afterAll(async () => {
   await browser?.close();
@@ -177,6 +176,217 @@ async function generalWithLinks(a: Awaited<ReturnType<typeof app>>) {
   await a.tap('inject-links');
   await a.data();
   await a.settle();
+}
+
+test.skipIf(!built)(
+  'older history keeps the visible message in place across animation frames at the exact top',
+  async (): Promise<void> => withHeldHistory(async (page: any, history: HeldHistory): Promise<void> => {
+    await page.locator('#transcript').evaluate((el: any): void => el.scrollTo({top:0, behavior:'instant'}));
+    await page.waitForFunction((): boolean => {
+      const list = document.getElementById('transcript') as any;
+      return Boolean(!list.$list.pending && list.querySelector(`[data-listitemkey="${list.$list.idents[0]}"]`));
+    });
+    await history.requested;
+    const saved = await page.locator('#transcript').evaluate((list: any): {key:string; top:number} => {
+      const key = list.$list.idents[0], row = list.querySelector(`[data-listitemkey="${key}"]`);
+      const top = row.getBoundingClientRect().top - list.getBoundingClientRect().top;
+      const watch = (globalThis as any).historyFrames = {active:true, positions:[]};
+      const frame = (): void => {
+        if (!watch.active) { return; }
+        const row = list.querySelector(`[data-listitemkey="${key}"]`);
+        watch.positions.push(row ? row.getBoundingClientRect().top - list.getBoundingClientRect().top : null);
+        requestAnimationFrame((): void => { setTimeout(frame, 0); });
+      };
+      requestAnimationFrame((): void => { setTimeout(frame, 0); });
+      return {key, top};
+    });
+    const reply = page.waitForResponse((response: any): boolean => response.url().includes('/messages?') && response.url().includes('before='));
+    history.release();
+    expect((await reply).ok()).toBe(true);
+    await page.waitForFunction((key: string): boolean => {
+      const list = document.getElementById('transcript') as any;
+      return Boolean(list.$list.idents[0] !== key && list.$list.index.pos.has(key) && !list.$list.pending);
+    }, saved.key);
+    const frames = await page.evaluate((): number => (globalThis as any).historyFrames.positions.length);
+    await page.waitForFunction((frames: number): boolean => (globalThis as any).historyFrames.positions.length >= frames + 2, frames);
+    const positions = await page.evaluate((): (number|null)[] => {
+      const watch = (globalThis as any).historyFrames;
+      watch.active = false;
+      return watch.positions;
+    });
+    expect(positions.length).toBeGreaterThan(0);
+    expect(positions.filter((top): boolean => top === null || Math.abs(top - saved.top) > 1)).toEqual([]);
+  }),
+  60_000,
+);
+
+for (const {deleted, reverse} of [{deleted:false, reverse:false}, {deleted:true, reverse:false}, {deleted:false, reverse:true}]) {
+  test.skipIf(!built)(
+    `history waits for the coast and preserves subsequent movement${deleted ? ' when the saved message is deleted' : reverse ? ' after reversing beyond the candidate window' : ''}`,
+    async (): Promise<void> => withHeldHistory(async (page: any, history: HeldHistory): Promise<void> => {
+      await page.waitForFunction((): boolean => {
+        const c = (document.getElementById('transcript') as any).$list;
+        return !c.atEnd && !c.pending && !c.target && !c.correction && c.mounted.every((m: any): boolean => c.index.measured(m.key));
+      });
+      await page.evaluate((): void => {
+        const g = globalThis as any, el = document.getElementById('transcript') as any;
+        const native = el.scrollTo.bind(el), descriptor = Object.getOwnPropertyDescriptor(Element.prototype, 'scrollTop')!;
+        g.historyWrites = [];
+        g.userScroll = (top: number): void => {native({top, behavior:'instant'}); el.dispatchEvent(new Event('scroll'));};
+        el.scrollTo = (options: any): void => {g.historyWrites.push({ignored:g.holdingHistoryMotion, top:options.top}); if (!g.holdingHistoryMotion) {native(options);}};
+        Object.defineProperty(el, 'scrollTop', {configurable:true, get:(): number => descriptor.get!.call(el), set:(top: number): void => {
+          g.historyWrites.push({ignored:g.holdingHistoryMotion, top}); if (!g.holdingHistoryMotion) {descriptor.set!.call(el, top);}
+        }});
+        g.holdingHistoryMotion = true; g.userScroll(Math.max(0, el.scrollTop - 80));
+      });
+      await page.evaluate((): Promise<void> => new Promise((resolve): void => {requestAnimationFrame((): void => {setTimeout(resolve, 0);});}));
+      await page.evaluate((): void => (globalThis as any).userScroll(0));
+      if (!reverse) {await history.requested;}
+      await page.waitForFunction((): boolean => {
+        const el = document.getElementById('transcript') as any;
+        return el.$list.scrolling && !el.$list.pending && el.$list.geometry.offset === -el.$list.index.leading;
+      });
+      const saved = await page.evaluate((): any => {
+        const el = document.getElementById('transcript') as any, c = el.$list;
+        const key = c.idents[0], row = c.mounted.find((m: any): boolean => m.key === key).wrapper;
+        const neighbor = c.mounted.find((m: any): boolean => m.key === c.idents[1]).wrapper;
+        (globalThis as any).historySaved = {key, row, neighbor, neighborKey:c.idents[1]};
+        (globalThis as any).historyWrites.length = 0;
+        return {key, first:c.idents[0], count:c.items.length, top:row.getBoundingClientRect().top - el.getBoundingClientRect().top,
+          neighborTop:neighbor.getBoundingClientRect().top - el.getBoundingClientRect().top};
+      });
+      if (deleted) {
+        const response = await fetch(`${fixtureOrigin}/control/delete`, {method:'POST', headers:{'content-type':'application/json'},
+          body:JSON.stringify({channel_id:GENERAL, message_id:saved.key.slice(2)})});
+        expect(response.ok).toBe(true);
+      }
+      history.release();
+      await page.waitForFunction((count: number): boolean => {
+        const g = globalThis as any;
+        const candidate = g.exact.resources.find((r: any): boolean => r.source === 'loadWindow').value[2];
+        return count >= 299 ? candidate[0]?.[0] !== (document.getElementById('transcript') as any).$list.idents[0].slice(2) : candidate.length > count;
+      }, saved.count);
+      const held = await page.evaluate((): any => {
+        const el = document.getElementById('transcript') as any, c = el.$list, saved = (globalThis as any).historySaved;
+        return {count:c.items.length, retained:c.mounted.find((m: any): boolean => m.key === saved.key)?.wrapper === saved.row,
+          top:saved.row.getBoundingClientRect().top - el.getBoundingClientRect().top, target:c.target?.key ?? null};
+      });
+      expect(held).toEqual({count:saved.count, retained:true, top:saved.top, target:null});
+      await page.evaluate((reverse: boolean): void => {
+        const g = globalThis as any, el = document.getElementById('transcript') as any, c = el.$list;
+        g.userScroll(reverse ? c.index.prefix(c.items.length - 24) + c.index.leading + 16 : el.scrollTop + 16);
+      }, reverse);
+      await page.waitForFunction((): boolean => {
+        const el = document.getElementById('transcript') as any;
+        return Math.abs(el.$list.geometry.offset - (el.scrollTop - el.$list.index.leading)) < 1;
+      });
+      let expected = (deleted ? saved.neighborTop : saved.top) - 16;
+      if (reverse) {
+        expected = await page.evaluate((): number => {
+          const g = globalThis as any, el = document.getElementById('transcript') as any, c = el.$list, key = `s:${c.scrollAnchor()[0]}`;
+          const row = c.mounted.find((m: any): boolean => m.key === key).wrapper;
+          g.historySaved = {key, row};
+          return row.getBoundingClientRect().top - el.getBoundingClientRect().top;
+        });
+      }
+      const ignored = await page.evaluate((): any[] => (globalThis as any).historyWrites.filter((write: any): boolean => write.ignored));
+      if (!reverse) {expect(ignored).toEqual([]);}
+      await page.evaluate((): void => (globalThis as any).finishHistoryMotion());
+      await page.waitForFunction((index: number): boolean => {
+        const g = globalThis as any, c = (document.getElementById('transcript') as any).$list;
+        const candidate = g.exact.resources.find((r: any): boolean => r.source === 'loadWindow').value;
+        const presented = g.exact.state[0][index]();
+        return presented[1] === candidate[1] && c.items.length === candidate[2].length
+          && c.idents.every((key: string, i: number): boolean => key.slice(2) === candidate[2][i][0]) && !c.pending && !c.target && !c.scrolling;
+      }, slotNames.indexOf('win'));
+      const position = await page.evaluate((deleted: boolean): number => {
+        const el = document.getElementById('transcript') as any, c = el.$list, saved = (globalThis as any).historySaved;
+        const row = c.mounted.find((m: any): boolean => m.key === (deleted ? saved.neighborKey : saved.key)).wrapper;
+        return row.getBoundingClientRect().top - el.getBoundingClientRect().top;
+      }, deleted);
+      expect(Math.abs(position - expected)).toBeLessThanOrEqual(1);
+      expect(await page.evaluate((index: number): boolean => (globalThis as any).exact.state[0][index](), slotNames.indexOf('leadHeld'))).toBe(false);
+    }, {coasting:true, preload:reverse}),
+    180_000,
+  );
+}
+
+type HeldHistory = { requested: Promise<void>; release: () => void };
+
+async function withHeldHistory(check: (page: any, history: HeldHistory) => Promise<void>, {coasting = false, preload = false}: {coasting?:boolean; preload?:boolean} = {}): Promise<void> {
+  const context = await browser.newContext({viewport:coasting ? {width:867, height:635} : {width:1100, height:760},
+    ...(coasting ? {isMobile:true, hasTouch:true, deviceScaleFactor:2} : {})});
+  if (coasting) {
+    await context.addInitScript((): void => {
+      const g = globalThis as any, set = globalThis.setTimeout, clear = globalThis.clearTimeout, add = EventTarget.prototype.addEventListener;
+      const timers = new Map<number, () => void>(), ends: (() => void)[] = []; let next = 0;
+      g.holdingHistoryMotion = false;
+      globalThis.setTimeout = ((fn: any, ms?: number, ...args: any[]): any => {
+        if (!g.holdingHistoryMotion || ms !== 300 || typeof fn !== 'function') {return set(fn, ms, ...args);}
+        const id = --next; timers.set(id, (): void => fn(...args)); return id;
+      }) as typeof setTimeout;
+      globalThis.clearTimeout = ((id: any): void => {if (!timers.delete(id)) {clear(id);}}) as typeof clearTimeout;
+      EventTarget.prototype.addEventListener = function (type: string, listener: any, ...rest: any[]): void {
+        if (type !== 'scrollend' || typeof listener !== 'function') {add.call(this, type, listener, ...rest); return;}
+        add.call(this, type, function (this: any, e: Event): void {
+          if (g.holdingHistoryMotion) {ends.push((): void => listener.call(this, e));} else {listener.call(this, e);}
+        }, ...rest);
+      } as typeof EventTarget.prototype.addEventListener;
+      g.finishHistoryMotion = (): void => {
+        g.holdingHistoryMotion = false;
+        for (const [id, done] of [...timers]) {timers.delete(id); done();}
+        for (const done of ends.splice(0)) {done();}
+      };
+    });
+  }
+  const page = await context.newPage();
+  const gate = Promise.withResolvers<void>(), requested = Promise.withResolvers<void>();
+  let released = false, holdingRequests = !preload;
+  const release = (): void => { released = true; gate.resolve(); };
+  try {
+    await page.route(/\/api\/v9\/channels\/[^/]+\/messages\?/, async (route: any): Promise<void> => {
+      if (new URL(route.request().url()).searchParams.has('before') && !released && holdingRequests) {
+        requested.resolve();
+        await gate.promise;
+      }
+      await route.continue();
+    });
+    await page.goto(coasting ? `${base}/c/${GENERAL}` : base);
+    await page.waitForFunction((): boolean => {
+      const list = document.getElementById('transcript') as any;
+      return Boolean(list?.$list?.items.length > 40 && !list.$list.pending && !list.$list.atEnd);
+    });
+    if (preload) {
+      for (let i = 0; i < 8; i++) {
+        const before = await page.evaluate((): {count:number; first:string} => {const c = (document.getElementById('transcript') as any).$list; return {count:c.items.length, first:c.idents[0]};});
+        await page.locator('#transcript').evaluate((el: any): void => el.scrollTo({top:0, behavior:'instant'}));
+        await page.waitForFunction((before: {count:number; first:string}): boolean => {
+          const c = (document.getElementById('transcript') as any).$list;
+          return c.items.length >= before.count && c.idents[0] !== before.first && !c.pending && !c.scrolling;
+        }, before);
+        const count = await page.evaluate((): number => (document.getElementById('transcript') as any).$list.items.length);
+        if (count <= before.count) {break;}
+      }
+      await page.locator('#transcript').evaluate((el: any): void => {
+        const c = el.$list;
+        el.scrollTo({top:c.index.prefix(c.items.length - 24) + c.index.leading + 16, behavior:'instant'});
+      });
+      await page.waitForFunction((): boolean => {
+        const c = (document.getElementById('transcript') as any).$list;
+        return !c.scrolling && !c.pending && !c.correction && c.mounted.every((m: any): boolean => c.index.measured(m.key));
+      });
+      holdingRequests = true;
+    }
+    await check(page, {requested:requested.promise, release});
+  } catch (e) {
+    console.error(await page.evaluate((): any => {
+      const g = globalThis as any, c = (document.getElementById('transcript') as any)?.$list;
+      return {list:c && {count:c.items.length, geometry:c.geometry, scrolling:c.scrolling, target:c.target, pending:c.pending, atEnd:c.atEnd, correction:c.correction, rows:c.mounted.map((m: any): any => ({key:m.key, measured:c.index.measured(m.key), epoch:m.token}))},
+        resources:g.exact.resources.filter((r: any): boolean => r.name === 'candidateWindow').map((r: any): any => ({channel:r.value?.[0], anchor:r.value?.[1], rows:r.value?.[2]?.length, need:r.value?.[11], ticket:r.ticket?.id})),
+        timers:g.exact.clock.timers.filter((t: any): boolean => !t.data).map((t: any): any => ({name:t.name, wait:t.wait, due:t.due})), journal:g.exact.journal?.slice(-8)};
+    }).catch((): null => null));
+    throw e;
+  } finally { release(); await context.close(); }
 }
 
 test.skipIf(!built)('the browser\'s Forward to a channel\'s address opens it; Back returns', async () => {
@@ -512,7 +722,7 @@ async function atEnd(a: Awaited<ReturnType<typeof app>>, s: any) {
 // A send from history, then the reader's slow wheel over the list: a step every 50 ms for 750 ms, Return sending
 // at the fourth step, the list wheeled on from where the send puts it. The quiet path (`scrollQuiet`, 200 ms) is
 // restarted by every scroll report, so it never acts while the list moves.
-async function sendThenWheel(a: Awaited<ReturnType<typeof app>>) {
+async function sendThenWheel(a: Awaited<ReturnType<typeof app>>): Promise<{settling:boolean; away:boolean; gap:number}[]> {
   await a.tap('channel-general');
   await a.data();
   await a.settle();
@@ -531,20 +741,39 @@ async function sendThenWheel(a: Awaited<ReturnType<typeof app>>) {
   await a.step({ op: 'clock', land: true });
   const list = (await a.page.evaluateHandle((v: number) => (globalThis as any).exact.views.get(v), transcript.id)).asElement();
   const box = await list.boundingBox();
+  await list.evaluate((el: any, slots: {win:number; settling:number}): void => {
+    const g = globalThis as any, descriptor = Object.getOwnPropertyDescriptor(Element.prototype, 'scrollTop')!;
+    g.sendLanding = null; g.sendStep = -1; g.sendStarted = false;
+    Object.defineProperty(el, 'scrollTop', {configurable:true,
+      get:(): number => {
+        const top = descriptor.get!.call(el), state = g.exact.state[0];
+        if (g.sendStarted && g.sendLanding === null && state[slots.settling]() && !state[slots.win]()[4]
+          && Math.abs(el.scrollHeight - el.clientHeight - top) <= 1) {g.sendLanding = g.sendStep;}
+        return top;
+      },
+      set:(top: number): void => descriptor.set!.call(el, top),
+    });
+  }, {win:slotNames.indexOf('win'), settling:slotNames.indexOf('settling')});
   const cdp = await a.page.context().newCDPSession(a.page);
+  const wheelStep = 120;
   const seen: { settling: boolean, away: boolean, gap: number }[] = [];
-  for (let i = 0; i < 15; i++) {
+  for (let i = 0; i < 40; i++) {
     // A wheel step as the agent's carrier sends one (Input.dispatchMouseEvent).
-    await cdp.send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: box.x + box.width / 2, y: box.y + box.height / 2, deltaX: 0, deltaY: -120 });
-    if (i === 3) await a.page.keyboard.press('Enter');
+    await a.page.evaluate((step: number): void => {(globalThis as any).sendStep = step;}, i);
+    await cdp.send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: box.x + box.width / 2, y: box.y + box.height / 2, deltaX: 0, deltaY: -wheelStep });
+    if (i === 3) {await a.page.evaluate((): void => {(globalThis as any).sendStarted = true;}); await a.page.keyboard.press('Enter');}
     await a.plus(50, true);
     const s = await a.bag();
-    seen.push({ settling: s.settling, away: s.away, gap: s.endGap });
+    const gap = await list.evaluate((el: HTMLElement): number => el.scrollHeight - el.clientHeight - el.scrollTop);
+    seen.push({settling:s.settling, away:s.away, gap});
+    const placement = await a.page.evaluate((): number | null => (globalThis as any).sendLanding);
+    if (placement !== null && seen.length - placement - 1 >= 8) {break;}
   }
   // From the send's landing at the end, the list only moves on with the wheel: never put back while it moves.
-  const landed = seen.findIndex((m, i) => i >= 3 && m.gap === 0);
-  const moving = seen.slice(landed + 1);
-  expect([landed >= 3, moving.length >= 8]).toEqual([true, true]);
+  // Capture an actual end readback even when the next wheel precedes the coalesced scroll event
+  const landed = await a.page.evaluate((): number | null => (globalThis as any).sendLanding);
+  const moving = seen.slice((landed ?? seen.length) + 1);
+  expect([landed !== null && landed >= 3, moving.length >= 8]).toEqual([true, true]);
   expect(moving.every((m, i) => i === 0 || m.gap >= moving[i - 1].gap)).toBe(true);
   expect(moving[moving.length - 1].gap).toBeGreaterThan(0);
   return moving;

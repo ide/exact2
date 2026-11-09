@@ -1,0 +1,114 @@
+// Fetch candidates independently; publish one coherent transcript window after reader motion
+use Window from "./shapes.contract"
+members Excord
+  state win = Window(channel="", anchor="", rows=[], hasBefore=false, hasAfter=false, firstId="", lastId="", pin="", unread=0, unreadMore=false, unreadAt=0, need="", cursor="")
+  resource candidateWindow = loadWindow(open, askAnchor, askVersion, since) as shape Window else empty()
+  derive windowChanged = candidateWindow != win
+  derive candidateReady = candidateWindow.channel == open and (candidateWindow.anchor == anchor or candidateWindow.pin == anchor) and candidateWindow.need != "around" and candidateWindow.need != "latest" and not pending(candidateWindow)
+  // Explicit destinations own placement; passive updates wait for the host's completed scroll reports
+  task publishDestination when candidateReady and windowChanged and (win.channel != open or target != "" or settling) key=`${open}/${anchor}/${target}`
+    after(1, publishWindow)
+  task publishHistory when candidateReady and windowChanged and win.channel == open and target == "" and not settling key=`${open}/${anchor}`
+    after(1, publishWindow, wait=scrollend)
+  action publishWindow
+    let preserve = reading and win.channel == open and target == "" and not settling and (away or win.hasAfter)
+    let nextKeys = candidateWindow.rows.map(r => r.key)
+    let port = frame("transcript")
+    // Read the presented viewport before replacing it; layout can move rows without a scroll event
+    let visible = preserve ? win.rows.filter(r => frame(`message-${r.key}`).height > 0 and frame(`message-${r.key}`).y < port.y + port.height and frame(`message-${r.key}`).y + frame(`message-${r.key}`).height > port.y) : []
+    let currentKey = match first(visible) { case some(r) => r.key, case none => topKey }
+    if preserve and currentKey != "" and not nextKeys.includes(currentKey) and candidateWindow.anchor != currentKey and candidateWindow.pin != currentKey
+      // Query around the current reader before releasing a candidate that slid beyond the presented range
+      anchor = currentKey
+      refresh candidateWindow
+    else
+      let survivor = match first(visible.filter(r => nextKeys.includes(r.key))) { case some(r) => r.key, case none => "" }
+      let key = nextKeys.includes(currentKey) ? currentKey : survivor
+      let offset = frame(`message-${key}`).height > 0 ? port.y - frame(`message-${key}`).y : topOffset
+      win = candidateWindow
+      if preserve and key != ""
+        scrollIntoView("transcript", key, offset=offset, behavior="instant")
+  derive rows = win.channel == open ? win.rows : []
+  derive keys = rows.map(r => r.key)
+  derive lastKey = match rows.at(-1) { case some(r) => r.key, case none => "" }
+  derive dividerKey = match first(rows.filter(r => r.isNew)) { case some(r) => r.key, case none => "" }
+  // Accept the requested anchor or its equivalent pin once the anchor's page is available
+  derive current = win.channel == open and (win.anchor == anchor or win.pin == anchor) and win.need != "around" and win.need != "latest"
+  derive pageKey = `${candidateWindow.channel}/${candidateWindow.need}/${candidateWindow.cursor}`
+  // Count attempts as well as replies because a refused window never runs `afterPage`
+  derive historyFailed = candidateWindow.channel == open and candidateWindow.need != "" and pageAsked == pageKey and (pageTries >= 3 or (pageAsks >= 3 and not pending(paged)))
+  derive historyLoading = pending(candidateWindow) or candidateWindow.channel != open or candidateWindow.need != ""
+  // Prefetch within 100 rows of the start; let publication and placement finish before advancing again
+  task leadOlder when reading and current and target == "" and highlight == "" and not leadHeld and not windowChanged and (away or (anchor != "" and win.hasAfter)) and win.need == "" and win.hasBefore and keys.indexOf(topKey) >= 0 and keys.indexOf(topKey) < 100 and anchor != win.firstId key=win.firstId
+    after(1, older)
+  // The page the window lacks while the channel is read; a failed one is asked again, at most three times.
+  task fetchPage when reading and candidateWindow.channel == open and not signedOutNow and candidateWindow.need != "" and not historyFailed and not pending(paged) and not pending(editPaged) key=`${pageKey}/${pageTries}`
+    after(1, pageNow)
+  action pageNow
+    if pageAsked != pageKey
+      pageTries = 0
+    pageAsks = pageAsked != pageKey ? 1 : pageAsks + 1
+    pageAsked = pageKey
+    send paged = loadPage(candidateWindow.channel, candidateWindow.need, candidateWindow.cursor)
+  action afterPage
+    refresh candidateWindow
+    match paged
+      case some(r)
+        pageTries = r.ok ? 0 : pageTries + 1
+      case none
+        pageTries = 0
+  action retryHistory
+    pageTries = 0
+    pageAsks = 0
+  // The window: the reader's place decides which run of history it holds.
+  // The reader is at the end within the last row's height of it (§3.7). The window anchors at its first (last)
+  // row when the first visible row comes within 15 rows of that edge, and the data module fetches the one page
+  // beyond it; toward the top, `leadOlder` anchors from 100 rows (F1). `reachstart` alone gives one viewport of
+  // lead, which a fling overruns. A page is asked only of a window that answers the present request, whatever else is refreshing.
+  action scrolled(x: number, y: number, e: ScrollEvent)
+    if not scrolling
+      scrolling = true
+      hoverKey = ""
+    scrollTick = scrollTick + 1
+    let k = match e.firstVisibleKey { case some(k) => k, case none => "" }
+    let at = keys.indexOf(k)
+    let gap = e.scrollHeight - e.scrollTop - e.clientHeight
+    let isAway = gap > max(1, frame(`message-${lastKey}`).height)
+    // Rows arriving below grow the gap without the reader moving (and the live window shedding its oldest row moves the
+    // offset): only a reader whose first visible row or its offset moved changes whether they are at the end. While a
+    // send's return to the end is owed or still settling, a fling's remaining reports do not decide it (`scrollEnded`
+    // puts the list back at its end). Any report at the live end clears an anchor left over (a restore given up there).
+    let moved = k != topKey or max(e.firstVisibleOffset - topOffset, topOffset - e.firstVisibleOffset) > 0.5
+    if isAway != away and moved and target == "" and not settling
+      away = isAway
+      if isAway
+        baseArrived = chan.arrived
+        if anchor == "" and chan.unread > 0 and reading
+          send acked = markRead(open)
+        if anchor == ""
+          anchor = win.pin
+      else
+        followed = chan.arrived
+        if anchor != "" and not win.hasAfter
+          anchor = ""
+    if not isAway and not away and anchor != "" and not win.hasAfter and target == "" and not settling
+      anchor = ""
+    if at >= 0 and current and target == ""
+      if at < 15 and win.hasBefore
+        anchor = win.firstId
+      else
+        if at > keys.length - 15 and win.hasAfter
+          anchor = win.lastId
+    endGap = gap < 1 ? 0 : round(gap)
+    topKey = k
+    leadHeld = false
+    topOffset = e.firstVisibleOffset
+  action scrollEnded
+    endSeen = true
+    scrollSettled()
+  action older
+    if win.hasBefore and current and target == ""
+      anchor = win.firstId
+  action newer
+    if win.hasAfter and current and target == ""
+      anchor = win.lastId

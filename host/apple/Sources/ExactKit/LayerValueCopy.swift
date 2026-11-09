@@ -35,7 +35,13 @@ extension CALayer {
         layer.cornerCurve = cornerCurve
         layer.backgroundColor = backgroundColor
         layer.borderColor = borderColor; layer.borderWidth = borderWidth
-        layer.contents = contents; layer.contentsScale = contentsScale
+        #if os(iOS) || os(tvOS)
+        if let coverage = delegate as? CoverageImageView { layer.contents = coverage.coverage?.painted() }
+        else { layer.contents = contents }
+        #else
+        layer.contents = contents
+        #endif
+        layer.contentsScale = contentsScale
         layer.contentsRect = contentsRect; layer.contentsCenter = contentsCenter
         layer.contentsGravity = contentsGravity
         layer.minificationFilter = minificationFilter; layer.magnificationFilter = magnificationFilter

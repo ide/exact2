@@ -36,7 +36,7 @@ afterAll(async () => {
 // A list that is its own port, two rows mounted. `report()` runs the frames owed and returns the last report's
 // flags; `timers` holds the glue's timers with their due times, and `fire(ms)` moves the test's clock on by `ms` and
 // runs the ones that come due, in order.
-function fixture() {
+function fixture({ accepted = () => true } = {}) {
   globalThis.wf?.controller.dispose();
   const root = document.getElementById('root');
   root.innerHTML = `<div data-view="1" style="height:180px;width:320px;overflow:auto"><div data-view="2" style="height:40px"></div><div data-view="4" style="height:60px"></div><div style="height:5000px"></div></div>`;
@@ -49,6 +49,7 @@ function fixture() {
     report(bytes) {
       const d = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength), flags = d.getUint32(92, true);
       seen.push({ top: d.getFloat64(24, true), scrolling: !!(flags & 32), gesture: !!(flags & 64), animating: !!(flags & 128) });
+      return accepted();
     } });
   const snapshot = (revision, extra = {}) => ({ view: 1, revision, scrollSequence: '0', totalExtent: 5100, count: 100,
     rows: [{ view: 2, root: 2, index: 0, start: 0, size: 40, epoch: '1' }, { view: 4, root: 4, index: 1, start: 40, size: 60, epoch: '1' }], correction: null, ...extra });
@@ -78,6 +79,36 @@ function fixture() {
   return wf;
 }
 
+test('scroll admission waits for an accepted ended report and the programmatic scroll event', async () => {
+  const result = await evaluate(`(() => {
+    let accepted = true;
+    const f = (${fixture.toString()})({accepted:() => accepted});
+    f.scroll(100); f.report();
+    const moving = f.controller.scrollPending();
+    f.fire(300);
+    const ended = f.controller.scrollPending();
+    accepted = false; f.report();
+    const refused = f.controller.scrollPending();
+    accepted = true; f.controller.scrollPending(); f.report();
+    const reported = f.controller.scrollPending();
+    f.controller.commit([f.snapshot('3', {correction:{scrollSequence:'0', offset:240, from:100}})]);
+    const owed = f.controller.scrollPending();
+    f.list.dispatchEvent(new Event('scroll')); f.report(); f.fire(300); f.report();
+    return {moving, ended, refused, reported, owed, acknowledged:f.controller.scrollPending()};
+  })()`);
+  expect(result).toEqual({moving:true, ended:true, refused:true, reported:false, owed:true, acknowledged:false});
+});
+test('an ignored smooth write does not invent an event that blocks passive work', async () => {
+  const result = await evaluate(`(() => {
+    const f = (${fixture.toString()})();
+    f.list.scrollTo = () => {};
+    f.controller.commit([f.snapshot('2', {request:1, seeking:true, correction:{scrollSequence:'0', offset:240, smooth:true}})]);
+    f.report();
+    return {offset:f.list.scrollTop, pending:f.controller.scrollPending()};
+  })()`);
+  expect(result).toEqual({offset:0, pending:false});
+});
+
 // Two lists, 1 and 3, in one scrollport, `#port`, one row mounted in each. `seen` holds each list's last scrolling
 // flag (bit 5), `gestures` its last gesture flag (bit 6), `animating` its last animating flag (bit 7); `timers` the
 // glue's pending timers, run on the real clock; `run()` runs the frames owed.
@@ -102,6 +133,43 @@ function sharedPort() {
   controller.commit([snapshot(1, 2, '1'), snapshot(3, 4, '1')]); run();
   return { controller, port, seen, gestures, animating, timers, snapshot, run };
 }
+
+test('fresh rows are measured before paint while a scroll is still moving', async () => {
+  const result = await evaluate(`(async () => {
+    globalThis.wf?.controller.dispose();
+    const root = document.getElementById('root');
+    root.innerHTML = '<div data-view="1" style="height:180px;width:320px;overflow:auto"><div data-view="2" style="height:40px"></div><div data-view="4" style="height:60px"></div><div style="height:5000px"></div></div>';
+    const views = new Map([...root.querySelectorAll('[data-view]')].map(el => [+el.dataset.view, el]));
+    const port = views.get(1), frames = [], reports = [];
+    let clock = 1000;
+    const controller = createController({ root, views, now:() => clock,
+      requestFrame(fn) { frames.push(fn); return frames.length; }, cancelFrame() {},
+      report(bytes) { const d = new DataView(bytes.buffer); reports.push({velocity:d.getFloat64(80, true), size:d.getFloat64(112, true)}); }
+    });
+    globalThis.wf = {controller};
+    const snapshot = (revision, epoch = '1') => ({view:1, revision, scrollSequence:'0', totalExtent:5100, count:100,
+      rows:[{view:2, root:2, index:0, start:0, size:40, epoch}, {view:4, root:4, index:1, start:40, size:60, epoch:'1'}], correction:null});
+    controller.commit([snapshot('1')]);
+    frames.splice(0).forEach(fn => fn());
+    await Promise.resolve();
+    for (const top of [20, 40]) {
+      clock += 16; port.scrollTop = top; port.dispatchEvent(new Event('scroll'));
+      frames.splice(0).forEach(fn => fn());
+    }
+    const velocity = reports.at(-1).velocity, before = reports.length;
+    views.get(2).style.height = '90px';
+    controller.commit([snapshot('2', '2')]);
+    await Promise.resolve(); await Promise.resolve();
+    const added = reports.slice(before);
+    controller.dispose(); delete globalThis.wf;
+    return {velocity, added};
+  })()`);
+  expect(result.velocity).toBe(1250);
+  expect(result.added.length).toBeGreaterThan(0);
+  expect(result.added.length).toBeLessThanOrEqual(2);
+  expect(result.added[0].size).toBe(90);
+  expect(result.added[0].velocity).toBe(1250);
+});
 
 test('a finger held still on the port holds nothing: its drag ends after the quiet interval, a request lands under it, and the drag going on ends it', async () => {
   const result = await evaluate(`(() => { const f=(${fixture})();

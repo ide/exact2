@@ -38,6 +38,24 @@ final class MenuStabilityIOSTests: XCTestCase {
         return try XCTUnwrap(button.menu)
     }
 
+    func testAnOpenMenuRejectsNewActivePropertiesWithoutReplacingItsActions() throws {
+        let p = presenter()
+        defer { p.menus.reset() }
+        let pop = try XCTUnwrap(p.views[3]), row = try XCTUnwrap(p.views[4])
+        let button = try XCTUnwrap(p.views[2]?.subviews.compactMap { $0 as? MenuButton }.first)
+        button.menu = UIMenu(children: p.menus.items(of: pop))
+        let menu = try XCTUnwrap(button.menu), action = try XCTUnwrap(menu.children.first as? UIAction)
+        let interaction = try XCTUnwrap(button.contextMenuInteraction)
+        let configuration = UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { _ in menu }
+        button.contextMenuInteraction(interaction, willDisplayMenuFor: configuration, animator: nil)
+        XCTAssertNil(row.nativeActiveRefusals["UIAction"])
+        p.apply(wireBatch([["op": "style", "id": 4, "style": ["press_opacity_to": 0.4]]]))
+        XCTAssertTrue(button.menu === menu, "synchronization keeps UIKit's menu instance")
+        XCTAssertTrue(button.menu?.children.first === action, "synchronization keeps the native action")
+        XCTAssertTrue(row.nativeActiveRefusals["UIAction"]?.contains("opacity") == true)
+        button.contextMenuInteraction(interaction, willEndFor: configuration, animator: nil)
+    }
+
     func testCommandsCloseANativePullDownBeforeItsEndCallback() throws {
         let p = presenter()
         defer { p.menus.reset() }

@@ -77,7 +77,7 @@
   does not convert to the display's profile, does not read the current EDR
   headroom, and does not tone-map.
 - **Pay for what you use** (LLP 1047). An 8-bit sRGB picture costs 4 bytes a
-  pixel, as before. A picture's bits follow its source. The core pays
+  pixel. A picture's bits follow its source. The core pays
   nothing for a capability an app doesn't use.
 - **Deterministic under the agent.** The display facts that change a
   decision (gamut, dynamic range) can be pinned with `prefer`.
@@ -219,7 +219,7 @@ names.
   platform's.
 - Tagging needs iOS 26 / macOS 26 / tvOS 26. Before 26 a color is not tagged.
 
-Widening every color to `[f32; 4]` was rejected: it doubles the style
+Widening every color to `[f32; 4]` doubles the style
 column for every app to serve the few colors that need it.
 
 ### D3 — `color-profile`: any ICC profile, as CSS Color 5 defines it
@@ -465,7 +465,7 @@ fallback API; before tvOS 26 these layers stay standard range.
 - *Declared deviation:* Mobile Safari 27.0 rejects `constrained`
   (`CSS.supports('dynamic-range-limit', 'constrained')` is false), so it
   drops the declaration. The node then inherits its parent's limit. The web
-  host still emits `constrained` as written. The color gallery says so on
+  host still emits `constrained` as written. The UI gallery says so on
   Safari.
 - `standard` and `no-limit` work on Safari.
 
@@ -473,13 +473,25 @@ fallback API; before tvOS 26 these layers stay standard range.
 
 **HDR text and a view's own drawing:**
 
-- **Text raster.** A paragraph whose ink is HDR rasterizes at half float
-  in extended sRGB (RGhA on macOS). SDR text keeps 4 bytes a pixel when
-  its gamut fits sRGB or Display P3. Profiled ink outside P3 uses half
+- **UIKit SDR coverage.** Eligible single-color SDR text uses an 8-bit alpha
+  image and a separately profiled `UIColor` through public UIImageView template
+  rendering. The profile belongs to the color, not the coverage; P3 alone does
+  not require colored pixels. Paint opacity is included in coverage and the
+  tint is opaque. [LLP 1008 §3](1008-apple-host-v1.spec.md#uikit-text-coverage)
+  specifies eligibility, ownership, reuse and the measured tradeoffs. Matching
+  the simulator's `UILabel` oracle qualifies conversion, not phone gamut.
+- **Colored text pixels.** A paragraph whose ink is HDR rasterizes at half
+  float in extended sRGB (RGhA on macOS). SDR colored pixels use 4 bytes per
+  pixel when their gamut fits sRGB or Display P3. Profiled ink outside P3 uses half
   float in extended sRGB even below SDR white. The raster is tagged with
   the peak of its colors where Core Animation reads it:
   - iOS: `CGImageCreateCopyWithContentHeadroom`
   - macOS: `kIOSurfaceContentHeadroom` on the IOSurface
+- **UIKit coverage captures.** Colorized capture copies use float16 extended
+  linear sRGB. An 8-bit copy in the color's standard-range profile reduces
+  retained capacity and capture CPU but introduces quantization; it is not
+  interchangeable with the selected capture-precision contract. It changes
+  neither displayed coverage storage nor the HDR pixel policy.
 - **Text shadow.** `text-shadow` keeps its color's space. It crosses as the
   text's nine channels: the sRGB four, then the space and four components
   (`BatchValue.textChannels`). An HDR shadow, the paragraph's or a run's
@@ -522,7 +534,7 @@ fallback API; before tvOS 26 these layers stay standard range.
 - **Not HDR on Apple: SVG gradients, patterns, masks and filters.** Each is
   drawn into an 8-bit sRGB picture (`SvgPaint.gradient`, `SvgIsland`,
   `SvgFilterGPU`, `SvgFilterLive`), so a color past SDR white there clips to
-  white under every limit. The color gallery says so under its HDR colors.
+  white under every limit. The UI gallery says so under its HDR colors.
 
 ### D9 — Display facts: `colorGamut`, `dynamicRange`
 
@@ -584,7 +596,7 @@ color-management engine to make up for it.
   is drawn as one. A PQ or HLG picture is drawn as its raw pixels.
 - **Canvas:** sRGB and 8-bit only. The build refuses a literal
   `display-p3` or `float16` canvas for Linux.
-- **The color gallery** is not built for Linux.
+- **The UI gallery** is not built for Linux.
 - If a Linux display stack with color management becomes a target (a
   Wayland compositor with the color-management protocol, or DRM's
   `Colorspace` and `HDR_OUTPUT_METADATA` with 10-bit buffers), Linux takes
@@ -714,11 +726,11 @@ quality 0.9 with orientation applied and no metadata copied.
   fails and removes its output only when no finalized attempt was acceptable.
 - Before 18, an HDR photo becomes its SDR picture.
 
-## 5. What this changes elsewhere
+## 5. Related contracts
 
-| document | change |
+| Document | Contract |
 |---|---|
-| LLP 1011 §1, §4 | "normalized sRGB RGBA8" is replaced by D4–D7 |
+| LLP 1011 §1, §4 | Decode class, storage and budget follow D4–D7 |
 | LLP 1042 | D11 |
 | LLP 1056 | the `colorSpace` row is D12a |
 | LLP 1069.000 | two `exactViewport` fields; `prefer` keys |
@@ -729,7 +741,7 @@ quality 0.9 with orientation applied and no metadata copied.
 ## 6. Costs
 
 - **sRGB apps:** an 8-bit sRGB picture is 4 bytes a pixel and a legacy
-  color is `Fixed(u32)`, as before.
+  color is `Fixed(u32)`.
 - **Web core:** the parser takes CSS Color 4's functions and the named
   colors. The web emits colors as text.
 - **Apple:** the HDR decode path and the layer ranges are in ExactKit. The
@@ -755,27 +767,27 @@ quality 0.9 with orientation applied and no metadata copied.
 
 ## 8. Verification
 
-PR #94 regressions cover wide shadow targets (including discrete profiles),
+Regression coverage includes wide shadow targets (including discrete profiles),
 wide-table refusal, selected `platform-color()` branches, the web's dynamic
 refusals, recorder byte parity for Rec. 2020/Adobe RGB/ProPhoto, equal hues and
 resolved `light-dark()` interpolation, and wide inset shading. Apple tests
 cover real gradient layers and drawn box stores, profile replacement between
 sessions/generations, authored ICC intents against Core Graphics, profiled
 text storage, unknown PQ/HLG headroom, screen-change publication and HDR
-image flight layers. Round 2 also covers role/platform inset fallbacks,
+image flight layers, role/platform inset fallbacks,
 per-appearance gradient encoding and sampling (opaque and translucent),
 explicit-plan ICC boot through a real session, wide text presentation layers,
 candidate profile isolation through prepare/discard/commit, discrete large-HDR
 transitions, and bounded ICC caching with live values surviving eviction.
-Round 3 covers Markdown/plain-text parity under view tint, contrast and elevation
+It also covers Markdown/plain-text parity under view tint, contrast and elevation
 overrides, and rendered SVG profile fills and strokes, including retained ICC
 payloads after cache eviction and removal of the source asset.
-The suggested native `platform-color` profile-fallback bake bypass was rejected:
+Native `platform-color` fallback syntax is constrained at compilation:
 `parse_platform` admits only plain legacy colors or a legacy `light-dark` pair;
-profile fallbacks fail compilation before bake validation. Build/run results
-are reported by the fix round; these regressions do not replace V6's physical-panel verification.
+profile fallbacks fail compilation before bake validation. These regressions
+do not replace V6's physical-panel verification.
 
-The five checks keep their 60 s. Anything on a simulator, browser or device
+Blocking checks follow the time budgets in `rules/RULES.md`. Anything on a simulator, browser or device
 runs in the async lane or by a person.
 
 ### V1 — Kernel and colors (blocking, `cargo test`)
@@ -842,7 +854,8 @@ runs in the async lane or by a person.
 9. **Colors.** A `color(display-p3 1 0 0)` box, a `--dci-p3` box, an ICC
    `color-profile` box and an `oklch()` gradient, read through `sample`,
    match the standard's numbers within 1/512 in extended linear sRGB. A wide
-   paragraph rasters in Display P3. A transition to a wide color ends in its
+   paragraph preserves its Display P3 color: UIKit coverage uses a profiled
+   tint, and colored pixels retain the profile (D8). A transition to a wide color ends in its
    space.
 10. **Canvas.** `display-p3` and `float16` contexts, `getImageData` color
     spaces, and `drawImage` clipping into an sRGB canvas.
@@ -855,16 +868,16 @@ runs in the async lane or by a person.
 - The panel actually brightening can't be proven on a simulator; that is
   V6.
 
-The four clips are in Color Gallery and `ColorFixtures`; `make.swift <directory>
+The four clips are in UI Gallery and `ColorFixtures`; `make.swift <directory>
 --videos` regenerates them. `HDRVideoIOSTests` verifies transfer functions,
 primaries, HDR classification, all 90 decoded frames and live range changes.
 `state.media[].state.appliedDynamicRange` reads the actual presentation objects.
-The [iPhone run](../apps/color-gallery/diary/2026-10-27-hdr-paint-video.md)
+The [iPhone run](../apps/ui-gallery/diary/2026-10-27-hdr-paint-video.md)
 covers both renderers under all three limits, plus native paint comparisons.
 
 ### V5 — The web oracle (async lane, headless Chrome)
 
-The color gallery on the JS target. For each fixture `<img>`, the glue in
+The UI gallery on the JS target. For each fixture `<img>`, the glue in
 agent mode draws it into a `display-p3` canvas (and a `float16` one where
 supported) and reads `getImageData`. The values must match the generator's
 within V3.2's tolerances.
@@ -983,8 +996,7 @@ and the JSON from the same patch definitions. No check runs it.
 - `color-mix.contract`: interpolation spaces, gradients, motion
 - `dynamic-range.contract`: the three limits over F11 and V2
 
-**The color gallery** (`apps/color-gallery`) is one page under a sticky
-`dynamic-range-limit` control:
+**The UI gallery** (`apps/ui-gallery`) separates text, colors, images, effects and media into navigable sections. Applicable sections have a fixed `dynamic-range-limit` control above their scroller:
 - the CSS color spaces, the platform profiles and the image profiles side
   by side
 - HDR pictures and HDR colors under the three limits
@@ -1014,15 +1026,14 @@ It is not built for Linux.
   remain process-global, immutable after insertion, with shared capacity
   (4096 and 1024 respectively). Overflow refuses, never clips. Candidate
   preparation can still consume slots even when discarded; values are not
-  reclaimed. Declared profile names are now isolated per compiler/plan parse,
+  reclaimed. Declared profile names are isolated per compiler/plan parse,
   and interned profile values retain their resolved source and intent. Direct
   callers of kernel profile parsing/wire decoding must bind an explicit
   `profiled::declarations` scope. Per-runner interning/reclamation would require
   context in style values, wire decoding and host lookup, and remains deferred.
   Apple's independent ICC cache is bounded and live values own their handles.
-- **CSS missing components:** `none` still becomes zero before interpolation,
-  including alpha and same-space endpoints. Valid CSS is accepted. The
-  narrower same-space fix was examined in round 2: a mask on `Wide` would
+- **CSS missing components:** `none` becomes zero before interpolation,
+  including alpha and same-space endpoints. Valid CSS is accepted. A mask on `Wide` would
   cover modern gradient interiors but not legacy `rgb`/`hsl`/`hwb` (already
   reduced to `Rgba8`), gradient stop endpoints (emitted directly), or motion
   (`Value` stores premultiplied components without missingness). Completing
@@ -1033,8 +1044,7 @@ It is not built for Linux.
 - **Motion storage range:** `Moving` stays the compact signed 1/2048 encoding.
   Authored endpoints outside −16…15.999 linear sRGB are discrete on native
   transitions, rather than plateauing at the ceiling and jumping on completion.
-  This is an intentional limit relative to browser interpolation; no wire or
-  schema change was made. Spring overshoot within otherwise supported
+  This is an intentional limit relative to browser interpolation. Spring overshoot within otherwise supported
   transitions still uses that compact frame range.
 - **Inset profile colors:** predefined wide colors shade in linear sRGB with
   extended components retained; arbitrary ICC colors remain unshaded because

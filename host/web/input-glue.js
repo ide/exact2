@@ -1,3 +1,4 @@
+import { viewChildren, viewParent } from './navigation.js';
 // Input-only glue: loaded after the baked first pixel, independently of data readiness.
 import "./prompt-glue.js"; // a prompt's Return
 import "./alert-message.js"; // a grouped alert's message box
@@ -33,7 +34,7 @@ function pointerLine(el, e, lifted = false) {
  * checked radio or else its first, set as the Tab key goes down, before the browser moves the
  * focus; and the arrows move the choice, to the next or previous radio, wrapping and past
  * disabled ones (Left and Right mirrored right to left), focused and pressed. */
-const radiosOf = group => Array.from(group.children ?? []).filter(el => el.getAttribute?.("role") === "radio");
+const radiosOf = group => viewChildren(group).filter(el => el.getAttribute?.("role") === "radio");
 const radioUsable = el => !el.disabled && el.getAttribute("aria-disabled") !== "true" && el.getClientRects().length > 0;
 const rove = (all, stop) => { for (const r of all) r.tabIndex = r === stop ? 0 : -1; };
 function radioStops(root) {
@@ -44,7 +45,7 @@ function radioStops(root) {
 }
 /** An arrow on a radio group's radio moves its choice; whether it did. */
 function radioArrow(root, event) {
-  const el = event.target, group = el?.parentElement;
+  const el = event.target, group = viewParent(el);
   if (el?.getAttribute?.("role") !== "radio" || group?.getAttribute?.("role") !== "radiogroup" || !root.contains(group)) return false;
   const rtl = getComputedStyle(group).direction === "rtl";
   const step = { ArrowDown: 1, ArrowUp: -1, ArrowRight: rtl ? -1 : 1, ArrowLeft: rtl ? 1 : -1 }[event.key];
@@ -83,7 +84,7 @@ function roveArrow(root, event) {
   if (!group || !root.contains(group)) return false;
   const menu = group.matches(MENUS), all = roversOf(group), live = all.filter(item => item === el || radioUsable(item));
   if (!open && !all.includes(el)) return false;
-  const vertical = menu || group.getAttribute("aria-orientation") === "vertical" || group.parentElement?.hasAttribute("data-exact-sidebar"), rtl = getComputedStyle(group).direction === "rtl";
+  const vertical = menu || group.getAttribute("aria-orientation") === "vertical" || viewParent(group)?.hasAttribute("data-exact-sidebar"), rtl = getComputedStyle(group).direction === "rtl";
   const step = (vertical ? { ArrowDown: 1, ArrowUp: -1 } : { ArrowRight: rtl ? -1 : 1, ArrowLeft: rtl ? 1 : -1 })[key];
   const next = open ? live.at(key === "ArrowDown" || key === "Home" ? 0 : -1) : step ? live[(live.indexOf(el) + step + live.length) % live.length] : key === "Home" ? live[0] : key === "End" ? live.at(-1) : null;
   if (!next) return false;
@@ -264,7 +265,9 @@ export function createInputHandlers({ root, views, retiredViews, ready, inertAnc
   // LLP 1121 D8), eased from what shows at the press, a hover look's included.
   const PAINT = ["--exact-press-opacity", "--exact-press-opacity-to", "--exact-press-background-color", "--exact-press-color"];
   const paints = new Map();
+  const hasPaint = el => PAINT.some(p => el.style.getPropertyValue(p));
   const EASE = { duration: 120, easing: "cubic-bezier(0.16,1,0.3,1)", fill: "both" };
+  const pressDuration = (el, duration) => agentMode || el.matches('button[data-button-style]') ? 0 : duration;
   // Start the ease toward `state.to` from where it shows, over `duration`,
   // on the node's look beneath, read now (`paintRule`): at the press, as it
   // shows; later (the release, a change of the node's style or class, the
@@ -274,7 +277,8 @@ export function createInputHandlers({ root, views, retiredViews, ready, inertAnc
     // The paint stays on while it is read again (`paintRule`): taking it off would itself be a style change.
     const rule = paintRule(el, state);
     state.animation?.cancel();
-    const animation = state.animation = el.animate([{ "--exact-press-paint": from }, { "--exact-press-paint": state.to }], { ...EASE, duration: agentMode ? 0 : duration });
+    const ms = pressDuration(el, duration);
+    const animation = state.animation = el.animate([{ "--exact-press-paint": from }, { "--exact-press-paint": state.to }], { ...EASE, duration: ms });
     const written = new Set(el.getAnimations());
     el.setAttribute("data-exact-painting", hold(el, state, rule));
     // Writing a kept declaration back is the glue's own change, which Firefox (its transition styles see the
@@ -282,14 +286,14 @@ export function createInputHandlers({ root, views, retiredViews, ready, inertAnc
     if (Object.keys(state.kept ?? {}).length) { getComputedStyle(el).opacity; for (const a of el.getAnimations()) if (!written.has(a) && a.transitionProperty in state.kept) a.cancel(); }
     // A finish already queued when a re-press replaced the ease ends nothing.
     if (state.to === 0) animation.onfinish = () => { if (state.animation === animation) endPaint(el, state); };
-    if (agentMode) animation.finish();
+    if (ms === 0) animation.finish();
   };
   const endPaint = (el, state) => {
     if (paints.get(el) !== state) return;
     paints.delete(el);
     if (!paints.size) { sheets.disconnect(); gone.disconnect(); }
     state.observer.disconnect();
-    state.animation.cancel();
+    state.animation?.cancel();
     el.removeAttribute("data-exact-painting");
     drop(state);
   };
@@ -404,7 +408,7 @@ export function createInputHandlers({ root, views, retiredViews, ready, inertAnc
   // The agent's node detail reports it (scripts/agent-inspect.mjs), and the press tests read it.
   (globalThis.exact ??= {}).pressShown = el => {
     const state = paints.get(el);
-    if (!state) return null;
+    if (!state?.animation) return null;
     const cs = getComputedStyle(el), paint = Number(cs.getPropertyValue("--exact-press-paint")) || 0;
     const shown = { paint, opacity: String(+(Number(cs.opacity) * (state.factor?.(paint) ?? 1)).toPrecision(6)), color: cs.color, backgroundColor: cs.backgroundColor };
     if (state.background && typeof OffscreenCanvas === "function") {
@@ -452,9 +456,11 @@ export function createInputHandlers({ root, views, retiredViews, ready, inertAnc
   const repaint = (el, stale = false) => {
     const state = paints.get(el);
     if (!state) return;
+    showScale(el, state.to === 1);
+    if (!state.animation && !hasPaint(el)) return;
     if (stale) state.stale = true;
-    const t = state.animation.effect.getComputedTiming();
-    paint(el, state, Math.max(0, (t.endTime ?? 0) - (t.localTime ?? 0)));
+    const t = state.animation?.effect.getComputedTiming();
+    paint(el, state, t ? Math.max(0, (t.endTime ?? 0) - (t.localTime ?? 0)) : EASE.duration);
   };
   globalThis.matchMedia?.("(prefers-color-scheme: dark)").addEventListener?.("change", () => { for (const el of paints.keys()) repaint(el, true); });
   // So does a live edit that reaches it through a sheet (a state look's rule, the theme's) or the root's
@@ -469,7 +475,6 @@ export function createInputHandlers({ root, views, retiredViews, ready, inertAnc
   const showPaint = (el, down, now = false) => {
     let state = paints.get(el);
     if ((state?.to ?? 0) === (down ? 1 : 0)) return;
-    if (!state && !PAINT.some(p => el.style.getPropertyValue(p))) return;
     if (!state) {
       state = { observer: new MutationObserver(() => repaint(el)) };
       state.observer.observe(el, { attributes: true, attributeFilter: ["style", "class"] });
@@ -481,8 +486,29 @@ export function createInputHandlers({ root, views, retiredViews, ready, inertAnc
       paints.set(el, state);
     }
     state.to = down ? 1 : 0;
+    // A hold exists before its first computed target; only a written paint starts an animation.
+    if (!state.animation && !hasPaint(el)) { if (!down) endPaint(el, state); return; }
     paint(el, state, EASE.duration);
     if (!down && (now || !el.isConnected)) endPaint(el, state);
+  };
+  const showScale = (el, down, now = false) => {
+    // A design token's scale is its property's `var()`: the computed value
+    // is the token's (LLP 1121 D7).
+    const press = el.style.getPropertyValue("--exact-press");
+    const to = down ? Number((press.includes("var(") ? getComputedStyle(el).getPropertyValue("--exact-press") : press) || 1) : 1;
+    const old = feedback.get(el);
+    if (old?.to === to || !old && to === 1) return;
+    const progress = old?.animation.effect.getComputedTiming().progress ?? 0;
+    const from = old ? old.from + (old.to - old.from) * progress : 1;
+    old?.animation.cancel();
+    const ms = pressDuration(el, EASE.duration);
+    const animation = el.animate([{ "--exact-press-factor": from }, { "--exact-press-factor": to }], { ...EASE, duration: ms });
+    const state = { animation, from, to };
+    feedback.set(el, state);
+    animation.onfinish = () => {
+      if (to === 1 && feedback.get(el) === state) { animation.cancel(); feedback.delete(el); }
+    };
+    if (ms === 0 || now) animation.finish();
   };
   // Keep the release style only until its transitions end. Immediate cancellation and the agent's clock skip it.
   const releases = new WeakMap(), RELEASED = new Set(["opacity", "background-color", "--exact-wash"]);
@@ -504,24 +530,7 @@ export function createInputHandlers({ root, views, retiredViews, ready, inertAnc
       ends.then(() => { if (releases.get(el) === ends) el.removeAttribute("data-exact-released"); });
     }
     showPaint(el, down, now);
-    // A design token's scale is its property's `var()`: the computed value
-    // is the token's (LLP 1121 D7).
-    const press = el.style.getPropertyValue("--exact-press");
-    const to = down ? Number((press.includes("var(") ? getComputedStyle(el).getPropertyValue("--exact-press") : press) || 1) : 1;
-    const old = feedback.get(el);
-    if (old?.to === to || !old && to === 1) return;
-    const progress = old?.animation.effect.getComputedTiming().progress ?? 0;
-    const from = old ? old.from + (old.to - old.from) * progress : 1;
-    old?.animation.cancel();
-    const animation = el.animate([{ "--exact-press-factor": from }, { "--exact-press-factor": to }], {
-      duration: agentMode ? 0 : 120, easing: "cubic-bezier(0.16,1,0.3,1)", fill: "both",
-    });
-    const state = { animation, from, to };
-    feedback.set(el, state);
-    animation.onfinish = () => {
-      if (to === 1 && feedback.get(el) === state) { animation.cancel(); feedback.delete(el); }
-    };
-    if (agentMode || now) animation.finish();
+    showScale(el, down, now);
   };
   // A re-press may catch the release easing out. Neutralize only our effect
   // for this synchronous measurement, then restore it before a frame. The
@@ -985,7 +994,7 @@ export function createInputHandlers({ root, views, retiredViews, ready, inertAnc
     unringed.setAttribute("data-exact-no-ring", "");
   }, true);
   const lands = el => !!el?.isConnected && !inertAncestor(el) && el.getClientRects().length > 0 && !el.matches(":disabled");
-  const titleOf = route => [...route.children].find(c => c.localName === "header")?.querySelector("h1, h2, h3, h4, h5, h6, [role=heading]");
+  const titleOf = route => viewChildren(route).find(c => c.localName === "header")?.querySelector("h1, h2, h3, h4, h5, h6, [role=heading]");
   // @ref LLP 1115.000 D4.5 — a modal route (a sheet) is a dialog to assistive technology: `role="dialog"` and
   // `aria-modal`, named by its header's heading, and the focus moves into it and returns on close as it does for any
   // route (`arrive`). The host's marks (`data-exact-dialog`: "named" when the name is its own too) are not the app's:
@@ -1003,7 +1012,7 @@ export function createInputHandlers({ root, views, retiredViews, ready, inertAnc
     for (const route of nav?.querySelectorAll(":is([navigationPresentation], [data-exact-dialog]):not([data-exiting])") ?? []) dialog(route); // a sheet sliding away is no route (navigation.js `sheetLeaves`)
     const top = key == null ? null : [...nav.querySelectorAll("[navigationKey]")].find(r => r.getAttribute("navigationKey") === key && r.parentElement.closest("[navigationKey]") === nav);
     if (!top) return;
-    const routes = [...top.parentElement.children].filter(r => r.hasAttribute("navigationKey") && !r.hasAttribute("data-exiting")), stack = routes.slice(0, routes.indexOf(top) + 1);
+    const routes = viewChildren(viewParent(top)).filter(r => r.hasAttribute("navigationKey") && !r.hasAttribute("data-exiting")), stack = routes.slice(0, routes.indexOf(top) + 1);
     const was = shown, active = document.activeElement, by = recentPress();
     shown = stack;
     if (!was || was[0] !== stack[0] || was.at(-1) === top) return;
@@ -1207,7 +1216,7 @@ export function backButton(el, selectedOnly = true) {
   const route = el.closest("[navigationkey]"), nav = route?.parentElement?.closest("[navigationback]");
   if (!nav || nav.getAttribute("navigationBack") !== el.id || (selectedOnly && nav.getAttribute("navigationKey") !== route.getAttribute("navigationKey"))
     || route.querySelector(`[id="${CSS.escape(el.id)}"]`) !== el) return null;
-  const back = route.querySelector(":scope > header")?.shadowRoot?.querySelector('button[part="back"]:not([hidden])');
+  const back = viewChildren(route).find(c => c.localName === "header")?.shadowRoot?.querySelector('button[part="back"]:not([hidden])');
   return back?.checkVisibility({ visibilityProperty: true }) ? back : null;
 }
 if (globalThis.exact) Object.assign(globalThis.exact, { createInputHandlers, backButton });

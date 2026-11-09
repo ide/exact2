@@ -15,6 +15,7 @@ extension ExactSession {
         let menu = NSMenu()
         menu.autoenablesItems = false
         for node in rows {
+            node.rejectNativeActiveProperties(on: "NSMenuItem")
             let item = AccessibleMenuItem(title: presenter.menus.title(of: node), action: #selector(DockMenuTarget.choose(_:)), keyEquivalent: "")
             item.owner = node
             item.target = DockMenuTarget.shared

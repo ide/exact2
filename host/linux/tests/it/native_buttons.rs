@@ -5,6 +5,73 @@
 use exact_linux::{presenter::PainterChoice, Presenter};
 
 #[test]
+fn native_active_colors_replace_only_the_authored_fields() {
+    let plan = contract::compile(
+        r##"component App
+  state count = 0
+  action go
+    count = count + 1
+  view
+    column width=400 height=300 background-color="white" align-items="flex-start"
+      button appearance="auto" buttonStyle="filled" width=160 height=50 press=go testId="button"
+        :active
+          background-color = "#ff000080"
+          color = "#0000ff"
+        text "MMMM"
+"##,
+    )
+    .unwrap();
+    let (mut p, error) = Presenter::boot_with(
+        &plan.encode(),
+        (),
+        (400., 300.),
+        1.,
+        std::path::PathBuf::new(),
+        PainterChoice::Cpu,
+    )
+    .unwrap();
+    assert!(error.is_none(), "{error:?}");
+    let k = p.host().kernel();
+    let node = k.node_by_key(k.find_by_test_id("button")[0]).unwrap();
+    let id = node.id;
+    assert_eq!(node.node_type, exact_kernel::NodeType::Control);
+    let frame = node.frame;
+    let rest = p.frame();
+    let hold = exact_linux::agent::handle(
+        &mut p,
+        &format!(r#"{{"op":"tap","id":{id},"holdState":"active"}}"#),
+    );
+    assert!(hold.contains(r#""holdState":"active""#), "{hold}");
+    let shown = p.frame();
+    let pixel = shown
+        .pixel(frame.x as u32 + 10, frame.y as u32 + 10)
+        .unwrap();
+    assert_eq!([pixel.red(), pixel.green(), pixel.blue()], [255, 127, 127]);
+    let corner = shown.pixel(frame.x as u32 + 1, frame.y as u32 + 1).unwrap();
+    assert!(
+        corner.green() > 240 && corner.blue() > 240,
+        "only the native rounded edge covers the corner"
+    );
+    assert!(
+        shown
+            .data()
+            .chunks_exact(4)
+            .any(|c| c[2] > 240 && c[0] < 20 && c[1] < 20),
+        "the native title shows its active ink"
+    );
+    let released = exact_linux::agent::handle(
+        &mut p,
+        &format!(r#"{{"op":"tap","id":{id},"holdState":null}}"#),
+    );
+    assert!(!released.contains("error"), "{released}");
+    assert_eq!(
+        p.frame().data(),
+        rest.data(),
+        "release returns to the native face"
+    );
+}
+
+#[test]
 fn a_native_button_presses_is_sized_and_takes_no_value() {
     let plan = contract::compile(
         r#"component App
@@ -289,5 +356,61 @@ fn native_and_bare_buttons_ring_on_focus_without_a_handler() {
         );
         focus(&mut p, "focusOff");
         assert_eq!(sample(&mut p, "off"), [255; 4], "disabled never rings");
+    }
+}
+
+/// LLP 1104 D6 (amended 2026-11-05): `outline="none"` takes the ring off a
+/// keyboard-focused button, native or bare, as CSS's does; the focus stays.
+/// The same buttons without it ring.
+#[test]
+fn outline_none_paints_no_ring_on_a_focused_button() {
+    for quiet in [false, true] {
+        let outline = if quiet { " outline=\"none\"" } else { "" };
+        let plan = contract::compile(&format!(r##"component App
+  action focusIt(to: string)
+    focus(to)
+  view
+    column width=400 height=300 background-color="white" align-items="flex-start"
+      button "Native" id="native" appearance="auto"{outline} width=120 height=40 accent-color="#ff0000" testId="native"
+      button id="bare" appearance="none"{outline} width=120 height=40 accent-color="#ff0000" testId="bare"
+        box width="100%" height="100%" background-color="blue"
+          text "Bare"
+      button "Focus native" press=focusIt("native") testId="focusNative"
+      button "Focus bare" press=focusIt("bare") testId="focusBare"
+"##)).unwrap();
+        let (mut p, err) = Presenter::boot_with(
+            &plan.encode(),
+            (),
+            (400., 300.),
+            1.,
+            std::path::PathBuf::new(),
+            PainterChoice::Cpu,
+        )
+        .unwrap();
+        assert!(err.is_none(), "{err:?}");
+        let id = |p: &Presenter<()>, name: &str| {
+            let k = p.host().kernel();
+            k.node_by_key(k.find_by_test_id(name)[0]).unwrap().id
+        };
+        // The accent anywhere on the box's top edge, where a ring is.
+        let ringed = |p: &mut Presenter<()>, name: &str| {
+            let f = p.host().kernel().node(id(p, name)).unwrap().frame;
+            let shot = p.frame();
+            (0..f.width as u32).any(|x| {
+                (0..3).any(|y| {
+                    shot.pixel(f.x as u32 + x, f.y as u32 + y)
+                        .is_some_and(|c| [c.red(), c.green(), c.blue()] == [255, 0, 0])
+                })
+            })
+        };
+        for (action, name) in [("focusNative", "native"), ("focusBare", "bare")] {
+            p.tap(id(&p, action)).unwrap();
+            p.run_commands(<()>::default);
+            let focused = p.focus().unwrap();
+            assert_eq!(focused, id(&p, name), "{name} takes the focus");
+            p.type_key(focused, "KeyX", "x", true, false).unwrap();
+            p.type_key(focused, "KeyX", "x", false, false).unwrap();
+            assert_eq!(ringed(&mut p, name), !quiet, "{name}, outline none {quiet}");
+        }
     }
 }

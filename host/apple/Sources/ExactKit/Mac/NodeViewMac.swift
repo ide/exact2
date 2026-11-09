@@ -89,6 +89,7 @@ package final class NodeView: NSView, NSTextViewDelegate, NSTextFieldDelegate {
     var cachedTextLayout: (width: CGFloat, paragraph: Paragraph)?
     var liveText: String?
     package var props: [String: String] = [:] { didSet { presenter?.propsChanged(self); presenter?.mouseChain.bubbledPress?.validate() } }
+    var nativeActiveRefusals: [String: String] = [:]
     package var style: NodeStyle = [:]
     /// What the host's own writers hid (a covered route, a tab a native control
     /// stands in for, a placement); a `display: none` box is hidden besides, as
@@ -176,7 +177,7 @@ package final class NodeView: NSView, NSTextViewDelegate, NSTextFieldDelegate {
     var content = CGSize.zero
     /// The platform view returned by the dlopened iframe arm (@ref LLP 1020 D3).
     var video: VideoView?
-    var web: NSView?
+    var web: NSView? { didSet { if web !== oldValue { placeWeb() } } }
     /// A canvas node's Metal layer (LLP 1009).
     package var metal: MetalView?
     package var canvasInput: CanvasInput?
@@ -276,7 +277,7 @@ package final class NodeView: NSView, NSTextViewDelegate, NSTextFieldDelegate {
     var fieldFocused = false { didSet { if fieldFocused != oldValue { applyBoxLayer(); needsDisplay = true } } }
     /// A key down's default action at a focused node; its `key` handlers
     /// heard it before AppKit delivered it (`Presenter.keyDown`, KeyEvents.swift).
-    /// Space on a pressable fires `press`; Return is the default button's (LLP 1115.000 D7.3), and here only follows a focused link, as Safari does, or chooses a menu's row (`choosesOnReturn`).
+    /// Space on a pressable fires `press`; Return is the default button's (LLP 1115.000 D7.3), and here only follows a focused link, as Safari does, or presses a menu's row or a button the author opted in (`pressesOnReturn`).
     package override func keyDown(with event: NSEvent) {
         guard !inert else { return }
         if inputCanvas?.canvasInput?.key(event, down: true, source: self) == true { return }
@@ -296,7 +297,7 @@ package final class NodeView: NSView, NSTextViewDelegate, NSTextFieldDelegate {
             return
         }
         if reorderKey(name) || presenter?.controls.radioKey(self, name, held: KeyCodes.held(event.modifierFlags)) == true { return }
-        let presses = name == " " || name == "Enter" && choosesOnReturn
+        let presses = name == " " || name == "Enter" && pressesOnReturn
         if isButton, !pressable, presses {
             activateNative()
             return
@@ -1116,6 +1117,7 @@ package final class NodeView: NSView, NSTextViewDelegate, NSTextFieldDelegate {
         if old["appearance"] != s["appearance"] { needsLayout = true } // a form row's bezel (FormRowsMac.swift)
         if old["color_scheme"] != s["color_scheme"] { applyColorScheme() }
         if old["accent_color"] != s["accent_color"] { accentChanged() }
+        if old["outline_style"] != s["outline_style"], focusVisible { noteFocusRingMaskChanged() } // LLP 1104 D6
         if s["transform_origin"] != origin { applyTransform() }
         applySpace(changedFrom: old)
         decorationChanged(from: old)

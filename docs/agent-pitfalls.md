@@ -13,6 +13,22 @@ This list holds what the [agent guide](contract-for-agents.md)'s rules don't mak
 
 ## Layout
 
+- **A layout-region inset is not a page gutter.** The web can report zero
+  for `env(-exact-readable-content-corners-inset-left)` and its right-edge equivalent. Give reading
+  content ordinary padding inside the safe region, and bound a full-width
+  field with `box-sizing="border-box"`: its native padding and border otherwise
+  extend beyond the authored width. (Duo Lab, 2026-11-04.)
+
+- **`gap`, `row-gap` and `column-gap` accept numeric lengths, not `calc()` or `env()`.**
+  The compiler rejects a segment-based gap with `lower-attr-value: expected
+  nonnegative number`. Place fold panes by segment edges in a container aligned
+  with the viewport. Global segment lengths used as flex bases shrink across
+  the hinge if a header or footer reduces the container's space. Put that chrome
+  inside a pane, and end a bottom pane at `bottom: 0`. For side-by-side
+  panes, automatic left/right insets with flex start/end alignment preserve
+  reading order; fixed width plus both physical insets overconstrains RTL.
+  Keep the same pane instances while their positions change. (Duo Lab, 2026-11-05.)
+
 - **In the web build, a view that leaves with an exit animation can jump as it starts
   to fade.** Symptom: the leaving view starts its exit higher or lower than it was,
   when the same action also changes its parent's layout, such as a top padding that is
@@ -399,6 +415,11 @@ This list holds what the [agent guide](contract-for-agents.md)'s rules don't mak
   round 30's grader named it. Fix: rows under a screen's own content are a
   `listStyle="plain"` list on the page's white, as the Clock's laps are; keep
   inset-grouped for a list that is the whole screen.
+- **A native sidebar separator needs another touch to redraw.** UI Gallery reloaded
+  its static table during row selection and selected the same row again. Keep the
+  cells and update selection only when it changes; reload when the row data changes.
+  The Gallery's native tests check row reuse during selection and compare the sidebar
+  before and after an extra background touch (`apps/ui-gallery/tests/GalleryUITests.swift`).
 - **A sideways swipe on a row opens it.** Cause: the row has no swipe actions. A
   `UITableView` or SwiftUI `List` row with none is selected by a horizontal drag of any
   length or speed, and one with trailing actions only is selected by a rightward drag;
@@ -765,8 +786,8 @@ screen, 2026-10-16.)
   set waits on the runner at each touch, and replaces the platform's own press with
   nothing until it answers. Fix: `pressed && styles.dim` ports to
   `-exact-press-opacity=0.5` (its opacity), a pressed `backgroundColor` to
-  `-exact-press-background-color`, a pressed text colour to `-exact-press-color`; the
-  host shows them while held (LLP 1061 D7). Drop the state and both handlers.
+  `background-color` in `:active`, and a pressed text colour to `color` in that
+  block. The host shows them while held (LLP 1061 D7). Drop the state and both handlers.
 - **A floating button's shadow is heavier than the original's.** Cause: on iOS React
   Native drops the shadow of a view with `overflow: "hidden"` (its layer masks to its
   bounds), so the shadow its style declares was never drawn; CSS draws a `box-shadow`
@@ -871,6 +892,10 @@ after launch) names a top level slower than 50 ms. Where the top level cannot be
 price: answers arrive `Later`, outside the action's transaction (LLP 1027.002 D1).
 
 ## Actions
+
+- **App resources belong in the root component.** A child can declare a reserved
+  viewport reader, but an app source there fails with `type-child-resource`.
+  Declare the resource in the root and pass the value the child needs as a prop.
 
 - **A send reads a derive from before the action's writes.** An action's writes
   commit together; reading a derive after assigning one of its inputs still reads
@@ -1254,9 +1279,9 @@ price: answers arrive `Later`, outside the action's transaction (LLP 1027.002 D1
   Apple's agent samples through `CALayer.render(in:)`, which does not reproduce
   every compositor effect. On iOS 27, a native `CAGradientLayer` from 1× to 4×
   white also captures as 1, and layer shadows disappear from that capture.
-  Compare the layer's colors and range with Color Gallery's UIKit reference,
+  Compare the layer's colors and range with UI Gallery's UIKit reference,
   then inspect the displayed screen through iPhone Mirroring. A float capture
-  alone cannot judge those effects. (Color Gallery, iPhone 16 Pro, 2026-10-27.)
+  alone cannot judge those effects. (UI Gallery, iPhone 16 Pro, 2026-10-27.)
 
 - **A build's refusals do not say "error".** A compile refusal prints as
   `app.contract:5:13 [lower-attr-value] symbol \`warning\` is not a role; …` and the
@@ -1555,14 +1580,14 @@ price: answers arrive `Later`, outside the action's transaction (LLP 1027.002 D1
   "screenshot s.png"`; find targets with `tree`, or `tree --ax` for the
   accessibility tree. (Exact-new iOS app feedback, 2026-10-04.)
 
-- **`build.mjs --ios … --phone <udid>` installed onto someone else's simulator.**
-  Cause: a simulator build reads `--sim` (or `EXACT_SIM`); `--phone` is the
-  device's, so it fell back to a booted iPhone, another drive's
-  (2026-10-09). `agent ios` and `smoke.mjs ios` choose the same way. Now a
-  choice among several booted iPhones is refused, naming the caller's way to
-  choose; fix: always pass
-  `--sim <udid>` to `build.mjs` and set `EXACT_SIM=<udid>` for the agent and
-  the smokes.
+- **An iOS build replaced the app another session was driving.** Simulator
+  builds use `--sim` or `EXACT_SIM`; `--phone` names a physical device.
+  Without an explicit simulator, selection can reuse one with the app
+  installed. Git worktrees share an app's bundle ID, so this can select
+  another worktree's simulator. Create a simulator for each concurrent
+  worktree with `xcrun simctl create "<name>" <device-type> <runtime>` and
+  set `EXACT_SIM=<udid>` for its builds, tests, verification and agent runs.
+  Pass `--sim <udid>` when invoking `build.mjs` directly.
 
 - **`tap <row>` pressed a link card, Like or Repost inside the row.** Cause: a
   plain tap aimed at the row's middle, and a finger there presses the deepest
@@ -1707,6 +1732,11 @@ price: answers arrive `Later`, outside the action's transaction (LLP 1027.002 D1
   background work that opened it`. Fix: close in a finally,
   `try { … } finally { await db.close(); }`. (LLP 1097 D7, Charlie,
   2026-10-07.)
+
+- **Native button contents can be viewless.** Read color ownership from
+  the face's `rows.title`, `rows.subtitle` and `rows.symbol` `written` fields.
+  Walking child views misses these contents and can replace a child's authored
+  color with an inherited active color.
 
 - **A native button refuses an image's frame or a third text.** Its face is
   semantic: two texts (title and subtitle) and one symbol image. Raster faces
@@ -1854,6 +1884,12 @@ price: answers arrive `Later`, outside the action's transaction (LLP 1027.002 D1
   Cargo step in `host/apple/build.mjs`'s `test` function, without
   `EXACT_BAKED` or a linked bake. Then relink and run the focused class.
   (QUEUE 638 review, 2026-10-23.)
+
+- **A manual hosted XCTest rerun uses an older build.** The hosted
+  `.xctestrun` loads the test bundle copied into `ExactTestHost.app/PlugIns`,
+  not the bundle an incremental Xcode build updates. Refresh it with
+  `hostedIn` from `host/apple/xctest.mjs` and re-sign the host before rerunning,
+  or use `build.mjs --test --ios`, which refreshes the copy.
 
 - **`build.mjs <app> --test` can break tests that assume Caltrain data.** The
   Swift suite links the named app's plan and sources; its owner and batch tests
@@ -2015,7 +2051,7 @@ are in [game-pitfalls.md](game-pitfalls.md).
   one another.** `element.diagnostics` is scoped to the hatch word. The session
   keeps 16 published names, with at most 4,096 bytes per value. Group repeated
   instances under a stable name, for example `publish("gradient", {standard: ..., constrained:
-  ..., noLimit: ...})`, and keep each payload within that bound. (Color Gallery's
+  ..., noLimit: ...})`, and keep each payload within that bound. (UI Gallery's
   27 paint probes, 2026-10-27; `HatchDiagnostics.swift`.)
 
 - **A native view's frame ticket left on costs CPU on a still screen.** A

@@ -417,11 +417,14 @@ impl Collection {
         self.animating || self.correction.is_some_and(|c| c.smooth)
     }
     /// Whether the list asks the host for its next report: it owes rows
-    /// (`pending`), a request has been admitted, or where the port is is
-    /// unknown, which nothing else may make the host say. A request that
+    /// (`pending`), a nonempty opening needs acknowledgement, a request has
+    /// been admitted, or the port position is unknown. A request that
     /// waits for the reader's scroll rides the scroll's reports.
     pub(super) fn asks_report(&self) -> bool {
-        self.pending || self.port_unknown || (self.target.is_some() && !self.request_waits())
+        self.pending
+            || (self.at_end && self.index.len() > 0)
+            || self.port_unknown
+            || (self.target.is_some() && !self.request_waits())
     }
     /// No request, or one a report leaves alone: it waits on, the reader
     /// still scrolling. The travel fast path may take such a report.

@@ -11,7 +11,10 @@ const APP: &str = r##"component App
     presses = presses + 1
   view
     column width=400 height=400 background-color="#ffffff"
-      box press=go -exact-press-opacity=0.5 -exact-press-background-color="#0000ff" -exact-press-color="#ff0000" background-color="#00ff00" color="#000000" width=300 height=120 testId="painted"
+      box press=go -exact-press-opacity=0.5 background-color="#00ff00" color="#000000" width=300 height=120 testId="painted"
+        :active
+          background-color="#0000ff"
+          color="#ff0000"
         text "IIIIIIII" font-size=40 testId="inherits"
         text "IIIIIIII" font-size=40 color="#000000" testId="keeps"
 "##;
@@ -136,7 +139,9 @@ fn a_pressed_ancestor_leaves_a_native_fields_ink() {
     words = value
   view
     column width=400 height=400 background-color="#ffffff"
-      box press=go -exact-press-color="#ff0000" color="#000000" width=300 height=200 testId="painted"
+      box press=go color="#000000" width=300 height=200 testId="painted"
+        :active
+          color="#ff0000"
         input value=words change=write font-size=40 aria-label="Native" testId="native"
         input value=words change=write font-size=40 appearance="none" aria-label="Own" testId="own"
 "##;

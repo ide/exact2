@@ -1,8 +1,8 @@
 // LLP 1115 wave 1: a tap on the status bar scrolls the screen's content to
 // its top, as in a hand-built app. UIKit does it only when exactly one scroll
 // view in the window has `scrollsToTop`, so every other one is turned off:
-// the one left on is the active route's content scroller (the one its
-// `navigationScroll` names, else the first vertical scroller under it: the
+// the one left on is the active route's content scroller (its native top
+// selection, else `navigationScroll`, else the first vertical scroller: the
 // bar's scroller too, by one rule, LLP 1115.000 D11.1), else, with no routes,
 // the viewport when it scrolls, else the first vertical scroller on the
 // page. A grouped list answers with the collection view that shows, never
@@ -20,6 +20,9 @@ extension Presenter {
         #else
         let chosen = scrollsToTopTarget()
         #endif
+        if let previous = navigation.scrollsToTopSelection, previous !== chosen { previous.scrollsToTop = false }
+        navigation.scrollsToTopSelection = chosen
+        if let chosen, !chosen.scrollsToTop { chosen.scrollsToTop = true }
         if viewport.scrollsToTop != (chosen === viewport) { viewport.scrollsToTop = chosen === viewport }
         for route in navigation.primaryRoutes {
             route.contentViewport?.scrollsToTop = route.contentViewport === chosen
@@ -79,9 +82,35 @@ extension Presenter {
         while !level.isEmpty, depth < 8 {
             depth += 1
             if let hit = level.first(where: { $0.scrollView != nil && $0.scrollsVertically }) { return hit }
-            level = level.flatMap { $0.container.subviews.compactMap { $0 as? NodeView }.filter { !$0.isHidden } }
+            level = level.flatMap { node -> [NodeView] in
+                #if os(iOS)
+                if #available(iOS 27.1, *), let panes = node.presenter?.arrangements.panes(in: node) { return panes.filter { !$0.isHidden } }
+                #endif
+                return node.container.subviews.compactMap { $0 as? NodeView }.filter { !$0.isHidden }
+            }
         }
         return nil
     }
 }
+
+extension NavigationHost {
+    /// Native selection wins over `navigationScroll`, then the first vertical scroller
+    /// (LLP 1115.000 D11.1). The bar, scroll-to-top actions and route hatch share this rule.
+    func contentScroller(of c: RouteController) -> NodeView? {
+        if c.nativeContentScrollEdges.contains(.top) { return c.nativeContentScroller }
+        if let name = c.node.props["navigationScroll"], !name.isEmpty {
+            return element(named: name, in: c.node).flatMap { $0.scrollView == nil ? nil : $0 }
+        }
+        return Presenter.firstVerticalScroller(under: c.node)
+    }
+
+    /// The native selection, authored scroller or default document viewport.
+    func contentScrollView(of route: RouteController) -> UIScrollView? {
+        if route.nativeContentScrollEdges.contains(.top), let selected = route.contentScrollView(for: .top) { return selected }
+        if let node = contentScroller(of: route) { return shownScroll(node) }
+        if !route.nativeContentScrollEdges.contains(.top), let name = route.node.props["navigationScroll"], !name.isEmpty { return nil }
+        return route.contentViewport
+    }
+}
+
 #endif

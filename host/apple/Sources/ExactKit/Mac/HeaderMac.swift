@@ -205,6 +205,7 @@ final class HeaderSegments: NSObject {
             (item, tablist, tabs, titles) = (nil, nil, [], [])
             return nil
         }
+        for tab in header.tabs { tab.rejectNativeActiveProperties(on: "NSToolbarItemGroup segment") }
         let ids = header.tabs.map(\.id), names = header.tabs.map(\.accessibleText)
         if item == nil || tablist != list.id || ids != tabs || names != titles {
             generation += 1

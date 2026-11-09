@@ -262,6 +262,67 @@ final class NativeListNavigationIOSTests: XCTestCase {
         XCTAssertEqual(node.scrollOrigin, 0, "the previous backend's title inset is not carried over")
         XCTAssertEqual(node.scrollCollapsed, 0)
         XCTAssertTrue(navigation.shownScroll(navigation.contentScroller(of: route)) === replacement)
+        route.setContentScrollView(replacement, for: .top)
+        navigation.prepareRoutes([route], in: nav)
+        XCTAssertTrue(navigation.contentScroller(of: route) === node, "native selection retains the collection's Exact owner")
+        XCTAssertTrue(route.collapseScroll === node)
+        XCTAssertTrue(route.collapseScrollView === replacement)
+        XCTAssertEqual(route.projected?.scroll, ObjectIdentifier(replacement), "the route hatch receives the selected collection")
+    }
+
+    func testRawNativeScrollSelectionsKeepTheirPoliciesAndOneScrollToTopTarget() throws {
+        let session = try fixture("native-scroll-selection")
+        let (nav, route, node) = try second(session)
+        let p = session.presenter, automatic = try XCTUnwrap(node.scrollView)
+        let firstNative = UIScrollView(frame: route.view.bounds), secondNative = UIScrollView(frame: route.view.bounds)
+        firstNative.scrollsToTop = false; secondNative.scrollsToTop = false
+        firstNative.contentInsetAdjustmentBehavior = .always
+        secondNative.contentInsetAdjustmentBehavior = .automatic
+        route.view.addSubview(firstNative); route.view.addSubview(secondNative)
+        defer { firstNative.removeFromSuperview(); secondNative.removeFromSuperview() }
+
+        route.setContentScrollView(firstNative, for: .all)
+        XCTAssertTrue(firstNative.scrollsToTop, "a selected native view is enabled even when its flag was false")
+        XCTAssertFalse(automatic.scrollsToTop)
+        p.navigation.prepareRoutes([route], in: nav)
+        XCTAssertEqual(route.projected?.scroll, ObjectIdentifier(firstNative), "the route hatch receives an app-owned native view")
+        XCTAssertEqual(firstNative.contentInsetAdjustmentBehavior, .always, "projection preserves the native bottom selection's inset policy")
+
+        route.setContentScrollView(secondNative, for: .top)
+        XCTAssertFalse(firstNative.scrollsToTop, "the previous native target stops competing for status-bar taps")
+        XCTAssertTrue(secondNative.scrollsToTop)
+        p.navigation.prepareRoutes([route], in: nav)
+        XCTAssertEqual(route.projected?.scroll, ObjectIdentifier(secondNative))
+        XCTAssertTrue(route.contentScrollView(for: .bottom) === firstNative)
+        XCTAssertEqual(firstNative.contentInsetAdjustmentBehavior, .always)
+        XCTAssertEqual(secondNative.contentInsetAdjustmentBehavior, .automatic)
+
+        #if EXACT_INSPECT
+        let inspected = Inspect.on
+        defer { Inspect.on = inspected; p.syncScrollsToTop() }
+        Inspect.on = true
+        p.syncScrollsToTop()
+        XCTAssertFalse(secondNative.scrollsToTop, "Inspect disables the native target too")
+        Inspect.on = false
+        p.syncScrollsToTop()
+        XCTAssertTrue(secondNative.scrollsToTop)
+        #endif
+
+        route.setContentScrollView(nil, for: .all)
+        XCTAssertFalse(firstNative.scrollsToTop)
+        XCTAssertFalse(secondNative.scrollsToTop)
+        XCTAssertTrue(automatic.scrollsToTop)
+        p.navigation.prepareRoutes([route], in: nav)
+        XCTAssertEqual(route.projected?.scroll, ObjectIdentifier(automatic))
+        XCTAssertNil(route.contentScrollView(for: .top), "UIKit retains automatic discovery")
+        XCTAssertNil(route.contentScrollView(for: .bottom))
+        XCTAssertEqual(firstNative.contentInsetAdjustmentBehavior, .always)
+        XCTAssertEqual(secondNative.contentInsetAdjustmentBehavior, .automatic)
+
+        route.setContentScrollView(firstNative, for: .top)
+        XCTAssertTrue(firstNative.scrollsToTop)
+        p.navigation.reset()
+        XCTAssertFalse(firstNative.scrollsToTop, "retiring navigation releases its native status-bar target")
     }
 
     private func nativeList(initialTop: Double? = 0, paddingTop: Double = 0, laterAuthoredTop: Double? = nil, customHero: Bool = false, heroHeight: Double = 80, followEnd: Bool = false) throws -> (ExactSession, UINavigationController, RouteController, NodeView) {

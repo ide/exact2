@@ -12,6 +12,175 @@ import XCTest
 /// UIKit, so a simulator runs it: bun host/apple/build.mjs --test --ios
 final class NativeButtonsIOSTests: XCTestCase {
     private var window: UIWindow!
+    private func rgba(_ color: UIColor?) -> [CGFloat]? {
+        guard let color else { return nil }
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        guard color.getRed(&r, green: &g, blue: &b, alpha: &a) else { return nil }
+        return [r, g, b, a]
+    }
+
+    func testActivePropertiesKeepNativeCustomizationAndConfigurationCallbacks() throws {
+        var base = face("Go"); base.ios = "filled"; base.iosBefore26 = "filled"
+        let p = presenter(box(1) + native(2) + [["op": "children", "id": 1, "ids": [2]], ["op": "roots", "ids": [1]]], faces: [2: base])
+        p.apply(wireBatch([["op": "style", "id": 2, "style": ["press_color": [0, 0, 255, 255], "press_background_color": [255, 0, 0, 255], "press_opacity_to": 0.4, "press_scale": 0.9]]]))
+        let button = try button(p, 2)
+        var config = try XCTUnwrap(button.configuration)
+        config.background.strokeWidth = 3
+        config.contentInsets.leading = 23
+        button.configuration = config
+        var states: [Bool] = []
+        let previousHandler = button.configurationUpdateHandler
+        button.configurationUpdateHandler = { button in
+            previousHandler?(button)
+            states.append(button.isHighlighted)
+            var config = button.configuration!
+            config.titlePadding = 9
+            config.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { incoming in
+                var outgoing = incoming
+                outgoing.uiKit.font = UIFont.monospacedSystemFont(ofSize: 19, weight: .bold)
+                return outgoing
+            }
+            button.configuration = config
+        }
+        for down in [true, false] {
+            button.isHighlighted = down
+            button.setNeedsUpdateConfiguration()
+            window.layoutIfNeeded()
+            waitForMainQueue()
+            XCTAssertTrue(states.contains(down), "UIKit still calls the native configuration handler")
+            XCTAssertEqual(button.configuration?.background.strokeWidth, 3)
+            XCTAssertEqual(button.configuration?.contentInsets.leading, 23)
+            XCTAssertEqual(button.configuration?.titlePadding, 9)
+            XCTAssertEqual(button.titleLabel?.font, UIFont.monospacedSystemFont(ofSize: 19, weight: .bold))
+            if down { XCTAssertEqual(rgba(button.titleLabel?.textColor.resolvedColor(with: button.traitCollection)), [0, 0, 1, 1]) }
+            let owner = try XCTUnwrap(p.views[2])
+            XCTAssertEqual(owner.layer.animation(forKey: "nativeActiveOpacity") != nil, down)
+            XCTAssertEqual(owner.layer.animation(forKey: "nativeActiveScale") != nil, down)
+            if down {
+                p.apply(wireBatch([["op": "style", "id": 2, "style": ["press_color": [0, 255, 0, 255]]]]))
+                waitForMainQueue()
+                XCTAssertEqual(button.configuration?.background.strokeWidth, 3)
+                XCTAssertEqual(button.configuration?.contentInsets.leading, 23)
+                XCTAssertEqual(rgba(button.titleLabel?.textColor.resolvedColor(with: button.traitCollection)), [0, 1, 0, 1])
+            }
+        }
+        window.isHidden = true
+    }
+
+    func testDirectConfigurationTransformersSurviveActiveColorOverrides() throws {
+        var base = face("Go", symbol: "paperplane", style: "filled", ios: "filled")
+        base.iosBefore26 = "filled"
+        let p = presenter(box(1) + native(2) + [["op": "children", "id": 1, "ids": [2]], ["op": "roots", "ids": [1]]], faces: [2: base])
+        defer { window.isHidden = true }
+        p.apply(wireBatch([["op": "style", "id": 2, "style": ["press_color": [0, 0, 255, 255], "press_background_color": [255, 0, 0, 255]]]]))
+        let button = try button(p, 2), font = UIFont.monospacedSystemFont(ofSize: 19, weight: .bold)
+        button.isHighlighted = true
+        waitForMainQueue()
+        var config = try XCTUnwrap(button.configuration)
+        let text = UIConfigurationTextAttributesTransformer { incoming in
+            var outgoing = incoming
+            outgoing.uiKit.font = font
+            outgoing.uiKit.foregroundColor = .magenta
+            return outgoing
+        }
+        config.titleTextAttributesTransformer = text
+        config.subtitleTextAttributesTransformer = text
+        config.imageColorTransformer = UIConfigurationColorTransformer { _ in .magenta }
+        config.background.backgroundColorTransformer = UIConfigurationColorTransformer { _ in .magenta }
+        button.configuration = config
+        // An unrelated write must keep the same bases, rather than wrap Exact's overrides again.
+        config = try XCTUnwrap(button.configuration)
+        config.titlePadding = 11
+        button.configuration = config
+        for down in [true, false, true] {
+            button.isHighlighted = down
+            button.setNeedsUpdateConfiguration()
+            window.layoutIfNeeded()
+            waitForMainQueue()
+            let current = try XCTUnwrap(button.configuration)
+            for transform in [current.titleTextAttributesTransformer, current.subtitleTextAttributesTransformer] {
+                let attributes = try XCTUnwrap(transform)(AttributeContainer())
+                XCTAssertEqual(attributes.uiKit.font, font)
+                XCTAssertEqual(rgba(attributes.uiKit.foregroundColor), down ? [0, 0, 1, 1] : [1, 0, 1, 1])
+            }
+            XCTAssertEqual(rgba(current.imageColorTransformer?(.green)), down ? [0, 0, 1, 1] : [1, 0, 1, 1])
+            XCTAssertEqual(rgba(current.background.backgroundColorTransformer?(.green)), down ? [1, 0, 0, 1] : [1, 0, 1, 1])
+        }
+        p.apply(wireBatch([["op": "style", "id": 2, "style": [:]]]))
+        waitForMainQueue()
+        let current = try XCTUnwrap(button.configuration)
+        XCTAssertEqual(current.titleTextAttributesTransformer?(AttributeContainer()).uiKit.font, font)
+        XCTAssertEqual(rgba(current.titleTextAttributesTransformer?(AttributeContainer()).uiKit.foregroundColor), [1, 0, 1, 1])
+        XCTAssertEqual(rgba(current.subtitleTextAttributesTransformer?(AttributeContainer()).uiKit.foregroundColor), [1, 0, 1, 1])
+        XCTAssertEqual(rgba(current.imageColorTransformer?(.green)), [1, 0, 1, 1])
+        XCTAssertEqual(rgba(current.background.backgroundColorTransformer?(.green)), [1, 0, 1, 1])
+    }
+
+    func testActivePropertiesComposeWithNativeHighlightAndClearWhileHeld() throws {
+        var base = face("Go")
+        base.ios = "filled"; base.iosBefore26 = "filled"
+        let p = presenter(box(1) + native(2) + [["op": "children", "id": 1, "ids": [2]], ["op": "roots", "ids": [1]]], faces: [2: base])
+        let owner = try XCTUnwrap(p.views[2]), button = try button(p, 2)
+        let reference = UIButton(configuration: try XCTUnwrap(button.configuration))
+        reference.frame = CGRect(x: 0, y: 300, width: button.bounds.width, height: button.bounds.height)
+        window.addSubview(reference)
+        let controls: [UIButton] = [button, reference]
+        for control in controls { control.isHighlighted = true; control.setNeedsUpdateConfiguration() }
+        window.layoutIfNeeded()
+        waitForMainQueue()
+        let nativeBackground = reference.configuration?.background
+        p.apply(wireBatch([["op": "style", "id": 2, "style": ["press_scale": 0.94]]]))
+        waitForMainQueue()
+        XCTAssertTrue(button.isHighlighted)
+        XCTAssertEqual(button.configuration?.background, nativeBackground, "a scale leaves the native highlighted background")
+        XCTAssertEqual(button.titleLabel?.textColor, reference.titleLabel?.textColor, "a scale leaves the native highlighted ink")
+        XCTAssertNotNil(owner.layer.animation(forKey: "nativeActiveScale"))
+        XCTAssertEqual(owner.layer.sublayerTransform.m11, 1, "presentation keeps tracking geometry unchanged")
+        p.apply(wireBatch([["op": "style", "id": 2, "style": ["press_background_color": [255, 0, 0, 255]]]]))
+        waitForMainQueue()
+        XCTAssertEqual(button.titleLabel?.textColor, reference.titleLabel?.textColor, "a background leaves the native highlighted ink")
+        p.apply(wireBatch([["op": "style", "id": 2, "style": ["press_background_color": [255, 0, 0, 255], "press_color": [0, 0, 255, 255], "press_opacity_to": 0.4]]]))
+        waitForMainQueue()
+        XCTAssertEqual(rgba(button.configuration?.background.resolvedBackgroundColor(for: button.tintColor).resolvedColor(with: button.traitCollection)), [1, 0, 0, 1])
+        XCTAssertEqual(rgba(button.titleLabel?.textColor.resolvedColor(with: button.traitCollection)), [0, 0, 1, 1])
+        XCTAssertNotNil(owner.layer.animation(forKey: "nativeActiveOpacity"))
+        XCTAssertNil(owner.layer.animation(forKey: "nativeActiveScale"))
+        XCTAssertEqual(owner.alpha, 1)
+        p.apply(wireBatch([["op": "style", "id": 2, "style": [:]]]))
+        waitForMainQueue()
+        XCTAssertTrue(button.isHighlighted)
+        XCTAssertEqual(button.configuration?.background, nativeBackground)
+        XCTAssertEqual(button.titleLabel?.textColor, reference.titleLabel?.textColor)
+        XCTAssertNil(owner.layer.animation(forKey: "nativeActiveOpacity"))
+        button.isHighlighted = false
+        window.isHidden = true
+    }
+
+    func testActiveInkKeepsTheTitlesAuthoredColorAndNativeControlIdentity() throws {
+        var base = face("Go")
+        base.rows.title["text_color"] = .array([.number(0), .number(128), .number(0), .number(255)])
+        base.rows.title["written"] = .array([.string("text_color")])
+        let p = presenter(box(1) + native(2) + [
+            ["op": "children", "id": 1, "ids": [2]], ["op": "roots", "ids": [1]],
+            ["op": "style", "id": 2, "style": ["press_color": [0, 0, 255, 255]]],
+        ], faces: [2: base])
+        p.buttonFace = { _ in base }
+        let button = try button(p, 2)
+        button.isHighlighted = true
+        button.setNeedsUpdateConfiguration()
+        waitForMainQueue()
+        let nativeInk = button.titleLabel?.textColor
+        base.rows.title["written"] = nil
+        p.controls.facesChanged()
+        p.controls.sync()
+        waitForMainQueue()
+        XCTAssertTrue(p.controls.controls[2] === button)
+        XCTAssertNotEqual(rgba(nativeInk), [0, 0, 1, 1])
+        XCTAssertEqual(rgba(button.titleLabel?.textColor.resolvedColor(with: button.traitCollection)), [0, 0, 1, 1])
+        XCTAssertTrue(button.isAccessibilityElement)
+        button.isHighlighted = false
+        window.isHidden = true
+    }
 
     private func presenter(_ ops: [[String: Any]], faces: [UInt32: ButtonFace] = [:],
                            options: SelectMenu = SelectMenu(options: [.init(value: "a", label: "A", disabled: false)], chosen: 0)) -> Presenter {

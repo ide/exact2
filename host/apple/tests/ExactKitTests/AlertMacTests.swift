@@ -110,6 +110,20 @@ final class AlertMacTests: XCTestCase {
     /// (or `showModal`) is a sheet, its title the label, its message the
     /// text, its destructive button marked, its cancel on Escape, and no
     /// default, as AppKit leaves a destructive alert.
+    func testAnOpenAlertRejectsAnActivePropertyAddedLaterWithoutReplacingItsButtons() throws {
+        let p = fixture()
+        p.press(2)
+        let owner = try XCTUnwrap(p.alerts.presented)
+        let button = owner.alert.buttons[0]
+        let source = try XCTUnwrap(p.views[10])
+        XCTAssertNil(source.nativeActiveRefusals["NSAlert button"])
+        p.apply(wireBatch([["op": "style", "id": 10, "style": ["press_opacity_to": 0.4]]]))
+        XCTAssertTrue(p.alerts.presented === owner)
+        XCTAssertTrue(owner.alert.buttons[0] === button)
+        XCTAssertTrue(source.nativeActiveRefusals["NSAlert button"]?.contains("opacity") == true)
+        _ = p.alerts.close(try XCTUnwrap(p.views[3]))
+    }
+
     func testAnAlertShapedDialogIsAnNSAlertSheetAndEachButtonPressesItsOwn() throws {
         let p = fixture()
         var pressed: [UInt32] = []

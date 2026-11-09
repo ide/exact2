@@ -2397,6 +2397,91 @@ carries it beside a Linux executable or, signed, in an Apple bundle's `Framework
 does not list; two dependencies declaring `native` (`bake-native-twice`).
 `packages/fixtures/vault` is a whole one, its library built by `test/library.mjs`.
 
+### Arranged panes
+
+On iOS and iPadOS 27.1 or later, an element hatch can call
+`element.arrange(using: controller)` with a `UIArrangementViewController` configured
+with `UISplitArrangement` or `UIOverlayArrangement`. Exact places the element's two
+authored children in the controller and lays each out in the space UIKit gives it.
+Give the element a definite size, such as `height="100%"` in a sized route;
+allocated children do not give an auto-height parent its height. Pass `nil` to
+restore CSS layout.
+
+A `true` result accepts the request; UIKit lays it out when the owning container
+is available. `false` means the element is unavailable, it does not have exactly
+two valid children, or a new controller is already attached or has populated
+content slots. Once accepted, the request uses CSS while the element
+does not have exactly two valid children, then resumes native layout when both
+return. Child order and replacements follow the authored tree.
+
+The first child is UIKit's primary pane and the second is its secondary pane.
+Exact supplies their child controllers and manages the arrangement's content
+slots and containment. Supply a detached controller with empty slots; reuse that
+controller for configuration changes. Call UIKit's `updateArrangement(_:animated:)`
+to change axes, split or overlay behavior, dimensions and placement properties.
+Exact does not translate those settings. Navigation stays in the enclosing controller.
+UIKit may hide a pane when the allowed axes do not suit the current display.
+
+```swift
+let arrangement = UIArrangementViewController()
+arrangement.updateArrangement(.split.axes(.horizontal))
+element.arrange(using: arrangement)
+
+// A later menu action changes the same controller, keeping the authored panes.
+arrangement.updateArrangement(.overlay, animated: true)
+```
+
+The pane wrappers do not measure authored content for UIKit's `.intrinsic`
+dimension. Use native automatic, absolute or fractional dimensions for now.
+
+Use a bounded scroller in each child for independent scrolling. The first visible
+vertical scroller is the default title and scroll-to-top target; `navigationScroll`
+can name another. UIKit owns bar minimization, safe-area changes, each pane's
+scroll-edge effect and navigation transitions. Arrangement adoption leaves the
+route's native navigation policy unchanged. The route hatch receives the enclosing
+controller, so title and bar settings use UIKit directly:
+
+```swift
+let item = route.controller.navigationItem
+item.largeTitleDisplayMode = .automatic
+item.navigationBarMinimization.minimizationBehavior = .onScrollDown
+item.navigationBarMinimization.safeAreaAdjustment = .automatic
+```
+
+Set only the native properties the app needs to change. For a fixed header, set
+`minimizationBehavior` to `.never`. Select the bar's scroll view with
+`route.controller.setContentScrollView(_:for:)`. An explicit native selection
+survives authored layout updates; passing `nil` leaves discovery to UIKit and keeps
+the first visible vertical scroller as Exact's scroll-to-top target. UIKit's
+`contentScrollView(for:)` getter reports only explicit selections, so `nil` does not
+mean scrolling is disabled. Each edge is independent, and `.all` selects all edges.
+For example, a menu action can select the secondary pane after the arrangement
+has mounted:
+
+```swift
+if let scroll = arrangement.viewController(for: .secondary)?.contentScrollView(for: .top) {
+    route.controller.setContentScrollView(scroll, for: .top)
+}
+```
+
+The route hatch's `contentScrollView` is the actual selected view, including a
+native collection view or an app-owned `UIScrollView`.
+
+The containing navigation controller still owns one shared navigation bar. UIKit
+decides where its large title and each pane's edge effect appear; the panes keep
+their own scroll offsets and safe areas.
+
+Declare the hatch for its platforms in `app.json`. Keep navigation outside the
+arrangement and avoid nesting it in authored scrollers or other native layout
+containers ([Apple's containment guidance](https://developer.apple.com/documentation/uikit/uiarrangementviewcontroller)).
+Keep the same children mounted when switching between native and CSS layouts, so
+folds and resizes preserve their controls, bindings and state. Older systems and
+other hosts use the authored CSS layout. Duo Lab's
+[Panes screen](../apps/duo-lab/arrangement.contract) and
+[hatch](../apps/duo-lab/modules/apple/ArrangedPanes.swift) use UIKit split and overlay
+arrangements and responsive CSS elsewhere. See Apple's
+[arrangement guidance](https://developer.apple.com/design/human-interface-guidelines/designing-for-iphone-duo).
+
 ## Routes and web documents
 
 Declare at most one `routes <slot>` in the app's root file. Each row names an
@@ -3082,23 +3167,18 @@ its schemes in `app.json`: `"host": { "ios": { "queriesSchemes":
 List at most 50 schemes, without `:` or `://`; changing the list requires a
 native rebuild.
 
-A pressed look is the host's, as UIKit's highlight is (LLP 1061 D7):
-`-exact-press-opacity` (0 to 1, a share of the node's own opacity),
-`-exact-press-background-color` and `-exact-press-color` (any colour row's
-values: a token, a role, `light-dark()`), beside `-exact-press-scale`, with
-which they compose. The host shows them while a finger or the mouse holds the
-node (the innermost pressable, inside its box; sliding off, a cancel or a pan
-lets go), eased in over 120 ms, at once under the agent's clock, so `"tap row
-down" "screenshot x.png" "tap up"` shows it. Nothing waits on the runner and no
-state changes. `-exact-press-color` reaches the node's text as `color` does
-(a text with its own colour keeps it). Any of them, 1 included, replaces the
-platform's unsaid press: iOS's dim, the Mac's darkening, a list row's cell
-highlight. An `:active` state part (below) says the same paint, with an
-opacity that is what the node shows pressed rather than a share; write each
-paint one way or the other, not both. These are paint only; a press that
-changes layout is app state. Do not draw a press from
-`pointerdown`/`pointerup` state: each touch then waits on the runner. Say
-nothing to get the platform's own.
+Write pressed `background-color`, `color` and absolute `opacity` in a
+`:active` block. `-exact-press-opacity` multiplies the node's presented opacity;
+`-exact-press-scale` multiplies its presented scale. The host applies these
+values while a finger or mouse holds the innermost pressable inside its box.
+Sliding off, cancellation or a pan releases it. Custom nodes ease over 120 ms;
+native controls keep the platform's timing. The agent applies the target at
+once, so `"tap row down" "screenshot x.png" "tap up"` shows it. Pressing requires
+no runner round trip. Active `color` reaches text that inherits the node's
+colour; descendants with their own keep it. On custom nodes, authored feedback
+replaces the platform's unsaid press. Native buttons and native list rows keep
+unwritten fields of the platform's highlighted state. Leave feedback unwritten
+for the platform default. A press that changes layout uses app state.
 
 Haptics are already there (LLP 1077 D14). `-exact-press-haptic` (`selection`,
 `impact-light|medium|heavy|soft|rigid`) plays at touch-down without a round
@@ -3297,18 +3377,23 @@ native-only animation cadence are unmeasured. While the card is shown, bounded h
 capture also records matching asynchronous owner and apply timestamps. Idle time never
 becomes a frame time.
 
-The card's charts take each frame and show the last 30 seconds: the frame rate's
-moving average over the last half second against the request, and each frame's frame
-time and work, the longest in each tenth of a second, against that frame's deadline.
-Within a run of frames the lines reach across tenths of a second without frames; an
-idle app, a pause and a reset leave gaps. The charts take the frames the app's clock
-already runs, start no timer or display link and store no file. The figures update
-every half second, and at once when the source stops, on the existing bounded
-publication pass in common run-loop modes, so touch tracking does not suspend them.
-The reader creates no display link or polling timer, reads nothing while the card is
-hidden, paused or detached, and keeps at most 60 half-second samples. During native
-scrolling the card stays on the app callback source; in development builds on iOS 18
-and later the separate experimental scroll source reaches `perf frames` and the report.
+The card's charts take each frame and show the last 30 seconds: the frame rate's moving
+average over the last half second against the request, and each frame's frame time and
+work, the longest in each tenth of a second, against that frame's deadline. Within a run
+of frames the lines reach across tenths of a second without frames; an idle app, a pause
+and a reset leave gaps. The charts start no display link and store no file. Measuring
+Exact's frames, they take the frames the app's clock already runs and move with the time
+on a tenth-of-a-second timer of their own, which stops once their newest mark has left
+them. Their figures update every half second, and at once when the source stops, on the
+existing bounded publication pass in common run-loop modes, so touch tracking does not
+suspend them. Measuring the screen, the charts take every UI update and glide on Core
+Animation, and the card reads on a half-second timer of its own in place of
+publications, which stops as it hides. The reader creates no display link, reads nothing
+while the card is hidden, paused or detached, and keeps at most 60 half-second samples;
+the first read after a pause covers the paused span. During native scrolling, a card
+measuring Exact's frames stays on the app callback source; in development builds on iOS
+18 and later the separate experimental scroll source reaches `perf frames` and the
+report.
 
 `perf frames health` exposes the metrics. `state.frameHealthUI` contains only the
 card's visibility and window-local bounds, marked as host controls outside app nodes.
@@ -3526,16 +3611,17 @@ sample. The observer reports completion-deadline overruns. Its cadence is unknow
 passive updates can pause while a finger rests, so they contribute no FPS, interval
 histogram or maximum-gap population. This observer is not presentation feedback.
 
-On macOS, Develop offers Frame Health, and the card's Details and Share work
-as on iOS. Actions follow the responder chain to the eligible window; an embedder opts
-in by passing `frameHealthContainer` to `DevMenu.install`. The standalone adapter
-supplies its host slot. The card takes the clicks within its bounds and moves without
-changing the app's viewport. Details shows within the card on both platforms, with the
-app's frames. Active reader updates are coalesced at half-second intervals across the
-process. Lifecycle changes may publish immediately; there is no idle publication
-timer. macOS spatial motion, canvases and press feedback request the current display
-maximum, including above 120 Hz; press clocks are per window and update when its
-screen changes.
+On macOS, Develop offers Frame Health, and the card's Details and Share work as on iOS.
+Actions follow the responder chain to the eligible window; an embedder opts in by
+passing `frameHealthContainer` to `DevMenu.install`. The standalone adapter supplies its
+host slot. The card takes the clicks within its bounds and moves without changing the
+app's viewport. Details shows within the card on both platforms, with the app's frames.
+Active reader updates are coalesced at half-second intervals across the process.
+Lifecycle changes may publish immediately; there is no idle publication timer, and only
+an iOS card measuring the screen reads on a timer of its own, twice a second while it
+shows. macOS spatial motion, canvases and press feedback request the current display
+maximum, including above 120 Hz; press clocks are per window and update when its screen
+changes.
 
 `exact.frame-health/2` is a versioned JSON schema. Field explanations stay here to
 leave bytes for evidence. `columns` names each field in a `hitches` row. Export keeps
@@ -3561,25 +3647,28 @@ offsets (35 minutes either way) and durations (71 minutes).
 | `main_landed_offset_us`, `apply_began_offset_us`, `apply_finished_offset_us` | Main arrival and outermost presenter-apply boundaries. Apply excludes legacy sampler bookkeeping |
 | `work_target_offset_us`, `operations` | Captured frame update's target and batch operation count; an apply without a frame target has no work target |
 
-A report whose `source` is `ui-update`, the card's measure of the screen's UI updates
-on iOS 18 and later, has no frame times and none of Exact's owner or apply boundaries,
-so its rows have only `sequence`, `capture`, `generation`, `age_us`, `flags`,
+A report whose `source` is `ui-update`, the card's measure of the screen's UI updates on
+iOS 18 and later, has no frame times and none of Exact's owner or apply boundaries, so
+its rows have only `sequence`, `capture`, `generation`, `age_us`, `flags`,
 `target_offset_us`, `callback_us`, `before_callback_us`, `after_offset_us`,
 `after_callback_us`, `waited_us`, `exact_us`, `card_us` and `layouts`. There
 `callback_us` is the update's work: the main thread's time from its scheduling until its
 last Core Animation commit, less `waited_us`, the time it waited between them, as UIKit
-lets it for input. The work is taken to end at the commit. `target_offset_us` is UIKit's
-completion deadline from the work's start, negative when the work began after it; work
-longer than it is late. `before_callback_us` is the previous update's work, and
-`after_offset_us` and `after_callback_us` when the next update's work began and its
-length. `exact_us` is the
-part of the work in Exact's host phases (applying batches, rows, text, scroll
-callbacks, pictures and waits on the runtime), `card_us` the card's own, its drawing
-included, and `layouts` how many nodes' views UIKit laid out; the rest is UIKit's, the
-system's and Core Animation's commit, and Exact's work outside its phases, such as
-laying out those views. Null is unmeasured.
-Updates that follow each other as one finishes are the main thread working without a
-pause; a single long one between short ones is one stall, such as a new screen.
+lets it for input. The commit is as the card sees it, in an action just after Core
+Animation's, behind any action ahead of its own in that phase, so a commit that ends
+just before the deadline can count as late; an update with no commit seen ends at its
+completion. The work is placed to end at the commit, so its effective start, the commit
+less the work, is when it began only where its waits all came first. `target_offset_us`
+is UIKit's completion deadline from that effective start, negative when the deadline
+came before it; work longer than it is late. `before_callback_us` is the previous
+update's work, and `after_offset_us` and `after_callback_us` the next update's effective
+start and its work. `exact_us` is the part of the work in Exact's host phases (applying
+batches, rows, text, scroll callbacks, pictures and waits on the runtime), `card_us` the
+card's own, its drawing included, and `layouts` how many nodes' views UIKit laid out;
+the rest is UIKit's, the system's and Core Animation's commit, and Exact's work outside
+its phases, such as laying out those views. Null is unmeasured. Updates that follow each
+other as one finishes are the main thread working without a pause; a single long one
+between short ones is one stall, such as a new screen.
 
 Offsets are relative to the event's origin; negative means before it. Null boundaries
 are unavailable, never zero-cost work. Callback events attach the largest apply since
@@ -3591,18 +3680,18 @@ CPU time. The report cannot attribute unobserved main-thread work, GPU execution
 presentation, input latency or native-only animations. Zero counts or an empty report do not establish healthy rendering. Live agent scheduler/apply parity remains unqualified; reproduce
 outside an agent run for production behavior.
 
-`flags` bits: 0 callback gap >1.5 stable periods, 1 synchronous callback past target,
-2 captured tick apply past its target, 3 following callback known, 4 work known,
-5 largest apply in the callback interval; 16 motion, 17 spatial, 18 canvas, 19 frame
-tasks, 20 fill pending, 21 tick pending, 22 hatch frames, 23 workload flags known
-(otherwise bits 16–22 are unavailable); bits 32–33 thermal state
-(0 nominal, 1 fair, 2 serious, 3 critical), 34 Low Power Mode, 35 card shown, 36 card
-dragging. A `ui-update` row's bits 16–23 are the app session's as its update was
-scheduled, and bits 40–46 the users of Exact's frame clock asking for frames then: 40 the
-session's clock, 41 a list's offset correction, 42 a navigation reveal, 43 the scroll pump,
-44 deferred heavy leaves, 45 a live SVG filter, 46 a textarea's resize grip; with none of
-them, UIKit or the system asked. These cached observations do not establish which
-activity caused the hitch.
+`flags` bits: 0 callback gap >1.5 stable periods, 1 synchronous callback past target, 2
+captured tick apply past its target, 3 following callback known, 4 work known, 5 largest
+apply in the callback interval; 16 motion, 17 spatial, 18 canvas, 19 frame tasks, 20
+fill pending, 21 tick pending, 22 hatch frames, 23 workload flags known (otherwise bits
+16–22 are unavailable); bits 32–33 thermal state (0 nominal, 1 fair, 2 serious, 3
+critical), 34 Low Power Mode, 35 card shown, 36 card dragging. A `ui-update` row's bits
+16–23 are the app session's and bits 35–36 the card's as its update was scheduled, and
+bits 40–46 the users of Exact's frame clock, in any session of the process, asking for
+frames then: 40 the session's clock, 41 a list's offset correction, 42 a navigation
+reveal, 43 the scroll pump, 44 deferred heavy leaves, 45 a live SVG filter, 46 a
+textarea's resize grip; with none of them, UIKit or the system asked. These cached
+observations do not establish which activity caused the hitch.
 
 Save received text as `report.frame-health.json` if needed, then use
 `bun scripts/agent.mjs trace report.frame-health.json` for the expert readout. This
@@ -4346,22 +4435,36 @@ component App
 under `:disabled`, and `:disabled` is your own disabled look (no default dim).
 `:active` is the host's own press of the innermost node with a `press`: it takes
 `background-color`, `color`, `opacity` and `-exact-press-scale`, which become the
-node's pressed paint (LLP 1061 D7), eased on the press curve (under Reduce
-Motion too, as the press is feedback) and replacing the host's unsaid press (no
-65% dim on top); its `opacity` is the opacity it shows pressed, not a share.
-Say each once: `:active background-color` beside `-exact-press-background-color`
-is refused (`lower-state-press-paint`), as is a border or shadow there, which the
-press cannot paint yet. `:hover` and `:focus-visible` take `background-color`,
+node's pressed paint (LLP 1061 D7). Custom nodes ease on the press curve (under
+Reduce Motion too) and replace the host's unsaid press. Native controls keep
+their native state beneath each authored override. Its `opacity` is the opacity
+it shows pressed, not a share.
+Its targets may compute during ordinary commits, including a conditional class
+and `none` to clear a target. Pressing needs no runner round trip.
+Absolute active opacity and `-exact-press-opacity` are mutually exclusive
+(`lower-state-press-paint`), as are two declarations of the press scale. Border
+and shadow targets remain unsupported until their host paint is implemented.
+`:hover` and `:focus-visible` take `background-color`,
 `border-color`, `opacity` and `box-shadow`, shown at once while they hold (a
 `:hover` replaces the platform's hover wash, as `:active` its press; on
 the web a `transition` of the node's own on one of those rows still times it), the
 focus's over the hover's, under the press. Each host applies them on its own
 tracking, over the node's rows (rows a part doesn't name show the base, also a
-base that changes while pressed); their rows are literals, tokens included. A
+base that changes while pressed); hover and focus rows are literals, tokens included. A
 disabled node takes none. The web (both targets) does this today; Apple, Linux
-and Android follow (LLP 1121 stage 8 B). A part
-on a native control or a list's row is refused (their states are the
-platform's); a node's own part whose state it never writes (`:disabled` with no
+and Android follow (LLP 1121 stage 8 B). Native buttons and list rows accept
+`:active`; their other states remain the platform's. Active properties keep a
+button native, including with `appearance="auto"`. Each written property overrides
+that field; unwritten fields keep the native highlighted state. Clearing a target
+restores the current native configuration. UIKit and AppKit own native button
+tracking, cancellation and accessibility. Native Apple controls add no fixed
+press curve to authored properties. A projected bar item, tab segment, menu row or
+confirmation action accepts only properties its native API can express. The
+host rejects an unsupported combination in the journal and keeps the native
+component. A UIKit title-only bar item supports active `color`; image bar items
+and per-item segments do not. Remove the unsupported properties.
+Other native controls refuse state parts.
+A node's own part whose state it never writes (`:disabled` with no
 `disabled`) is warned of (`lower-state-dead`).
 
 A native control takes `accent-color` and, a field, the design's `Field`,
@@ -4392,14 +4495,17 @@ editor keep the bare text-input box or their existing specialised control.
 A focused field shows the platform's ring: the OS's on a native field, Exact's
 on a bare one (LLP 1104 D6). `outline="none"` (or `outline-style="none"`)
 takes it off on every host, for a field whose focus you draw yourself, such as
-a ring on the card around a composer: the card's `focusin` and `focusout`
+a ring on the card around a composer. It does the same on any other element
+that takes the focus (a `button`, a `link`, a native control, a `tabindex`
+box), as CSS's does; tvOS keeps its focus effect, which is how a remote
+moves. The card's `focusin` and `focusout`
 handlers hear the field's focus on every host without making the card a Tab
 stop. `focusout` also fires when focus moves between descendants and when the
 focused node is removed; use its `FocusEvent.relatedTarget` to identify a
 subtree exit. `stopPropagation()` stops a focus event at its current handler;
 autofocus delivers these events too, with IDs read when focus moves.
-A field with no visible focus fails WCAG 2.4.7. Tab still reaches the field and its accessibility is unchanged. Only
-`none` is admitted, and only on a text field or a `textarea`.
+An element with no visible focus fails WCAG 2.4.7. Tab still reaches it and its accessibility is unchanged. Only
+`none` is admitted.
 
 `textarea rows=3` sets its preferred height in lines (default 2); explicit CSS
 height and `field-sizing="content"` override it. `maxlength=80` on text inputs

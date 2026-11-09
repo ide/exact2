@@ -330,12 +330,42 @@ final class RouteController: UIViewController, UIScrollViewDelegate {
     /// The stack it is in: its navigation controller, or a tab's held stack.
     var stack: UIViewController? { navigationController ?? (parent as? HeldStack) }
 
+    private var projectingContentScrollView = false
+    private(set) var nativeContentScrollEdges: NSDirectionalRectEdge = []
+    var nativeContentScroller: NodeView? {
+        // UIKit's getter reports explicit selection only; nil keeps automatic scroll targeting.
+        guard let selected = contentScrollView(for: .top) else { return Presenter.firstVerticalScroller(under: node) }
+        var owner = (selected as? Viewport)?.documentNode
+        var ancestor = selected.superview
+        while owner == nil, let view = ancestor {
+            if let node = view as? NodeView, node.scrollView === selected { owner = node }
+            ancestor = view.superview
+        }
+        return owner.flatMap { $0 === node || $0.isDescendant(of: node) ? $0 : nil }
+    }
+
+    /// Authored layout supplies defaults; an app's native selection owns that edge, including nil.
+    func projectContentScrollView(_ scrollView: UIScrollView?, for edge: NSDirectionalRectEdge) {
+        guard nativeContentScrollEdges.intersection(edge).isEmpty else { return }
+        projectingContentScrollView = true
+        defer { projectingContentScrollView = false }
+        setContentScrollView(scrollView, for: edge)
+    }
+
     // A held stack's tab bar follows the route's scroll views as a navigation controller's follows its top's.
     override func setContentScrollView(_ scrollView: UIScrollView?, for edge: NSDirectionalRectEdge) {
-        let leaving = contentScrollView(for: edge)
+        if !projectingContentScrollView { nativeContentScrollEdges.formUnion(edge) }
+        // Read the view a single edge leaves: `contentScrollView(for:)` takes one edge, and a write that moves
+        // both edges off a view leaves no edge still using it
+        let leaving = edge == .top || edge == .bottom ? contentScrollView(for: edge) : nil
         super.setContentScrollView(scrollView, for: edge)
         (parent as? HeldStack)?.setContentScrollView(scrollView, for: edge)
-        if edge == .top { followTopEdge(scrollView) }
+        if edge.contains(.top) {
+            followTopEdge(scrollView)
+            #if os(iOS)
+            if !projectingContentScrollView { host?.presenter.syncScrollsToTop() }
+            #endif
+        }
         observeAgain(leaving, leftFrom: edge, for: scrollView)
     }
 
@@ -367,6 +397,7 @@ final class RouteController: UIViewController, UIScrollViewDelegate {
 }
 
 final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureRecognizerDelegate {
+    weak var scrollsToTopSelection: UIScrollView?
     unowned let presenter: Presenter
     /// The selected tab's stack. An app's tab container can show a stack
     /// without appearance callbacks, so restart its reveal here.
@@ -681,14 +712,14 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
         guard primaryOwner == nil, !syncing, presenter.session?.view?.window != nil else { giveBackBootCover(); return }
         syncing = true
         defer { syncing = false }
-        guard let p = projection(batch) else { giveBackBootCover(); return }
+        guard let p = ApplyProfile.time("nav.projection", { projection(batch) }) else { giveBackBootCover(); return }
         // After the projection, whose first `reset` clears the covers.
         _ = adoptBootCover()
         let parts = NavigationRules.segments(presentations: p.routes[...p.selected].map { $0.props["navigationPresentation"] })
-        installPrimary(p, first: Array(p.chosen[parts[0]]))
+        ApplyProfile.time("nav.primary") { installPrimary(p, first: Array(p.chosen[parts[0]])) }
         // The content area the bar leaves reaches layout in this turn, before
         // the first frame (LLP 1075.003 Q3 (c)).
-        reportCovers()
+        ApplyProfile.time("nav.covers") { reportCovers() }
         refitForBars()
     }
 
@@ -1077,8 +1108,12 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
         let transition: [String: Any] = ["interactive": navigation?.transitionCoordinator?.isInteractive ?? false,
                                          "phase": changing || pendingSync || presenter.modals.inTransition ? "in-progress" : lastTransition]
         let root = container ?? presenter.root.subviews.first as? NodeView
+        let top = navigation?.topViewController as? RouteController
         return ["route": root?.props["navigationKey"] ?? NSNull(), "stack": stack, "transition": transition,
-                "nativeBack": nativeBack ?? NSNull()]
+                "nativeBack": nativeBack ?? NSNull(), "barHeight": Agent.r2(navigation?.navigationBar.bounds.height ?? 0),
+                "contentScroller": top.flatMap { contentScroller(of: $0).map { Int($0.id) } } ?? NSNull(),
+                "collapseScroller": top?.collapseScroll.map { Int($0.id) } ?? NSNull(),
+                "arrangedScrollers": top.map { arrangementScrollers(in: $0, top: true).map { Int($0.id) } } ?? []]
     }
 
     /// Whether a route or a logical ancestor of it (`eventParent`) is
@@ -1306,6 +1341,14 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
         // @ref LLP 1038 D6/D11; LLP 1035.001 D2 — a cancelled swipe calls
         // willShow again for its source, in the transition already begun.
         guard let transition = pushOrPop(on: navigationController), transition.viewController(forKey: .to) === viewController else { return }
+        // UIKit's own (its Back button, its menu, a swipe): Observe's render
+        // mark is this transition's first frame, unless it is cancelled.
+        if !syncing {
+            NavigationMarks.shared.platformBeganShowing()
+            transition.animate(alongsideTransition: nil) { context in
+                if context.isCancelled { NavigationMarks.shared.platformCancelled() }
+            }
+        }
         // As the swipe begins: an update may remove its source's node while
         // the finger is down. Beneath a split's detail is the list's route.
         let depth = navigationController.viewControllers.count + (split?.detail === navigationController ? 2 : 1)
@@ -1415,6 +1458,7 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
             // its tablist (§3.7).
             DispatchQueue.main.async { [weak self, weak navigationController] in
                 if let navigationController { self?.settleTablist(navigationController) }
+                self?.presenter.menus.resumeAfterRouteDismissal()
             }
             // At rest: a large title's insets are sampled now (§9.10).
             coversChanged()
@@ -1492,6 +1536,10 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
         pendingPress?.pending = false; pendingPress?.settle(); pendingPress = nil
         lastTransition = "idle"
         if clearFocus { presenter.cancelPendingFocus() }
+        #if os(iOS)
+        scrollsToTopSelection?.scrollsToTop = false
+        scrollsToTopSelection = nil
+        #endif
         // The routes no stack holds now give their blocks back (LLP 1123 D2)
         presenter.owners.publish()
     }

@@ -15,7 +15,7 @@ import UIKit
 #endif
 
 /// One node's press factor, eased from `from` to `to` since `start`.
-struct PressFeedback {
+package struct PressFeedback {
     var from: CGFloat = 1, to: CGFloat = 1, start: CFTimeInterval = 0
     /// A release that came before the press was ever on screen, held until
     /// the press has eased all the way in (D2): UIKit's delayed touches hand
@@ -30,9 +30,9 @@ struct PressFeedback {
     var dimmedAt: CFTimeInterval?
     #endif
     /// In and back alike: a fast settle that reads as a physical give.
-    static let duration: CFTimeInterval = 0.12
+    package static let duration: CFTimeInterval = 0.12
     /// `ease` as Core Animation's curve, for the render server's ease.
-    static let timing = CAMediaTimingFunction(controlPoints: 0.16, 1, 0.3, 1)
+    package static let timing = CAMediaTimingFunction(controlPoints: 0.16, 1, 0.3, 1)
     /// Shorter than one 60 Hz frame: a press this young was never presented.
     static let unseen: CFTimeInterval = 1.0 / 60
 
@@ -116,18 +116,25 @@ extension NodeView {
     /// the platform's own. A held press (HeldState.swift) shows it as a
     /// real press does, with no haptic.
     func showPress(_ down: Bool) {
+        #if os(iOS)
+        if presenter?.groupedLists?.press(self, down: down) == true {
+            paintPress(false, instantly: true); aimPress(false, release: true); dimPress(false, instantly: true)
+            return
+        }
+        #endif
+        if isNativeButton { heldHighlight(); return }
         let down = down && defaultLink == nil
         // What a press shows goes at its release whatever the style says now:
         // an authored look the style dropped while held included.
-        if !down { paintPress(false); aimPress(false, release: true) }
+        if !down || !authorsPress { paintPress(false, instantly: down); aimPress(false, release: true) }
         #if os(iOS)
         // A list's row is its cell: the cell's ground, not the dim (LLP 1115.000 D16).
-        if platformPressDims, presenter?.rowCells.press(self, down) == true { return }
+        if presenter?.rowCells.press(self, down) == true { return }
         if platformPressDims { dimPress(down); return }
-        if !down { dimPress(false) }
+        dimPress(false, instantly: down)
         #elseif os(macOS)
         if platformPressTints { tintPress(down); return }
-        if !down { tintPress(false) }
+        tintPress(false)
         #endif
         guard down else { return }
         paintPress(true)
@@ -143,7 +150,7 @@ extension NodeView {
         if holds("active") { return }
         if !inside { paintPress(false); aimPress(false) }
         #if os(iOS)
-        if platformPressDims, presenter?.rowCells.press(self, inside) == true { return }
+        if presenter?.rowCells.press(self, inside) == true { return }
         if platformPressDims { dimPress(inside); return }
         #elseif os(macOS)
         if platformPressTints { tintPress(inside); return }
@@ -273,6 +280,10 @@ extension NodeView {
     /// `transform-origin` in the box's own coordinates (LLP 1061 D6): each
     /// axis points or `{"pct": n}` of the border box; the centre when unset.
     var transformOriginPoint: CGPoint {
+        Self.resolveTransformOrigin(style, in: boxBounds)
+    }
+
+    package static func resolveTransformOrigin(_ style: NodeStyle, in bounds: CGRect) -> CGPoint {
         let axes = style["transform_origin"]?.array ?? []
         func axis(_ i: Int, _ size: CGFloat) -> CGFloat {
             guard axes.count == 2 else { return size / 2 }
@@ -280,7 +291,7 @@ extension NodeView {
             if case .object(let o) = axes[i], let pct = o["pct"]?.number { return size * pct / 100 }
             return size / 2
         }
-        return CGPoint(x: boxBounds.minX + axis(0, boxBounds.width), y: boxBounds.minY + axis(1, boxBounds.height))
+        return CGPoint(x: bounds.minX + axis(0, bounds.width), y: bounds.minY + axis(1, bounds.height))
     }
 
     #if os(iOS) || os(tvOS)
@@ -343,6 +354,8 @@ extension NodeView {
     package func applyTransform() {
         // A backdrop mirrors its box as the transform moves and scales it.
         defer { if !backdropOperations.isEmpty { applyBackdrop() } }
+        // A frame's web view takes its scale by geometry (`FrameScaleMac.swift`).
+        defer { if web != nil { placeWeb() } }
         // Flying scaled whole in its clip (LLP 1013.000 D4.4): the flight's
         // scale only, about the layer's origin, the clip's top left.
         if let s = flightLook?.scale {
@@ -363,7 +376,7 @@ extension NodeView {
         }
         // The layer turns about its own origin: move `transform-origin`
         // there, turn, move it back. A press folds into the scale.
-        let o = transformOriginPoint, s = scale * pressFactor
+        let o = transformOriginPoint, s = scale / frameGeometryScale * pressFactor
         if let space = spaceTransform(origin: o, scale: s, shift: lift) {
             // A 3D rotation or a z translation (LLP 1077 D8).
             layer?.transform = CATransform3DConcat(space, CATransform3DMakeTranslation(layoutOffset.x, layoutOffset.y, 0))

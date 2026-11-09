@@ -216,6 +216,52 @@ fn an_opening_at_a_half_pixel_end_settles_and_then_follows_smoothly() {
     assert!(c.smooth, "the opening settled, so the follow is smooth");
 }
 
+#[test]
+fn an_opening_owes_acknowledgement_after_its_rows_are_measured_but_an_empty_one_does_not() {
+    let mut h = Harness::from_parts(
+        plan_opening(40, false, true, false, true, false),
+        vec![
+            values(40),
+            Value::Number(0.0),
+            Value::Number(0.0),
+            Value::Number(16.0),
+            Value::Unit,
+        ],
+    );
+    for _ in 0..6 {
+        let mut feedback = h.feedback(h.snapshot().total_extent - 320.0);
+        feedback.measurements = h
+            .snapshot()
+            .rows
+            .iter()
+            .map(|row| RowMeasurement {
+                view: row.view,
+                epoch: row.epoch,
+                size: 32.0,
+            })
+            .collect();
+        h.send(feedback);
+    }
+    assert!(!h.collection().at_end);
+    let Child::Node(root) = &mut h.tree.children[0] else {
+        panic!()
+    };
+    let collection = root.collection_mut().unwrap();
+    collection.at_end = true;
+    assert!(!collection.pending);
+    assert!(h.snapshot().pending);
+    h.send(h.feedback(h.snapshot().total_extent - 320.0));
+    assert!(!h.collection().at_end);
+    assert!(!h.snapshot().pending);
+    h.slots[0] = values(0);
+    h.update().unwrap();
+    let Child::Node(root) = &mut h.tree.children[0] else {
+        panic!()
+    };
+    root.collection_mut().unwrap().at_end = true;
+    assert!(!h.snapshot().pending);
+}
+
 /// A followed end that moves by less than half a point is still sent, once:
 /// the last row measured 32.4, then 32.8, keeps the port on the end, and a
 /// new row after it is followed. On a row list a card's re-measurement lands

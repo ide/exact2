@@ -244,6 +244,19 @@ final class ConfirmationAlertIOSTests: XCTestCase {
     /// "Remove book?" — the shape of React Native's `Alert.alert`: a
     /// centred alert, titled by the label, its text the message, the
     /// destructive action and the Cancel both drawn.
+    func testAnOpenAlertRejectsAnActivePropertyAddedLaterWithoutReplacingItsActions() throws {
+        let (p, controller, _) = confirmation(label: "Keep?", texts: ["A message."], actions: ["Keep"], cancel: true)
+        defer { dismiss(p, controller) }
+        XCTAssertEqual(p.menus.activate(try XCTUnwrap(p.views[1])), true)
+        let alert = try XCTUnwrap(controller.presentedViewController as? UIAlertController)
+        let action = alert.actions[0], source = try XCTUnwrap(p.views[3])
+        XCTAssertNil(source.nativeActiveRefusals["UIAlertAction"])
+        p.apply(wireBatch([["op": "style", "id": 3, "style": ["press_opacity_to": 0.4]]]))
+        XCTAssertTrue(controller.presentedViewController === alert)
+        XCTAssertTrue(alert.actions[0] === action)
+        XCTAssertTrue(source.nativeActiveRefusals["UIAlertAction"]?.contains("opacity") == true)
+    }
+
     func testAConfirmationWithAMessageIsTheCentredAlertWithItsTitleAndCancel() throws {
         let (p, controller, scene) = confirmation(label: "Remove book?", texts: ["\u{201C}Piranesi\u{201D} will be removed."], actions: ["Remove"], cancel: true)
         defer { dismiss(p, controller) }

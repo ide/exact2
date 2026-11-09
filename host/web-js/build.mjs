@@ -1,5 +1,6 @@
 import { asyncContext, bundleOptions, developmentLocalNetwork, lowered, packageConfig, webImplementations } from '../../js/bake/src/typescript.mjs';
 import { bakeWatchEnv, hatchWords, injectedProfiles, moduleDirectory, resolveApp, webAppManifest } from '../../scripts/app.mjs';
+import { launchModules } from '../../scripts/launch-modules.mjs';
 // The web build's JS target: `bun host/web-js/build.mjs <app> [--plan <baked app.plan>] [--out <dir>]`.
 //
 // 1. `exact-web-js js` compiles the plan (the app's Contract, or a baked
@@ -416,6 +417,9 @@ if (rust) {
   cpSync(resolve(gen, 'app.bind.plan'), resolve(out, 'app.bind.plan'));
 }
 writeFileSync(resolve(gen, 'admission-data.js'), `import {createGrantSet} from './admission.js';export const tsGrantSet=createGrantSet(${JSON.stringify(tsGrantSet)}),rustGrantSet=createGrantSet(${JSON.stringify(rustGrantSet)});\n`);
+// The app's launch modules that have a web service.
+const launchWeb = launchModules(appDir, manifest).filter(m => m.web);
+if (launchWeb.length) cpSync(resolve(here, 'marks.js'), resolve(gen, 'marks.js'));
 writeFileSync(resolve(gen, 'main.js'), [
   "import app, { sources, wait } from './app.js';",
   ...(devReload ? ["import { prepareDev } from './checkpoint.js';", "const finishDev = prepareDev();"] : []),
@@ -449,8 +453,11 @@ writeFileSync(resolve(gen, 'main.js'), [
   // when app.json gives words their platforms (LLP 1075.003.000.001 §4.3, §5: a word it leaves out is shown and never
   // called), and whether the app has a page module at all (none: no module artifact is asked for).
   `globalThis.exact = Object.assign(globalThis.exact ?? {}, { pageModule: ${pageModules}${manifest.hatches && !Array.isArray(manifest.hatches) ? `, hatchWords: ${JSON.stringify(hatchWords(manifest, 'web'))}` : ''} });`,
+  // Launch marks install before the app boots; marks.js loads the services after startup.
+  ...(launchWeb.length ? ["import { install as launchMarks } from './marks.js';", `const marks = launchMarks(${JSON.stringify(launchWeb.map(m => ({ name: m.name, url: `./launch/${m.name}/service.js`, config: { ...(manifest.moduleConfig?.[m.name] ?? {}), 'app.CFBundleIdentifier': manifest.app?.id, 'app.CFBundleName': manifest.app?.name, 'fact.development': !production } })))});`] : []),
   "const start = () => {",
   "  const state = app();",
+  ...(launchWeb.length ? ["  marks.mounted();"] : []),
   ...(devReload ? ["  finishDev();"] : []),
   "  globalThis.exact = Object.assign(globalThis.exact ?? {}, { ready: true, journal, clock, advance, commit, data, state, inflight, heldAsks, heldReplies, views: Views, viewId, After, resources: Resources, mutations: Mutations, writes: writeRecords });",
   // A development page counts its work and samples its frames (LLP 1079); the agent adapter, only when the agent drives it.
@@ -498,7 +505,7 @@ writeFileSync(resolve(gen, 'main.js'), [
   // After the first render, which a font wait may defer (`containers()` reads the runtime's `globalThis.exact`).
   ...(containerHatches ? ["go(() => requestAnimationFrame(() => requestAnimationFrame(() => import('./hatches.js').then(m => m.containers()))));"] : []),
 ].join('\n'));
-for (const f of ['agent.js', 'check.js', 'perf.js', 'seam.js', 'rust-data.js', 'list.js', 'facts.js', 'modules.js', 'sheets.js', 'samples.js', 'wakes.js', 'reach.js', 'devices.js', 'members.js', 'arrival.js', 'calls.js', 'update.js', 'spans.js', 'views.js', 'pictures.js', 'symbols.js', 'motion.js', 'drag-target.js', 'transform.js', 'svg-transform.js', 'dataset.js', 'format.js', 'hatches.js', 'arrange.js', 'reorder.js', 'flow.js', 'native.js', 'shared.js']) cpSync(resolve(here, f), resolve(gen, f));
+for (const f of ['agent.js', 'check.js', 'perf.js', 'seam.js', 'rust-data.js', 'list.js', 'facts.js', 'modules.js', 'sheets.js', 'samples.js', 'wakes.js', 'reach.js', 'devices.js', 'members.js', 'arrival.js', 'calls.js', 'update.js', 'spans.js', 'views.js', 'pictures.js', 'markdown.js', 'symbols.js', 'motion.js', 'drag-target.js', 'transform.js', 'svg-transform.js', 'dataset.js', 'format.js', 'hatches.js', 'arrange.js', 'reorder.js', 'flow.js', 'native.js', 'shared.js']) cpSync(resolve(here, f), resolve(gen, f));
 writeFileSync(resolve(gen, 'modules.js'), localImports(readFileSync(resolve(here, 'modules.js'), 'utf8')));
 // The web host's own pieces the runtime loads (glue.mjs).
 stageHostGlue(root, gen);
@@ -545,13 +552,14 @@ cpSync(resolve(here, 'midi.js'), resolve(gen, 'midi.js'));
 writeFileSync(resolve(gen, 'main-server.js'), [
   `import app${rust ? ', { sources }' : ''} from './app.js';`,
   ...(soundTable ? [`import { install as sounds } from './sounds.js'; sounds(${soundTable});`] : []),
-  "import { data, clock, inflight, Resources, Mutations, routeAt, Head } from './rt.js';",
-  "import { types, sourceTypes, pages, viewportMedia, activation } from './names.js';",
+  "import { data, clock, inflight, Resources, Mutations, routeAt, Head, canSetStatus, unfinishedAnswers } from './rt.js';",
+  "import { types, sourceTypes, pages, viewportMedia, activation, markdownPaths } from './names.js';",
+  ...(existsSync(resolve(gen, 'markdown.flag')) ? ["import { compileReaders } from './markdown.js';", 'globalThis.__markdown = () => compileReaders(markdownPaths, Resources);'] : []),
   "import { viewportFacts } from './facts.js';",
   "import { answers } from './checkpoint.js';",
   "import { markBars } from './navigation.js';",
   "import { markRoutes, markDocument } from './document.js';",
-  ...(ts ? ["import { install as ts } from './ts-data.js';", "import { answering } from './ts-fetch.js'; import { heldReply, looseFetch } from './held.js'; Object.assign(answering, { loose: looseFetch, heldReply });"] : []),
+  ...(ts ? ["import { install as ts } from './ts-data.js';", "import { answering, unfinishedIO } from './ts-fetch.js'; import { heldReply, looseFetch } from './held.js'; Object.assign(answering, { loose: looseFetch, heldReply });"] : []),
   ...(rust ? ["import { install } from './rust-data.js';"] : []),
   // Two steps, so a server can send the page's head between them
   // (render.mjs): the app starts and names its route, then settles.
@@ -563,11 +571,13 @@ writeFileSync(resolve(gen, 'main-server.js'), [
   '  app();',
   '  route = routeAt(location.pathname + location.search);',
   '  const [render, activate] = pages[route] ?? ["build", "inferred"];',
-  '  return { activate: ["idle", "interaction", "never"].includes(activate) ? activate : "inferred", policy: render, notfound: !!pages[route]?.[2], readsViewport: activation.viewport };',
+  '  return { activate: ["idle", "interaction", "never"].includes(activate) ? activate : "inferred", policy: render, notfound: !!pages[route]?.[2], readsViewport: activation.viewport, canSetStatus: canSetStatus() };',
   '};',
-  'globalThis.__render = async deadline => {',
+  'globalThis.__render = async (deadline, waitStatus = true) => {',
   '  const end = t0 + deadline;',
-  '  do await new Promise(r => setTimeout(r, 1)); while (inflight.n && performance.now() < end);',
+  `  const unfinished = () => unfinishedAnswers()${ts ? ' || unfinishedIO()' : ''};`,
+  '  const outstanding = () => inflight.n > 0 || Resources.some(r => r.waiting) || (waitStatus && unfinished());',
+  '  do await new Promise(r => setTimeout(r, 1)); while (outstanding() && performance.now() < end);',
   '  markBars(document.getElementById("exact-root")); // the bars the glue marks, so their symbols are the size they will be',
   '  markRoutes(document.getElementById("exact-root")); markDocument(); // a hidden route\'s page scroller is off the page',
   '  return { root: document.rootHTML(), title: Head.headTitle, description: Head.headDescription, image: Head.headImage, canonical: Head.headCanonical, robots: Head.headRobots,',
@@ -575,7 +585,7 @@ writeFileSync(resolve(gen, 'main-server.js'), [
   `    origin: ${JSON.stringify(manifest.app?.origin ?? null)}, status: Head.headStatus ?? null, time: clock.now, answers: answers(Resources, types[2], sourceTypes),`,
   // Each resource whose source failed, with its message: the server's log names it (render.mjs), as the page cannot.
   '    failed: Resources.filter(r => r.failed).map(r => `${r.name}: ${r.error}`),',
-  '    pending: Resources.filter(r => r.ticket).map(r => r.name), scrollDocument: document.documentElement.hasAttribute("data-scrolldocument"), render: performance.now() - t0,',
+  '    pending: Resources.filter(r => r.ticket).map(r => r.name), outstanding: outstanding(), continuing: unfinished(), scrollDocument: document.documentElement.hasAttribute("data-scrolldocument"), render: performance.now() - t0,',
   // What an inferred activation reads (LLP 1048.007 D1): what is still due, the sources read, the viewport's comparisons as the render saw them.
   '    due: clock.timers.length > 0 || Mutations.some(m => m.due < Infinity || m.next < Infinity), activation, zoned: !!globalThis.__exactZone,',
   // Only a TypeScript source is held to no clock and no Math.random (ts-fetch.js): a Rust module's page is never kept.
@@ -655,15 +665,16 @@ const bundle = async (options) => {
   if (!r.success) process.exit(1);
 };
 // The renderer uses vm.Script, which cannot parse import.meta.
-if (how !== 'none') await bundle({ entrypoints: [resolve(gen, 'main-server.js')], format: 'iife', outdir: gen, naming: 'server.js',
-  define: { ...bundleOptions.transform.define, 'import.meta.url': JSON.stringify(pathToFileURL(resolve(out, 'app.js')).href) } });
+const markdownReaders = existsSync(resolve(gen, 'markdown.flag'));
+if (how !== 'none' || markdownReaders) await bundle({ entrypoints: [resolve(gen, 'main-server.js')], format: 'iife', outdir: gen, naming: 'server.js',
+  define: { ...bundleOptions.transform.define, 'globalThis.__exactRender': 'true', 'import.meta.url': JSON.stringify(pathToFileURL(resolve(out, 'app.js')).href) } });
 // The page's module and its chunks: Rolldown, the repo's app bundler, whose
 // minifier leaves the entry 6–10% smaller than Bun's after brotli (RealWorld
 // 25.8 → 23.6 KB, the feed bench's 30.9 → 27.9, the grid's 19.3 → 18.1),
 // bytes a page downloads before its runtime is up.
 {
   const { rolldown } = await import('rolldown');
-  const b = await rolldown({ input: resolve(gen, 'main.js'), transform: bundleOptions.transform, plugins: [...(replay ? [replay.rolldown] : []), { name: 'exact-mounts', resolveId: (source, importer) => mounted(source, importer) }, { name: 'source-grants', transform: (code, id) => scopedModule(code, id, true) }, asyncContext()], logLevel: 'warn', onLog: (level, log) => {
+  const b = await rolldown({ input: resolve(gen, 'main.js'), transform: { ...bundleOptions.transform, define: { ...bundleOptions.transform.define, 'globalThis.__exactRender': 'false' } }, plugins: [...(replay ? [replay.rolldown] : []), { name: 'exact-mounts', resolveId: (source, importer) => mounted(source, importer) }, { name: 'source-grants', transform: (code, id) => scopedModule(code, id, true) }, asyncContext()], logLevel: 'warn', onLog: (level, log) => {
     if (level === 'warn' && log.code === 'IMPORT_IS_UNDEFINED' && optionalHookWarning(log.id, log.message)) return;
     console.error(log.message);
   } });
@@ -817,6 +828,8 @@ if (existsSync(gpuLib)) {
   await copyLazyModules(['gpu-glue.js']);
 }
 if (pageModules) cpSync(moduleDirectory(appDir, 'web'), resolve(out, 'modules'), { recursive: true });
+// Launch modules' web services, which marks.js imports after startup.
+for (const m of launchWeb) cpSync(m.web, resolve(out, 'launch', m.name, 'service.js'));
 if (existsSync(resolve(appDir, 'assets'))) cpSync(resolve(appDir, 'assets'), resolve(out, 'assets'), { recursive: true });
 // Copy each imported package's declared web assets from the capture, to /assets/<package>/<path> (LLP 1154 D2;
 // js/bake/src/typescript.mjs `capturedSources`).
@@ -877,6 +890,20 @@ cpSync(resolve(out, 'index.html'), resolve(out, 'shell.html'));
   const { planRouteTable } = await import('../web/serve.mjs');
   const routes = planRouteTable(readFileSync(resolve(out, 'app.plan'))).map(({ name, pattern, render, notfound }) => ({ name, pattern, render, notfound }));
   writeFileSync(resolve(out, 'routes.json'), JSON.stringify({ routes }, null, 2) + '\n');
+}
+// Compile known reader text even when the development build emits only a shell.
+if (markdownReaders) {
+  const { renderer } = await import('./render.mjs');
+  const prepared = await renderer(out, { closed: true }).markdown();
+  if (prepared.length) {
+    const data = JSON.stringify(prepared).replace(/</g, '\\u003c');
+    const tag = `<script type="application/vnd.exact.markdown">${data}</script>`;
+    for (const file of ['index.html', 'shell.html']) {
+      const path = resolve(out, file);
+      writeFileSync(path, readFileSync(path, 'utf8').replace('<script type="module"', tag + '<script type="module"'));
+    }
+    console.log(`${app}: ${prepared.length} Markdown sources compiled`);
+  }
 }
 if (pages.length && !opt('--render') && !renderAt) console.log(`${app}: no ${renderBin} entry, so its pages render under Bun (--render js)`);
 if (pages.length && how === 'rust') {

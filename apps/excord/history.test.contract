@@ -93,14 +93,13 @@ test "retrying older history at the exact top keeps the first visible message" o
   tap "transcript" drag 0 2500
   clock settle
   expect state pageTries == 3
-  expect state historyStart == true
   expect state topKey == "1562618399954052832"
   pass fetch "/api/v9/channels/1191168914235588608/messages?limit=50&before="
   tap "retry-history"
   clock settle
   expect tree has "message-1562618399954052832"
   expect state target == ""
-  expect state historyStart == false
+  expect state pageTries == 0
 
 test "retrying older history at the exact top keeps the first visible message (the Mac, by wheel)" on macos
   size 1100x760
@@ -118,11 +117,10 @@ test "retrying older history at the exact top keeps the first visible message (t
   tap "transcript" wheel 0 -2500
   clock settle
   expect state pageTries == 3
-  expect state historyStart == true
   expect state topKey == "1562618399954052832"
   pass fetch "/api/v9/channels/1191168914235588608/messages?limit=50&before="
   tap "retry-history"
   clock settle
   expect tree has "message-1562618399954052832"
   expect state target == ""
-  expect state historyStart == false
+  expect state pageTries == 0

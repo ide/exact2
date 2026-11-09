@@ -1,6 +1,6 @@
 // Admission opportunities for the wasm scheduler, using the JS target's scroll observations.
 import { ScrollActivity, idleAllowed } from './timer-observations.js';
-export function createWaitObserver({ now, read, release, demand, next, requestFrame }) {
+export function createWaitObserver({ now, read, release, demand, next, requestFrame, scrollPending = () => false }) {
   const activity = new ScrollActivity(), events = new AbortController(), watched = new WeakMap();
   let offscreen = document.hidden, generation = 0, timeout, checkSoon, animationProbe, observer, idle, checking = false;
   const listen = (type, callback) => document.addEventListener(type, callback, { passive: true, capture: true, signal: events.signal });
@@ -17,7 +17,7 @@ export function createWaitObserver({ now, read, release, demand, next, requestFr
       if (!read().some(at => at === -2 || at >= 0 && at <= cutoff)) { return; }
       let batch;
       do {
-        const states = read(), scrolling = !offscreen && activity.sample(now(), 'onscrollend' in window, frame);
+        const states = read(), scrolling = !offscreen && (activity.sample(now(), 'onscrollend' in window, frame) || scrollPending());
         const frames = demand() || scrolling || states[0] === -2;
         const kinds = (frame || offscreen ? 2 : 0) | (frame || !frames || offscreen ? 4 : 0) | (!scrolling ? 8 : 0);
         batch = release(kinds, cutoff);
@@ -30,7 +30,7 @@ export function createWaitObserver({ now, read, release, demand, next, requestFr
           idle = null; if (token !== generation) { return; }
           const animations = document.getAnimations().filter(a => a.timeline === document.timeline && a.playState === 'running' && a.playbackRate !== 0);
           const states = read(), at = now();
-          if (idleAllowed({ scroll: !offscreen && activity.sample(at, 'onscrollend' in window, false), demand: demand() || animations.length > 0, ordinary: states.slice(0, 3).includes(-2), next: next() }, at)) { release(16, at); if (read()[3] === -2) { setTimeout(() => { if (token === generation) { check(); } }, 0); } }
+          if (idleAllowed({ scroll: !offscreen && (activity.sample(at, 'onscrollend' in window, false) || scrollPending()), demand: demand() || animations.length > 0, ordinary: states.slice(0, 3).includes(-2), next: next() }, at)) { release(16, at); if (read()[3] === -2) { setTimeout(() => { if (token === generation) { check(); } }, 0); } }
           if (animations.length) {
             const fresh = animations.filter(a => watched.get(a) !== a.finished);
             for (const a of fresh) { watched.set(a, a.finished); }

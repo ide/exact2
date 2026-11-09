@@ -45,7 +45,7 @@ export function timerWaits() {
         if (clock.agent || clock.stopped || rt.poisoned?.()) { return; }
       }
       const supported = 'onscrollend' in window;
-      const scrolling = () => !offscreen() && activity.sample(Math.max(clock.now, rt.wall()), supported, inFrame);
+      const scrolling = () => !offscreen() && (activity.sample(Math.max(clock.now, rt.wall()), supported, inFrame) || rt.collectionScrollPending?.() === true);
       const held = () => clock.timers.filter(t => t.wait && t.due <= now && cap(t) > now).sort((a, b) => a.due - b.due || a.i - b.i);
       while (!clock.agent && !clock.stopped && !rt.poisoned?.()) {
         const scroll = scrolling();
@@ -58,14 +58,14 @@ export function timerWaits() {
         }
         fire(next, now);
       }
-      if (scrolling() && activity.moving.size && held().length) { requestFrame(); }
+      if (scrolling() && (activity.moving.size || rt.collectionScrollPending?.() === true) && held().length) { requestFrame(); }
       if (held().some(t => t.wait === 4) && !idle) {
         const token = generation;
         const run = () => {
           if (!current(token)) { return; } idle = 0;
           if (clock.stopped || rt.poisoned?.()) { return; }
           const at = Math.max(clock.now, rt.wall()); clock.now = at;
-          const busyScroll = !offscreen() && activity.sample(at, supported, false);
+          const busyScroll = !offscreen() && (activity.sample(at, supported, false) || rt.collectionScrollPending?.() === true);
           const animations = document.getAnimations().filter(a => a.timeline === document.timeline && a.playState === 'running' && a.playbackRate !== 0);
           let next = rt.nextMutation();
           for (const t of clock.timers) { next = Math.min(next, t.wait === 4 && t.due <= at ? cap(t) : t.due); }

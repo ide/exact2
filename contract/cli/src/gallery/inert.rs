@@ -386,8 +386,10 @@ fn styled(
         match node {
             Node::Element { attrs, .. } => {
                 for a in attrs.iter().filter(|a| yields(&a.value, prop)) {
+                    let name = contract_syntax::state::state_of(&a.name)
+                        .map_or(a.name.as_str(), |(_, row)| row);
                     if let Some(AttrTarget::Styles(rows)) =
-                        contract_lower::style_names::lookup(&a.name)
+                        contract_lower::style_names::lookup(name)
                     {
                         colour |= !rows.is_empty()
                             && rows.iter().all(|r| {

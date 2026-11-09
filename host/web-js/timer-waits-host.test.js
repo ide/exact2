@@ -80,6 +80,30 @@ test('touch holds survive pointer cancellation, old scroll completion and the fi
   f.event('touchend', { changedTouches:[{identifier:1}] }); f.frame(); expect(f.fired).toEqual([]);
   f.event('touchend', { changedTouches:[{identifier:2}] }); f.frame(); expect(f.fired).toEqual(['task0']);
 });
+test('scroll and idle waits include the collection final report and owed scroll event', () => {
+  for (const supported of [false, true]) {
+    const f = fixture();
+    if (!supported) { delete window.onscrollend; }
+    let pending = true;
+    rt.collectionScrollPending = () => pending;
+    f.task(3); f.task(4); f.event('scroll'); f.at(200); f.frame(); f.idle();
+    expect(f.fired).toEqual([]);
+    f.event('scrollend'); f.frame(); f.idle();
+    expect(f.fired).toEqual([]);
+    pending = false; f.frame(); f.idle();
+    expect(f.fired).toEqual(['task0', 'task1']);
+  }
+});
+test('an idle wait alone keeps an opportunity for an outstanding collection report', () => {
+  const f = fixture();
+  let pending = true;
+  rt.collectionScrollPending = () => pending;
+  f.task(4); f.at(10); f.check(); f.idle();
+  expect(f.fired).toEqual([]);
+  expect(f.frames.size).toBeGreaterThan(0);
+  pending = false; f.frame(); f.idle();
+  expect(f.fired).toEqual(['task0']);
+});
 test('movement survives a lift and a delivered offscreen report releases the wait', () => {
   const f = fixture(); f.task(3); f.event('scroll'); f.at(10); f.check();
   f.intersect(true); f.frame(); expect(f.fired).toEqual([]);
@@ -139,6 +163,21 @@ test('the wasm scheduler requests a frame when its nominal check first reports h
   expect(f.frames.size).toBe(1);
   f.frame();
   expect(firings).toEqual([10]);
+  scheduler.dispose();
+});
+test('the wasm scheduler joins collection acknowledgement before releasing a scroll wait', () => {
+  const f = fixture(), firings = [];
+  let waiting = [-1, -1, 10, -1], pending = true;
+  const scheduler = createTimerScheduler({now:f.now, advance() {}, scrollPending:() => pending, release(kinds) {
+    waiting = [-1, -1, -2, -1];
+    if (kinds & 8) {waiting[2] = -1; firings.push('published');}
+    scheduler.update(null, false, waiting);
+    return {};
+  }});
+  scheduler.update(110, false, waiting); f.at(10); f.frame();
+  expect(firings).toEqual([]);
+  pending = false; f.frame();
+  expect(firings).toEqual(['published']);
   scheduler.dispose();
 });
 

@@ -130,6 +130,7 @@ final class ContextMenuHost: NSObject, UIContextMenuInteractionDelegate, UIEditM
             if owner.keyboardConfiguration != nil { keyboardInteraction.dismissMenu() }
             restore(owner)
         }
+        if let owner = open, let pop = current(owner) { menus?.rejectActiveMenuProperties(in: pop) }
         var wanted: [UInt32: NodeView] = [:]
         if !ExactEnv.agentPaints {
             for v in presenter.textViews.values where v.hasInlineContextPopover { wanted[v.id] = v }
@@ -661,22 +662,22 @@ final class ContextMenuHost: NSObject, UIContextMenuInteractionDelegate, UIEditM
         return picture
     }
 
-    /// The run's words over `runArea` as the paragraph shows them, with no
-    /// pixel copied: layers that show the paragraph's own text raster
-    /// (`textRasterLayer`) cut to the run, which the render server composites
-    /// as it does the paragraph, at the opacity and in the dynamic range it
-    /// shows them in. A one-color raster is that color masked by its coverage
-    /// (`TintInk`). Nil where the paragraph shows its words otherwise (a
-    /// shadow, an HDR shadow's cast, vibrancy, rolling numerals, a drawing of
-    /// its own) or not upright in the container, and the caller takes the
+    /// The run's words over `runArea` as the paragraph shows them: layers that
+    /// show the paragraph's own ink (`textRasterLayer`) cut to the run, which
+    /// the render server composites as it does the paragraph, at the opacity
+    /// and in the dynamic range it shows them in. Pixels are shared, not
+    /// copied; template coverage is colorized into temporary profiled pixels under the run. Nil where the paragraph shows its words
+    /// otherwise (a shadow, an HDR shadow's cast, vibrancy, rolling numerals,
+    /// a drawing of its own), in a transition (`transitioning`), which a copy
+    /// cannot show, or not upright in the container, and the caller takes the
     /// screen's.
     private static func words(_ lines: RunLines, in runArea: CGRect, of source: NodeView) -> CALayer? {
         let space = lines.container.layer
         guard source.layer.contents == nil, source.vibrancyView == nil, let ink = source.textRasterLayer, ink.superlayer != nil, ink.textCast == nil,
               ink.shadowOpacity == 0, ink.sublayers?.isEmpty ?? true,
               ink.filters == nil, ink.compositingFilter == nil, ink.contentsRect == CGRect(x: 0, y: 0, width: 1, height: 1), !ink.bounds.isEmpty else { return nil }
-        let tint = (ink as? TintInk)?.backgroundColor
-        guard let image = tint == nil ? ink.contents : ink.mask?.contents, tint == nil || ink.mask?.contentsRect == CGRect(x: 0, y: 0, width: 1, height: 1) else { return nil }
+        guard (ink.delegate as? CoverageImageView)?.coverage != nil || ink.contents != nil,
+              !transitioning(ink), !(ink.superlayer.map(transitioning) ?? false) else { return nil }
         // Upright: the ink's axes land on the container's
         let o = ink.convert(CGPoint.zero, to: space), x = ink.convert(CGPoint(x: 1, y: 0), to: space), y = ink.convert(CGPoint(x: 0, y: 1), to: space)
         guard abs(x.y - o.y) < 0.001, abs(y.x - o.x) < 0.001 else { return nil }
@@ -686,18 +687,14 @@ final class ContextMenuHost: NSObject, UIContextMenuInteractionDelegate, UIEditM
         let words = CALayer(), area = lines.area
         words.frame = runArea.offsetBy(dx: -area.minX, dy: -area.minY)
         words.opacity = sequence(first: ink, next: { $0.superlayer }).prefix { $0 !== space }.reduce(1) { $0 * $1.opacity }
+        let pixels: Any?
+        if let coverage = (ink.delegate as? CoverageImageView)?.coverage { pixels = coverage.painted() }
+        else { pixels = ink.contents }
+        guard let pixels else { return nil }
         let face = CALayer()
         face.frame = ink.convert(shown, to: space).offsetBy(dx: -runArea.minX, dy: -runArea.minY)
         takeRange(of: ink, into: face)
-        if let tint {
-            face.backgroundColor = tint
-            let coverage = CALayer()
-            coverage.frame = face.bounds
-            (coverage.contents, coverage.contentsRect, coverage.contentsScale) = (image, cut, ink.contentsScale)
-            face.mask = coverage
-        } else {
-            (face.contents, face.contentsRect, face.contentsScale) = (image, cut, ink.contentsScale)
-        }
+        (face.contents, face.contentsRect, face.contentsScale) = (pixels, cut, ink.contentsScale)
         words.addSublayer(face)
         return words
     }
@@ -828,9 +825,8 @@ final class ContextMenuHost: NSObject, UIContextMenuInteractionDelegate, UIEditM
 
     /// A copy of `layer` without what it holds (`valueCopy`), with its
     /// `zPosition`, dynamic range and mask, which the render server composites
-    /// as it does the original, no pixel drawn. The paragraph is copied by its
-    /// fill alone. Speed before fidelity: what a layer draws some other way is
-    /// left out.
+    /// as it does the original: bitmaps are shared; template coverage is colorized for the copy. The paragraph is copied by its fill alone. Speed
+    /// before fidelity: what a layer draws some other way is left out.
     private static func replica(of layer: CALayer, paragraph: CALayer?) -> CALayer {
         if layer === paragraph {
             let copy = shell(of: layer)
@@ -929,7 +925,8 @@ final class ContextMenuHost: NSObject, UIContextMenuInteractionDelegate, UIEditM
         case layers(material: UIVisualEffectView?)
         /// What only a snapshot of the screen shows: something only the render
         /// server draws (`drawnByRenderServer`), vibrancy, a second material,
-        /// or contents a copy must not share (`shareable`)
+        /// contents a copy must not share (`shareable`), or text in a
+        /// transition (`transitioning`)
         case screen
     }
 
@@ -947,40 +944,37 @@ final class ContextMenuHost: NSObject, UIContextMenuInteractionDelegate, UIEditM
             let whole = opacity >= 1 && (layer === box || covers(layer, area, in: space))
             if whole, fill.alpha >= 1 { fills = [fill]; flat = true } else if whole, flat { fills.append(fill) } else { flat = false }
         }
-        // Nil where only a snapshot shows something of `layer`'s in the area; else whether any of it lies there.
+        // Whether copies show what `layer` and all it holds put in the area: false where only a snapshot does.
         // `around` is the area in the superlayer's coordinates, where `frame` holds the layer's bounds.
-        func visit(_ layer: CALayer, around: CGRect, opacity: Float) -> Bool? {
-            guard !layer.isHidden, layer.opacity > 0 else { return false }
+        func visit(_ layer: CALayer, around: CGRect, opacity: Float) -> Bool {
+            guard !layer.isHidden, layer.opacity > 0 else { return true }
+            // Wherever its old lines lay, which no current frame says
+            if transitioning(layer) { return false }
             let alpha = opacity * layer.opacity, inside = layer.frame.intersects(around)
             // An effect view: only what it holds walked, a material shown live (`padding`)
             if let view = layer.delegate as? UIVisualEffectView {
-                guard inside else { return false }
+                guard inside else { return true }
                 switch effect(of: view) {
                 case .material:
-                    guard material == nil else { return nil }
+                    guard material == nil else { return false }
                     (material, flat) = (view, false)
                 case .vibrancy:
-                    return nil
+                    return false
                 case .container:
                     break
                 }
-                return visit(view.contentView.layer, around: space.convert(area, to: layer), opacity: alpha).map { _ in true }
+                return visit(view.contentView.layer, around: space.convert(area, to: layer), opacity: alpha)
             }
             if inside {
-                if drawnByRenderServer(layer) || layer !== paragraph && !shareable(layer) { return nil }
+                if drawnByRenderServer(layer) || layer !== paragraph && !shareable(layer) { return false }
                 paint(layer, opacity: alpha)
             }
             if layer === paragraph { return true }
-            guard let sublayers = layer.sublayers, !sublayers.isEmpty, inside || !layer.masksToBounds else { return inside }
-            var reaches = inside
+            guard let sublayers = layer.sublayers, !sublayers.isEmpty, inside || !layer.masksToBounds else { return true }
             let local = space.convert(area, to: layer)
-            for sublayer in composited(sublayers) {
-                guard let reached = visit(sublayer, around: local, opacity: alpha) else { return nil }
-                reaches = reaches || reached
-            }
-            return reaches
+            return composited(sublayers).allSatisfy { visit($0, around: local, opacity: alpha) }
         }
-        guard visit(root, around: root.superlayer.map { space.convert(area, to: $0) } ?? area, opacity: 1) != nil else { return .screen }
+        guard visit(root, around: root.superlayer.map { space.convert(area, to: $0) } ?? area, opacity: 1) else { return .screen }
         if flat, let color = composite(fills) { return .color(color) }
         return .layers(material: material)
     }
@@ -998,16 +992,27 @@ final class ContextMenuHost: NSObject, UIContextMenuInteractionDelegate, UIEditM
     }
 
     /// Whether a copy may share `layer`'s contents and its mask's: each none
-    /// or a bitmap. A view's backing store is neither, and a copy on screen
-    /// must not share one: on macOS, a committed copy sharing one left the
-    /// view blank (`PaintCapture.swift`, `PressLookMac.swift`).
+    /// or a bitmap; a template's copy colorizes its coverage. A
+    /// view's backing store is neither, and a copy on screen must not share
+    /// one: on macOS, a committed copy sharing one left the view blank
+    /// (`PaintCapture.swift`, `PressLookMac.swift`).
     private static func shareable(_ layer: CALayer) -> Bool {
-        isBitmap(layer.contents) && (layer.mask.map(bitmapsOnly) ?? true)
+        (layer.delegate is CoverageImageView || isBitmap(layer.contents)) && (layer.mask.map(bitmapsOnly) ?? true)
     }
 
     /// Whether `layer`, its mask and all they hold have no contents but bitmaps
     private static func bitmapsOnly(_ layer: CALayer) -> Bool {
         isBitmap(layer.contents) && (layer.mask.map(bitmapsOnly) ?? true) && (layer.sublayers ?? []).allSatisfy(bitmapsOnly)
+    }
+
+    /// Whether a paragraph's ink, lines or shadow cast is in a transition (a
+    /// numeral roll, a fade between two layouts of its lines), which shows the
+    /// old text and the new at once, the old where no current frame says: a
+    /// copy holds only the new. A fade of colours elsewhere (a press's) ends
+    /// in what the copy shows.
+    private static func transitioning(_ layer: CALayer) -> Bool {
+        (layer is InkLayer || layer is TextCastLayer || layer.delegate is CoverageImageView) &&
+            (layer.animationKeys() ?? []).contains { layer.animation(forKey: $0) is CATransition }
     }
 
     private static func isBitmap(_ contents: Any?) -> Bool { contents.map { CFGetTypeID($0 as CFTypeRef) == CGImage.typeID } ?? true }
@@ -1057,7 +1062,7 @@ final class ContextMenuHost: NSObject, UIContextMenuInteractionDelegate, UIEditM
         if let node = layer.delegate as? NodeView {
             return node.isParagraph || node.boxDrawn || node.kind == "image" || node.kind == "canvas" || node.symbolView != nil || node.style["background_image"] != nil
         }
-        return layer.contents != nil || layer is CAShapeLayer || layer is CATextLayer || layer is CAGradientLayer || layer is CAReplicatorLayer || layer is CAEmitterLayer
+        return layer.contents != nil || layer.delegate is CoverageImageView || layer is CAShapeLayer || layer is CATextLayer || layer is CAGradientLayer || layer is CAReplicatorLayer || layer is CAEmitterLayer
     }
 
     /// The view UIKit highlights, lifts and returns a preview over: the view of

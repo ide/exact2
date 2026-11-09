@@ -151,6 +151,11 @@ pub(crate) fn shows(node: &exact_kernel::NodeRef<'_>) -> bool {
     node.style.press_scale != 1. || paints(node.style)
 }
 
+fn native_button(node: &exact_kernel::NodeRef<'_>) -> bool {
+    node.node_type == exact_kernel::NodeType::Control
+        && node.props.str(exact_kernel::PropId::Type) == Some("button")
+}
+
 /// `shown` at a press's `progress`, and in the looks that hold (`looks`:
 /// `:hover`, `:focus-visible`), whose opacity replaces the node's: the
 /// press's opacity is `:active`'s absolute target, eased from what shows, or
@@ -258,15 +263,30 @@ impl<D: DataSource> Host<D> {
 
     /// The press's progress on `key` now; 0 when none.
     pub(crate) fn press_progress(&self, key: NodeKey) -> f32 {
-        self.presses
-            .get(&key)
-            .map_or(0., |f| f.progress(self.now_ms))
+        let native = self
+            .runner
+            .kernel()
+            .node_by_key(key)
+            .is_some_and(|n| native_button(&n));
+        self.presses.get(&key).map_or(0., |f| {
+            if native {
+                f.to
+            } else {
+                f.progress(self.now_ms)
+            }
+        })
     }
 
     pub(super) fn press_settle(&self) -> Option<f64> {
         self.presses
-            .values()
-            .map(|p| p.start + DURATION)
+            .iter()
+            .filter(|(key, _)| {
+                self.runner
+                    .kernel()
+                    .node_by_key(**key)
+                    .is_some_and(|n| shows(&n) && !native_button(&n))
+            })
+            .map(|(_, p)| p.start + DURATION)
             .filter(|&end| end > self.now_ms)
             .reduce(f64::max)
     }

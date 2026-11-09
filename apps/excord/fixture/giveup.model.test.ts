@@ -9,7 +9,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 const ROOT = resolve(import.meta.dir, '../../..');
-const contract = readFileSync(resolve(import.meta.dir, '../app.contract'), 'utf8');
+const contract = readFileSync(resolve(import.meta.dir, '../app.contract'), 'utf8') + '\n' + readFileSync(resolve(import.meta.dir, '../history.contract'), 'utf8');
 const lines = contract.split('\n');
 
 // The contract's expressions as JS's: its operators, `max`/`round`, and a `match` on an option.
@@ -65,14 +65,15 @@ const KEYS = Array.from({ length: 148 }, (_, i) => `r${i}`);
 // A reopen of #general at a saved place whose row is gone, the window around its anchor reaching the live end.
 function reopen() {
   const s: Record<string, any> = {
-    open: 'general', anchor: 'r20', target: 'gone', targetBlock: 'place', restoreOffset: 0, highlight: '', away: false,
+    candidateWindow: {}, windowChanged:false, open: 'general', anchor: 'r20', target: 'gone', targetBlock: 'place', restoreOffset: 0, highlight: '', away: false,
     settling: false, scrolling: false, hoverKey: '', scrollTick: 0, topKey: 'elsewhere', topOffset: 0, leadHeld: false,
-    endGap: 1823, historyStart: false, baseArrived: 0, followed: 5, reading: true, signedOutNow: false,
+    endGap: 1823, baseArrived: 0, followed: 5, reading: true, signedOutNow: false,
     current: true, keys: KEYS, rows: KEYS.map(key => ({ key, id: key })), lastKey: KEYS.at(-1),
     win: { hasAfter: false, hasBefore: true, pin: 'r20', firstId: 'r0', lastId: 'r147' },
     chan: { arrived: 6, unread: 1 }, page: { visibilityState: 'visible' },
     jumpFromAnchor: '', jumpFromKey: '', jumpFromOffset: 0,
   };
+  s.candidateWindow = s.win;
   const env = { keyOf: (rows: any[], id: string) => rows.find(r => r.id === id)?.key ?? '', pending: () => false,
     frame: () => ({ height: 72 }), markRead: () => {} };
   const landJump = action(body('landJump'), Object.keys(env).concat('scrollIntoView'));
@@ -113,8 +114,8 @@ test('a reopen that gives up: the landing fires before the list\'s first report,
 // One report at the live end, from a given state: what it leaves of the anchor.
 function endReport(change: Record<string, any>, top = KEYS.at(-12)) {
   const s: Record<string, any> = {
-    open: 'general', anchor: 'r20', target: '', away: false, settling: false, scrolling: true, hoverKey: '', scrollTick: 3,
-    topKey: top, topOffset: 0, leadHeld: false, endGap: 0, historyStart: false, baseArrived: 0, followed: 5, reading: true,
+    candidateWindow: {}, windowChanged:false, open: 'general', anchor: 'r20', target: '', away: false, settling: false, scrolling: true, hoverKey: '', scrollTick: 3,
+    topKey: top, topOffset: 0, leadHeld: false, endGap: 0, baseArrived: 0, followed: 5, reading: true,
     current: true, keys: KEYS, lastKey: KEYS.at(-1), win: { hasAfter: false, hasBefore: true, pin: 'r20', firstId: 'r0', lastId: 'r147' },
     chan: { arrived: 6, unread: 1 }, ...change,
   };

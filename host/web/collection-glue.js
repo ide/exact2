@@ -245,6 +245,8 @@ export function collectionController({ root, views, report, settled=()=>{}, agen
     s.port.scrollTo({ [name === 'scrollTop' ? 'top' : 'left']: at, behavior: smooth ? 'smooth' : 'instant' });
     const read = s.port[name];
     if (smooth || read !== was) s.owesScroll = true;
+    // Block admission only for confirmed movement; an ignored smooth write may never emit an event
+    if (read !== was) s.positionEventPending = true;
     // Its `scrollend` answers this write, not the reader's scroll
     if (!smooth && read !== was) s.activity.ownEnd = true;
     // Only a rounding residual (under a pixel): a target the browser clamped (an offset below 0 or past
@@ -419,6 +421,7 @@ export function collectionController({ root, views, report, settled=()=>{}, agen
       // An anchor correction in the reply already moved the port there.
       if (jump != null) { s.jump = null; if (s.offset === at) move(s, jump); }
       if (accepted) {
+        s.reportedMoving = reader;
         s.signature = signature; s.lastFacts = facts;
         if (s.clamp === clamp) s.clamp = null; // reported; one in its own commit is the next report's
         if(!notification){notification=true;queueMicrotask(()=>{notification=false;settled();});}
@@ -431,7 +434,7 @@ export function collectionController({ root, views, report, settled=()=>{}, agen
   function move(s, at) {
     const name = AXES[s.axis].offset, was = s.port[name];
     s.port[name] = at; s.offset = s.port[name]; s.travel = null; s.exact = null;
-    if (s.offset !== was) s.owesScroll = s.activity.ownEnd = true;
+    if (s.offset !== was) s.owesScroll = s.positionEventPending = s.activity.ownEnd = true;
     echo(s);
   }
   function jumpTo(s, at) {
@@ -515,6 +518,15 @@ export function collectionController({ root, views, report, settled=()=>{}, agen
   for (const name of ['pointerup', 'pointercancel', 'lostpointercapture']) doc.addEventListener(name, pointerUp);
   doc.defaultView?.addEventListener('pointerdown', input, { capture: true, passive: true });
   const api = {
+    scrollPending() {
+      for (const s of states.values()) {
+        if (!s.valid || !s.el.isConnected || !s.el.getClientRects().length) continue;
+        if (readScroll(s)) enqueue(s, true);
+        if (s.reportedMoving && !s.activity.moving) enqueue(s, true);
+        if (s.activity.moving || s.reportedMoving || s.positionEventPending) return true;
+      }
+      return false;
+    },
     releaseInteraction(pointer) { pointerUp({pointerId:pointer}); },
     reporting() { return delivering; },
     reorderContact(element,pointer) { pointerDown({target:element,pointerId:pointer}); },
@@ -611,7 +623,7 @@ export function collectionController({ root, views, report, settled=()=>{}, agen
           // A scroll event acknowledged before any reader's handler (capture runs
           // first at the target), so a jump that handler makes stays owed; only
           // the port's own (a descendant's passes through capture too).
-          s.acked = e => { if (e.target !== s.eventTarget) return; s.owesScroll = false; scrollsFired++; };
+          s.acked = e => { if (e.target !== s.eventTarget) return; s.owesScroll = s.positionEventPending = false; scrollsFired++; };
           s.eventTarget.addEventListener('scroll', s.acked, { passive: true, capture: true });
           states.set(snapshot.view, s);
         }
@@ -710,20 +722,14 @@ export function collectionController({ root, views, report, settled=()=>{}, agen
         observe(s);
         // A reply that left rows unbuilt owes the next slice a report.
         enqueue(s, !delivering || freshRows || snapshot.pending === true);
-        if (freshRows && velocity(s) === 0) fresh.add(s);
+        if (freshRows) fresh.add(s);
       }
-      // Rows built at rest (a list opening at its end, a window replaced,
-      // the rows a report's correction brought in) are measured and
-      // reported before the next frame, as a native host measures its rows
-      // in the batch that built them: that frame's scroll event, which runs
-      // before its animation frame callbacks, would otherwise read the port
-      // where their estimates put it, and the frame paint it there. Two
-      // such reports a list a frame (the first report's correction is made
-      // on estimates, the second on the rows measured; a window the second
-      // moves onto unmeasured rows waits for the frame), outside the shared
-      // budget, which lists opening together would exhaust; in all, two for
-      // each list an app's own commit built and four more, so lists the
-      // reports' replies mount again and again cannot hold the frame off.
+      // Measure new rows before paint, including during scrolling, so scroll
+      // events read measured geometry. Allow two early reports per list
+      // per frame to measure size changes and check their corrections.
+      // Use a separate allowance of four reports plus two per list with new
+      // rows in an app commit. Apply these limits to feedback replies so
+      // repeated corrections cannot postpone painting indefinitely.
       if (fresh.size) {
         // The last frame's time names the frame these reports come before;
         // a frame's flush renews them too, where there is no timeline.

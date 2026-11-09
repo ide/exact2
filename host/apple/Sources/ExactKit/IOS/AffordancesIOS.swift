@@ -77,6 +77,10 @@ final class HoverEffect: NSObject, UIPointerInteractionDelegate {
 /// line rolls: the raster is one picture.
 enum NumeralRoll {
     private static var key = 0
+    static func forget(_ ink: CALayer) {
+        objc_setAssociatedObject(ink, &key, nil, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+        ink.removeAnimation(forKey: "exact.numeric")
+    }
     /// Answers the roll it began, for the layer of the text's HDR shadow,
     /// which rolls with it (`CALayer.applyTextCast`).
     @discardableResult
@@ -85,7 +89,8 @@ enum NumeralRoll {
         let text = node.props["text"] ?? node.inlineText.map(\.text).joined()
         let last = objc_getAssociatedObject(ink, &key) as? String
         objc_setAssociatedObject(ink, &key, text, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
-        guard mode != "none", let last, last != text, ink.contents != nil, !UIAccessibility.isReduceMotionEnabled else { return nil }
+        let ready = (ink.delegate as? CoverageImageView).map { $0.image != nil } ?? (ink.contents != nil)
+        guard mode != "none", let last, last != text, ready, !UIAccessibility.isReduceMotionEnabled else { return nil }
         let roll = CATransition()
         roll.type = .push
         let down = mode == "numeric-countdown" || leadingNumber(text) < leadingNumber(last)

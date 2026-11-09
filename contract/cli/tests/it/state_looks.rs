@@ -116,9 +116,9 @@ fn an_active_look_and_the_pressed_paint_say_one_paint_once() {
         ":active\n        background-color = \"#111111\"",
     )
     .expect("refused");
-    assert_eq!(id, "lower-state-press-paint");
+    assert_eq!(id, "lower-unknown-attr");
     assert!(
-        message.contains("-exact-press-background-color") && message.contains("background-color"),
+        message.contains(":active") && message.contains("contract migrate"),
         "{message}"
     );
     let (id, _) = refused(
@@ -133,7 +133,7 @@ fn an_active_look_and_the_pressed_paint_say_one_paint_once() {
     )
     .is_none());
     assert!(refused(
-        "-exact-press-background-color = \"#000000\"",
+        ":active\n    background-color = \"#000000\"",
         ":hover\n        background-color = \"#111111\""
     )
     .is_none());

@@ -496,8 +496,7 @@ extension NavigationHost {
     }
 
     /// A route's grounds, its grouped lists' and its boxes on the page's
-    /// ground follow the column it is in, and its texts' boxes
-    /// (`NodeView.rehostText`).
+    /// ground follow the column it is in.
     func repaintGrounds(_ route: RouteController) {
         route.paintBackdrop()
         route.node.applyBoxLayer()
@@ -505,7 +504,6 @@ extension NavigationHost {
         let lists = presenter.carrying("listStyle").filter { $0.kind == "list" && $0.isDescendant(of: route.node) }
         for list in lists { list.applyBoxLayer() }
         if !lists.isEmpty { presenter.groupedLists?.sync(changed: Set(lists.map(\.id))) }
-        for text in presenter.textViews.values where text.isDescendant(of: route.node) { text.rehostText() }
     }
 
     /// The row of the split's list whose detail shows: the detail's highest

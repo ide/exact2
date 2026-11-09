@@ -7,6 +7,33 @@ import XCTest
 
 final class NativeButtonFidelityIOSTests: XCTestCase {
     private var window: UIWindow!
+    private func rgba(_ color: UIColor?) -> [CGFloat]? {
+        guard let color else { return nil }
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        guard color.getRed(&r, green: &g, blue: &b, alpha: &a) else { return nil }
+        return [r, g, b, a]
+    }
+    func testCompiledActivePropertiesKeepViewlessColorOwnership() throws {
+        let session = try fixture(); defer { session.destroy() }
+        let native = try button(session, "active-properties")
+        let owner = try XCTUnwrap(native.owner)
+        XCTAssertTrue(owner.container.subviews.compactMap { $0 as? NodeView }.isEmpty, "the kernel supplies the viewless face")
+        native.isHighlighted = true
+        native.setNeedsUpdateConfiguration()
+        waitForMainQueue()
+        XCTAssertNotEqual(rgba(native.titleLabel?.textColor.resolvedColor(with: native.traitCollection)), [0, 0, 1, 1], "the title owns its color")
+        XCTAssertEqual(rgba(native.subtitleLabel?.textColor.resolvedColor(with: native.traitCollection)), [0, 0, 1, 1])
+        XCTAssertEqual(rgba(native.configuration?.background.resolvedBackgroundColor(for: native.tintColor).resolvedColor(with: native.traitCollection)), [1, 0, 0, 1])
+        let imageInk = try XCTUnwrap(native.configuration?.imageColorTransformer)
+        XCTAssertEqual(rgba(imageInk(.black).resolvedColor(with: native.traitCollection)), [1, 0, 0, 1], "the symbol owns its tint")
+        try button(session, "g3").sendActions(for: .primaryActionTriggered)
+        waitForMainQueue()
+        XCTAssertTrue(native.isHighlighted)
+        XCTAssertEqual(rgba(native.titleLabel?.textColor.resolvedColor(with: native.traitCollection)), [0, 0, 1, 1], "a class without color leaves the title inheriting")
+        XCTAssertNotEqual(rgba(native.configuration?.background.resolvedBackgroundColor(for: native.tintColor).resolvedColor(with: native.traitCollection)), [1, 0, 0, 1], "none restores the native highlighted background")
+        XCTAssertEqual(owner.alpha, 1)
+        native.isHighlighted = false
+    }
     override func tearDown() { window?.isHidden = true; window = nil; super.tearDown() }
     private func fixture() throws -> ExactSession {
         let path = try XCTUnwrap(ProcessInfo.processInfo.environment["EXACT_BUTTONS_PLAN"])

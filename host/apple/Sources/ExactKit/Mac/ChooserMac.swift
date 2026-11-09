@@ -117,6 +117,7 @@ extension MenuHost {
         if !owner.message.isEmpty { menu.addItem(.separator()) }
         for (index, entry) in owner.actions.enumerated() {
             guard let row = entry.node else { continue }
+            row.rejectNativeActiveProperties(on: "NSMenuItem")
             let item = AccessibleMenuItem(title: entry.title, action: #selector(choose(_:)), keyEquivalent: "")
             item.owner = row
             item.target = self

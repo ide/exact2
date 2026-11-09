@@ -192,6 +192,15 @@ cargo run -q -p contract -- fmt --stdout apps/messages/app.contract
 cargo run -q -p contract -- fmt --check apps/messages/app.contract
 ```
 
+`contract migrate <file.contract>` rewrites retired spellings in place. It moves
+`-exact-press-background-color` and `-exact-press-color` into the owner's
+`:active` block, merging with an existing block and retaining expressions and
+comments. It refuses conflicting active rows, directly nested inline text and
+explicit `appearance="auto"` controls other than buttons before writing.
+Classes and component uses are checked at compile time. Compile the result with
+`contract build`; use `contract fmt` to format it. Arbitrary strings and
+transition targets are unchanged.
+
 `symbols` prints JSON with `definitions` and `references`. Each reference's
 `to` is an index into `definitions`; locations include the original file,
 1-based line and byte column, and an exclusive `end_col`. Component interfaces,
@@ -2954,6 +2963,8 @@ task autosave when dirty
 | `wait=idle` | Wait for no observed scrolling, frame demand, unapplied batches, or conflicting timer work; keep a 60 Hz frame period clear before the next known deadline. |
 
 `frame` and `update` have a 100 ms waiting bound. `scrollend` is unbounded unless `max=` names a bound. `idle` defaults to the larger of its interval and 1,000 ms. Bounds start at the nominal deadline; reaching one makes the firing ordinary due work. They limit intentional waiting, not OS scheduling latency. A hidden session admits frame and scroll waits without waiting for display callbacks. Observations can arrive late; a web scroll that ends without an event uses a quiet-period fallback.
+
+The web host treats a virtualized list as still scrolling until its final motion report is accepted and any scroll event owed by an accepted position change is delivered.
 
 Use `wait=scrollend` for list refreshes and `wait=idle` for saves or housekeeping. For a clock display, prefer live `time` rather than an action that copies the clock into state. A waiting repeat keeps its original phase and merges missed beats. A false gate or changed key cancels its held firing.
 

@@ -203,6 +203,13 @@ extension NavigationHost {
     /// Each batch: every other tab's stack, the selected tab, its items.
     func syncTabs(_ p: Projection) {
         guard tabOwner != nil, let tabs = p.tabs else { return }
+        // Re-adopt a replacement over unchanged panels and remove the standalone bar projected earlier in this batch
+        if adoptedTablist != tabs.tablist.id {
+            adoptedTablist = tabs.tablist.id
+            measuredTablist = nil
+            if tabController == nil { presenter.session?.natives.tabNodesChanged(tabs.tabs.map(\.id)) }
+            presenter.segments.sync()
+        }
         let authored = tabs.tablist.wrote("appearance") && tabs.tablist.style["appearance"]?.string == "none"
         if authored != tablistAppearanceNone {
             tablistAppearanceNone = authored
@@ -285,6 +292,7 @@ extension NavigationHost {
 
     private func syncItems(_ tabs: NavigationTabs, navs: [UIViewController]) {
         tabItemsSource = (tabs, navs)
+        for tab in tabs.tabs { tab.rejectNativeActiveProperties(on: "UITabBarItem") }
         let faces = tabs.tabs.map(TabFace.init)
         // A tab's test id is its item's identifier, which XCUITest and
         // Maestro address it by (LLP 1116 D2); without one, its symbol or title.

@@ -1,8 +1,8 @@
 // The author's pressed paint (LLP 1061 D7), on both platforms: while the
 // press `pressed` tracks holds a node (the bit `-exact-press-scale` and the
 // platform's dim use), it shows its `-exact-press-opacity` as a fraction of
-// its own opacity, its `-exact-press-background-color` in place of its
-// background, and its `-exact-press-color` as its text colour, which its
+// its own opacity, its active `background-color` in place of its
+// background, and its active `color` as its text colour, which its
 // subtree takes as CSS's `color` is taken (a descendant with a colour of its
 // own keeps it). Eased in and back on the scale's curve and duration, at once
 // under the agent's clock; a release before the press was ever on screen
@@ -75,6 +75,7 @@ extension NodeView {
     var showsOwnTextColor: Bool {
         wrote("text_color") || (pressPaint.down && style["press_color"] != nil)
     }
+    package var pressIsDown: Bool { holds("active") || pressed && !pressPaint.outside }
     /// The rows of the pressed paint (LLP 1061 D7).
     static let pressPaintRows = ["press_opacity", "press_opacity_to", "press_background_color", "press_color"]
     /// Whether the author wrote this node's pressed look: a press scale or
@@ -279,6 +280,7 @@ extension NodeView {
     /// held colour. Re-ink after applying the style to avoid re-entering
     /// `presented` while it is building that style.
     func refreshPressInheritance() {
+        if pressed || holds("active") { showPress(pressIsDown) }
         guard pressPaint.down, !showsOwnTextColor else { return }
         liveLender()?.inkAgain()
     }
@@ -327,6 +329,7 @@ extension NodeView {
     /// the same ease with the new depth; a press opacity no longer written goes
     /// at once.
     func refreshPressOpacity(_ s: NodeStyle? = nil) {
+        if isNativeButton { refreshNativeActivePresentation(); return }
         applyLookOpacity()
         // Held, easing in or easing out: the fade is always `-depth ×
         // progress` on the press's own ease, so what shows moves with it, as
@@ -472,6 +475,8 @@ extension NodeView {
         endInked(pressPaint.inked.compactMap(\.view).filter { $0 !== self })
         paintLayer?.removeAnimation(forKey: "pressOpacity")
         paintLayer?.removeAnimation(forKey: "lookOpacity")
+        paintLayer?.removeAnimation(forKey: "nativeActiveOpacity")
+        paintLayer?.removeAnimation(forKey: "nativeActiveScale")
         pressPaint = PressPaint()
     }
 }

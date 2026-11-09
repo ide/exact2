@@ -65,6 +65,21 @@ final class ChooserMacTests: XCTestCase {
         wait(for: [turned], timeout: 5)
     }
 
+    func testAnOpenChooserRejectsNewActivePropertiesWithoutReplacingItsMenu() throws {
+        let p = chooser(["One", "Two"], cancels: 0)
+        defer { p.menus.reset() }
+        p.press(1)
+        let entry = try XCTUnwrap(p.menus.entries.last)
+        let menu = try XCTUnwrap(entry.menu), item = menu.items[1]
+        let row = try XCTUnwrap(p.views[3])
+        XCTAssertNil(row.nativeActiveRefusals["NSMenuItem"])
+        p.apply(wireBatch([["op": "style", "id": 3, "style": ["press_opacity_to": 0.4]]]))
+        XCTAssertTrue(p.menus.entries.last === entry)
+        XCTAssertTrue(entry.menu === menu)
+        XCTAssertTrue(menu.items[1] === item)
+        XCTAssertTrue(row.nativeActiveRefusals["NSMenuItem"]?.contains("opacity") == true)
+    }
+
     func testExplicitSourceWithoutInvokerTargetKeepsTheChooserValid() throws {
         let p = chooser(["One", "Two"], cancels: 0)
         defer { p.menus.reset() }

@@ -38,7 +38,9 @@ component App
         :hover
           background-color = "#dddddd"
         text "Hovered"
-      column id="pressed" popover="auto" -exact-press-background-color="#dddddd" testId="pressed"
+      column id="pressed" popover="auto" testId="pressed"
+        :active
+          background-color="#dddddd"
         text "Pressed"
       column id="clipped" popover="auto" background-clip="padding-box" testId="clipped"
         text "Clipped"

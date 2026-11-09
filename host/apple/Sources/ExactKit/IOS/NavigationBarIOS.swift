@@ -23,266 +23,6 @@ struct HatchSource: Equatable {
     let bar: BarSource, back: String, navigation: ObjectIdentifier, dataset: String, scroll: ObjectIdentifier?
 }
 
-/// A route whose first child is a `header` holding exactly one heading
-/// (LLP 1035.001 D9's header-shaped route). The bar shows the heading as
-/// its title — large for a level-1 heading, inline for any other — and the
-/// header's buttons as its items, those before the heading leading and
-/// those after it trailing, each pressing its authored button. The stack's
-/// Back control is UIKit's back button, never an item. iOS does not paint
-/// the header; the web and the agent do (LLP 1021 D4's one presentation).
-struct HeaderShape: Equatable {
-    struct Item: Equatable {
-        let id: UInt32, title: String, symbol: String?, label: String?, disabled: Bool, accessibilityDisabled: Bool
-        /// The button's `testId`: the item's `accessibilityIdentifier`, so
-        /// XCUITest and Maestro address it as any other node (LLP 1116 D2).
-        let testId: String?
-        let toolbarGroup: UInt32?
-        /// A face drawn from the button's one filled box (an avatar or a
-        /// badge: a shape holding a text or a symbol), when the button has
-        /// one: the item's image, in the box's own colours and corners.
-        let badge: BadgeFace?
-        /// A face that says more than a title or symbol (a dot beside its
-        /// label, a font of the author's), drawn as painted (`ChipFace`).
-        let chip: ChipFace?
-        /// Whether the button opens a menu-shaped popover or a confirmation
-        /// (`MenuHost.pullsDown`): the item's menu, its rows read when it
-        /// opens, as LLP 1021 D3's pull-down. Any other popover opens as
-        /// itself, from the item (`MenuHost.openFromBar`).
-        let menu: Bool
-        /// The popover's `aria-label`: the menu's title, as an in-page
-        /// button's is (MenusIOS: "Open location in", "Sort by").
-        let menuTitle: String
-        /// A native button's prominent style: a prominent bar item (iOS 26),
-        /// as LLP 1069.011.000 D2 maps `NSToolbarItem`.
-        let prominent: Bool
-        /// A native button's `glass` or `clear-glass` style: a glass capsule
-        /// of its own, not the one iOS 26 shares among adjacent items
-        /// (`sharesBackground`). A bar item has no clear variant.
-        let ownGlass: Bool
-        /// The colour the author gave the item's face, light and dark: a
-        /// symbol's tint, else a `color` written on the button itself. Nil
-        /// (UIKit's tint, the platform default) for a colour the button
-        /// only inherits or the compiler implied.
-        let tint: [[Double]]?
-        /// Whether that colour is the tint itself: the item's tint then, its node's `ownAccent` or the bar's
-        let followsTint: Bool
-        /// A native button's title font where its face's rows give a size or
-        /// a weight (LLP 1069.011.001 D4), as its in-page control draws it:
-        /// the item's title in it, so its glass fits those words. Nil is
-        /// UIKit's bar title font.
-        let font: UIFont?
-        /// A readout's face (`role="status"`, LLP 1075.003 §9.15): an item
-        /// no one presses, whose custom view shows the face as written and
-        /// follows it in place (BarReadoutIOS.swift).
-        let readout: ChipFace?
-        /// The padding around a readout's face inside the glass: each side
-        /// as its author wrote it, else UIKit's (`titleInset` beside words).
-        let readoutPadding: UIEdgeInsets
-        /// How far a `UIBarButtonItem(title:)`'s label sits inside its item
-        /// on each side, which UIKit does not publish: 12 pt on iOS 26 and 27
-        /// (measured), so its glass is 16 pt wider than the words each side.
-        static let titleInset: CGFloat = 12
-        /// The font UIKit draws a plain bar item's title in, which it does
-        /// not publish: the system font at 17 pt, medium in the 26 design and
-        /// bold under Bold Text (both measured on iOS 27,
-        /// `testTheUnsaidTitleFontIsUIKits`); regular before it, semibold
-        /// under Bold Text. A row its author left unsaid keeps this one's
-        /// size or weight; the kernel has stepped the weights it sends.
-        static func titleFont(bold: Bool) -> UIFont {
-            if #available(iOS 26.0, *), LinkedDesign.liquidGlass { return .systemFont(ofSize: 17, weight: bold ? .bold : .medium) }
-            return .systemFont(ofSize: 17, weight: bold ? .semibold : .regular)
-        }
-        init(_ button: NodeView, readout isReadout: Bool = false) {
-            var symbol: String?, text = "", ink: (NodeView, String)?
-            func walk(_ node: NodeView) {
-                for case let child as NodeView in node.container.subviews {
-                    if child.kind == "image", let name = child.faceSymbol {
-                        if symbol == nil { symbol = name; ink = (child, "text_color") }
-                    } else if child.isParagraph, text.isEmpty { text = child.accessibleText; ink = ink ?? (child, "text_color") }
-                    else { walk(child) }
-                }
-            }
-            // A native button's children are its face, not views (LLP 1069.011.000 D1).
-            let face = button.isNativeButton ? button.face : nil
-            if let face {
-                symbol = face.symbol
-                text = face.title ?? ""
-            } else {
-                walk(button)
-            }
-            var parent = button.superview
-            var grouped: UInt32?
-            while let view = parent {
-                if let node = view as? NodeView {
-                    if node.props["semanticTag"] == "header" { break }
-                    if node.props["accessibilityRole"] == "group" { grouped = node.id; break }
-                }
-                parent = view.superview
-            }
-            toolbarGroup = grouped
-            id = button.id
-            testId = button.props["testId"]
-            readout = isReadout ? ChipFace(button, readout: true) : nil
-            // A side left unsaid is UIKit's. A bare custom view hugs its
-            // capsule, whose round ends then cut into its words, so a face
-            // with words takes the inset a title item's label has.
-            let words = readout?.parts.contains { if case .text = $0 { true } else { false } } == true
-            let pad = { (side: String, platform: CGFloat) in button.wrote("padding_\(side)") ? button.number("padding_\(side)") : platform }
-            let beside: CGFloat = words ? Self.titleInset : 0
-            readoutPadding = isReadout ? UIEdgeInsets(top: pad("top", 0), left: pad("left", beside), bottom: pad("bottom", 0), right: pad("right", beside)) : .zero
-            badge = button.isNativeButton || isReadout ? nil : BadgeFace(button)
-            chip = badge == nil && !isReadout ? ChipFace(button) : nil
-            let invocation = button.presenter?.invocation(of: button)
-            menu = invocation.map { $0.opensPopover && button.presenter?.menus.pullsDown($0.target) == true } == true
-            menuTitle = menu ? invocation?.target.props["accessibilityLabel"] ?? "" : ""
-            self.symbol = symbol
-            title = text
-            label = button.props["accessibilityLabel"] ?? face?.label ?? (isReadout ? Self.shownWords(button) : nil)
-            disabled = button.disabled
-            accessibilityDisabled = button.ariaUnavailable
-            prominent = ["filled", "bordered-prominent", "prominent-glass", "prominent-clear-glass"].contains(face?.style ?? "")
-            ownGlass = ["glass", "clear-glass"].contains(face?.style ?? "")
-            #if os(tvOS)
-            // tvOS's bar title font is not measured: its own stays.
-            font = nil
-            #else
-            let rows = face?.rows.title ?? [:]
-            font = rows["font_size"] != nil || rows["font_weight"] != nil
-                ? ButtonConfigurationIOS.font(Self.titleFont(bold: button.traitCollection.legibilityWeight == .bold), rows: rows) : nil
-            #endif
-            // The platform's tint unless the author said otherwise (LLP
-            // 1115.000 D2): a `color` written on the symbol, else a `color`
-            // written on the button, a platform colour as much as a literal.
-            // One the button only inherits, or a sheet wrote, is unsaid.
-            // Read from the node it is written on, the tint in it as a value (`carriedTint`)
-            let source = ink.flatMap { $0.0.kind == "image" && $0.0.ownColor("text_color") != nil ? $0.0 : nil } ?? (button.ownColor("text_color") != nil ? button : nil)
-            followsTint = source?.style["text_color"]?.tintAlpha == 1
-            if !followsTint, let source, let light = source.carriedChannels("text_color", dark: false), let dark = source.carriedChannels("text_color", dark: true) {
-                tint = [light, dark]
-            } else {
-                tint = nil
-            }
-        }
-        /// What a readout says with no `aria-label`: its words that show,
-        /// none `display: none` or `aria-hidden` (the bar's own hiding of the
-        /// header is `isHidden`, not this).
-        static func shownWords(_ node: NodeView) -> String {
-            guard node.style["display"]?.string != "none", node.props["accessibilityElementsHidden"] != "true" else { return "" }
-            if node.isParagraph { return node.accessibleText }
-            return node.container.subviews.compactMap { ($0 as? NodeView).map(shownWords) }.filter { !$0.isEmpty }.joined(separator: " ")
-        }
-        /// Everything a bar item is made from. A readout's face is not: its
-        /// view follows it in place (`showReadouts`).
-        var source: String {
-            if readout != nil { return "readout:\(toolbarGroup.map(String.init) ?? ""):\(id):\(testId ?? "")" }
-            return "\(face):\(disabled):\(accessibilityDisabled)"
-        }
-        /// `source` but for whether the item is enabled.
-        var face: String {
-            if readout != nil { return source }
-            return "\(toolbarGroup.map(String.init) ?? ""):\(id):\(title):\(symbol ?? ""):\(label ?? ""):\(prominent):\(ownGlass):\(badge?.source ?? ""):\(chip?.source ?? ""):\(menu):\(menuTitle):\(tint ?? []):\(followsTint):\(font.map { "\($0.fontName) \($0.pointSize) \(TextEngine.controlWeight($0))" } ?? ""):\(testId ?? "")"
-        }
-    }
-    let header: NodeView
-    let heading: NodeView?
-    let title: String
-    let level: Int
-    let leading: [Item], trailing: [Item]
-    /// The header's `input type="search"`, if it has one: the item's
-    /// search controller (LLP 1075.003 §9.6).
-    let search: NodeView?
-    /// The header's tablist of text tabs, if it has one: the item's title
-    /// view, a segmented control (LLP 1075.003 §9.8).
-    let segments: NodeView?
-    /// What the heading's group holds besides it (an avatar, a subtitle) and
-    /// whether pressing it does something: the item's title, richer (§9.10).
-    let group: HeaderTitle?
-    /// The header's nodes the bar places (`presents`): the heading, every
-    /// item's button (the Back control's too), the search field, the
-    /// tablist when it has tabs for the segmented title, and what the title
-    /// shows of the heading's group.
-    let placed: [NodeView]
-    /// Explicit opt-outs stay in the authored header with their descendants.
-    let authored: [NodeView]
-    let authoredBack: Bool
-
-    /// `back` names the stack's Back control, left to UIKit's back button
-    /// when there is one (`backIsUIKits`): the root of a presented stack
-    /// has none, so there it is an item like the others.
-    init?(route: NodeView, back: String?, backIsUIKits: Bool = true, projected: Bool = false) {
-        // What is header-shaped is the kernel's rule, read over this route's views (`HeaderRule`, LLP 1115.001 D11).
-        guard let rule = HeaderRule(route: route, back: back, backIsPlatforms: backIsUIKits, projected: projected) else { return nil }
-        // Every role the header rule assigns can remain authored. In
-        // particular the title's tap target is not one of its bar items.
-        // A readout hidden as authored, itself or by a box around it in the
-        // header, shows nothing (the bar's own hiding is `isHidden`, not this).
-        let readouts = rule.readouts.filter { readout in
-            var at: UIView? = readout
-            while let view = at, view !== rule.header {
-                if (view as? NodeView)?.style["display"]?.string == "none" { return false }
-                at = view.superview
-            }
-            return true
-        }
-        let roles = rule.items + readouts + [rule.heading, rule.tap, rule.search, rule.segments].compactMap { $0 }
-        let authored = projected ? roles.filter { $0.wrote("appearance") && $0.style["appearance"]?.string == "none" } : []
-        self.authored = authored
-        let projects = { (node: NodeView) in !authored.contains { node === $0 || node.isDescendant(of: $0) } }
-        authoredBack = back != nil && roles.contains { $0.props["id"] == back && !projects($0) }
-        let heading = rule.heading, titleProjects = projects(heading)
-        self.heading = titleProjects ? heading : nil
-        let search = rule.search.flatMap { projects($0) ? $0 : nil }
-        let segments = rule.segments.flatMap { projects($0) ? $0 : nil }
-        let tap = rule.tap.flatMap { projects($0) ? $0 : nil }
-        header = rule.header
-        // A heading of only white space names nothing (accname trims it);
-        // UIKit would take it as a title and show a pair of quotes
-        let text = titleProjects ? heading.accessibleText : ""
-        title = text.unicodeScalars.allSatisfy(\.properties.isWhitespace) ? "" : text
-        level = titleProjects ? rule.level : 0
-        let item = { (node: NodeView) -> Item? in
-            guard rule.readouts.contains(where: { $0 === node }) else { return Item(node) }
-            guard readouts.contains(where: { $0 === node }) else { return nil }
-            let item = Item(node, readout: true)
-            return item.readout == nil ? nil : item
-        }
-        let before = rule.leading.filter(projects).compactMap(item), after = rule.trailing.filter(projects).compactMap(item)
-        // A readout is apart from the title when it has a face to show: one
-        // hidden, or with nothing to draw, is the page's, as the web has it.
-        let drawn = (before + after).filter { $0.readout != nil }.map(\.id)
-        let faced = readouts.filter { drawn.contains($0.id) }
-        #if os(tvOS)
-        // tvOS's bar has no item that focus passes by undimmed: no readout.
-        leading = before.filter { $0.readout == nil }
-        trailing = after.filter { $0.readout == nil }
-        let shownReadouts: [NodeView] = []
-        #else
-        (leading, trailing) = (before, after)
-        let shownReadouts = faced
-        #endif
-        self.search = search
-        self.segments = segments
-        let group = titleProjects ? HeaderTitle(header: header, heading: heading, tap: tap, apart: rule.items + faced + [rule.search, rule.segments].compactMap { $0 }) : nil
-        self.group = group
-        let tablist = segments.flatMap { HeaderShape.titleTabs($0).isEmpty ? nil : $0 }
-        // The title's pressable wrapper goes with the title it holds, unless
-        // it holds an opted-out node, which stays where it is.
-        let wrapper = titleProjects ? tap.flatMap { tap in authored.contains { $0.isDescendant(of: tap) } ? nil : tap } : nil
-        placed = ([heading] + rule.items + shownReadouts + [search, tablist, wrapper].compactMap { $0 } + (HeaderShape.presented(group, segments: segments)?.placed ?? [])).filter(projects)
-    }
-
-    /// The tabs of a header's tablist the segmented title shows (§9.8).
-    static func titleTabs(_ list: NodeView) -> [NodeView] {
-        list.container.subviews.compactMap { $0 as? NodeView }.filter {
-            $0.isButton && $0.props["accessibilityRole"] == "tab" && $0.handlers.contains("press")
-        }
-    }
-
-    static func == (a: HeaderShape, b: HeaderShape) -> Bool {
-        a.header === b.header && a.authoredBack == b.authoredBack && a.title == b.title && a.level == b.level && a.leading == b.leading && a.trailing == b.trailing && a.search === b.search && a.segments === b.segments && a.group == b.group && a.authored.map(\.id) == b.authored.map(\.id)
-    }
-}
-
 /// The delegate Exact gives each navigation controller it builds: Exact's
 /// own handling first, then the app's delegate, which receives straight
 /// anything Exact does not implement — a custom transition's animator
@@ -570,6 +310,8 @@ final class SegmentPress: NSObject {
 final class BarPress: NSObject {
     let id: UInt32
     weak var host: NavigationHost?
+    struct SavedForeground { let value: Any? }
+    var activeForeground: SavedForeground?
     init(_ id: UInt32, _ host: NavigationHost) { self.id = id; self.host = host }
     @objc func press() {
         guard let host, let node = host.presenter.views[id] else { return }
@@ -774,8 +516,15 @@ extension NavigationHost {
             let shape = stackShows ? HeaderShape.bar(of: c.node, back: back, backIsUIKits: pushed) : nil
             let bar = stackShows ? self.bar(of: c.node, pushed: pushed) : .hidden
             let shows = bar != .hidden
+            if shows {
+                for entry in (shape?.leading ?? []) + (shape?.trailing ?? []) where entry.menu {
+                    if let source = presenter.views[entry.id], let invocation = presenter.invocation(of: source), !presenter.menus.isConfirmation(invocation.target) {
+                        presenter.menus.rejectActiveMenuProperties(in: invocation.target)
+                    }
+                }
+            }
             let canGoBack = pushed && canInvokeBack && shape?.authoredBack != true
-            let scroller = contentScroller(of: c), scroll = scroller?.scrollView
+            let scroller = contentScroller(of: c), scroll = contentScrollView(of: c)
             let dataset = c.node.props["dataset"]
             func barSource(_ key: (HeaderShape.Item) -> String) -> BarSource {
                 BarSource(bar: bar, authored: shape?.authored.map(\.id) ?? [], placed: shape?.placed.map(\.id) ?? [], header: shape?.header.id, title: shape?.title ?? "", level: shape?.level ?? 0, leading: shape?.leading.map(key) ?? [],
@@ -814,7 +563,7 @@ extension NavigationHost {
             hatching(nav) { presenter.session?.natives.routeHatch(c.hatched ? .changed : .built, controller: c, navigation: nav, scroll: scroll,
                                                                   key: c.key, dataset: dataset) }
             c.hatched = true
-            if scroll != nil { c.ownedScroll = scroller }
+            c.ownedScroll = scroller
         }
         coverLifted(routes)
         // A route's header shown or hidden in place; a push or pop sets the
@@ -897,7 +646,7 @@ extension NavigationHost {
                 self.restAtTop(sv, in: c)
             }
         }
-        item.hidesBackButton = !canGoBack
+        item.hidesBackButton = shape?.authoredBack == true || (c.pushed && !canGoBack) // Keep UIKit's Back on split roots
         item.leftItemsSupplementBackButton = true
         #endif
         c.barPresses = []
@@ -929,6 +678,7 @@ extension NavigationHost {
     /// the back button on the next route reads.
     private func segmentedTitle(_ list: NodeView?, in c: RouteController) {
         let tabs = list.map(HeaderShape.titleTabs) ?? []
+        for tab in tabs { tab.rejectNativeActiveProperties(on: "UISegmentedControl") }
         guard !tabs.isEmpty else {
             if let old = c.titleSegments?.control, c.navigationItem.titleView === old { c.navigationItem.titleView = nil }
             c.titleSegments = nil
@@ -1052,6 +802,7 @@ extension NavigationHost {
         let name = container?.props["navigationBack"]
         for index in 1..<routes.count {
             let control = name.flatMap { element(named: $0, in: routes[index].node) }
+            control?.rejectNativeActiveProperties(on: "UIKit back button")
             let shape = control.map { HeaderShape.Item($0) }
             let source = shape.map { "\($0.symbol ?? "")|\($0.title)" } ?? "-"
             let below = routes[index - 1]
@@ -1089,7 +840,7 @@ extension NavigationHost {
         // In flow by layout: a popover a context preview lays out is hidden
         // here while it pushes the scroller down (`MenusIOS`), and a title
         // must not collapse with a scroller that is no longer the route's top.
-        let flowing = { (v: NodeView) in (!v.isHidden || v.presenter?.menus.isLaidOut(v) == true) && Self.inFlow(v) }
+        let flowing = Self.flowingTopContent
         let node = shape.map { shape in kids.firstIndex { $0 === shape.header }.flatMap { kids[($0 + 1)...].first(where: flowing) } }
             ?? (shows || wantsWholeView ? kids.first(where: flowing) : nil)
         var bands = Presenter.Bands()
@@ -1105,8 +856,9 @@ extension NavigationHost {
         c.ridingBars = riders
         c.rideBars()
         let covered = padsTop(c)
-        let ordinary = shape?.authored.isEmpty != false && node?.scrollView != nil && node === scroller ? node : nil
-        let target = !riders.isEmpty ? (covered ? nil : scroller) : ordinary
+        let ordinary = shape?.authored.isEmpty != false ? node.flatMap { Self.topScroller($0, target: scroller) } : nil
+        let arranged = scroller.flatMap { node in arrangementScrollers(in: c, top: true).contains(where: { $0 === node }) ? node : nil }
+        let target = !riders.isEmpty ? (covered ? nil : scroller) : (ordinary ?? arranged)
         if let target, !riders.isEmpty {
             let band = UIEdgeInsets(top: bands.band.top, left: 0, bottom: target.pageBand.bottom, right: 0)
             var own = band
@@ -1126,7 +878,7 @@ extension NavigationHost {
         // photo bleeds to the top, and the bar's material comes as it scrolls.
         // That is the top's clearance turned off (`ignoresSafeArea`).
         if shown?.contentInsetAdjustmentBehavior == .scrollableAxes { shown?.contentInsetAdjustmentBehavior = .automatic } // PROTO: release the reach's axis policy for the primary scroller
-        c.setContentScrollView(shown ?? c.bandedTop, for: .top) // or the scroller its control bars are over (LLP 1131)
+        c.projectContentScrollView(shown ?? c.bandedTop, for: .top) // or the scroller its control bars are over (LLP 1131)
         // PROTO: keep UIKit's inset and offset when only the bar's scroll association changes
         if let old, oldView !== shown {
             old.scrollOrigin = 0
@@ -1185,15 +937,18 @@ extension NavigationHost {
         // the authored one: a scroller there ends that far above it. The
         // cover it has without one, so a scroller that does not grow as the
         // cover goes is at the edge either way.
-        let target = Self.bottomScroller(in: c.node, cover: c.bottomClearance)
-        guard c.edgeScroll !== target || c.contentScrollView(for: .bottom) !== (target?.scrollView ?? c.bandedBottom) else { return }
+        let peers = arrangementScrollers(in: c, top: false)
+        let peer = contentScroller(of: c).flatMap { node in peers.contains(where: { $0 === node }) ? node : nil } ?? peers.first
+        let target = Self.bottomScroller(in: c.node, cover: c.bottomClearance) ?? peer
+        let projects = !c.nativeContentScrollEdges.contains(.bottom)
+        guard c.edgeScroll !== target || (projects && c.contentScrollView(for: .bottom) !== (target?.scrollView ?? c.bandedBottom)) else { return }
         c.safeArea.release(c.edgeScroll?.scrollView)
         c.edgeScroll = target
         let shown = shownScroll(target)
         if shown?.contentInsetAdjustmentBehavior == .scrollableAxes { shown?.contentInsetAdjustmentBehavior = .automatic } // PROTO: release only the reach's axis policy
         // tvOS has no bottom bar whose edge follows a scroller.
         #if !os(tvOS)
-        c.setContentScrollView(shown ?? c.bandedBottom, for: .bottom)
+        c.projectContentScrollView(shown ?? c.bandedBottom, for: .bottom)
         #endif
         presenter.session?.log("navigation: route \(c.key) \(target == nil ? "keeps its content above the bottom edge" : "scrolls its content to the bottom edge")")
     }
@@ -1254,10 +1009,9 @@ extension NavigationHost {
     /// The physical backend owned by a content node.
     func shownScroll(_ node: NodeView?) -> UIScrollView? { node?.scrollView }
 
-    /// Whether UIKit insets this scroller under its bars (`.automatic`): a
-    /// route's collapse or bottom-edge scroller.
+    /// UIKit insets the route's collapse scroller, bottom-edge scroller and arranged peers
     func insetByUIKit(_ node: NodeView) -> Bool {
-        controllers.values.contains { $0.collapseScroll === node || $0.edgeScroll === node }
+        controllers.values.contains { $0.collapseScroll === node || $0.edgeScroll === node || arrangementPeers(in: $0).contains { $0 === node } }
     }
 
     /// A route's primary scroller's adjusted inset changed (`RouteSafeArea`).
@@ -1320,6 +1074,7 @@ extension NavigationHost {
     }
 
     private func barItemMade(_ i: HeaderShape.Item, _ c: RouteController) -> UIBarButtonItem {
+        presenter.views[i.id]?.rejectNativeActiveProperties(on: "UIBarButtonItem", supporting: i.supportsActiveColor ? ["press_color"] : [])
         if i.readout != nil { c.barItemsMade[i.id] = nil; return readoutItem(i, c) }
         // A menu reads its rows through the button's view: a new view, a new menu.
         // Before iOS 26 a chip's picture follows the bar's tint, which the item
@@ -1352,7 +1107,7 @@ extension NavigationHost {
                 made.bar.action = nil
             }
             c.barItemsMade[i.id] = (i, made.bar, made.press, button?.incarnation)
-            return configure(made.bar, i, image: image)
+            return configure(made.bar, i, image: image, press: made.press)
         }
         let press = BarPress(i.id, self)
         c.barPresses.append(press)
@@ -1367,11 +1122,11 @@ extension NavigationHost {
                 ?? UIBarButtonItem(title: i.title, style: .plain, target: press, action: action)
         }
         c.barItemsMade[i.id] = (i, item, press, button?.incarnation)
-        return configure(item, i, image: image)
+        return configure(item, i, image: image, press: press)
     }
 
     /// What a bar item says of its control besides its face.
-    private func configure(_ item: UIBarButtonItem, _ i: HeaderShape.Item, image: UIImage?) -> UIBarButtonItem {
+    private func configure(_ item: UIBarButtonItem, _ i: HeaderShape.Item, image: UIImage?, press: BarPress) -> UIBarButtonItem {
         item.accessibilityLabel = i.label ?? (i.title.isEmpty ? nil : i.title)
         item.accessibilityIdentifier = i.testId
         item.isEnabled = !i.disabled
@@ -1385,8 +1140,22 @@ extension NavigationHost {
         let font = image == nil ? i.font : nil
         if item.titleTextAttributes(for: .normal)?[.font] as? UIFont != font {
             for state: UIControl.State in [.normal, .highlighted, .disabled, .selected, .focused] {
-                item.setTitleTextAttributes(font.map { [.font: $0] }, for: state)
+                var attributes = item.titleTextAttributes(for: state) ?? [:]
+                attributes[.font] = font
+                item.setTitleTextAttributes(attributes.isEmpty ? nil : attributes, for: state)
             }
+        }
+        var highlighted = item.titleTextAttributes(for: .highlighted) ?? [:]
+        if let value = i.activeTitleColor, let button = presenter.views[i.id] {
+            if press.activeForeground == nil { press.activeForeground = .init(value: highlighted[.foregroundColor]) }
+            highlighted[.foregroundColor] = SystemColor.native(value) ?? UIColor { [weak button] traits in
+                ButtonConfigurationIOS.color(value, traits: traits, accent: button?.carriedTint) ?? .clear
+            }
+            item.setTitleTextAttributes(highlighted, for: .highlighted)
+        } else if let saved = press.activeForeground {
+            highlighted[.foregroundColor] = saved.value
+            item.setTitleTextAttributes(highlighted.isEmpty ? nil : highlighted, for: .highlighted)
+            press.activeForeground = nil
         }
         if #available(iOS 26.0, tvOS 26.0, *) {
             item.style = i.prominent ? .prominent : .plain
@@ -1399,29 +1168,7 @@ extension NavigationHost {
         return item
     }
 
-    /// A route's content scroller (LLP 1115.000 D11.1). With nothing written
-    /// it is the first scroller under the route that scrolls vertically, as
-    /// a hand-built screen's scroll view is its bar's unasked; a route names
-    /// a different one with `navigationScroll`, resolved inside it by HTML
-    /// id as its Back control is (E7: nothing searches), and a name that
-    /// finds no scroller is none. One rule for everything that asks: the
-    /// bar's scroller (`collapse`), the status bar's tap and a reselected
-    /// tab's (`ScrollsToTopIOS`), and the scroll view a route hatch is given.
-    func contentScroller(of c: RouteController) -> NodeView? {
-        if let name = c.node.props["navigationScroll"], !name.isEmpty {
-            return element(named: name, in: c.node).flatMap { $0.scrollView == nil ? nil : $0 }
-        }
-        return Presenter.firstVerticalScroller(under: c.node)
-    }
-
-    /// The authored content scroller, or the route's document viewport when none was named.
-    func contentScrollView(of route: RouteController) -> UIScrollView? {
-        if let node = contentScroller(of: route) { return shownScroll(node) }
-        if let name = route.node.props["navigationScroll"], !name.isEmpty { return nil }
-        return route.contentViewport
-    }
-
-    private func element(named name: String, in route: NodeView) -> NodeView? {
+    func element(named name: String, in route: NodeView) -> NodeView? {
         presenter.carrying("id").first { $0.props["id"] == name && ($0 === route || $0.isDescendant(of: route)) }
     }
 

@@ -1014,7 +1014,10 @@ component Inks
     pressInk: string
     go: action
   view
-    column press=go -exact-press-background-color=pressed -exact-press-color=pressInk
+    column press=go
+      :active
+        background-color=pressed
+        color=pressInk
       input value="" aria-label="field" caret-color=caret accent-color=accent
 "#;
 

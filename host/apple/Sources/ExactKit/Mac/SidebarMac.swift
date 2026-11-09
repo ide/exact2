@@ -187,6 +187,7 @@ final class SidebarHost {
             decide("kept as authored: the root tablist #\(host.tablist.id) is placed by the app (not a row in flow in the root's flex column)")
             return
         }
+        for tab in host.tabs { tab.rejectNativeActiveProperties(on: "NSOutlineView sidebar row") }
         decide("the root tablist #\(host.tablist.id) is the window's sidebar (\(host.tabs.count) tabs)")
         let hidden = host.tablist.style["display"]?.string == "none"
         // Native button faces are viewless. Rebuild rows for every controls batch,

@@ -1121,7 +1121,9 @@ fn a_cleared_pressed_paint_sends_no_row() {
   action flip
     on = not on
   view
-    button press=flip background-color="#ffffff" -exact-press-background-color=(on ? "#abcdef" : "unset") -exact-press-opacity=(on ? 0.5 : "unset") testId="b"
+    button press=flip background-color="#ffffff" -exact-press-opacity=(on ? 0.5 : "unset") testId="b"
+      :active
+        background-color=(on ? "#abcdef" : "unset")
       text "b"
 "##,
     )

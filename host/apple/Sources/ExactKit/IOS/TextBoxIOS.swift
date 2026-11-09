@@ -1,17 +1,9 @@
-// A paragraph's words laid out again while UIKit resizes their box cross-fade
-// from their old lines to the new ones over the resize. The fade is Core
-// Animation's: a `CATransition` on the box's lines blends the two states, so
-// pixels the same in both stay as they are, and the render server runs it.
-// Where the fade is comes from the lines' clock, which `TextBoxLayer` sets
-// from UIKit's resize of the box: from where the fade is to where the resize
-// ends, at the resize's pace, or held where a gesture holds the resize. It is
-// set again only when UIKit adds or removes a resize. A paused, scrubbed,
-// continued or reversed `UIViewPropertyAnimator` was seen to replace the
-// animations it made with copies of the same values, re-timed: paused at the
-// finger's fraction (speed 0, the offset that fraction of the duration), or
-// running again (speed 1, or -1 counting back from its end), and to remove
-// them when it finishes. So the main thread works when UIKit does, and no
-// frame needs it.
+// Cross-fade relaid-out lines while UIKit resizes their box. A CATransition
+// on the lines blends both states and runs in the render server. The lines'
+// clock follows the resize, including pauses and reversals. UIViewPropertyAnimator
+// can replace resize animations with retimed copies while scrubbing or continuing;
+// update the fade's clock when UIKit adds or removes those animations, without
+// per-frame main-thread work.
 #if os(iOS) || os(tvOS)
 import UIKit
 
@@ -110,12 +102,9 @@ final class TextBoxLayer: BoxPartLayer {
     }
 
     /// A change the fade is aimed from (new lines, or a resize added or
-    /// removed), aimed once Core Animation has committed it, which fixes the
-    /// begin times of the animations UIKit added: the commit's time for one
-    /// begun at 0, or a time counted from it (UIKit was seen to add a 0.3 s
-    /// delay as 0.3, and a continued animator's re-timed animation as
-    /// -0.74). A mark added with the latest change, begun at 0, says when
-    /// that commit has happened: its begin time is the commit's from then on.
+    /// removed), aimed after Core Animation commits the animation begin times.
+    /// UIKit can supply zero or commit-relative begin times. A zero-begin-time
+    /// mark resolves to the commit time and identifies when those values are ready.
     private func changed() {
         // Held where it is until it is aimed for the change, in the change's
         // own transaction: its clock was set for the resize as it was
@@ -131,8 +120,7 @@ final class TextBoxLayer: BoxPartLayer {
     private func awaitCommit() {
         guard !Self.unaimed.contains(self) else { return }
         if Self.unaimed.count == 0 {
-            // Ordered last in the turn, after Core Animation's commit (its own
-            // observer was seen at order 2000000); exit covers a turn that never waits
+            // Run after Core Animation's commit; exit covers a turn that does not wait
             let observer = CFRunLoopObserverCreateWithHandler(nil, CFRunLoopActivity.beforeWaiting.rawValue | CFRunLoopActivity.exit.rawValue, false, CFIndex.max) { _, _ in
                 Self.committed()
             }
@@ -152,8 +140,7 @@ final class TextBoxLayer: BoxPartLayer {
         unaimed.removeAllObjects()
         var ready: [TextBoxLayer] = []
         for box in taken where box.fading {
-            // Not committed yet (an open explicit transaction holds it, or a run
-            // loop run inside another's callout was seen to leave it to that one): a later turn
+            // Retry when an explicit transaction or nested run loop leaves the mark uncommitted
             if box.animation(forKey: mark)?.beginTime == 0 { box.awaitCommit() } else { ready.append(box) }
         }
         guard !ready.isEmpty else { return }
@@ -168,6 +155,18 @@ final class TextBoxLayer: BoxPartLayer {
             box.aim()
         }
         CATransaction.commit()
+    }
+
+    /// An empty pooled box carries no fade, resize or paused clock into its next row.
+    func reset() {
+        end()
+        held = nil
+        Self.unaimed.remove(self)
+        removeAllAnimations()
+        lines?.removeAllAnimations()
+        lines?.beginTime = 0
+        lines?.speed = 1
+        lines?.timeOffset = 0
     }
 
     /// The lines' clock set from the box's resize as committed. Held where a

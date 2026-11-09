@@ -590,6 +590,51 @@ final class HeaderMacTests: XCTestCase {
         }
     }
 
+    func testRetainedToolbarAndStatusMenusRejectNewActiveProperties() throws {
+        for status in [false, true] {
+            var props = ["popovertarget": "more"]
+            if status { props["menuPlacement"] = "status" }
+            let content = symbolButton(16, "More", "ellipsis.circle", props)
+                + view(40, "view", ["popover": "auto", "id": "more"])
+                + view(41, "button", ["popovertarget": "more", "popovertargetaction": "hide"], press: true)
+                + view(411, "text", ["text": "Rename"])
+                + view(42, "button", [:], press: true) + view(421, "text", ["text": "Delete"])
+                + [children(41, [411]), children(42, [421]), children(40, [41, 42]), children(10, [11, 12, 13, 14, 16]), children(2, [10, 15, 40])]
+            let p = fixture(extra: content)
+            defer { p.toolbar.detach(); p.statusItems.reset() }
+            let source = try node(p, 16), pop = try node(p, 40), row = try node(p, 41)
+            XCTAssertNil(pop.props["accessibilityRole"])
+            var item: NSMenuToolbarItem?, menu: NSMenu?, action: NSMenuItem?
+            if status {
+                XCTAssertTrue(p.statusItems.places(source))
+                let opened = try XCTUnwrap(p.statusItems.agentClick(source))
+                XCTAssertNil(opened["error"])
+                XCTAssertNotNil(opened["menu"])
+            } else {
+                XCTAssertTrue(p.toolbar.attach(to: window))
+                item = try XCTUnwrap(p.toolbar.items[16] as? NSMenuToolbarItem)
+                menu = item?.menu
+                menu?.delegate?.menuNeedsUpdate?(try XCTUnwrap(menu))
+                action = try XCTUnwrap(menu?.items.first)
+            }
+            XCTAssertNil(row.nativeActiveRefusals["NSMenuItem"])
+            p.apply(wireBatch([["op": "style", "id": 41, "style": ["press_opacity_to": 0.4]]]))
+            if status {
+                XCTAssertTrue(p.statusItems.places(source))
+            } else {
+                XCTAssertTrue(p.toolbar.items[16] === item)
+                XCTAssertTrue(item?.menu === menu)
+                XCTAssertTrue(item?.menu.items.first === action)
+            }
+            XCTAssertTrue(row.nativeActiveRefusals["NSMenuItem"]?.contains("opacity") == true, "the retained native menu refuses opacity (status: \(status))")
+            row.nativeActiveRefusals.removeValue(forKey: "NSMenuItem")
+            p.apply(wireBatch([children(40, [42]), children(2, [10, 15, 40, 41]),
+                              ["op": "style", "id": 41, "style": ["press_opacity_to": 0.5]]]))
+            XCTAssertTrue(row.superview === p.views[2]?.container)
+            XCTAssertNil(row.nativeActiveRefusals["NSMenuItem"], "a former menu row now belongs to the page (status: \(status))")
+        }
+    }
+
     /// A header's button that opens a menu is AppKit's menu item: the menu
     /// is the item's own to pop up, filled from the popover's rows as it
     /// opens, after the button's own press; a chosen row presses its

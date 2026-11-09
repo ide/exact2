@@ -525,8 +525,21 @@ final class MenuHost: NSObject {
         layout()
         return true
     }
+    func rejectActiveMenuProperties(in pop: NodeView) {
+        for case let row as NodeView in pop.container.subviews where row.isButton && row.props["popover"] == nil && row.props["contextPreview"] != "true" {
+            row.rejectNativeActiveProperties(on: "NSMenuItem")
+        }
+    }
     func sync() {
         guard let presenter else { return }
+        for case let item as NSMenuToolbarItem in presenter.toolbar.items.values {
+            if let source = (item.menu as? InvokerMenu)?.source, let pop = toolbarPopover(of: source) {
+                rejectActiveMenuProperties(in: pop)
+            }
+        }
+        for pop in presenter.carrying("popover") where pop.props["accessibilityRole"] == "menu" {
+            rejectActiveMenuProperties(in: pop)
+        }
         for entry in entries {
             let source = entry.source
             guard (!entry.sourced || source != nil), source.map(live) ?? true, live(entry.popover), source.map(connected) ?? true, connected(entry.popover),
@@ -537,6 +550,7 @@ final class MenuHost: NSObject {
                   entry.value == "manual" || source.map({ !hidden($0) || presenter.toolbar.contains($0) }) ?? true,
                   entry.menu == nil || (entry.confirmation.map(valid) ?? isMenuShaped(entry.popover))
             else { close(entry.popover); continue }
+            if entry.menu != nil { rejectActiveMenuProperties(in: entry.popover) }
             syncPresentation(entry)
             entry.native?.repoint()
         }
@@ -805,6 +819,7 @@ final class MenuHost: NSObject {
         if presenter.statusItems.places(source) { presenter.statusItems.endMenu(menu) }
     }
     private func menuItem(of row: NodeView, action: Selector?) -> NSMenuItem {
+        row.rejectNativeActiveProperties(on: "NSMenuItem")
         let item = AccessibleMenuItem(title: title(of: row), action: action, keyEquivalent: "")
         item.owner = row
         if #available(macOS 14.4, *), row.isNativeButton {

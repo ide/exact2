@@ -4,7 +4,8 @@ import XCTest
 @testable import ExactKit
 
 final class TextUpdateIOSTests: XCTestCase {
-    func testTintedCoverageReplacesItsPixelsInPlaceAndSwitchesFormat() throws {
+    /// Profile changes reuse coverage in the same UIKit view; complex paint switches to a pixel layer
+    func testCoverageInkRedrawsInPlaceAndSwitchesKind() throws {
         let p = Presenter()
         p.apply(wireBatch([["op": "create", "id": 1, "kind": "text", "props": ["text": "Ink"]],
             ["op": "frame", "id": 1, "x": 0, "y": 0, "w": 20, "h": 20]]))
@@ -12,61 +13,56 @@ final class TextUpdateIOSTests: XCTestCase {
         let node = try XCTUnwrap(p.views[1])
         let context = try XCTUnwrap(CGContext(data: nil, width: 20, height: 20, bitsPerComponent: 8,
             bytesPerRow: 80, space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
-        context.setFillColor(UIColor.black.cgColor)
-        context.fill(CGRect(x: 5, y: 5, width: 10, height: 10))
-        let image = try XCTUnwrap(context.makeImage())
-        let key = TextRasterKey(spec: node.paragraphSpec(), size: node.bounds.size, box: node.paragraphBox(), scale: 1)
-        var result = TextRasterImage(image, frame: node.bounds, covered: node.bounds, headroom: 0)
-        result.tint = UIColor.red.cgColor
-        let start = CACurrentMediaTime()
-        for _ in 0..<1600 {
-            node.textRasterKey = key; node.textRasterReady = false
-            node.showTextRaster(result, for: key)
-        }
-        print("D3 tinted updates=1600 ms=\((CACurrentMediaTime() - start) * 1000)")
-        let ink = try XCTUnwrap(node.textRasterLayer)
-        XCTAssertNil(ink.sublayers, "one-colour ink is one layer, as a label is")
-        XCTAssertNil(ink.delegate, "standalone raster ink has no UIKit backing view")
-        XCTAssertTrue(node.subviews.isEmpty, "ink is a layer: no subview to take input or keep a row from parking")
-        context.clear(node.bounds)
-        ink.render(in: context)
         let bytes = try XCTUnwrap(context.data).assumingMemoryBound(to: UInt8.self)
-        XCTAssertEqual(bytes[3], 0, "the coverage's empty corner stays transparent")
-        let center = (10 * 20 + 10) * 4
-        XCTAssertEqual(Array(UnsafeBufferPointer(start: bytes + center, count: 4)), [255, 0, 0, 255])
-        context.clear(node.bounds)
-        context.fill(node.bounds)
-        var replacement = TextRasterImage(try XCTUnwrap(context.makeImage()), frame: node.bounds, covered: node.bounds, headroom: 0)
-        replacement.tint = UIColor.blue.cgColor
+        func drawing(_ color: UIColor) -> TextRasterImage {
+            TextRasterImage(TextDrawing("HH", color: color.cgColor, baseline: 15, frame: node.bounds), covered: node.bounds)
+        }
+        // What Core Animation displayed for the layer, rendered: its pixels as RGBA
+        func displayed(_ ink: CALayer) -> [[UInt8]] {
+            context.clear(node.bounds)
+            ink.render(in: context)
+            return (0..<400).map { Array(UnsafeBufferPointer(start: bytes + $0 * 4, count: 4)) }
+        }
+        let key = TextRasterKey(spec: node.paragraphSpec(), size: node.bounds.size, box: node.paragraphBox(), scale: 1)
+        let red = drawing(.red)
+        node.textRasterKey = key; node.textRasterReady = false
+        node.showTextRaster(red, for: key)
+        let ink = try XCTUnwrap(node.textRasterLayer, "one-colour ink is drawn by its own layer")
+        XCTAssertNil(ink.sublayers, "one-colour ink is one layer, as a label is")
+        XCTAssertNil(ink.mask, "no mask")
+        let coverageView = try XCTUnwrap(ink.delegate as? CoverageImageView)
+        XCTAssertTrue(coverageView.isDescendant(of: node), "UIKit owns the coverage view")
+        XCTAssertFalse(coverageView.isUserInteractionEnabled, "text keeps its authored input target")
+        XCTAssertFalse(coverageView.isAccessibilityElement, "the authored paragraph owns accessibility")
+        ink.displayIfNeeded()
+        var shown = displayed(ink)
+        XCTAssertTrue(shown.contains([255, 0, 0, 255]), "red glyphs")
+        XCTAssertTrue(shown.contains { $0[3] == 0 }, "clear around them")
         CATransaction.begin(); CATransaction.setAnimationDuration(1)
         node.textRasterReady = false
-        node.showTextRaster(replacement, for: key)
+        node.showTextRaster(drawing(.blue), for: key)
         CATransaction.commit()
-        XCTAssertTrue(node.textRasterLayer === ink)
-        context.clear(node.bounds)
-        ink.render(in: context)
-        XCTAssertEqual(Array(UnsafeBufferPointer(start: bytes, count: 4)), [0, 0, 255, 255], "replacement coverage and colour reach the existing layer")
+        XCTAssertTrue(node.textRasterLayer === ink, "a new drawing reaches the existing layer")
         XCTAssertTrue(ink.animationKeys()?.isEmpty ?? true)
-        XCTAssertTrue(ink.mask?.animationKeys()?.isEmpty ?? true)
-        replacement.tint = nil
-        node.textRasterReady = false
-        node.showTextRaster(replacement, for: key)
-        let untinted = try XCTUnwrap(node.textRasterLayer)
-        XCTAssertFalse(untinted === ink)
-        XCTAssertNil(ink.superlayer, "switching raster formats removes the previous ink")
-        XCTAssertNil(untinted.mask)
+        ink.displayIfNeeded()
+        shown = displayed(ink)
+        XCTAssertTrue(shown.contains([0, 0, 255, 255]), "blue glyphs")
+        XCTAssertFalse(shown.contains { $0[0] > 0 }, "none of the red")
         context.clear(node.bounds)
-        untinted.render(in: context)
-        XCTAssertEqual(Array(UnsafeBufferPointer(start: bytes, count: 4)), [0, 0, 0, 255])
-        replacement.tint = UIColor.red.cgColor
+        context.setFillColor(UIColor.black.cgColor)
+        context.fill(node.bounds)
         node.textRasterReady = false
-        node.showTextRaster(replacement, for: key)
-        let retinted = try XCTUnwrap(node.textRasterLayer)
-        XCTAssertNil(untinted.superlayer)
-        XCTAssertNotNil(retinted.mask)
-        context.clear(node.bounds)
-        retinted.render(in: context)
-        XCTAssertEqual(Array(UnsafeBufferPointer(start: bytes, count: 4)), [255, 0, 0, 255])
+        node.showTextRaster(TextRasterImage(try XCTUnwrap(context.makeImage()), frame: node.bounds, covered: node.bounds, headroom: 0), for: key)
+        let pixels = try XCTUnwrap(node.textRasterLayer)
+        XCTAssertFalse(pixels.delegate is CoverageImageView, "pixels are shown by a plain ink layer")
+        XCTAssertNil(ink.superlayer, "switching kinds removes the previous ink")
+        XCTAssertEqual(displayed(pixels)[0], [0, 0, 0, 255])
+        node.textRasterReady = false
+        node.showTextRaster(red, for: key)
+        let redrawn = try XCTUnwrap(node.textRasterLayer)
+        XCTAssertNil(pixels.superlayer)
+        redrawn.displayIfNeeded()
+        XCTAssertTrue(displayed(redrawn).contains([255, 0, 0, 255]), "red glyphs again")
     }
 
     func testWordsReuseTheParagraphsBoxLayer() throws {

@@ -1,0 +1,28 @@
+# Native feedback: Astra review, round 1
+
+- **Family:** OpenAI. GPT-6 Astra (`gpt-6-astra`) via `codex-cli 0.167.0`, reasoning effort max, read-only sandbox, a throwaway worktree at `974abf0eeb` on `72c8cabfe8`.
+- **Method:** one brief (sha256 `75005c61dccbec5eedd250000bcb2bd9157ee83840824239925e6be47215790a`), one reviewer, with four passes: adversarial correctness, simplification, writing and verification. The author is not a reviewer.
+- **Transcription:** the final message, unedited; its links name the review's evidence paths and its commit names that frozen source.
+
+---
+
+Reviewed `974abf0eeb6bc05ae2e26225d02c31cb459b1e1c` against `72c8cabfe8ce1ee03eb16b9da6ac5e2ab5e155e0`. Findings below are from source review, not runtime reproduction.
+
+1. **[P2] UIKit configuration callbacks can permanently remove an active override.** [ButtonConfigurationIOS.swift:27](/tmp/exact-native-astra-r1-checkout/host/apple/Sources/ExactKit/IOS/ButtonConfigurationIOS.swift:27) installs each transformer only while its saved slot is empty. If a configuration callback replaces `titleTextAttributesTransformer` to customize the font, the active-color wrapper disappears but the saved slot remains occupied. Subsequent active-color retargeting cannot reinstall it. [NativeButtonsIOS.swift:18](/tmp/exact-native-astra-r1-checkout/host/apple/Sources/ExactKit/IOS/NativeButtonsIOS.swift:18) also performs no reconciliation after `super.updateConfiguration()`. Reconcile against the callback’s current transformer. The new callback test changes `titlePadding`, leaving this failure untested.
+
+2. **[P2] Linux paints the active background twice, with different shapes.** [paint.rs:1108](/tmp/exact-native-astra-r1-checkout/host/linux/src/paint.rs:1108) applies active background through `BoxPaint.states()` and paints that box before calling the native button painter. The new mapping then paints the same background again—for example, [button.rs:716](/tmp/exact-native-astra-r1-checkout/host/linux/src/paint/button.rs:716). A 50%-alpha fill therefore produces approximately 75% coverage where both overlap. The generic box also uses CSS radii rather than the native button’s default rounded shape, allowing painted corners outside that shape. Give the native background one paint owner. The added regression checks opaque interior pixels, which conceal both problems.
+
+3. **[P2] AppKit clearing restores stale native colors.** [NativeButtonsMac.swift:105](/tmp/exact-native-astra-r1-checkout/host/apple/Sources/ExactKit/Mac/NativeButtonsMac.swift:105) unconditionally restores saved bezel/tint values and saved title foreground attributes. For example: start with a green bezel, hold an authored red background, set the native bezel to purple, then clear the active background without changing the base face. Clearing restores green, discarding purple. This contradicts restoration of the *current* native configuration, including changes made while pressed. Preserve intervening native writes; the new preservation test changes unrelated fields before pressing.
+
+4. **[P2] Already-open alerts bypass refusal for newly added active properties.** The rejection calls at [MenusIOS.swift:1271](/tmp/exact-native-astra-r1-checkout/host/apple/Sources/ExactKit/IOS/MenusIOS.swift:1271) and [AlertsMac.swift:175](/tmp/exact-native-astra-r1-checkout/host/apple/Sources/ExactKit/Mac/AlertsMac.swift:175) run only when creating alert actions. Their subsequent `sync`/`valid` paths do not check active properties. Open an alert with a conditional target cleared, then enable that target while the alert remains open: the override is ignored without the required journal refusal. Check live projected actions during synchronization while retaining the native alert.
+
+5. **[P2] The change exceeds the source-file cap.** The three added refusal calls make [MenusIOS.swift](/tmp/exact-native-astra-r1-checkout/host/apple/Sources/ExactKit/IOS/MenusIOS.swift:1435) 1,502 physical lines, or **1,503 using [caps.mjs:165](/tmp/exact-native-astra-r1-checkout/scripts/caps.mjs:165)**. The base counted exactly 1,500 using that rule. This violates the configured cap independently of the pending validation run.
+
+6. **[P3] Existing prose contradicts the new native semantics.** [contract-for-agents.md:3072](/tmp/exact-native-astra-r1-checkout/docs/contract-for-agents.md:3072) still promises a 120 ms curve and says authored properties remove the whole native highlight, explicitly including grouped rows. [The RFC at line 231](/tmp/exact-native-astra-r1-checkout/llp/1061-press-feel-and-reduced-motion.rfc.md:231) still says native buttons refuse these properties immediately before the new admission paragraph. Scope the timing/replacement guidance correctly and remove the obsolete refusal statement. This is a semantic contradiction, separate from spelling retirement.
+
+The four passes found:
+
+- **Correctness:** Findings 1–4. I also traced viewless color ownership, disabled gating, transform origin, and bar/segment caches; no additional concrete finding there.
+- **Simplification:** No separate finding. The face-row projection and host adapters provide a direct extension path. `HeaderShape` extraction is coherent; border/shadow implementation remains outside scope.
+- **Writing:** Finding 6. Retained public press-paint names were intentionally excluded.
+- **Verification:** Finding 5, plus the regression gaps described above. All 49 changed working files match their HEAD blobs; `git diff --check` reported no whitespace errors. I modified no files, launched no agents, and ran no runtime tests or apps. The newest native tests and remaining validation are still pending; earlier candidate results do not validate this frozen HEAD.

@@ -226,6 +226,51 @@ pub fn compatibility_id_sources_with_entries(
     rust_grants: Option<&str>,
     entries: Option<&std::collections::BTreeMap<String, contract::snapshot::Entry>>,
 ) -> Result<Compat, String> {
+    compatibility_id_pinned(
+        app_dir,
+        platform,
+        target,
+        manifest,
+        grants,
+        rust_grants,
+        entries,
+        None,
+    )
+}
+
+/// The module a platform's stored bundles are pinned to: the compiled module's
+/// sha256 from a bake's metadata (`module.sha256`) when the platform has a
+/// store, since stores deliver plans and assets and cannot replace the compiled
+/// module; none without one. Metadata without the hash is refused either way.
+pub fn stored_module<'a>(
+    meta: &'a serde_json::Value,
+    manifest: &Manifest,
+    platform: &str,
+) -> Result<Option<&'a str>, String> {
+    let module = meta["module"]["sha256"]
+        .as_str()
+        .ok_or("missing module hash")?;
+    Ok((manifest.store(platform) != "0").then_some(module))
+}
+
+/// As [`compatibility_id_sources_with_entries`], for a module client (its
+/// logic compiled into the binary, LLP 1027) whose binary has an update store.
+/// Bundles carry plan and assets, never code, so a bundle is safe only on a
+/// binary whose module is the one the plan was baked against: `module` (the
+/// compiled module's sha256) enters the id as `typescriptModule`, and any
+/// change to the app's TypeScript is a new cohort, a new stream and a new
+/// binary.
+#[allow(clippy::too_many_arguments)]
+pub fn compatibility_id_pinned(
+    app_dir: &Path,
+    platform: &str,
+    target: &str,
+    manifest: &Manifest,
+    grants: Option<&str>,
+    rust_grants: Option<&str>,
+    entries: Option<&std::collections::BTreeMap<String, contract::snapshot::Entry>>,
+    module: Option<&str>,
+) -> Result<Compat, String> {
     // Cargo must rebake even when only the explicit trust selection changes.
     // External apps call this same entrypoint from their own build scripts.
     if std::env::var_os("OUT_DIR").is_some() {
@@ -259,6 +304,10 @@ pub fn compatibility_id_sources_with_entries(
     )?;
     if let Some(rust) = rust_grants {
         source_scopes(&mut compat, grants.unwrap_or(""), rust);
+    }
+    if let Some(module) = module {
+        compat.inputs["typescriptModule"] = serde_json::Value::String(module.into());
+        compat.id = compatibility_digest(&compat.inputs);
     }
     crate::reach::derive(app_dir, platform, plan.as_ref(), &mut compat)?;
     // The plans that ship, each resolved once (the receipt writes the entry

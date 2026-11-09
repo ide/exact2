@@ -2,3 +2,5 @@
 
 mod fmt;
 mod parse;
+
+mod migrate;

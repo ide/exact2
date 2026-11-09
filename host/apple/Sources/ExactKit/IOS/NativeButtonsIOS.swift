@@ -15,11 +15,124 @@ import UIKit
 /// (the node is the focus owner, D4).
 final class NativeButtonIOS: UIButton {
     weak var owner: NodeView?
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        configurationUpdateHandler = nil
+    }
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        configurationUpdateHandler = nil
+    }
+    private var composingConfiguration = false
+    private var applyingActiveConfiguration = false
+    // The Swift configuration overlay cannot be overridden. This is UIKit's
+    // public Objective-C property, imported with a prefix for the overlay.
+    override var __configuration: __UIButtonConfiguration? {
+        get { super.__configuration }
+        set {
+            if !applyingActiveConfiguration {
+                if let slot = activeBackground, slot.installed !== newValue?.value(forKeyPath: "background.backgroundColorTransformer") as AnyObject? { activeBackground = nil }
+                if let slot = activeTitle, slot.installed !== newValue?.value(forKey: "titleTextAttributesTransformer") as AnyObject? { activeTitle = nil }
+                if let slot = activeSubtitle, slot.installed !== newValue?.value(forKey: "subtitleTextAttributesTransformer") as AnyObject? { activeSubtitle = nil }
+                if let slot = activeSymbol, slot.installed !== newValue?.value(forKey: "imageColorTransformer") as AnyObject? { activeSymbol = nil }
+            }
+            super.__configuration = newValue
+            if !applyingActiveConfiguration { ButtonConfigurationIOS.syncActive(on: self, requestUpdate: false) }
+        }
+    }
+    func applyActiveConfiguration(_ config: UIButton.Configuration) {
+        applyingActiveConfiguration = true
+        defer { applyingActiveConfiguration = false }
+        configuration = config
+        let native = __configuration
+        activeBackground?.installed = native?.value(forKeyPath: "background.backgroundColorTransformer") as AnyObject?
+        activeTitle?.installed = native?.value(forKey: "titleTextAttributesTransformer") as AnyObject?
+        activeSubtitle?.installed = native?.value(forKey: "subtitleTextAttributesTransformer") as AnyObject?
+        activeSymbol?.installed = native?.value(forKey: "imageColorTransformer") as AnyObject?
+    }
+    override var configurationUpdateHandler: UIButton.ConfigurationUpdateHandler? {
+        get { super.configurationUpdateHandler }
+        set {
+            super.configurationUpdateHandler = { [weak self] button in
+                guard let self else { return }
+                // A client may wrap the previous handler; only the outer callback composes active fields.
+                if self.composingConfiguration { newValue?(button); return }
+                self.composingConfiguration = true
+                defer { self.composingConfiguration = false }
+                // UIKit invokes this after updateConfiguration(). Compose the client's
+                // native fields before installing the authored color overrides.
+                ButtonConfigurationIOS.removeActive(from: self)
+                newValue?(button)
+                ButtonConfigurationIOS.syncActive(on: self, requestUpdate: false)
+                self.refreshActiveState()
+            }
+        }
+    }
+    override func updateConfiguration() {
+        super.updateConfiguration()
+        if let written { ButtonConfigurationIOS.titleLayout(written.face.rows.title, on: self) }
+        if let owner { written?.active.present(on: owner, down: isEnabled && isHighlighted) }
+    }
+    /// Glass ignores imageColorTransformer. Own only the tinted image while
+    /// active; other native configuration fields remain UIKit's and the client's.
+    private struct ActiveImage {
+        let base: UIImage, shown: UIImage, color: UIColor
+    }
+    private var activeImage: ActiveImage?
+    struct TransformerBase<Value> {
+        let value: Value?
+        var installed: AnyObject?
+    }
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        if let written { ButtonConfigurationIOS.titleLayout(written.face.rows.title, on: self) }
+        refreshActiveState()
+    }
+    var activeBackground: TransformerBase<UIConfigurationColorTransformer>?
+    var activeTitle: TransformerBase<UIConfigurationTextAttributesTransformer>?
+    var activeSubtitle: TransformerBase<UIConfigurationTextAttributesTransformer>?
+    var activeSymbol: TransformerBase<UIConfigurationColorTransformer>?
+    func resetActiveConfiguration() {
+        activeImage = nil
+        activeBackground = nil; activeTitle = nil; activeSubtitle = nil; activeSymbol = nil
+    }
+    func refreshActiveState() {
+        updateActiveImage()
+        if let owner { written?.active.present(on: owner, down: isEnabled && isHighlighted) }
+    }
+    private func updateActiveImage() {
+        guard var config = configuration else { activeImage = nil; return }
+        let previous = activeImage
+        let base = config.image === previous?.shown ? previous?.base : config.image
+        guard isGlass, isEnabled, isHighlighted, let base,
+              base.isSymbolImage || base.renderingMode == .alwaysTemplate || symbolInk != nil,
+              let written, let value = written.active.properties(over: written.face.rows).symbol["tint_color"] else {
+            if let previous, config.image === previous.shown {
+                config.image = previous.base
+                configuration = config
+            }
+            activeImage = nil
+            return
+        }
+        let desired = ButtonConfigurationIOS.activeColor(value, on: self).resolvedColor(with: traitCollection)
+        let color = (tintAdjustmentMode == .dimmed ? tintColor.withAlphaComponent(desired.cgColor.alpha) : desired).resolvedColor(with: traitCollection)
+        if let previous, previous.base === base, previous.color == color, config.image === previous.shown { return }
+        let shown = base.withTintColor(color, renderingMode: .alwaysOriginal)
+        activeImage = ActiveImage(base: base, shown: shown, color: color)
+        config.image = shown
+        configuration = config
+    }
     /// UIKit's highlight, and a held press's beside it (HeldState.swift): a
     /// touch's own release leaves a held one highlighted.
     override var isHighlighted: Bool {
         get { super.isHighlighted }
-        set { super.isHighlighted = newValue || owner?.holds("active") == true }
+        set {
+            super.isHighlighted = newValue || owner?.holds("active") == true
+            refreshActiveState()
+        }
+    }
+    override var isEnabled: Bool {
+        didSet { refreshActiveState() }
     }
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
         if ExactEnv.agentMode { TouchLog.reach(touches) }
@@ -37,6 +150,7 @@ final class NativeButtonIOS: UIButton {
     /// What was last written, so a batch that changes nothing writes nothing.
     struct Written: Equatable {
         var face: ButtonFace
+        var active: NativeButtonState
         var raster: UInt64
         var accent: UIColor?
         var destructive: Bool
@@ -56,6 +170,10 @@ final class NativeButtonIOS: UIButton {
         func draws(as other: Written) -> Bool {
             var face = face, theirs = other.face
             face.label = nil; theirs.label = nil
+            face.rows.button["written"] = nil; theirs.rows.button["written"] = nil
+            face.rows.title["written"] = nil; theirs.rows.title["written"] = nil
+            face.rows.subtitle["written"] = nil; theirs.rows.subtitle["written"] = nil
+            face.rows.symbol["written"] = nil; theirs.rows.symbol["written"] = nil
             return face == theirs && raster == other.raster && accent == other.accent && destructive == other.destructive
                 && enabled == other.enabled && traits == other.traits && interactive == other.interactive && padding == other.padding
         }
@@ -102,6 +220,7 @@ final class NativeButtonIOS: UIButton {
     override func tintColorDidChange() {
         super.tintColorDidChange()
         noteTint()
+        defer { if isHighlighted, written?.active.style["press_color"] != nil { setNeedsUpdateConfiguration() } }
         guard let symbolInk, var config = configuration else { return }
         config.image = symbolInk.drawn(in: self)
         configuration = config
@@ -266,6 +385,7 @@ extension ControlHost {
     /// written only when one of them changes (a rewrite each batch would
     /// restart UIKit's own animations).
     func configureNative(_ button: NativeButtonIOS, _ owner: NodeView, accent: UIColor?) {
+        defer { button.refreshActiveState() }
         let face = self.face(owner.id)
         syncRaster(face, owner)
         // A destructive button draws in the platform's destructive red, as a hand-built screen's does (SwiftUI's
@@ -276,7 +396,7 @@ extension ControlHost {
         let destructive = owner.props["destructive"] == "true" && !owner.wrote("accent_color")
         let accent = destructive ? UIColor.systemRed : Self.platformAccent(owner, accent)
         let written = NativeButtonIOS.Written(
-            face: face, raster: owner.raster?.id ?? 0, accent: accent, destructive: destructive, enabled: !owner.disabled,
+            face: face, active: NativeButtonState(owner), raster: owner.raster?.id ?? 0, accent: accent, destructive: destructive, enabled: !owner.disabled,
             label: owner.authoredLabel ?? face.title, testId: owner.props["testId"],
             // A checked radio is selected, as Safari's VoiceOver reads one (`setAccessibilityChecked`).
             // `aria-current` (not `false`) too: UIKit has no current (theme2 2026-10-22 06:40).
@@ -290,7 +410,8 @@ extension ControlHost {
         if !face.known, button.written?.face.style != face.style {
             presenter.session?.log("buttonStyle `\(face.style ?? "")` is not a button style; drawing bordered")
         }
-        let redraw = button.written.map { !$0.draws(as: written) } ?? true
+        let previous = button.written
+        let redraw = previous.map { !$0.draws(as: written) } ?? true
         button.written = written
         if redraw {
             let (_, drawn, glass) = Self.configuration(face)
@@ -303,6 +424,8 @@ extension ControlHost {
                 button.isGlass = glass
                 owner.syncGlassSlot()
             }
+        } else if previous.map({ $0.active.properties(over: $0.face.rows) }) != written.active.properties(over: face.rows) {
+            ButtonConfigurationIOS.syncActive(on: button)
         }
         button.accessibilityLabel = written.label
         button.accessibilityIdentifier = written.testId

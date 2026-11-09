@@ -88,6 +88,7 @@ final class StatusItemHost: NSObject {
     }
 
     private func place(_ node: NodeView) {
+        node.rejectNativeActiveProperties(on: "NSStatusBarButton")
         let item = items[node.id] ?? {
             let made = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
             // Where the person dragged it is kept, as a hand-built app's is.
@@ -123,6 +124,7 @@ final class StatusItemHost: NSObject {
         } else {
             item.menu = nil
         }
+        if item.menu != nil, let pop = presenter.menus.toolbarPopover(of: node) { presenter.menus.rejectActiveMenuProperties(in: pop) }
     }
 
     @objc private func clicked(_ sender: NSStatusBarButton) {

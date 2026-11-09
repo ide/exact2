@@ -212,6 +212,53 @@ final class NavigationTabsIOSTests: XCTestCase {
         XCTAssertTrue(list.isHidden, "the restarted tablist is hidden: its tabs do not draw at the window's origin")
     }
 
+    /// A tablist built again after launch over the same panels (the fixture
+    /// keys it by its build) is the tab bar's as the first was: covered, hidden
+    /// by the host and no tab bar of its own, while the tabs keep their stacks.
+    func testATablistBuiltAgainOverTheSamePanelsIsTheTabBars() throws {
+        guard hostedWindowScene() != nil else { throw missing("scene", "the tab container adopts its replacement in a window") }
+        let session = try fixture("rebuilt-tablist")
+        let navigation = session.presenter.navigation
+        let old = try node(session, "tabs")
+        XCTAssertTrue(navigation.adopts(tablist: old))
+        let stacks = try XCTUnwrap(navigation.tabController?.viewControllers)
+        // Pressed as its handler is (the button may be on a tab not shown).
+        session.apply(session.runtime.press(try node(session, "tabs-rebuilt").id, now: session.now()))
+        until("the tablist is built again") { (try? self.node(session, "tabs")).map { $0.id != old.id } == true }
+        let list = try node(session, "tabs")
+        until("the tab bar takes the new tablist's place") { navigation.adopts(tablist: list) && navigation.delivered[list.id] == .whole }
+        XCTAssertTrue(list.isHidden, "its tabs do not draw over the bar")
+        XCTAssertFalse(list.subviews.contains { $0 is UITabBar || $0 is UISegmentedControl }, "it is not a bar of its own")
+        let controllers = try XCTUnwrap(navigation.tabController?.viewControllers)
+        XCTAssertTrue(controllers.count == stacks.count && zip(controllers, stacks).allSatisfy { $0 === $1 }, "the tabs keep their stacks")
+    }
+
+    func testAnAppOwnedContainerSelectsThroughARebuiltTablist() throws {
+        guard hostedWindowScene() != nil else { throw missing("scene", "the app's container selects tabs in its window") }
+        setenv("EXACT_FIXTURE_CONTAINER", "app", 1)
+        defer { unsetenv("EXACT_FIXTURE_CONTAINER"); NativeViews.uninstallTable() }
+        let session = try fixture("rebuilt-owned-tabs", module: true)
+        let navigation = session.presenter.navigation
+        until("the app's container holds the tabs") { navigation.tabController == nil && navigation.tabOwner != nil }
+        let owner = try XCTUnwrap(navigation.tabOwner)
+        let stacks = navigation.tabPanels.compactMap { navigation.tabNavigations[$0] }
+        XCTAssertEqual(stacks.count, 2)
+        let second = try XCTUnwrap(stacks.dropFirst().first)
+        let old = try node(session, "tabs").id
+        session.apply(session.runtime.press(try node(session, "tabs-rebuilt").id, now: session.now()))
+        until("the app's container adopts the replacement") {
+            (try? self.node(session, "tabs")).map { $0.id != old && navigation.adopts(tablist: $0) } == true
+        }
+        XCTAssertTrue(navigation.tabOwner === owner)
+        let control = try XCTUnwrap(owner.view.subviews.compactMap { $0 as? UISegmentedControl }.first)
+        control.selectedSegmentIndex = 1
+        for case let target as NSObject in control.allTargets {
+            for name in control.actions(forTarget: target, forControlEvent: .valueChanged) ?? [] { target.perform(Selector(name), with: control) }
+        }
+        until("the rebuilt tab's handler selects Second") { navigation.primaryNavigation === second }
+        XCTAssertTrue(stacks.allSatisfy { $0.parent === owner }, "the app keeps its existing stacks")
+    }
+
     /// A style that drops the tablist's `accent-color` (here one sent by
     /// hand, which replaces the whole style) as the bar hides: the bar's
     /// tint, whose fallback was the bar's own tint, recursed until the
@@ -426,6 +473,70 @@ final class NavigationTabsIOSTests: XCTestCase {
         XCTAssertEqual(bar.bounds.width, view.bounds.width, accuracy: 0.5)
     }
 
+    func testTabRootsLeaveBackToTheContainingSplitView() throws {
+        let session = try fixture("split-view-back")
+        let navigation = session.presenter.navigation
+        let first = try XCTUnwrap(navigation.primaryNavigation?.topViewController)
+        XCTAssertFalse(first.navigationItem.hidesBackButton,
+                       "UIKit supplies the return to the sidebar when a split view collapses")
+        try tapNode(session, "tab-second")
+        until("the second tab is selected") { navigation.primaryNavigation?.topViewController !== first }
+        let second = try XCTUnwrap(navigation.primaryNavigation?.topViewController)
+        XCTAssertFalse(second.navigationItem.hidesBackButton)
+        try tapNode(session, "tab-home")
+        until("the first tab is selected again") { navigation.primaryNavigation?.topViewController === first }
+        XCTAssertFalse(first.navigationItem.hidesBackButton)
+    }
+
+    func testSegmentsInNativeRoutesTakeInputOutsideTheirHiddenLogicalPanels() throws {
+        guard hostedWindowScene() != nil else {
+            throw missing("scene", "UIControl dispatches actions only in a hosted application")
+        }
+        let session = try fixture("native-route-segments", plan: "EXACT_ACCENT_TABS_PLAN")
+        let p = session.presenter
+        let first = try node(session, "choice-first")
+        let control = try XCTUnwrap(p.segments.control(of: first.id))
+        let route = try XCTUnwrap(p.navigation.primaryNavigation?.topViewController as? RouteController)
+        let panel = try XCTUnwrap(p.navigation.logicalParent(of: route.node))
+        XCTAssertFalse(first.isDescendant(of: panel), "UIKit contains the route outside its authored panel")
+        until("the first route's content is mounted") { first.window != nil }
+        panel.hiddenByHost = true
+        p.segments.sync()
+        XCTAssertTrue(control.isEnabled)
+        var ancestor: UIView? = first
+        while let view = ancestor {
+            XCTAssertFalse(view.isHidden, "the control's physical ancestor \(type(of: view)) is visible")
+            ancestor = view.superview
+        }
+        control.selectedSegmentIndex = 1
+        control.sendActions(for: .valueChanged)
+        until("the native segment presses its authored action") {
+            (try? self.node(session, "chosen-first").accessibleText) == "Two"
+        }
+        try tapNode(session, "tab-second")
+        let second = try node(session, "choice-second")
+        let next = try XCTUnwrap(p.segments.control(of: second.id))
+        until("the second route's content is mounted") { second.window != nil }
+        XCTAssertTrue(next.isEnabled)
+        XCTAssertEqual(next.selectedSegmentIndex, 1, "the offscreen route takes the shared choice")
+        next.selectedSegmentIndex = 0
+        next.sendActions(for: .valueChanged)
+        until("the other route also takes native input") {
+            (try? self.node(session, "chosen-second").accessibleText) == "One"
+        }
+        try tapNode(session, "tab-first")
+        XCTAssertTrue(p.segments.control(of: first.id) === control, "the route retains its control")
+        XCTAssertTrue(control.isEnabled)
+        XCTAssertEqual(control.selectedSegmentIndex, 0)
+        panel.style["display"] = .string("none")
+        p.segments.sync()
+        XCTAssertFalse(control.isEnabled, "authored display none still prevents input")
+        XCTAssertEqual(p.segments.activate(try node(session, "two-first")), false)
+        panel.style["display"] = nil
+        p.segments.sync()
+        XCTAssertTrue(control.isEnabled)
+    }
+
     func testAuthoredTabsAreNotSubstitutedForPlatformTouch() throws {
         let session = try fixture("authored-tabs-touch")
         let tab = try node(session, "tab-second")
@@ -434,7 +545,7 @@ final class NavigationTabsIOSTests: XCTestCase {
         try authoredTabs(session, true)
         XCTAssertNil(agent.substituted(tab), "platform touch must target the visible authored tab")
         let reply = agent.aim(["id": Int(tab.id), "aim": ["press": true]])
-        if (reply["error"] as? String)?.contains("foreground") == true { throw missing("foreground", "test host is in the background") }
+        try requireFront(window)
         let aim = try XCTUnwrap(reply["aim"] as? [String: Any], "\(reply)")
         let point = try XCTUnwrap(aim["window"] as? [Double])
         let hit = try XCTUnwrap(window?.hitTest(CGPoint(x: point[0], y: point[1]), with: nil))

@@ -13,6 +13,10 @@ style Chosen
   border-radius=8
 style Plain
   padding=6
+style OwnedInk
+  color="#00ff00"
+style InheritedInk
+  white-space="normal"
 component NativeButtons
   state presses = 0
   state fading = false
@@ -197,3 +201,11 @@ component NativeButtons
         for p in ["Day", "Week", "Month"] key=p
           button role="radio" aria-checked=(period == p) press=choose(p) class=(period == p ? Chosen : Plain) testId=`tint-${p}` flex=1
             text p
+      button appearance="auto" buttonStyle="filled" press=fade testId="active-properties"
+        :active
+          background-color = (fading ? none : "#ff0000")
+          color = "#0000ff"
+          opacity = 0.4
+        image "symbol:send" -exact-tint-color="#ff0000"
+        text "Owned title" class=(fading ? InheritedInk : OwnedInk)
+        text "Inherited subtitle"

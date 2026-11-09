@@ -19,7 +19,7 @@ mod keyframes;
 mod media_session;
 mod midi;
 mod migration;
-pub(crate) use migration::parsed_with_edits;
+pub(crate) use migration::{attribute_value_end, parsed_with_edits};
 mod names;
 pub use names::is_reserved;
 mod params;

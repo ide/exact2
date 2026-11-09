@@ -738,7 +738,7 @@ export function renderPerf(r) {
       const g = n => n == null ? '—' : `${Math.round(n * 100) / 100} ms`, ms = x => x ? `p50 ${g(x.p50)} p95 ${g(x.p95)} p99 ${g(x.p99)} mean ${g(x.mean)}` : '—';
       out.push(`  world ${w.canvas}: frame ${ms(w.perf.frameMs)} · tick ${ms(w.perf.tickMs)} · feed ${ms(w.perf.feedMs)} · encode ${ms(w.perf.encodeMs)}`);
     }
-    for (const l of r.late ?? []) out.push(`  t=${l.t} late: ${l.missed} missed (${l.interval} ms)${l.overrun ? ` · main ${l.overrun} ms past the target` : ''} · seq ${l.seq ? l.seq.join('..') : '—'}${l.apply != null ? ` · apply ${l.apply}` : ''}${l.layout != null ? ` · layout ${l.layout}` : ''}${l.loaf ? ` · loaf script ${l.loaf.script}${l.loaf.styleLayout != null ? ` style+layout ${l.loaf.styleLayout}` : ''}` : ''}${l.phases ? ` · ${[...l.phases].sort((a, b) => b.ms - a.ms).map(p => `${p.phase} ${p.ms}`).join(' ')} unattributed ${l.unattributed}` : ''}`);
+    for (const l of r.late ?? []) out.push(`  t=${l.t} late: ${l.missed} missed (${l.interval} ms)${l.overrun ? ` · committed ${l.overrun} ms late` : ''} · seq ${l.seq ? l.seq.join('..') : '—'}${l.apply != null ? ` · apply ${l.apply}` : ''}${l.layout != null ? ` · layout ${l.layout}` : ''}${l.loaf ? ` · loaf script ${l.loaf.script}${l.loaf.styleLayout != null ? ` style+layout ${l.loaf.styleLayout}` : ''}` : ''}${l.phases ? ` · ${[...l.phases].sort((a, b) => b.ms - a.ms).map(p => `${p.phase} ${p.ms}`).join(' ')} unattributed ${l.unattributed}` : ''}`);
     return out.join('\n');
   }
   const round = x => typeof x === 'number' ? Math.round(x * 100) / 100 : x;
@@ -914,7 +914,7 @@ export function renderTrace(t) {
       while (from > 0 && at - from < 5 && !lines[from - 1].includes(' frame late at ')) from--;
       const near = at < 0 ? [] : lines.slice(from, at);
       const n = r.seq ? r.seq[1] - r.seq[0] + 1 : 0;
-      out.push(`  late at ${r.t}: ${r.missed} missed (${r.interval} ms)${r.overrun ? ` · main ${r.overrun} ms past the target` : ''} · ${r.seq ? `${n} transaction${n === 1 ? '' : 's'} (seq ${r.seq.join('..')})` : 'no transaction range'}${r.batches ? ` · ${r.batches} batch${r.batches === 1 ? '' : 'es'}` : ''}${r.apply ? ` · apply ${r.apply}` : ''}${r.layout != null ? ` · layout ${r.layout}` : ''}${r.paint != null ? ` · paint ${r.paint}` : ''}${r.loaf ? ` · loaf script ${r.loaf.script}${r.loaf.styleLayout != null ? ` style+layout ${r.loaf.styleLayout}` : ''}` : ''}${at < 0 ? ' · its journal line is gone (the ring turned over)' : ` · ${near.length} journal line${near.length === 1 ? '' : 's'} before it`}`);
+      out.push(`  late at ${r.t}: ${r.missed} missed (${r.interval} ms)${r.overrun ? ` · committed ${r.overrun} ms late` : ''} · ${r.seq ? `${n} transaction${n === 1 ? '' : 's'} (seq ${r.seq.join('..')})` : 'no transaction range'}${r.batches ? ` · ${r.batches} batch${r.batches === 1 ? '' : 'es'}` : ''}${r.apply ? ` · apply ${r.apply}` : ''}${r.layout != null ? ` · layout ${r.layout}` : ''}${r.paint != null ? ` · paint ${r.paint}` : ''}${r.loaf ? ` · loaf script ${r.loaf.script}${r.loaf.styleLayout != null ? ` style+layout ${r.loaf.styleLayout}` : ''}` : ''}${at < 0 ? ' · its journal line is gone (the ring turned over)' : ` · ${near.length} journal line${near.length === 1 ? '' : 's'} before it`}`);
       // The main thread's host phases inside the interval, innermost charged (LLP 1142 D1), and the hatch calls that overlapped it.
       if (r.phases) out.push(`    of its ${r.interval} ms: ${[...[...r.phases].sort((a, b) => b.ms - a.ms).map(p => `${p.phase} ${p.ms}${p.segments > 1 ? ` (${p.segments})` : ''}`), `unattributed ${r.unattributed}`].join(' · ')}${r.phasesCoverage ? ' · recording does not reach its start' : ''}`);
       if (r.hatches?.length) out.push(`    hatches: ${r.hatches.map(h => `${h.hatch} ${h.ms} ms (${h.calls})`).join(' · ')}${r.coverage ? ' · partial' : ''}`);
@@ -1014,12 +1014,12 @@ export function renderFrameHealthReport(report) {
     const thermal = ['nominal', 'fair', 'serious', 'critical'][Math.floor(event.flags / 2 ** 32) % 4];
     const reasons = [event.flags & 1 ? 'callback gap' : null, event.flags & 2 ? 'callback target overrun' : null, event.flags & 4 ? 'tick apply target overrun' : null].filter(Boolean);
     if (screen) {
-      const next = event.flags & 8 ? `next update's work began ${ms(event.after_offset_us)} after this one's, work ${ms(event.after_callback_us)}` : 'next update unseen';
+      const next = event.flags & 8 ? `next update's effective start ${ms(event.after_offset_us)} after this one's, work ${ms(event.after_callback_us)}` : 'next update unseen';
       const rest = event.exact_us == null || event.card_us == null ? null : Math.max(0, event.callback_us - event.exact_us - event.card_us);
-      out.push(`#${event.sequence} / capture ${event.capture} / generation ${event.generation} · ${ms(event.age_us)} ago · ${event.flags & 2 ? 'committed past its deadline' : 'timing event'}`,
-        `  work ${ms(event.callback_us)} · ${event.target_offset_us < 0 ? `its work began ${ms(-event.target_offset_us)} after the deadline` : `deadline ${ms(event.target_offset_us)} after its work began`} · previous update's work ${ms(event.before_callback_us || null)} · ${next}`,
+      out.push(`#${event.sequence} / capture ${event.capture} / generation ${event.generation} · ${ms(event.age_us)} ago · ${event.flags & 2 ? 'commit seen past its deadline' : 'timing event'}`,
+        `  work ${ms(event.callback_us)} · deadline ${ms(Math.abs(event.target_offset_us))} ${event.target_offset_us < 0 ? 'before' : 'after'} its work's effective start, the commit less its work · previous update's work ${ms(event.before_callback_us || null)} · ${next}`,
         `  of its work: Exact's host phases ${ms(event.exact_us)} · the card's ${ms(event.card_us)} · the rest ${ms(rest)} · nodes laid out ${event.layouts ?? 'unknown'} · the main thread also waited ${ms(event.waited_us)} in the update`,
-        `  workload ${workload} · asked by ${SCREEN_ASKERS.filter((_, index) => bit(index + 40)).join(', ') || 'none of Exact\'s frame clock (UIKit or the system)'} · thermal ${thermal} · low power ${bit(34)}`);
+        `  workload ${workload} · asked by ${SCREEN_ASKERS.filter((_, index) => bit(index + 40)).join(', ') || 'none of Exact\'s frame clock (UIKit or the system)'} · thermal ${thermal} · low power ${bit(34)}${bit(36) ? ' · card dragged' : ''}`);
       continue;
     }
     out.push(`#${event.sequence} / capture ${event.capture} / generation ${event.generation} · ${ms(event.age_us)} ago · ${reasons.join(', ') || 'timing event'}`,

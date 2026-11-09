@@ -11,6 +11,69 @@ import XCTest
 final class NativeButtonsMacTests: XCTestCase {
     private var window: NSWindow!
 
+    func testActivePropertiesUseAppKitFieldsAndRestoreTheCurrentBaseFace() throws {
+        var current = face("Go")
+        let p = presenter(box(1) + native(2) + [["op": "children", "id": 1, "ids": [2]], ["op": "roots", "ids": [1]]], faces: [2: current])
+        p.buttonFace = { _ in current }
+        let button = try XCTUnwrap(p.controls.controls[2] as? NativeButtonMac)
+        let owner = try XCTUnwrap(p.views[2]), background = button.bezelColor
+        p.apply(wireBatch([["op": "style", "id": 2, "style": ["press_scale": 0.94]]]))
+        button.cell?.isHighlighted = true
+        XCTAssertTrue(button.cell?.isHighlighted == true)
+        XCTAssertEqual(button.bezelColor, background, "scale keeps AppKit's highlighted bezel")
+        XCTAssertNotNil(owner.layer?.animation(forKey: "nativeActiveScale"))
+        p.apply(wireBatch([["op": "style", "id": 2, "style": ["press_background_color": [255, 0, 0, 255], "press_color": [0, 0, 255, 255]]]]))
+        XCTAssertEqual(button.bezelColor, .red)
+        XCTAssertEqual(button.contentTintColor, .blue)
+        current.title = "Updated"
+        current.rows.title["text_color"] = .array([.number(0), .number(128), .number(0), .number(255)])
+        p.apply(wireBatch([["op": "style", "id": 2, "style": [:]]]))
+        XCTAssertTrue(p.controls.controls[2] === button)
+        XCTAssertEqual(button.title, "Updated")
+        XCTAssertEqual(button.bezelColor, background)
+        XCTAssertEqual(button.contentTintColor?.usingColorSpace(.sRGB), NSColor(srgbRed: 0, green: 128 / 255, blue: 0, alpha: 1))
+        XCTAssertNil(owner.layer?.animation(forKey: "nativeActiveScale"))
+        button.cell?.isHighlighted = false
+    }
+
+    func testActivePropertiesKeepUnrelatedNativeCustomization() throws {
+        let p = presenter(box(1) + native(2) + [["op": "children", "id": 1, "ids": [2]], ["op": "roots", "ids": [1]]], faces: [2: face("Go")])
+        p.apply(wireBatch([["op": "style", "id": 2, "style": ["press_background_color": [255, 0, 0, 255], "press_scale": 0.9]]]))
+        let button = try XCTUnwrap(p.controls.controls[2] as? NativeButtonMac)
+        let font = NSFont.monospacedSystemFont(ofSize: 19, weight: .bold)
+        button.font = font
+        button.contentTintColor = .purple
+        for down in [true, false] {
+            button.highlight(down)
+            XCTAssertEqual(button.font, font)
+            XCTAssertEqual(button.contentTintColor, .purple)
+            XCTAssertEqual(p.views[2]?.layer?.animation(forKey: "nativeActiveScale") != nil, down)
+        }
+    }
+
+    func testClearingActiveColorsPreservesNativeWritesMadeWhileHeld() throws {
+        let p = presenter(box(1) + native(2) + [["op": "children", "id": 1, "ids": [2]], ["op": "roots", "ids": [1]]], faces: [2: face("Go")])
+        p.apply(wireBatch([["op": "style", "id": 2, "style": ["press_background_color": [255, 0, 0, 255], "press_color": [0, 0, 255, 255]]]]))
+        let button = try XCTUnwrap(p.controls.controls[2] as? NativeButtonMac)
+        button.bezelColor = .green
+        button.highlight(true)
+        button.bezelColor = .purple
+        button.contentTintColor = .orange
+        let font = NSFont.monospacedSystemFont(ofSize: 21, weight: .bold)
+        button.attributedTitle = NSAttributedString(string: "Go", attributes: [.foregroundColor: NSColor.brown, .font: font])
+        XCTAssertEqual(button.bezelColor?.usingColorSpace(.sRGB), NSColor(srgbRed: 1, green: 0, blue: 0, alpha: 1))
+        XCTAssertEqual(button.contentTintColor?.usingColorSpace(.sRGB), NSColor(srgbRed: 0, green: 0, blue: 1, alpha: 1))
+        XCTAssertEqual((button.attributedTitle.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor)?.usingColorSpace(.sRGB), NSColor(srgbRed: 0, green: 0, blue: 1, alpha: 1))
+        XCTAssertEqual(button.attributedTitle.attribute(.font, at: 0, effectiveRange: nil) as? NSFont, font)
+        p.apply(wireBatch([["op": "style", "id": 2, "style": [:]]]))
+        XCTAssertTrue(button.cell?.isHighlighted == true)
+        XCTAssertEqual(button.bezelColor, .purple)
+        XCTAssertEqual(button.contentTintColor, .orange)
+        XCTAssertEqual(button.attributedTitle.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor, .brown)
+        XCTAssertEqual(button.attributedTitle.attribute(.font, at: 0, effectiveRange: nil) as? NSFont, font)
+        button.highlight(false)
+    }
+
     override func tearDown() { window?.close(); window = nil }
     /// Tab reaches the buttons here: Keyboard Navigation on (LLP 1115.000 D7.2).
     override func setUp() { super.setUp(); keyboardNavigation(true) }

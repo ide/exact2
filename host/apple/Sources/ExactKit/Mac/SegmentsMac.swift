@@ -186,6 +186,7 @@ final class SegmentHost {
                 decide(owner, unshown.map { "kept as authored: \(member) #\($0.id) is not one image or its label alone, which a segment cannot show" } ?? "kept as authored: fewer than two pressable \(member)s")
                 continue
             }
+            for tab in tabs { tab.rejectNativeActiveProperties(on: "NSSegmentedControl") }
             decide(owner, "projected to NSSegmentedControl (\(tabs.count) segments)")
             let ids = tabs.map(\.id)
             if members[owner.id] != ids {

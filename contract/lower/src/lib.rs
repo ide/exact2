@@ -546,7 +546,10 @@ fn lower_body(
                         .then(|| "; the press's opacity is `opacity` in an `:active` part (LLP 1121 D8)".to_string())
                         .or_else(|| fields::placeholder_hint(&a.name))
                         .or_else(|| lint::css_hint(&a.name))
-                        .or_else(|| tags::renamed(&a.name).map(|n| format!("; `{}` is spelled `{n}` here", a.name)))
+                        .or_else(|| tags::renamed(&a.name).map(|n| {
+                            if n.starts_with(":active ") { lint::active_migration_hint(&a.name, n) }
+                            else { format!("; `{}` is spelled `{n}` here", a.name) }
+                        }))
                         .or_else(|| tags::similar_attr(&a.name, true).map(|n| format!("; did you mean `{n}`?")))
                         .unwrap_or_default();
                     l.errors.push(LowerError {
@@ -1204,7 +1207,6 @@ impl<'a> Lowerer<'a> {
             );
         }
         if let Some(why) = shorthands::text_box_trim_refusal(&a.name, tag, module)
-            .or_else(|| fields::outline_refusal(&a.name, tag, control))
             .or_else(|| fields::placeholder_refusal(&a.name, tag, control))
         {
             return err("lower-attr-tag", why, a.span);

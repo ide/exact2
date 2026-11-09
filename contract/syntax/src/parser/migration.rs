@@ -113,3 +113,12 @@ pub(crate) fn parsed_with_edits(
     };
     (Err(partial), p.edits)
 }
+
+/// The end of one already-parsed attribute value, including closing delimiters.
+/// Migration uses the expression grammar so following positionals remain on the node.
+pub(crate) fn attribute_value_end(tokens: &[Token], start: usize) -> R<Span> {
+    let mut p = Parser::new(tokens.to_vec());
+    p.pos = start + 2;
+    p.attr_value()?;
+    Ok(p.tokens[p.pos - 1].span)
+}

@@ -418,9 +418,9 @@ package final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, U
     @objc func focusPreviousNode() { presenter?.moveFocus(backward: true) }
     /// The ring a keyboard-focused control shows, as the web's `:focus-visible`
     /// and AppKit's focus ring do: drawn when Tab moved the focus here, never
-    /// for a touch, and inside the box so no clip hides it.
+    /// for a touch, and inside the box so no clip hides it; none for `outlineNone`.
     func showFocusRing(_ shown: Bool) {
-        guard shown, !isNativeTextControl else { focusRing?.removeFromSuperlayer(); focusRing = nil; return }
+        guard shown, !isNativeTextControl, !outlineNone else { focusRing?.removeFromSuperlayer(); focusRing = nil; return }
         let ring = focusRing ?? CAShapeLayer()
         #if os(tvOS)
         // Across a room the ring stands clear of the content: outside the box, padded and rounded.
@@ -782,6 +782,7 @@ package final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, U
         presenter?.collections.userIntent(id, travel: true)
         retainedScrollTop = nil; endScrollToTop(dragging: true)
         #if os(iOS)
+        if #available(iOS 27.1, *) { presenter?.arrangements.cancelScrollHandoff(id) }
         if swipeOwner { presenter?.swipeActions.painted.began(self) }
         #endif
     }
@@ -1048,13 +1049,12 @@ package final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, U
         ])
     }
 
-    // display:none removes the CSS box, but retains its stored scroll position.
-    // UIKit/AppKit collapse the native extent; keep that transient reset out of
-    // scroll events and restore only when the box returns.
+    // A pane hidden by its native container retains its scroll position as display:none does.
     var hasScrollLayoutBox: Bool {
         var ancestor: UIView? = self
         while let current = ancestor {
-            if let node = current as? NodeView, node.style["display"]?.string == "none" { return false }
+            if let node = current as? NodeView,
+               node.style["display"]?.string == "none" || node.presenter?.arrangementHides(node.id) == true { return false }
             ancestor = current.superview
         }
         return true

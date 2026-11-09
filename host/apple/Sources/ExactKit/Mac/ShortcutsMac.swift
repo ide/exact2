@@ -409,6 +409,7 @@ final class ShortcutHost: NSObject, NSMenuItemValidation {
             if ids.contains("status") { continue }
             let placement = ids.first { $0 != "dock" }
             guard shortcut != nil || placement != nil || presenter?.toolbar.contains(view) == true else { continue }
+            view.rejectNativeActiveProperties(on: "NSMenuItem")
             live.insert(view.id)
             let item = items[view.id] ?? AccessibleMenuItem(title: "", action: #selector(activate(_:)), keyEquivalent: "")
             items[view.id] = item

@@ -10,29 +10,57 @@ final class TextRasterizer {
         weak var node: NodeView?
         let key: TextRasterKey
         let namespace: Int
+        let diagnosticNode: UInt32
         /// The node's incarnation when the job was issued (LLP 1068 §4.9).
         let incarnation: UInt64
         let group = DispatchGroup()
-        var result: TextRasterImage?
         weak var operation: Operation?
         private let lock = NSLock()
-        private var started = false, abandoned = false
+        private enum State {
+            case queued, running, abandoned, finished(TextRasterImage?), consumed
+        }
+        private var state = State.queued
         init(_ node: NodeView, key: TextRasterKey, namespace: Int) {
             self.node = node; self.key = key; self.namespace = namespace; incarnation = node.incarnation
+            diagnosticNode = node.id
             group.enter()
         }
-        /// The worker's claim: false once the job was abandoned unstarted.
-        func begin() -> Bool {
-            lock.lock(); defer { lock.unlock() }
-            started = !abandoned
-            return started
+        /// Claim and finish one result; cancellation can only win before the claim.
+        func perform(_ render: () -> TextRasterImage?) {
+            lock.lock()
+            guard case .queued = state else { lock.unlock(); return }
+            state = .running
+            lock.unlock()
+            let result = render()
+            lock.lock()
+            state = .finished(result)
+            lock.unlock()
         }
-        var wasAbandoned: Bool { lock.lock(); defer { lock.unlock() }; return abandoned }
+        var wasAbandoned: Bool {
+            lock.lock(); defer { lock.unlock() }
+            if case .abandoned = state { return true }
+            return false
+        }
+        /// A completed mailbox transfers ownership once, even when settlement beats the queued notification.
+        func consume() -> TextRasterImage? {
+            precondition(group.wait(timeout: .now()) == .success)
+            lock.lock(); defer { lock.unlock() }
+            switch state {
+            case .finished(let result): state = .consumed; return result
+            case .queued, .abandoned: state = .consumed; return nil
+            case .running: preconditionFailure("Text work completes before consumption")
+            case .consumed: preconditionFailure("Text work is consumed once")
+            }
+        }
         /// Drop a job no worker has begun: true if it will never render.
         func abandon() -> Bool {
             lock.lock()
-            let unstarted = !started
-            if unstarted { abandoned = true }
+            let unstarted: Bool
+            switch state {
+            case .queued: state = .abandoned; unstarted = true
+            case .abandoned: unstarted = true
+            default: unstarted = false
+            }
             lock.unlock()
             if unstarted { operation?.cancel() }
             return unstarted
@@ -70,8 +98,9 @@ final class TextRasterizer {
     /// Pixels by what they paint. Rows repeat small labels (a reaction's
     /// emoji and count, a relative time), and a list that turns back shows
     /// what it just left: those take the pixels another view already paid
-    /// for. Least recently used first, bounded by bytes; only small images,
-    /// so what stays beyond the views that show it is a few megabytes.
+    /// for. Least recently used first, bounded by the bytes each holds (its
+    /// pixels or glyph values, and its key's text); only small entries, so
+    /// what stays beyond the views that show it is a few megabytes.
     /// Kept by `TextRasterKey.anyRoom`, with the key it was painted for: a
     /// view of another size, or the same view after its padding changed,
     /// takes pixels that serve it (`TextRasterKey.serves`).
@@ -93,10 +122,31 @@ final class TextRasterizer {
         keptClock += 1; hit.used = keptClock; kept[key.anyRoom] = hit
         return hit.image
     }
+    private func sharedImage(_ image: TextRasterImage?, for key: TextRasterKey, namespace: Int) -> TextRasterImage? {
+        // A late worker cannot switch the cache back to an earlier font namespace
+        guard key.clip == nil, namespace == keptNamespace else { return image }
+        guard let shared = keptImage(key, namespace: namespace) else { return image }
+        // A live shared mask wins at publication; otherwise matching glyph values take the worker's mask
+        if case .coverage(let prepared)? = image?.content, let drawing = shared.drawing,
+           let coverage = prepared.reusing(for: drawing) {
+            return shared.replacingInk(with: .coverage(coverage))
+        }
+        return shared
+    }
     private func keep(_ image: TextRasterImage?, for key: TextRasterKey, namespace: Int) {
         let any = key.anyRoom
-        guard let image, namespace == keptNamespace else { return }
-        let bytes = image.image.bytesPerRow * image.image.height + (image.cast.map { $0.bytesPerRow * $0.height } ?? 0)
+        guard var image, namespace == keptNamespace else { return }
+        // Strip only the cache's value copy; the mailbox keeps the mask until a view takes it
+        if let drawing = image.drawing { image = image.replacingInk(with: .drawn(drawing)) }
+        let ink: Int
+        switch image.content {
+        case .pixels(let pixels): ink = pixels.bytesPerRow * pixels.height
+        case .drawn(let drawing): ink = drawing.bytes
+        case .coverage(let coverage): ink = coverage.bytes
+        }
+        // The key holds the paragraph's text, however little of it shows
+        let text = key.spec.runs.reduce(0) { $0 + $1.text.utf8.count }
+        let bytes = ink + (image.cast.map { $0.bytesPerRow * $0.height } ?? 0) + text
         guard bytes <= Self.keptEntryLimit else { return }
         // A newer image replaces one that cannot serve its room (a narrower view's, its ink cut)
         if let old = kept[any] {
@@ -228,10 +278,8 @@ final class TextRasterizer {
             flush: key.spec.align == 1 ? 0.5 : key.spec.align == 2 ? 1 : 0, whiteSpace: key.spec.whiteSpace, justifies: key.spec.align == 3, insets: paragraph?.insets ?? LineInsets(key.spec, source: source),
             box: key.box, size: key.size, scale: key.scale, clip: key.clip, room: key.room,
             ellipsis: key.spec.ellipsis, crop: true, clamped: geometry.clamped, shadow: key.spec.hdrShadow.map(TextRunShadow.init),
-            // A layer shadow and a vibrancy view each take the ink as it is.
-            tints: key.spec.shadow == nil && (node.vibrantColor == nil || node.enclosingBlur == nil),
             antialiased: key.spec.antialiased,
-            measuredGlyphs: key.spec.color.count == 4 ? engine.measuredGlyphs(key.spec, width: key.box.width) : nil,
+            measuredGlyphs: engine.measuredGlyphs(key.spec, width: key.box.width),
             measuredColor: TextEngine.color(key.spec.color).cgColor)
         // A job for the paragraph's previous text or box paints nothing now.
         if let pending { _ = pending.abandon() }
@@ -241,7 +289,7 @@ final class TextRasterizer {
         } else if firstPixels {
             let post = Presenter.signposts.beginInterval("text-raster-urgent"), phase = HostPhases.shared.begin(.text)
             defer { HostPhases.shared.end(phase) }
-            let image = job.render()
+            let image = job.renderDiagnosed(node: node.id)
             node.showTextRaster(image, for: key)
             if key.clip == nil { keep(image, for: key, namespace: engine.namespace) }
             Presenter.signposts.endInterval("text-raster-urgent", post)
@@ -250,10 +298,11 @@ final class TextRasterizer {
             working.append(work)
             work.group.notify(queue: .main) { [weak self] in self?.publish(work) }
             let operation = BlockOperation {
-                guard work.begin() else { return }
-                let post = Presenter.signposts.beginInterval("text-raster-worker")
-                work.result = job.render()
-                Presenter.signposts.endInterval("text-raster-worker", post)
+                work.perform {
+                    let post = Presenter.signposts.beginInterval("text-raster-worker")
+                    defer { Presenter.signposts.endInterval("text-raster-worker", post) }
+                    return job.renderPrepared(node: work.diagnosticNode)
+                }
             }
             operation.queuePriority = priority
             // Also when abandoned unstarted: the mailbox always closes.
@@ -268,24 +317,19 @@ final class TextRasterizer {
         let key: TextRasterKey
         let job: TextRasterJob
         let namespace: Int
+        var diagnosticNode: UInt32 { node.id }
     }
-    /// The paragraphs `ensureUrgent` paints together, while it runs.
+    /// The paragraphs `ensureUrgent` prepares together, while it runs.
     private var urgentBatch: [UrgentPaint]?
 
-    /// How long `ensureUrgent` paints on the main thread alone before it
-    /// paints the rest at once. A paragraph painted on another thread makes
-    /// its glyphs' bitmaps again (each frame of a weight transition is a new
-    /// font): twelve paragraphs painted at once every frame took twice the
-    /// CPU time of the same paragraphs painted in turn.
+    /// Start urgent preparation serially to limit contention on shared glyph caches.
     private static let urgentAlone: CFTimeInterval = 0.002
 
-    /// `ensure(urgent: true)` for each of `nodes`. The paragraphs that must
-    /// be painted now are painted in turn on the main thread for up to
-    /// `urgentAlone`, then the rest at once, the main thread among the
-    /// workers. For about ten frames after an idle stretch the CPU runs
-    /// slowly: twelve paragraphs of body text painted in turn then took 4 ms
-    /// of a frame's 5.4, against 1.1 later (iPhone 17 Pro Max, Time
-    /// Profiler), and those were the frames that came late.
+    /// `ensure(urgent: true)` for each of `nodes`. Prepare results in turn
+    /// for `urgentAlone`, then the rest at once, the main thread among the
+    /// workers. Glyph plans defer painting until main-thread publication,
+    /// after reuse is checked; pixel jobs paint during preparation. This
+    /// threshold bounds serial preparation, not publication.
     func ensureUrgent(_ nodes: [NodeView], now: Bool = false) {
         urgentBatch = []
         for node in nodes { ensure(node, urgent: true, now: now) }
@@ -293,24 +337,29 @@ final class TextRasterizer {
         urgentBatch = nil
         guard !batch.isEmpty else { return }
         let post = Presenter.signposts.beginInterval("text-raster-urgent"), phase = HostPhases.shared.begin(.text)
-        defer { HostPhases.shared.end(phase) }
+        defer { Presenter.signposts.endInterval("text-raster-urgent", post); HostPhases.shared.end(phase) }
         var images = [TextRasterImage?](repeating: nil, count: batch.count)
         images.withUnsafeMutableBufferPointer { slots in
             let start = CACurrentMediaTime()
             var next = 0
             while next < batch.count && CACurrentMediaTime() - start < Self.urgentAlone {
-                slots[next] = batch[next].job.render()
+                slots[next] = batch[next].job.renderDiagnosed(node: batch[next].diagnosticNode)
                 next += 1
             }
             let first = next
             guard first < batch.count else { return }
-            DispatchQueue.concurrentPerform(iterations: batch.count - first) { slots[first + $0] = batch[first + $0].job.render() }
+            let identifiers = batch.map(\.diagnosticNode)
+            DispatchQueue.concurrentPerform(iterations: batch.count - first) {
+                slots[first + $0] = batch[first + $0].job.renderDiagnosed(node: identifiers[first + $0])
+            }
         }
-        Presenter.signposts.endInterval("text-raster-urgent", post)
-        for (paint, image) in zip(batch, images) {
-            paint.node.showTextRaster(image, for: paint.key)
-            if paint.key.clip == nil { keep(image, for: paint.key, namespace: paint.namespace) }
-        }
+        for (paint, image) in zip(batch, images) { publishUrgent(paint, image: image) }
+    }
+
+    private func publishUrgent(_ paint: UrgentPaint, image rendered: TextRasterImage?) {
+        let image = sharedImage(rendered, for: paint.key, namespace: paint.namespace)
+        paint.node.showTextRaster(image, for: paint.key)
+        if paint.key.clip == nil { keep(image, for: paint.key, namespace: paint.namespace) }
     }
 
     /// A worker's pixels for what shows now: its finished result, or the
@@ -322,7 +371,9 @@ final class TextRasterizer {
         if work.group.wait(timeout: .now()) != .success {
             if work.abandon() { return false }
             let post = Presenter.signposts.beginInterval("text-raster-wait")
+            let diagnostic = TextRenderMetrics.shared.begin()
             let done = work.group.wait(timeout: .now() + .milliseconds(8)) == .success
+            TextRenderMetrics.shared.end(diagnostic, kind: .workerWait, node: work.diagnosticNode, detail: done ? 1 : 0)
             Presenter.signposts.endInterval("text-raster-wait", post)
             guard done else { return false }
         }
@@ -337,9 +388,10 @@ final class TextRasterizer {
         defer { slotFreed?() }
         // Dropped unstarted: no pixels, and no failure either.
         guard !work.wasAbandoned else { return }
-        if work.key.clip == nil { keep(work.result, for: work.key, namespace: work.namespace) }
+        let image = sharedImage(work.consume(), for: work.key, namespace: work.namespace)
+        if work.key.clip == nil { keep(image, for: work.key, namespace: work.namespace) }
         guard let node = work.node, node.incarnation == work.incarnation else { return }
-        node.showTextRaster(work.result, for: work.key)
+        node.showTextRaster(image, for: work.key)
     }
     /// Jobs whose paragraph left, or whose text or box changed since, or
     /// that the list has already carried past (`passed`), and that no worker
@@ -441,40 +493,77 @@ extension NodeView {
             setNeedsDisplay()
             return
         }
+        let diagnostic = TextRenderMetrics.shared.begin()
+        let coverage: TextCoverage?
+        var reusedCoverage = false
+        if let drawing = result.drawing {
+            if let held = drawing.liveCoverage {
+                coverage = held
+                reusedCoverage = true
+            } else if let old = textRasterLayer?.delegate as? CoverageImageView,
+               let held = old.coverage?.reusing(for: drawing) {
+                coverage = held
+                reusedCoverage = true
+            } else if case .coverage(let prepared) = result.content {
+                coverage = prepared
+            } else {
+                let paint = TextRenderMetrics.shared.begin(), phase = HostPhases.shared.begin(.text)
+                coverage = drawing.coverage()
+                HostPhases.shared.end(phase)
+                TextRenderMetrics.shared.end(paint, kind: .coveragePaint, node: id,
+                    width: drawing.pixelWidth, height: drawing.pixelHeight, bytes: coverage?.bytes ?? 0)
+            }
+            guard coverage != nil else { showTextRaster(nil, for: key); return }
+            assert(coverage?.drawing === drawing)
+            drawing.liveCoverage = coverage
+        } else if case .coverage(let held) = result.content { coverage = held }
+        else { coverage = nil }
         let shown = textRasterSpec
-        textRaster = result.image; textRasterScale = key.scale; textRasterSpec = key.spec
+        textRaster = result.drawing.map(TextInk.drawn) ?? result.content
+        textRasterScale = key.scale; textRasterSpec = key.spec
         textMore.rasterCovered = result.covered; textMore.rasterBand = key.clip != nil; textMore.rasterInk = (result.ink, result.shadows)
         textMore.rasterRoom = key.room ?? key.box
         textRasterReady = true; textRasterFailed = false
-        // One colour's coverage masks that colour; other ink carries its
-        // own colours. Each has its own layer.
-        let tint = result.tint
-        if (tint != nil) != (textRasterLayer is TintInk), let old = textRasterLayer {
-            old.dropTextCast(); old.removeFromSuperlayer(); textRasterLayer = nil
+        if (coverage != nil) != (textRasterLayer?.delegate is CoverageImageView), let old = textRasterLayer {
+            old.dropTextCast()
+            if let view = old.delegate as? CoverageImageView { view.removeFromSuperview() } else { old.removeFromSuperlayer() }
+            textRasterLayer = nil
         }
-        // The ink layer never animates (`InkLayer`), so no
-        // transaction of its own: a worker's result published between frames
-        // commits with the next frame's changes, rather than alone.
         let ink: CALayer
-        if let tint {
-            let layer = textRasterLayer as? TintInk ?? TintInk()
-            layer.show(result.image, tint: tint, frame: result.frame, scale: key.scale)
-            ink = layer
+        let imageView: CoverageImageView?
+        if coverage != nil {
+            let view = (textRasterLayer?.delegate as? CoverageImageView) ?? CoverageImageView()
+            imageView = view; ink = view.layer
         } else {
-            ink = textRasterLayer ?? InkLayer()
+            imageView = nil; ink = textRasterLayer ?? InkLayer()
         }
         hostText(ink)
+        // The box follows UIKit's resize; the cropped ink rectangle changes atomically with its image
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
         ink.frame = result.frame
         ink.contentsScale = key.scale
-        // The lines' clock settled first: a numeral roll runs in it
+        CATransaction.commit()
         textBoxLayer?.show(from: shown, to: key.spec)
         let roll = NumeralRoll.roll(ink, node: self)
-        if tint == nil { ink.contents = result.image }
+        UIView.performWithoutAnimation {
+            if let coverage, let imageView {
+                imageView.show(coverage, scale: key.scale)
+            } else if case .pixels(let pixels) = result.content { ink.contents = pixels }
+        }
         TextShadowLayer.apply(key.spec.hdrShadow == nil ? key.spec.shadow : nil, to: ink)
         ink.applyTextRange(headroom: result.headroom, limit: style["dynamic_range_limit"]?.string)
         ink.applyTextCast(result.cast, headroom: result.castHeadroom, limit: style["dynamic_range_limit"]?.string, rolling: roll)
         textRasterLayer = ink
         presenter?.boxFilters.changed(self)
+        switch result.content {
+        case .pixels(let pixels):
+            TextRenderMetrics.shared.end(diagnostic, kind: .publishPixels, node: id, width: pixels.width, height: pixels.height,
+                bytes: pixels.bytesPerRow * pixels.height, detail: Int(result.diagnosticFallback))
+        case .drawn, .coverage:
+            TextRenderMetrics.shared.end(diagnostic, kind: .publishSingleColor, node: id,
+                width: coverage?.mask.width ?? 0, height: coverage?.mask.height ?? 0, bytes: coverage?.bytes ?? 0, detail: reusedCoverage ? 1 : 0)
+        }
     }
     /// Release a raster still off-window a turn after any within-batch move; the next display
     /// repaints it when the view returns.
@@ -485,77 +574,76 @@ extension NodeView {
     }
 
     func dropTextRaster() {
-        textRasterLayer?.dropTextCast(); textRasterLayer?.removeFromSuperlayer(); textRasterLayer = nil
+        textRasterLayer?.dropTextCast()
+        if let view = textRasterLayer?.delegate as? CoverageImageView { view.removeFromSuperview() }
+        else { textRasterLayer?.removeFromSuperlayer() }
+        textRasterLayer = nil
         removeTextBox()
         textRaster = nil; textRasterKey = nil; textRasterReady = false; textRasterFailed = false; textRasterSpec = nil
     }
 
+    /// Only row recycling keeps the empty UIKit hierarchy; eviction and off-window release still drop it.
+    func parkTextRaster() {
+        guard let ink = textRasterLayer, let view = ink.delegate as? CoverageImageView else { return dropTextRaster() }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        textBoxLayer?.reset()
+        ink.removeAllAnimations()
+        NumeralRoll.forget(ink)
+        ink.dropTextCast()
+        TextShadowLayer.apply(nil, to: ink)
+        ink.applyTextRange(headroom: 0, limit: nil)
+        view.clear()
+        textRaster = nil; textRasterKey = nil; textRasterReady = false; textRasterFailed = false; textRasterSpec = nil
+        textMore.rasterCovered = .null; textMore.rasterRoom = .null; textMore.rasterBand = false
+        textMore.rasterInk = (.null, .null); textMore.rasterFrame = .zero; textMore.rasterScale = 1
+        mountTextBox()
+        CATransaction.commit()
+        presenter?.boxFilters.changed(self)
+    }
+
     /// The paragraph's ink in the lines layer inside its text's box
-    /// (`makeTextBox`, `placeTextRaster`), a box of the kind it wants
-    /// (`textBoxWantsView`): one made now, or one the ink moves into when the
-    /// kind changes, takes its place at once. The box is inside a vibrancy
-    /// view when the ink draws in a system colour over a blur
-    /// (`VibrancyIOS.swift`).
+    /// (`makeTextBox`, `placeTextRaster`), the box made now if it has none.
+    /// The box is inside a vibrancy view when the ink draws in a system colour
+    /// over a blur (`VibrancyIOS.swift`).
     func hostText(_ ink: CALayer) {
-        let asView = textBoxWantsView(ink), old = textBoxLayer
-        if old != nil, (specs?.rasterBoxView != nil) != asView { removeTextBox() }
         let made = textBoxLayer == nil
         if made { CATransaction.begin(); CATransaction.setDisableActions(true) }
         defer { if made { CATransaction.commit() } }
-        let box = textBoxLayer ?? makeTextBox(asView: asView)
-        if let lines = box.lines, ink.superlayer !== lines { lines.addSublayer(ink) }
+        let box = textBoxLayer ?? makeTextBox()
+        if let view = ink.delegate as? CoverageImageView, let lines = textMore.rasterView?.lines {
+            if view.superview !== lines { lines.addSubview(view) }
+        } else if let lines = box.lines, ink.superlayer !== lines { lines.addSublayer(ink) }
         if let cast = ink.textCast, let lines = box.lines, cast.superlayer !== lines { lines.insertSublayer(cast, below: ink) }
         textRasterLayer = ink
         if box.superlayer == nil, syncVibrancy() == nil { mountTextBox() }
         placeTextRaster()
-        // A box of the other kind takes over the one it replaces' motion: UIKit's animation in flight.
-        if let old, old !== box { for key in old.animationKeys() ?? [] { if let motion = old.animation(forKey: key) { box.add(motion, forKey: key) } } }
-    }
-
-    /// The text's box again, of the kind the ground under it now asks for
-    /// (`NavigationHost.repaintGrounds`), its pixels kept.
-    func rehostText() { if let ink = textRasterLayer { hostText(ink) } }
-
-    /// Whether the text's box is a view (`TextBoxView`): its ink is one
-    /// system colour (a tint, `TextRasterImage.tint`, of a `system_colors`
-    /// row) on the ground of a split's sidebar or inspector, where UIKit
-    /// draws such a view's content vibrantly when the view is its own. A
-    /// view costs about seven times what a layer does to make, so every
-    /// other box is a layer.
-    private func textBoxWantsView(_ ink: CALayer) -> Bool {
-        ink is TintInk && systemColor("text_color") != nil && presenter?.onColumnGround(self) == true
     }
 
     /// The box, placed and sized as the paragraph's content box, moving and
     /// resizing in UIKit's animation (`BoxPartLayer`), with its lines at its
-    /// origin, which never move in it; a view's layer when `asView`. The lines
-    /// are a layer of their own for a fade (`TextBoxLayer`): a transition was
-    /// seen to render the old state of the layer it is on with that layer's
-    /// geometry before the change, so a fade on the box itself, moved in the
-    /// same transaction, left the old lines where it was; and a fade on the
-    /// ink alone left out a one-colour ink's coverage mask (both states showed
-    /// the new one).
-    private func makeTextBox(asView: Bool) -> TextBoxLayer {
-        let view = asView ? TextBoxView() : nil
-        let box = view?.box ?? TextBoxLayer(), lines = InkLayer()
-        box.anchorPoint = .zero
-        lines.anchorPoint = .zero
-        box.addSublayer(lines)
-        box.lines = lines
-        textBoxLayer = box; textMore.rasterBoxView = view
+    /// origin, which never move in it. A separate lines layer keeps fade
+    /// snapshots in box-local coordinates while the box moves and resizes;
+    /// a transition on the box can retain its pre-resize geometry.
+    private func makeTextBox() -> TextBoxLayer {
+        let view = TextBoxView(), box = view.box
+        textMore.rasterView = view
+        textBoxLayer = box
         return box
     }
 
     /// The text's box above the box's border (`applyBoxLayer`), under everything else.
     func mountTextBox() {
-        guard let box = textBoxLayer else { return }
-        if let view = specs?.rasterBoxView, view.superview !== self { insertSubview(view, at: 0) }
-        insertBoxSublayer(box)
+        if let view = specs?.rasterView {
+            if view.superview !== self { insertSubview(view, at: 0) }
+            insertBoxSublayer(view.layer)
+        }
     }
 
     func removeTextBox() {
-        if let view = specs?.rasterBoxView { view.removeFromSuperview() } else { textBoxLayer?.removeFromSuperlayer() }
-        textBoxLayer = nil; specs?.rasterBoxView = nil
+        if let view = specs?.rasterView { view.removeFromSuperview() } else { textBoxLayer?.removeFromSuperlayer() }
+        specs?.rasterView = nil
+        textBoxLayer = nil
     }
 
     /// Where the paragraph's box is drawn in this view: its content box
@@ -577,6 +665,7 @@ extension NodeView {
         let at = textPlace(scale: textRasterScale), size = paragraphBox().size
         if box.position != at { box.position = at }
         if box.bounds.size != size { box.bounds = CGRect(origin: .zero, size: size) }
+        if let lines = specs.rasterView?.lines, lines.bounds.size != size { lines.frame = CGRect(origin: .zero, size: size) }
         // What the pixels answer for in this view: the room they were painted
         // for (the view's bounds then, `TextRasterKey.room`) and the ink past
         // it; a band, only its rows. Bounds that grew since are not theirs
@@ -587,40 +676,10 @@ extension NodeView {
     }
 }
 
-/// A paragraph's text box as a view (`NodeView.makeTextBox`). It takes no
-/// touches and is no accessibility element: the paragraph is.
-final class TextBoxView: UIView {
-    override class var layerClass: AnyClass { TextBoxLayer.self }
-    var box: TextBoxLayer { layer as! TextBoxLayer }
-    override init(frame: CGRect) {
-        super.init(frame: frame)
-        isUserInteractionEnabled = false
-        accessibilityElementsHidden = true
-    }
-    required init?(coder: NSCoder) { nil }
-}
-
 /// A paragraph's worker-rendered pixels (`showTextRaster`): its changes show
 /// at once, as under `setDisableActions`, in whatever transaction is open.
 class InkLayer: CALayer {
     override func action(forKey event: String) -> (any CAAction)? { nil }
-}
-
-/// A one-colour paragraph's ink (`TextRasterImage.tint`): a layer of that
-/// colour masked by its coverage. A layer, not a view: Core Animation's
-/// sublayer methods are for layers you create, never a view's own layer
-/// ("Building a Layer Hierarchy"). A paragraph with a `text-shadow` is
-/// never tinted (`TextRasterizer`'s `tints`), so the mask clips no shadow.
-final class TintInk: InkLayer {
-    func show(_ image: CGImage, tint: CGColor, frame: CGRect, scale: CGFloat) {
-        self.frame = frame
-        backgroundColor = tint
-        let coverage = mask ?? InkLayer()
-        coverage.frame = bounds
-        coverage.contentsScale = scale
-        coverage.contents = image
-        if mask !== coverage { mask = coverage }
-    }
 }
 
 /// One refresh's clip geometry: each ancestor's accumulated clips (at no

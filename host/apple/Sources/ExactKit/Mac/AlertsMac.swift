@@ -172,6 +172,7 @@ final class AlertHost {
         owner.alert.messageText = plan.title
         owner.alert.informativeText = plan.message
         for (index, row) in rows.enumerated() {
+            row.node?.rejectNativeActiveProperties(on: "NSAlert button")
             let button = owner.alert.addButton(withTitle: row.title)
             button.isEnabled = row.enabled
             button.hasDestructiveAction = plan.destructive[index]
@@ -267,7 +268,10 @@ final class AlertHost {
     /// nothing it showed is pressed.
     func sync() {
         if let owner = presented, !owner.fields.isEmpty { followPrompt(owner) }
-        if let owner = presented, !valid(owner) { withdraw(owner) }
+        if let owner = presented {
+            if valid(owner) { for row in owner.rows { row.node?.rejectNativeActiveProperties(on: "NSAlert button") } }
+            else { withdraw(owner) }
+        }
     }
 
     /// A prompt (`kernel/src/confirmation.rs`): the alert's accessory view

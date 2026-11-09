@@ -25,12 +25,12 @@ final class TextSpecs {
     var rasterSpec: Spec?
     var cached: Spec? { didSet { headroom = nil } }
     var headroom: Float?
-    var raster: CGImage?
+    var raster: TextInk?
     var rasterLayer: CALayer?
     /// The layer at the paragraph's place (`NodeView.placeTextRaster`), whose
-    /// lines hold `rasterLayer`, and the view it is the layer of when it is
-    /// one (`NodeView.makeTextBox`).
-    var rasterBox: TextBoxLayer?, rasterBoxView: TextBoxView?
+    /// lines hold `rasterLayer` (`NodeView.makeTextBox`).
+    var rasterBox: TextBoxLayer?
+    var rasterView: TextBoxView?
     /// What the shown pixels answer for in the paragraph's box, whether they
     /// are a band of it, the ink they were painted from (`TextRasterImage.ink`)
     /// and the room they serve (`TextRasterKey.room`).
@@ -77,6 +77,7 @@ final class NodePaintExtras {
 }
 
 final class NodeExtras {
+    var nativeActiveRefusals: [String: String] = [:]
     /// The tint its authored `accent-color` gives its subtree (`applyAccentTint`)
     var authoredAccentTint: UIColor?
     var pressContact: PressContact?
@@ -222,7 +223,7 @@ extension NodeView {
     var textRasterSpec: Spec? { get { specs?.rasterSpec } set { if newValue != nil || specs != nil { textMore.rasterSpec = newValue } } }
     var cachedTextSpec: Spec? { get { specs?.cached } set { if newValue != nil || specs != nil { textMore.cached = newValue } } }
     var cachedTextHeadroom: Float? { get { specs?.headroom } set { if newValue != nil || specs != nil { textMore.headroom = newValue } } }
-    var textRaster: CGImage? { get { specs?.raster } set { if newValue != nil || specs != nil { textMore.raster = newValue } } }
+    var textRaster: TextInk? { get { specs?.raster } set { if newValue != nil || specs != nil { textMore.raster = newValue } } }
     var textRasterLayer: CALayer? { get { specs?.rasterLayer } set { if newValue != nil || specs != nil { textMore.rasterLayer = newValue } } }
     var textBoxLayer: TextBoxLayer? { get { specs?.rasterBox } set { if newValue != nil || specs != nil { textMore.rasterBox = newValue } } }
     var textRasterFrame: CGRect { get { specs?.rasterFrame ?? .zero } set { if newValue != .zero || specs != nil { textMore.rasterFrame = newValue } } }
@@ -267,6 +268,10 @@ extension NodeView {
         if let extras { return extras }
         let made = NodeExtras(); extras = made
         return made
+    }
+    var nativeActiveRefusals: [String: String] {
+        get { extras?.nativeActiveRefusals ?? [:] }
+        set { if !newValue.isEmpty || extras != nil { more.nativeActiveRefusals = newValue } }
     }
     var inlinePressed: UInt32? { get { extras?.inlinePressed } set { if newValue != nil || extras != nil { more.inlinePressed = newValue } } }
     var pressContact: PressContact? { get { extras?.pressContact } set { if newValue != nil || extras != nil { more.pressContact = newValue } } }
@@ -417,7 +422,7 @@ extension NodeView {
     /// plus that inset fixed while the title collapses), or past native content room.
     func scrollTopInset(_ sv: UIScrollView) -> CGFloat {
         scrollOrigin > 0 || sv.contentInsetAdjustmentBehavior != .never
-            ? sv.adjustedContentInset.top : (extras?.nativeScrollContentInsets.top ?? 0) + pageBand.top
+            ? sv.adjustedContentInset.top : (extras?.nativeScrollContentInsets.top ?? 0) + bandInset.top
     }
     /// Its page band (`NodeExtras.pageBand`), zero for most.
     var pageBand: UIEdgeInsets { extras?.pageBand ?? .zero }

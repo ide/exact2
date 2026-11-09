@@ -377,10 +377,12 @@ impl Lowerer<'_> {
             }
         }
         // @ref LLP 1121 D8 — the state parts, folded or recorded.
-        let target = if control.is_some() || t.node_type == NodeType::Control {
-            Some("a native control")
+        let target = if native_button {
+            Some(crate::states::StateTarget::NativeButton)
+        } else if control.is_some() || t.node_type == NodeType::Control {
+            Some(crate::states::StateTarget::NativeControl)
         } else if self.row_depth == 1 {
-            Some("a list's row, whose press is the cell's highlight")
+            Some(crate::states::StateTarget::ListRow)
         } else {
             None
         };

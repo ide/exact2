@@ -220,8 +220,31 @@ final class ProfileColorTests: XCTestCase {
                 } else { XCTAssertTrue(ink.wantsExtendedDynamicRangeContent) }
             }
             #else
-            XCTAssertEqual(image.image.bitsPerComponent, 16)
-            if #available(iOS 18, tvOS 18, *) { XCTAssertEqual(image.image.contentHeadroom, image.headroom, accuracy: 0.001) }
+            if let coverage = image.singleColorCoverage {
+                XCTAssertEqual(coverage.mask.bitsPerPixel, 8, "wide SDR uses the shared coverage path")
+                XCTAssertEqual(coverage.color, color.copy(alpha: 1))
+                XCTAssertTrue(ColorRange.needsExtendedComponents(coverage.color))
+                let view = CoverageImageView()
+                view.bounds = CGRect(origin: .zero, size: image.frame.size)
+                view.show(coverage, scale: 2)
+                let space = CGColorSpace(name: CGColorSpace.extendedLinearSRGB)!
+                let expected = try XCTUnwrap(coverage.color.converted(to: space, intent: .relativeColorimetric, options: nil)?.components)
+                let context = try XCTUnwrap(CGContext(data: nil, width: coverage.mask.width, height: coverage.mask.height,
+                    bitsPerComponent: 32, bytesPerRow: coverage.mask.width * 16, space: space,
+                    bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.floatComponents.rawValue | CGBitmapInfo.byteOrder32Little.rawValue))
+                context.scaleBy(x: 2, y: 2)
+                view.layer.render(in: context)
+                let values = context.data!.assumingMemoryBound(to: Float.self)
+                let opaque = stride(from: 0, to: coverage.mask.width * coverage.mask.height * 4, by: 4).filter { values[$0 + 3] > 0.99 }
+                XCTAssertFalse(opaque.isEmpty)
+                for channel in 0..<3 {
+                    XCTAssertTrue(opaque.contains { abs(Double(values[$0 + channel]) - Double(expected[channel])) < 0.01 }, "the original gamut reaches the native tint")
+                }
+                continue
+            }
+            let pixels = try XCTUnwrap(image.pixels)
+            XCTAssertEqual(pixels.bitsPerComponent, 16)
+            if #available(iOS 18, tvOS 18, *) { XCTAssertEqual(pixels.contentHeadroom, image.headroom, accuracy: 0.001) }
             let session = ExactApp.shared.makeSession()
             defer { session.destroy() }
             session.presenter.apply(wireBatch([

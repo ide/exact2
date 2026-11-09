@@ -412,6 +412,9 @@ pub fn rows(a: &contract_syntax::Attr) -> Vec<StyleId> {
 
 /// Look up an attribute.
 pub fn attr(name: &str) -> Option<AttrTarget> {
+    if let Some(("active", row)) = contract_syntax::state::state_of(name) {
+        return crate::states::active_target(row);
+    }
     if let Some(target) = crate::style_names::lookup(name) {
         return Some(target);
     }
@@ -655,6 +658,7 @@ pub fn attr(name: &str) -> Option<AttrTarget> {
         "-exact-menu" => AttrTarget::Prop(p("menuPlacement")),
         "-exact-menu-remove" => AttrTarget::Prop(p("menuRemove")),
         "-exact-menu-keys" => AttrTarget::Prop(p("menuKeys")),
+        "-exact-return-presses" => AttrTarget::Prop(p("returnPresses")),
         "aria-keyshortcuts" => AttrTarget::Prop(p("accessibilityKeyShortcuts")),
         "aria-description" => AttrTarget::Prop(p("accessibilityHint")),
         "aria-level" => AttrTarget::Prop(p("accessibilityHeadingLevel")),
@@ -978,8 +982,10 @@ pub fn renamed(old: &str) -> Option<&'static str> {
         // LLP 1061 D7: the pressed paint, and React Native's
         // `TouchableOpacity`/`TouchableHighlight` props that set it.
         "press-opacity" | "activeOpacity" => "-exact-press-opacity",
-        "press-background-color" | "underlayColor" => "-exact-press-background-color",
-        "press-color" => "-exact-press-color",
+        "-exact-press-background-color" | "press-background-color" | "underlayColor" => {
+            ":active background-color"
+        }
+        "-exact-press-color" | "press-color" => ":active color",
         "content-transition" => "-exact-content-transition",
         "scroll-edge-effect" => "-exact-scroll-edge-effect",
         "hover-effect" => "-exact-hover-effect",

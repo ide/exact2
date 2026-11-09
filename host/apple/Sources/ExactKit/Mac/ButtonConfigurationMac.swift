@@ -68,7 +68,8 @@ enum ButtonConfigurationMac {
         // the system's, and the platform's red where the author painted no accent: the accent look's bezel (AppKit's
         // white title on it), else the ink.
         button.hasDestructiveAction = destructive
-        button.bezelColor = look.hasSuffix("-accent") ? (red ? .systemRed : accent ?? .controlAccentColor) : nil
+        button.bezelColor = color(rows.button["background_color"], appearance: appearance, accent: accent)
+            ?? (look.hasSuffix("-accent") ? (red ? .systemRed : accent ?? .controlAccentColor) : nil)
         let authored = color(rows.title["text_color"], appearance: appearance, accent: accent)
         let foreground = authored ?? (red && !look.hasSuffix("-accent") ? NSColor.systemRed : nil)
         // SwiftUI's `.plain` draws in the label colour, `.borderless` in the

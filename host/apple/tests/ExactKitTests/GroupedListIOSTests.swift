@@ -27,7 +27,7 @@ class GroupedListFixture: XCTestCase {
     }
 
     func presenter(height: Double = 874, handlers: [String] = [], props: [String: String] = [:], style: [String: Any] = [:],
-                           on given: Presenter? = nil, _ m: @escaping () -> GroupedListModel) -> Presenter {
+                           nativeButtonRow: Bool = false, on given: Presenter? = nil, _ m: @escaping () -> GroupedListModel) -> Presenter {
         ExactGroupedLists.install()
         let p = given ?? Presenter()
         host(p).model = { $0 == 1 ? m() : nil }
@@ -47,7 +47,9 @@ class GroupedListFixture: XCTestCase {
             ["op": "create", "id": 13, "kind": "control", "props": ["type": "checkbox", "accessibilityRole": "switch", "checked": "true", "testId": "toggle"], "handlers": ["input"], "style": [:]],
         ]
         for (id, kind) in [(10, "button"), (11, "button"), (12, "view"), (20, "button"), (21, "button")] {
-            ops.append(view(id, kind, ["testId": "row\(id)"]))
+            if id == 10 && nativeButtonRow {
+                ops.append(["op": "create", "id": id, "kind": "control", "props": ["type": "button", "testId": "row10"], "handlers": ["press"], "style": ["appearance": "auto"]])
+            } else { ops.append(view(id, kind, ["testId": "row\(id)"])) }
         }
         ops += [["op": "children", "id": 1, "ids": [2, 3]], ["op": "children", "id": 2, "ids": [4]], ["op": "children", "id": 3, "ids": [5]],
                 ["op": "children", "id": 4, "ids": [10, 11, 12]], ["op": "children", "id": 5, "ids": [20, 21]],

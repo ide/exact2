@@ -426,7 +426,7 @@ that last held focus, or its first focusable descendant. The guide is disabled
 while focus is inside the container. Other hosts ignore both literal and bound
 values. This is a declared platform deviation: CSS and HTML have no spatial
 focus guide, and the browser retains its sequential Tab order. See
-[LLP 1008 §9](1008-apple-host-v1.spec.md#tvos-doug-lowder-landed-2026-10-03).
+[LLP 1008 §9](1008-apple-host-v1.spec.md#tvos).
 `swipeIndicator` (prop 56, boolean, absent/false by default) marks a direct
 child of a `swiperight` target as authored gesture feedback. Web and iOS hold
 its opacity and scale between their authored values and 1 as the rightward
@@ -589,13 +589,12 @@ with PR #47, with Charlie's rulings of 2026-09-27 where he made them; the
   or app-owned pressed state. Ruled 2026-09-27: it composes through CSS's
   `scale` property and never writes `transform`, and it is kept under reduced
   motion, as a native button's highlight is.
-- **`-exact-press-opacity`, `-exact-press-background-color`, `-exact-press-color`**,
-  bits 212 to 214 ([LLP 1061 D7](1061-press-feel-and-reduced-motion.rfc.md)), are
-  not CSS (Charlie, 2026-10-17). They are the author's pressed paint, which CSS
-  writes as an `:active` rule; Contract has no selectors, and `:active` also
-  matches the pressed node's ancestors where the press is the innermost
-  pressable's. The host shows them from the press state it tracks for
-  `-exact-press-scale`, on its timing, with no runner round trip.
+- **`-exact-press-opacity`**, bit 212 ([LLP 1061 D7](1061-press-feel-and-reduced-motion.rfc.md)),
+  multiplies the presented opacity while pressed; CSS `:active opacity` sets an absolute
+  value. Pressed colours are authored as `background-color` and `color` in `:active`;
+  bits 213 and 214 remain their private host representation. The host's press belongs
+  to the innermost pressable, unlike the browser pseudo-class's ancestor matches,
+  and uses the host's feedback timing without a runner round trip.
 - **`-exact-layout-transition`**, bit 143 ([LLP 1063 D1, D6](1063-presence-and-layout-motion.rfc.md)),
   is not CSS. It moves the presentation after committed layout, sizing only
   the box's surface while content keeps its final geometry. The separate row

@@ -23,7 +23,7 @@ final class BaselinePrecisionIOSTests: XCTestCase {
                 label.text = "Hxg"; label.textColor = .black
                 label.traitOverrides.displayScale = scale; label.updateTraitsIfNeeded()
                 label.frame = CGRect(origin: .zero, size: label.sizeThatFits(CGSize(width: 100, height: 100)))
-                let format = UIGraphicsImageRendererFormat(); format.scale = scale; format.opaque = true; format.preferredRange = .standard
+                let format = UIGraphicsImageRendererFormat(); format.scale = scale; format.opaque = false; format.preferredRange = .standard
                 func render(_ paint: (CGContext) -> Void) -> UIImage {
                     UIGraphicsImageRenderer(size: CGSize(width: 100, height: 40), format: format).image { context in
                         UIColor.white.setFill(); context.fill(CGRect(x: 0, y: 0, width: 100, height: 40))
@@ -34,18 +34,20 @@ final class BaselinePrecisionIOSTests: XCTestCase {
                 let exact = render { TextEngine.draw(paragraph, spec: spec, in: CGRect(x: 0, y: 0, width: 80, height: 30), context: $0) }
                 let native = render { label.layer.render(in: $0) }
                 func inkRows(_ image: UIImage) throws -> ClosedRange<Int> {
-                    let cg = try XCTUnwrap(image.cgImage), data = try XCTUnwrap(cg.dataProvider?.data)
-                    let bytes = CFDataGetBytePtr(data)!
+                    let cg = try XCTUnwrap(image.cgImage), bytes = try XCTUnwrap(cg.dataProvider?.data) as Data
                     let rows = (0..<cg.height).filter { y in
-                        (0..<cg.width).contains { x in bytes[y * cg.bytesPerRow + x * cg.bitsPerPixel / 8] < 240 }
+                        (0..<cg.width).contains { x in
+                            let at = y * cg.bytesPerRow + x * cg.bitsPerPixel / 8
+                            return CapturePixels.painted(bytes, at: at) && bytes[at] < 240
+                        }
                     }
                     return try XCTUnwrap(rows.first)...XCTUnwrap(rows.last)
                 }
                 let job = TextRasterJob(source: engine.attributed(spec), ranges: paragraph.lines.map { CTLineGetStringRange($0) },
                                         baselines: paragraph.baselines, flush: 0, box: CGRect(x: 0, y: 0, width: 80, height: 30),
                                         size: CGSize(width: 80, height: 30), scale: scale)
-                let raster = try XCTUnwrap(job.render(lines: paragraph.lines))
-                let worker = render { _ in UIImage(cgImage: raster.image, scale: scale, orientation: .up).draw(in: raster.frame) }
+                let raster = try XCTUnwrap(job.render(lines: paragraph.lines)), pixels = try XCTUnwrap(raster.pixels)
+                let worker = render { _ in UIImage(cgImage: pixels, scale: scale, orientation: .up).draw(in: raster.frame) }
                 let actual = try inkRows(exact), expected = try inkRows(native)
                 XCTAssertEqual(try inkRows(worker), actual, "the worker and direct painter place the same ink")
                 print("painted baseline \(scale)x \(size)pt: Exact ink=\(actual) UILabel ink=\(expected) normal heights=\(paragraph.height)/\(label.bounds.height)")

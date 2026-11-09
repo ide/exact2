@@ -28,13 +28,9 @@ package final class Presenter {
     var gridMoved: [NodeView] = []
     /// The views Core Animation's next commit may show (`unshown`).
     var awaitingFrame: [WeakNodeView] = []
-    /// What the native projections show changed outside a batch (a subtree's appearance or
-    /// size traits, geometry applied after the batch, as a flight's landing is).
-    /// Run the projection steps an empty batch used to run, once, on the next
-    /// turn, without waiting for a batch an idle app may never commit (LLP
-    /// 1079's amendment of 2026-10-04): grouped lists remount (frames, cell
-    /// heights, switches), lists redraw separators where geometry applied,
-    /// then tab bars and controls.
+    /// Coalesce native appearance and geometry changes outside a batch into the
+    /// next main-thread turn. Synchronize grouped lists, row separators, segments
+    /// and controls without waiting for another kernel batch (LLP 1079).
     package func requestProjectionSync() {
         guard !projectionSyncOwed else { return }
         projectionSyncOwed = true
@@ -133,6 +129,15 @@ package final class Presenter {
     #endif
     lazy var modals = ModalHost(presenter: self)
     lazy var owners = OwnerBlocks(self)
+    #if os(iOS)
+    private var arrangementHost: AnyObject?
+    @available(iOS 27.1, *)
+    var arrangements: ArrangementHost {
+        if let host = arrangementHost as? ArrangementHost { return host }
+        let host = ArrangementHost(self); arrangementHost = host
+        return host
+    }
+    #endif
     /// What a capability module sees of the viewport and the keyboard's
     /// container (LLP 1047.001 D4): UIKit's types, not the core's.
     package var viewportScroll: UIScrollView { viewport }
@@ -333,6 +338,9 @@ package final class Presenter {
         pool.reset()
         leaves.reset()
         flats.reset()
+        #if os(iOS)
+        if #available(iOS 27.1, *) { arrangements.reset() }
+        #endif
         owners.reset {
             modals.reset()
             navigation.reset(); navigation.rebooting()
@@ -842,13 +850,13 @@ package final class Presenter {
                 }
                 collections.endBatch() // Sample the new backend only after its containers have laid it out.
                 reaimFixedGradients()
-                paintPresentedText()
+                ApplyProfile.time("pass.text") { paintPresentedText() }
                 paintChangedText()
                 if !boxFilters.isEmpty { boxFilters.render() }
                 videoVisibility?.changed()
                 for (id, f) in q where id.map({ textHost($0) != nil }) ?? true { f() }
                 scrollPump.batchApplied()
-                leaves.batchApplied(moved: moved)
+                ApplyProfile.time("pass.leaves") { leaves.batchApplied(moved: moved) }
                 #if os(iOS)
                 resolveStatusBar()
                 textSelection.batchEnded()
@@ -991,7 +999,7 @@ package final class Presenter {
                 if let gone, !modals.retainsRemovedView(gone) { gone.removeFromSuperview() }
             case .roots:
                 root.subviews.forEach { $0.removeFromSuperview() }
-                accent.attach(op.ids.compactMap { views[UInt32($0)] }) { for r in $0 { root.addSubview(r); regrid(r) } }
+                ApplyProfile.time("roots.attach") { accent.attach(op.ids.compactMap { views[UInt32($0)] }) { for r in $0 { root.addSubview(r); regrid(r) } } }
             case .far: farFrame(op)
             case .frame, .content, .fieldContent:
                 if flats.isFlat(id) {
@@ -1025,6 +1033,8 @@ package final class Presenter {
         let protoOps = ApplyPhases.cpu() // PROTO (UIKit-first measurement)
         for op in batch.ops {
             let kind = op.op
+            let opBegan = ApplyProfile.on ? CACurrentMediaTime() : 0
+            defer { if ApplyProfile.on { ApplyProfile.add("op.\(kind)", since: opBegan) } }
             switch kind {
             case .create, .props, .style, .children, .paragraph, .flow: touchedIDs.append(op.id); reshapedIDs.append(op.id); controls.faceChanged(op.id)
             case .frame: touchedIDs.append(op.id); controls.faceChanged(op.id)
@@ -1038,10 +1048,10 @@ package final class Presenter {
                 // content geometry lets UIKit settle its scroll relationship.
                 if let first = root.subviews.first as? NodeView {
                     for frame in batch.ops where frame.op == .frame && frame.id == first.id {
-                        applyGeometry(frame)
+                        ApplyProfile.time("geom.first") { applyGeometry(frame) }
                     }
                 }
-                navigation.installInitialOwner(batch)
+                ApplyProfile.time("nav.install") { navigation.installInitialOwner(batch) }
             }
             let id = op.id
             if kind == .children { touched(id, children: true) } else if ![.roots, .create, .fieldContent].contains(kind) {
@@ -1084,7 +1094,7 @@ package final class Presenter {
         menuKey.sync()
         playPauseKey.sync()
         #endif
-        segments.sync()
+        ApplyProfile.time("pass.segments") { segments.sync() }
         // A batch that changes a control's contents (a select's options, a
         // button's face) reads every control again. At or above a control,
         // only props and style reach it (a disabled box, a closing one), and
@@ -1092,13 +1102,13 @@ package final class Presenter {
         // whose rows a scroll replaced leave the controls of the rows it
         // kept as they were. Every checkbox in a list of tasks was
         // configured again each batch.
-        controls.sync(contents: false, changed: batch.controls ? nil : changed, touched: Set(restyledIDs + placedAnew[anewFrom...]))
+        ApplyProfile.time("pass.controls") { controls.sync(contents: false, changed: batch.controls ? nil : changed, touched: Set(restyledIDs + placedAnew[anewFrom...])) }
         #if os(tvOS)
         // A remembered node's replacement owns focus only after its native
         // control exists, so retarget guides in this same batch after sync.
         focusGuides.sync()
         #endif
-        menus.sync()
+        ApplyProfile.time("pass.menus") { menus.sync() }
         glassGroups.reconcile()
         positionContexts()
         // A view a `children` op moved within its parent keeps its ancestors.
@@ -1113,6 +1123,9 @@ package final class Presenter {
         let named = touchedAndAbove(batch.ops.compactMap { [.create, .props, .style, .children, .paragraph, .flow].contains($0.op) ? $0.id : nil } + deferredIDs) // PROTO (UIKit-first measurement): include deferred names and states
         afterBatch { [weak self] in
             guard let self else { return }
+            #if os(iOS)
+            if #available(iOS 27.1, *) { arrangements.sync() }
+            #endif
             keyboardToolbars.finishBackendChange()
             for id in scrollers.union(pendingScrolls).union(materialNodes) {
                 guard let node = views[id] else { continue }
@@ -1134,6 +1147,9 @@ package final class Presenter {
     /// parked row, `NodePool`).
     @discardableResult
     func release(_ id: UInt32, _ leaving: (NodeView) -> Void) -> NodeView? {
+        #if os(iOS)
+        if #available(iOS 27.1, *) { arrangements.remove(id) }
+        #endif
         focusEvents.removed(id)
         session?.canvases.destroy(view: id)
         svg.forget(id)
@@ -1153,6 +1169,9 @@ package final class Presenter {
     /// `parent`'s children, in order: its views as subviews of its container,
     /// then its flat leaves' layers among them (LLP 1068 §6.1).
     func placeChildren(_ parent: NodeView, _ ids: [UInt32]) {
+        #if os(iOS)
+        if #available(iOS 27.1, *) { arrangements.record(parent, children: ids) }
+        #endif
         // Make any views required by this holder before assembling its list.
         for id in flats.place(parent, ids) { flats.promote(id) }
         let container = parent.container
@@ -1169,9 +1188,24 @@ package final class Presenter {
         // view's indicators): inserting a subview at an index moves
         // it when it is already there. One already there stays.
         for child in want where child.superview !== container { placedAnew.append(child.id) }
-        let contained = NodeView.keepingGhosts(want.filter { !navigation.ownsContainment(of: $0, under: parent) && !menus.lifted($0) && !isFlying($0) }, in: container)
+        let heldByArrangement: (NodeView) -> Bool = { node in
+            #if os(iOS)
+            if #available(iOS 27.1, *) { return self.arrangements.owns(node, under: parent) }
+            #endif
+            return false
+        }
+        let contained = NodeView.keepingGhosts(want.filter { !heldByArrangement($0) && !navigation.ownsContainment(of: $0, under: parent) && !menus.lifted($0) && !isFlying($0) }, in: container)
+        // Keep paragraph coverage below authored children when UIKit owns its view
+        let text = parent.specs?.rasterView
+        let offset = text?.superview === container ? 1 : 0
+        if offset != 0, let text, container.subviews.first !== text {
+            container.sendSubviewToBack(text)
+            parent.insertBoxSublayer(text.layer)
+        }
         current = container.subviews
-        for (i, child) in contained.enumerated() where !(i < current.count && current[i] === child) {
+        for (rank, child) in contained.enumerated() {
+            let i = rank + offset
+            if i < current.count && current[i] === child { continue }
             // One already here is past `i` (those before it are in place):
             // moved as UIKit moves it, without asking for every subview again
             // (a pooled row comes back from past the rows, each a move).
@@ -1485,9 +1519,8 @@ extension CGRect {
 }
 
 extension Presenter {
-    /// The view a view is under in the authored tree, where UIKit holds it elsewhere: a dialog's
-    /// sheet, a lifted popover, a route (any, presented or pushed) and a grouped list's carried row
-    /// to their authored parent; else its superview
+    /// The view a view is under in the authored tree, where UIKit holds it elsewhere: a dialog's sheet, a lifted
+    /// popover, a route (any, presented or pushed) and a grouped list's carried row to their authored parent; else its superview
     func authoredParent(of view: UIView) -> UIView? {
         if let node = view as? NodeView {
             if let p = menus.sheets.authoredParent(of: node) { return p }

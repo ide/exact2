@@ -1,11 +1,10 @@
 // Excord: a Discord client (apps/excord/llp/0001).
 // The data seam is §4.2's: `gatewayState` is the gateway's stream and its small snapshot (a version
-// for the lists and one per channel); each list is a resource taking its version, and the transcript
-// is one resource, `loadWindow`, answering one contiguous run of at most 300 messages around `anchor`
-// ("" is the live tail).
+// for the lists and one per channel). `loadWindow` fetches at most 300 messages around `anchor`
+// ("" is the live tail); `history.contract` presents that window after reader motion ends.
 // Paging moves the anchor a page ahead of the reader (`scrolled`, with `reachstart` and `reachend`
 // behind it, and `leadOlder`); a jump replaces the window and places its target with `scrollIntoView`.
-use Run, Block, Media, Embed, Reaction, ReplyRef, Message, Window, Channel, Guild, Category, Gateway, Session, Ack, Sent, EditTarget, Suggestion, EmojiChoice, SwitchTarget, RoleTag, Profile, RailEntry, MemberRow, Pasted, MediaPreferences, Place, Viewport, Page, noAnswers, channelOf, connected, draftOf, withDraft, placeOf, piece, keyOf, Time, typingDot from "./shapes.contract"
+use Run, Block, Media, Embed, Reaction, ReplyRef, Message, Channel, Guild, Category, Gateway, Session, Ack, Sent, EditTarget, Suggestion, EmojiChoice, SwitchTarget, RoleTag, Profile, RailEntry, MemberRow, Pasted, MediaPreferences, Place, Viewport, Page, noAnswers, channelOf, connected, draftOf, withDraft, placeOf, piece, keyOf, Time, typingDot from "./shapes.contract"
 use MessageLanguage, Translated, withTranslated, pendingLineOf from "./translate.contract"
 use translatorAvailability, createTranslator, translate, createLanguageDetector, TranslatorAvailability, TranslatorInfo, TranslatorResult, LanguageDetectorInfo from "@exact/translation"
 use AgeGate from "./agegate.contract"
@@ -41,7 +40,6 @@ component Excord
   state topKey = ""
   state leadHeld = false
   state topOffset = 0
-  state historyStart = false
   state places: Place[] = []
   state drafts: string[] = [] persist
   // The server whose channels the list shows, "@me" for the direct messages.
@@ -214,20 +212,19 @@ component Excord
   // host refuses an answer that waits on a promise another call settles.
   derive askAnchor = slow ? lagAnchor : anchor
   derive askVersion = slow ? lagVersion : histVersion
-  resource win = loadWindow(open, askAnchor, askVersion, since) as shape Window else empty()
   resource editTarget = loadEditTarget(editLookup ? open : "", editLookup ? histVersion : 0, editLookup ? editRequest : 0) as shape EditTarget else empty()
   mutation editPaged as shape Ack refreshes editTarget then afterEditPage
   // A send shows at once (`echoed`, the local row), then posts (`sent`).
-  mutation echoed as shape Sent queue refreshes win, chan then postEchoed
-  mutation sent as shape Sent queue refreshes win, chan, categories then afterSent
-  mutation changed as shape Ack queue refreshes win, chan, typing, categories, dms, guilds, rail
-  mutation deleted as shape Ack queue refreshes win, chan, categories, dms, guilds, rail then afterDelete
-  mutation edited as shape Ack refreshes win then afterEdit
+  mutation echoed as shape Sent queue refreshes candidateWindow, chan then postEchoed
+  mutation sent as shape Sent queue refreshes candidateWindow, chan, categories then afterSent
+  mutation changed as shape Ack queue refreshes candidateWindow, chan, typing, categories, dms, guilds, rail
+  mutation deleted as shape Ack queue refreshes candidateWindow, chan, categories, dms, guilds, rail then afterDelete
+  mutation edited as shape Ack refreshes candidateWindow then afterEdit
   mutation pastedPictures as shape Pasted queue then takePasted
   // An ack changes the read state, not the history the window shows.
   mutation acked as shape Ack queue refreshes chan, categories, dms, guilds, rail then afterAck
-  // The page the window names (`win.need`), one at a time.
-  mutation paged as shape Ack queue refreshes win, chan then afterPage
+  // Fetch the page named by `candidateWindow.need`, one at a time
+  mutation paged as shape Ack queue refreshes chan then afterPage
   mutation beat as shape Ack
   // The clock moved on and the gateway asked again: a backoff's retry.
   mutation redialed as shape Ack refreshes gateway
@@ -239,7 +236,7 @@ component Excord
   mutation joined as shape Ack refreshes categories, dms
   // A token kept re-asks the session and the gateway, which then connects with it.
   mutation signedIn as shape Ack refreshes session, gateway then afterSignIn
-  mutation signedOut as shape Ack refreshes session, gateway, guilds, rail, categories, dms, chan, win
+  mutation signedOut as shape Ack refreshes session, gateway, guilds, rail, categories, dms, chan, candidateWindow
   // The launch's unlock reads the token behind the check; a return's check
   // gates the screen, the token being in memory already. Turning the lock on
   // asks first, as WhatsApp does, then keeps the token locked.
@@ -249,18 +246,6 @@ component Excord
   mutation lockSet as shape Ack refreshes session
   mutation age as shape AgeRange
   state ageGate = ""
-  derive rows = win.channel == open ? win.rows : []
-  derive keys = rows.map(r => r.key)
-  derive lastKey = match rows.at(-1) { case some(r) => r.key, case none => "" }
-  derive dividerKey = match first(rows.filter(r => r.isNew)) { case some(r) => r.key, case none => "" }
-  // The window answers the reader's present request (a page or a jump has
-  // landed). A window's pin asks for the same rows, so pinning it keeps it current.
-  // A window still lacking the page that holds its anchor (or its tail) answers nothing yet.
-  derive current = win.channel == open and (win.anchor == anchor or win.pin == anchor) and win.need != "around" and win.need != "latest"
-  derive pageKey = `${win.channel}/${win.need}/${win.cursor}`
-  // Asks count too: a page whose window the host refused runs no `afterPage` and would be asked for good.
-  derive historyFailed = win.channel == open and win.need != "" and pageAsked == pageKey and (pageTries >= 3 or (pageAsks >= 3 and not pending(paged)))
-  derive historyLoading = pending(win) or win.channel != open or win.need != ""
   // The transcript is on screen, not the channel list, a picture or the lock screen over it.
   derive reading = top(nav).name == "channel" and not locked
   derive draft = editing == "" ? draftOf(drafts, open) : editText
@@ -333,6 +318,7 @@ component Excord
     after(1, openResume)
   task signedOutHome when signedOutNow and top(nav).name != "home"
     after(1, toSignIn)
+  members "./history.contract"
   members "./routing.contract"
   members "./viewer.contract"
   members "./light.contract"
@@ -347,25 +333,19 @@ component Excord
   task unhighlight when highlight != "" and target == "" key=highlight
     after(2500, clearHighlight)
   // A jump, a restored place or a return to the present lands once the window holding it has.
-  task land when target != "" and current and not pending(win) key=target
+  task land when target != "" and current and not pending(candidateWindow) key=target
     after(1, landJump)
   // A message arriving while the reader is within a row of the end is followed
   // (§3.7); the list follows by itself only from the end exactly.
-  task follow when current and anchor == "" and not away and chan.arrived > followed key=chan.arrived
+  task follow when current and not windowChanged and anchor == "" and not away and chan.arrived > followed key=chan.arrived
     after(1, followEnd)
   // What the reader has seen at the end is acknowledged a second after it shows,
   // while the transcript is in front: at most one ack a second. Leaving the end
   // or the channel acknowledges at once what was on screen (`scrolled`, `back`).
   // It is asked again when the channel changes (a message reached the tail after the
   // ack chose its newest) and after a failed ack, at most three times.
-  task ack when reading and not signedOutNow and current and anchor == "" and not away and chan.unread > 0 and page.visibilityState == "visible" key=`${chan.version}/${ackTries}`
+  task ack when reading and not signedOutNow and current and not windowChanged and anchor == "" and not away and chan.unread > 0 and page.visibilityState == "visible" key=`${chan.version}/${ackTries}`
     after(1000, ackNow)
-  // The lead (F1): a page a step while fewer than 100 rows stand above a reader in history (never a short live tail); after a jump, the highlight, and after a restore, the placement's scroll report (leadHeld).
-  task leadOlder when reading and current and target == "" and highlight == "" and not leadHeld and (away or (anchor != "" and win.hasAfter)) and win.need == "" and win.hasBefore and keys.indexOf(topKey) >= 0 and keys.indexOf(topKey) < 100 and anchor != win.firstId key=win.firstId
-    after(1, older)
-  // The page the window lacks while the channel is read; a failed one is asked again, at most three times.
-  task fetchPage when reading and win.channel == open and not signedOutNow and win.need != "" and not historyFailed and not pending(paged) and not pending(editPaged) key=`${pageKey}/${pageTries}`
-    after(1, pageNow)
   // The bar says what was unread when the channel opened: its label is held from
   // the first window that answers it, as arrivals and sends move the count on.
   task unreadLands when unreadBar and unreadLabel == "" and current
@@ -410,27 +390,6 @@ component Excord
         ackTries = r.ok ? 0 : min(3, ackTries + 1)
       case none
         ackTries = 0
-  action pageNow
-    if pageAsked != pageKey
-      pageTries = 0
-    pageAsks = pageAsked != pageKey ? 1 : pageAsks + 1
-    pageAsked = pageKey
-    send paged = loadPage(win.channel, win.need, win.cursor)
-  action afterPage
-    match paged
-      case some(r)
-        pageTries = r.ok ? 0 : pageTries + 1
-        // A collection at offset zero shows prepended rows. A transcript keeps
-        // the message being read, including when a slow page lands at that edge.
-        if r.ok and reading and pageAsked.startsWith(`${open}/before/`) and historyStart and target == "" and topKey != ""
-          target = topKey
-          targetBlock = "offset"
-          restoreOffset = topOffset
-      case none
-        pageTries = 0
-  action retryHistory
-    pageTries = 0
-    pageAsks = 0
   action followEnd
     followed = chan.arrived
     if not away and endGap > 0.5
@@ -470,7 +429,6 @@ component Excord
     attachError = ""
     highlight = ""
     away = false
-    historyStart = false
     // A New divider only for what was unread on opening: what arrives while the reader watches is not new to them.
     since = c.unread > 0 ? c.lastRead : ""
     unreadBar = c.unread > 0
@@ -563,60 +521,6 @@ component Excord
     if not away and anchor == "" and chan.unread > 0 and viewing == ""
       send acked = markRead(open)
     send joined = viewChannel("")
-
-  // The window: the reader's place decides which run of history it holds.
-  // The reader is at the end within the last row's height of it (§3.7). The window anchors at its first (last)
-  // row when the first visible row comes within 15 rows of that edge, and the data module fetches the one page
-  // beyond it; toward the top, `leadOlder` anchors from 100 rows (F1). `reachstart` alone gives one viewport of
-  // lead, which a fling overruns. A page is asked only of a window that answers the present request, whatever else is refreshing.
-  action scrolled(x: number, y: number, e: ScrollEvent)
-    if not scrolling
-      scrolling = true
-      hoverKey = ""
-    scrollTick = scrollTick + 1
-    let k = match e.firstVisibleKey { case some(k) => k, case none => "" }
-    let at = keys.indexOf(k)
-    let gap = e.scrollHeight - e.scrollTop - e.clientHeight
-    let isAway = gap > max(1, frame(`message-${lastKey}`).height)
-    // Rows arriving below grow the gap without the reader moving (and the live window shedding its oldest row moves the
-    // offset): only a reader whose first visible row or its offset moved changes whether they are at the end. While a
-    // send's return to the end is owed or still settling, a fling's remaining reports do not decide it (`scrollEnded`
-    // puts the list back at its end). Any report at the live end clears an anchor left over (a restore given up there).
-    let moved = k != topKey or max(e.firstVisibleOffset - topOffset, topOffset - e.firstVisibleOffset) > 0.5
-    if isAway != away and moved and target == "" and not settling
-      away = isAway
-      if isAway
-        baseArrived = chan.arrived
-        if anchor == "" and chan.unread > 0 and reading
-          send acked = markRead(open)
-        if anchor == ""
-          anchor = win.pin
-      else
-        followed = chan.arrived
-        if anchor != "" and not win.hasAfter
-          anchor = ""
-    if not isAway and not away and anchor != "" and not win.hasAfter and target == "" and not settling
-      anchor = ""
-    if at >= 0 and current and target == ""
-      if at < 15 and win.hasBefore
-        anchor = win.firstId
-      else
-        if at > keys.length - 15 and win.hasAfter
-          anchor = win.lastId
-    endGap = gap < 1 ? 0 : round(gap)
-    historyStart = e.scrollTop <= 0.5
-    topKey = k
-    leadHeld = false
-    topOffset = e.firstVisibleOffset
-  action scrollEnded
-    endSeen = true
-    scrollSettled()
-  action older
-    if win.hasBefore and current and target == ""
-      anchor = win.firstId
-  action newer
-    if win.hasAfter and current and target == ""
-      anchor = win.lastId
 
   // "The end" is the last row with an offset past it, which the list clamps to the
   // end of its range: the bottom inset (the typing line) included.

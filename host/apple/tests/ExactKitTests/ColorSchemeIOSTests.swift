@@ -177,8 +177,8 @@ final class ColorSchemeIOSTests: XCTestCase {
         var white: CGFloat = 0
         XCTAssertTrue(baked.getWhite(&white, alpha: nil))
         XCTAssertGreaterThan(white, 0.9, "the button's ink is its dark one")
-        // The paragraph's raster, painted as the batch ended: its ink is white,
-        // as its layer shows it (one colour's coverage is tinted there).
+        // The paragraph's ink, made as the batch ended: white, as its layer
+        // shows it (one colour is drawn by the layer itself).
         let raster = try XCTUnwrap(text.textRaster, "painted by the batch")
         let shown = try XCTUnwrap(text.textRasterLayer)
         let w = raster.width, h = raster.height

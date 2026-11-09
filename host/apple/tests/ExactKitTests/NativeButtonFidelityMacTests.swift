@@ -306,7 +306,7 @@ final class NativeButtonFidelityMacTests: XCTestCase {
         let name = glass ? String(id.dropFirst(6)) : id
         let b = NSButton(title: "", target: nil, action: nil)
         let borderless: Set<String> = ["plain", "borderless", "get-app", "try-demo", "subscriptions", "sign-out", "clear", "a-plain"]
-        let accent: Set<String> = ["filled", "bordered-prominent", "control-tile", "sign-in", "radius-padding", "pointer-none", "open-dialog", "wide", "narrow"]
+        let accent: Set<String> = ["filled", "bordered-prominent", "control-tile", "sign-in", "radius-padding", "pointer-none", "open-dialog", "wide", "narrow", "active-properties"]
         let glassStyles: Set<String> = ["glass", "prominent-glass", "clear-glass", "prominent-clear-glass", "symbol-only", "a-glass", "a-clear", "a-sf", "g1", "g2", "g3", "pointer-override"]
         let titles: [String: String] = ["defrost-front": "Front Defrost", "defrost-rear": "Rear Defrost", "control-tile": "Lock",
             "subtitle": "Last Parked", "check-update": "Check for update", "sign-in": "Sign In", "resend-code": "Resend Code",
@@ -316,11 +316,11 @@ final class NativeButtonFidelityMacTests: XCTestCase {
             "pointer-override": "Takes touch", "pointer-none": "Passes touch through", "open-dialog": "Open confirmation", "open-popover": "Open popover",
             "confirm-action": "Confirm", "confirm-cancel": "Cancel", "symbol-title": "Send", "title-symbol": "Forward", "wide": "Fixed 240 wide",
             "a-plain": "plain", "a-gray": "gray", "a-bordered": "bordered", "a-glass": "glass", "a-clear": "clear", "a-tinted": "tinted",
-            "narrow": "Send this very long message", "stretched": "Stretched (default bordered)", "disabled": "Disabled", "g1": "Lock", "g2": "Unlock", "g3": "Fade"]
+            "narrow": "Send this very long message", "stretched": "Stretched (default bordered)", "disabled": "Disabled", "active-properties": "Owned title", "g1": "Lock", "g2": "Unlock", "g3": "Fade"]
         let symbols: [String: String] = ["defrost-front": "windshield.front.and.wiper", "defrost-rear": "windshield.rear.and.wiper", "control-tile": "lock.fill",
             "subtitle": "location.fill", "check-update": "arrow.clockwise", "method-email": "envelope.fill", "method-passkey": "key.fill", "clear": "xmark.circle.fill",
             "disabled-authored": "lock.fill", "symbol-only": "plus", "symbol-title": "arrow.up", "title-symbol": "arrowshape.turn.up.right", "a-plain": "arrow.up",
-            "a-gray": "arrow.up", "a-bordered": "arrow.up", "a-glass": "arrow.up", "a-clear": "arrow.up", "a-tinted": "arrow.up", "a-sf": "paperplane.fill"]
+            "a-gray": "arrow.up", "a-bordered": "arrow.up", "a-glass": "arrow.up", "a-clear": "arrow.up", "a-tinted": "arrow.up", "a-sf": "paperplane.fill", "active-properties": "arrow.up"]
         b.bezelStyle = .push
         if #available(macOS 26, *), LinkedDesign.liquidGlass, glass || glassStyles.contains(name) { b.bezelStyle = .glass }
         b.isBordered = glass || !borderless.contains(name)
@@ -349,6 +349,14 @@ final class NativeButtonFidelityMacTests: XCTestCase {
         if ["control-tile", "disabled-authored"].contains(name), let image = b.image {
             let tint = NSColor(red: 0, green: 128.0 / 255, blue: 0, alpha: 1)
             b.image = image.withSymbolConfiguration(b.symbolConfiguration!.applying(NSImage.SymbolConfiguration(paletteColors: [tint])))
+            b.image?.isTemplate = false
+        }
+        if name == "active-properties" {
+            let ink = NSColor(srgbRed: 0, green: 1, blue: 0, alpha: 1)
+            b.contentTintColor = ink
+            let paragraph = NSMutableParagraphStyle(); paragraph.alignment = .center
+            b.attributedTitle = NSAttributedString(string: b.title, attributes: [.font: b.font!, .foregroundColor: ink, .paragraphStyle: paragraph])
+            b.image = b.image?.withSymbolConfiguration(b.symbolConfiguration!.applying(NSImage.SymbolConfiguration(paletteColors: [.red])))
             b.image?.isTemplate = false
         }
         b.imagePosition = b.image == nil ? .noImage : b.title.isEmpty ? .imageOnly : name == "control-tile" ? .imageAbove : name == "title-symbol" ? .imageTrailing : .imageLeading

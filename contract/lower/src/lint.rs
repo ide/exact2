@@ -306,6 +306,16 @@ fn attribute_name(name: &str) -> bool {
     true
 }
 
+pub(crate) fn active_migration_hint(name: &str, target: &str) -> String {
+    let property = target.trim_start_matches(":active ");
+    let migration = if matches!(name, "-exact-press-background-color" | "-exact-press-color") {
+        "; `contract migrate <file.contract>` moves this attribute"
+    } else {
+        ""
+    };
+    format!("; write `{property}` in a `:active` block{migration}")
+}
+
 pub(crate) fn unknown_attr(tag: &str, a: &Attr) -> LowerError {
     let hint = match tags::renamed(&a.name) {
         None if crate::fields::placeholder_hint(&a.name).is_some() => {
@@ -319,6 +329,7 @@ pub(crate) fn unknown_attr(tag: &str, a: &Attr) -> LowerError {
         Some(new @ "background-color") if a.name == "background" => {
             format!("; CSS's `background` shorthand is not taken here: a colour is `{new}` (LLP 1017 §8.1)")
         }
+        Some(new) if new.starts_with(":active ") => active_migration_hint(&a.name, new),
         Some(new) => format!(
             "; `{}` is spelled `{new}` here, the web's name (LLP 1017 §8.1)",
             a.name
@@ -346,12 +357,10 @@ pub(crate) fn unknown_attr(tag: &str, a: &Attr) -> LowerError {
              available yet"
                 .into()
         }
-        // @ref LLP 1061 D7: no selectors, so no pressed block of any row;
-        // what the host can change under a finger, with no layout, is named.
         None if a.name.starts_with("-exact-press-") => {
-            "; a pressed look is paint only, never layout: `-exact-press-opacity`, \
-             `-exact-press-background-color`, `-exact-press-color` and `-exact-press-scale` \
-             (and `-exact-press-haptic`), which the host shows while a pointer holds the node"
+            "; a pressed look is paint only: write rows in `:active`; `-exact-press-opacity` and \
+             `-exact-press-scale` multiply the presented value, and \
+             `-exact-press-haptic` names the platform feedback"
                 .into()
         }
         // Every host ends a hold the system took (a scroll, an alert, the
@@ -573,7 +582,7 @@ pub fn lint(file: &File) -> Vec<LowerError> {
                                         continue;
                                     }
                                     row = contract_syntax::Attr {
-                                        name: crate::states::checked_as(state, name).to_string(),
+                                        name: crate::states::checked_as(state, name),
                                         ..written
                                     };
                                     &row

@@ -971,3 +971,51 @@ fn tab_retained_membership_changes(p: &mut Presenter<()>, width: f32) {
         siblings.as_slice()
     );
 }
+
+// Active fill is painted by the native tab, including its default and gray styles.
+pub(super) fn active_tab_background_has_one_native_paint_owner() {
+    for style in ["bordered", "gray"] {
+        let source = r##"component App
+  state count = 0
+  action go
+    count = count + 1
+  view
+    column width=200 height=100 background-color="white"
+      row role="tablist"
+        button role="tab" aria-controls="panel" buttonStyle="STYLE" press=go width=160 height=50 testId="tab"
+          :active
+            background-color = "#ff000080"
+          text "Tab"
+"##
+        .replace("STYLE", style);
+        let plan = contract::compile(&source).unwrap();
+        let (mut p, error) = Presenter::boot_with(
+            &plan.encode(),
+            (),
+            (200., 100.),
+            1.,
+            std::path::PathBuf::new(),
+            PainterChoice::Cpu,
+        )
+        .unwrap();
+        assert!(error.is_none(), "{error:?}");
+        let node = p.host().kernel().node(id(&p, "tab")).unwrap();
+        assert!(node.is_neutral_tab());
+        let frame = node.frame;
+        let target = node.id;
+        let held = exact_linux::agent::handle(
+            &mut p,
+            &format!(r#"{{"op":"tap","id":{target},"holdState":"active"}}"#),
+        );
+        assert!(!held.contains("error"), "{held}");
+        let image = p.frame();
+        let pixel = image
+            .pixel(frame.x as u32 + 10, frame.y as u32 + 10)
+            .unwrap();
+        assert_eq!(
+            [pixel.red(), pixel.green(), pixel.blue()],
+            [255, 127, 127],
+            "{style}"
+        );
+    }
+}

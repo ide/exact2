@@ -1,3 +1,7 @@
+down native-active
+up
+down native-scale
+up
 tap visibility
 tap visibility
 tap change

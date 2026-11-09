@@ -564,6 +564,11 @@ final class ExactHatches {
     let surfaceHasFn: SurfaceHasFn?, surfaceSensorFn: SurfaceSensorFn?
     /// One of 168 or more: a package's call of the app's handler (LLP 1133.016 D15 item 1; ExactExtensions.swift).
     let invokeFn: Invocations.InvokeFn?
+    /// One of 176 or more: an authored content arrangement.
+    typealias ArrangementFn = @convention(c) (UnsafeMutableRawPointer?, UInt32, UnsafeMutableRawPointer?) -> Int32
+    let arrangementFn: ArrangementFn?
+    /// One of 184 or more: a module's service query (ExactServices.swift).
+    let serviceFn: ServiceFn?
     #if os(iOS) || os(tvOS)
     /// One of 112 or more: a held tab's navigation controller, built (`ExactTab.controller`).
     typealias StackFn = @convention(c) (UnsafeMutableRawPointer?, UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer?
@@ -618,6 +623,10 @@ final class ExactHatches {
         surfaceSensorFn = surfaces ? table.load(fromByteOffset: 152, as: UnsafeRawPointer?.self).map { unsafeBitCast($0, to: SurfaceSensorFn.self) } : nil
         invokeFn = table.load(as: UInt32.self) >= 168
             ? table.load(fromByteOffset: 160, as: UnsafeRawPointer?.self).map { unsafeBitCast($0, to: Invocations.InvokeFn.self) } : nil
+        arrangementFn = table.load(as: UInt32.self) >= 176
+            ? table.load(fromByteOffset: 168, as: UnsafeRawPointer?.self).map { unsafeBitCast($0, to: ArrangementFn.self) } : nil
+        serviceFn = table.load(as: UInt32.self) >= 184
+            ? table.load(fromByteOffset: 176, as: UnsafeRawPointer?.self).map { unsafeBitCast($0, to: ServiceFn.self) } : nil
     }
 
     /// A package picture changed (0) or revoked (1): the host's raster loader acts on it.
@@ -715,10 +724,11 @@ public final class ExactRoute {
     public internal(set) var navigation: ExactNavigation?
     /// The route node's `data-*` words.
     public internal(set) var data: ExactData
-    /// The route's content scroll view: the one it names with
-    /// `navigationScroll`, else its first that scrolls vertically (LLP
-    /// 1115.000 D11.1). Its offset, insets, size and delegate are Exact's
-    /// (LLP 1075.003 §3.5).
+    /// The route's content scroll view: its native top-edge selection, else the one named
+    /// by `navigationScroll` or its first vertical scroller. Select with UIKit's
+    /// `controller.setContentScrollView(_:for:)`; nil leaves discovery to UIKit and
+    /// keeps the first vertical scroller as Exact's automatic scroll-to-top target.
+    /// An authored scroller's offset, insets, size and delegate remain Exact's.
     public internal(set) weak var contentScrollView: UIScrollView?
     /// Whether this call is the controller's first.
     public internal(set) var isNew: Bool
@@ -800,7 +810,7 @@ public final class ExactTabContents {
     public var onSelect: ((Int) -> Void)?
     /// False once Exact retired the container: `select` then does nothing.
     public internal(set) var isLive = true
-    let tabNodes: [UInt32]
+    var tabNodes: [UInt32]
     weak var hatches: ExactHatches?
     init(tabs: [ExactTab], selected: Int, tabNodes: [UInt32], hatches: ExactHatches) {
         self.tabs = tabs; self.selected = selected; self.tabNodes = tabNodes; self.hatches = hatches
@@ -899,6 +909,20 @@ public final class ExactElement {
     public func owns(recognizer: ExactPlatformRecognizer, _ what: String, surface: Bool = false) {
         if isLive { hatches?.owns(scope: scopeName, node: node, kind: 1, object: recognizer, what, surface: surface) }
     }
+
+    #if os(iOS)
+    /// Lay out this element's two authored children with UIKit, preserving their content.
+    /// The first child is primary and the second secondary. Exact manages their child controllers
+    /// and containment; supply a detached controller with empty content slots. The app configures
+    /// the native arrangement, including animated updates. Navigation stays in the enclosing
+    /// controller, with its native policies unchanged. Pass nil to restore authored layout.
+    @available(iOS 27.1, *)
+    @discardableResult
+    public func arrange(using controller: UIArrangementViewController?) -> Bool {
+        guard isLive, let hatches, let arrange = hatches.arrangementFn else { return false }
+        return arrange(hatches.host, node, controller.map { Unmanaged.passUnretained($0).toOpaque() }) == 0
+    }
+    #endif
 
     /// The controls this hatch drew in the node (§3.5), at most 32. Setting
     /// the list replaces it; one that breaks a bound is refused whole, by
@@ -1172,9 +1196,14 @@ private let moduleTabs: @convention(c) (UnsafeMutableRawPointer?, UInt32, Unsafe
 /// container the app owns, retained once for the host, or nil.
 private let moduleTabContainer: @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<UInt8>?, UInt32, UnsafePointer<UnsafeMutableRawPointer?>?, UInt32) -> UnsafeMutableRawPointer? = { raw, json, length, controllers, count in
     #if os(iOS) || os(tvOS)
-    guard let m = module(raw), let hatches = m.hatches, let json, let controllers,
+    guard let m = module(raw), let hatches = m.hatches, let json,
           let object = try? JSONSerialization.jsonObject(with: Data(bytes: json, count: Int(length))) as? [String: Any],
-          let names = object["names"] as? [String], let nodes = object["nodes"] as? [NSNumber], names.count == Int(count) else { return nil }
+          let nodes = object["nodes"] as? [NSNumber] else { return nil }
+    if object["refresh"] as? Bool == true {
+        if let contents = hatches.contents, contents.isLive, contents.tabs.count == nodes.count { contents.tabNodes = nodes.map(\.uint32Value) }
+        return nil
+    }
+    guard let controllers, let names = object["names"] as? [String], names.count == Int(count), nodes.count == names.count else { return nil }
     let shown = (0..<Int(count)).compactMap { controllers[$0].map { Unmanaged<UIViewController>.fromOpaque($0).takeUnretainedValue() } }
     guard shown.count == names.count else { return nil }
     let tabs = zip(names, shown).map { ExactTab(name: $0, shown: $1, hatches: hatches) }

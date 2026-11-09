@@ -735,7 +735,7 @@ final class GroupedListView: NSObject, UICollectionViewDelegate {
         // A standard row whose symbol's authored tint or written colour, whose
         // authored `min-height` (D7) or whose `-exact-tint-adjustment` changed is too.
         let looking: [UInt32: BatchValue?] = Dictionary(uniqueKeysWithValues: snapshot.itemIdentifiers.map { ($0, .array([tint(of: $0) ?? .null, minimum(of: $0).map { .number(Double($0)) } ?? .null,
-                                                                                                                       host.presenter.views[$0]?.style["tint_adjustment"] ?? .null])) })
+                                                                                                                       host.presenter.views[$0]?.style["tint_adjustment"] ?? .null, activeSignature($0)])) })
         // A row whose card changed (its section gained or lost one, or the
         // row moved between sections) is configured again.
         let wasCarded = Dictionary(previous.sections.flatMap { s in s.rows.map { ($0.view, s.card) } }, uniquingKeysWith: { a, _ in a })
@@ -1062,11 +1062,13 @@ final class GroupedListView: NSObject, UICollectionViewDelegate {
     }
 
     private func configure(_ cell: GroupedCell, _ id: UInt32) {
+        if cell.row != id { cell.restorePressPresentation() }
         cell.row = id
         cell.target = rows[id]?.target
         // The row's `-exact-tint-adjustment` is its cell's, as a hand-built app sets the cell's
         cell.tintAdjustmentMode = .init(host.presenter.views[id]?.style["tint_adjustment"])
         guard let row = rows[id] else { return }
+        cell.forcedPressed = !row.custom && host.presenter.views[id]?.pressIsDown == true
         interact(cell, id)
         // A card-less section's rows sit on the list's background; a
         // pressable standard row still shows UIKit's highlight while pressed.
@@ -1084,6 +1086,7 @@ final class GroupedListView: NSObject, UICollectionViewDelegate {
             cell.backgroundConfiguration = .clear()
         }
         if row.custom {
+            cell.restorePressPresentation()
             cell.accessibilityLabel = nil
             cell.accessibilityTraits.remove([.button, .link, .selected])
             cell.contentConfiguration = nil
@@ -1162,6 +1165,7 @@ final class GroupedListView: NSObject, UICollectionViewDelegate {
         cell.imageInk = ink
         c.image = cell.inked(c.image)
         cell.show(c)
+        activePaint(cell, id, content: c)
         cell.marginsIgnoreSafeArea()
         cell.accessories = accessories(row, cell: cell)
         accessibility(cell, id, row)
@@ -1268,7 +1272,7 @@ final class GroupedListView: NSObject, UICollectionViewDelegate {
 
     /// The view of the symbol the model named: the row's first shown child,
     /// when it is an image of that symbol (`kernel/src/grouped.rs`).
-    private func symbolView(of id: UInt32) -> NodeView? {
+    func symbolView(of id: UInt32) -> NodeView? {
         guard let symbol = rows[id]?.symbol, !(rows[id]?.custom ?? true), let row = host.presenter.views[id] else { return nil }
         let first = row.container.subviews.lazy.compactMap { $0 as? NodeView }.first { $0.style["display"]?.string != "none" }
         guard let image = first, image.kind == "image", let source = image.props["imageSource"], source.hasPrefix("symbol:") else { return nil }

@@ -588,6 +588,7 @@ final class WindowToolbarHost: NSObject, NSToolbarDelegate, NSToolbarItemValidat
         let live = Set(buttons.map(\.id))
         for id in Array(items.keys) where !live.contains(id) { items.removeValue(forKey: id); symbols.removeValue(forKey: id) }
         for node in buttons {
+            node.rejectNativeActiveProperties(on: "NSToolbarItem")
             if node.props["accessibilityRole"] == "status", let face = MacBarFace(node, readout: true) {
                 let item = items[node.id] ?? NSToolbarItem(itemIdentifier: .init("exact.readout.\(node.id)"))
                 let view = (item.view as? NSImageView) ?? NSImageView()

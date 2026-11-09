@@ -689,6 +689,7 @@ package final class SwipeActionsHost {
         #if !os(tvOS)
         fileprivate func configuration(_ controls: [NodeView]) -> UISwipeActionsConfiguration? {
             let actions = controls.filter(enabled).map { target in
+                target.rejectNativeActiveProperties(on: "UIContextualAction")
                 let destructive = target.props["destructive"] == "true"
                 let action = UIContextualAction(style: destructive ? .destructive : .normal, title: nil) { [weak self, weak target] _, _, complete in
                     guard let self, let target, self.host.presenter.views[target.id] === target, self.enabled(target) else { complete(false); return }

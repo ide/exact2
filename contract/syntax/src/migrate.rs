@@ -3,6 +3,8 @@
 
 use crate::{Span, SyntaxError};
 
+mod press;
+
 pub(crate) struct Edit {
     start: Span,
     end: Span,
@@ -19,8 +21,8 @@ impl Edit {
     }
 }
 
-/// Rewrite retired list types, free method calls and view keywords. Other syntax
-/// errors refuse the migration without changing the source.
+/// Rewrite retired spellings, including press paints moved into an active part.
+/// Other syntax errors refuse the migration without changing the source.
 pub fn migrate(src: &str) -> Result<String, Vec<SyntaxError>> {
     let (parsed, edits) = crate::parser::parsed_with_edits(src, 0);
     if let Err(partial) = parsed {
@@ -47,7 +49,9 @@ pub fn migrate(src: &str) -> Result<String, Vec<SyntaxError>> {
     for (start, end, text) in edits.into_iter().rev() {
         after.replace_range(start..end, &text);
     }
-    // Validate the rewritten spelling before allowing any file write.
+    // Finish expression repairs before moving their source into state parts.
+    let file = crate::parse(&after).map_err(|e| vec![e])?;
+    let after = press::rewrite(&after, &file)?;
     crate::parse(&after).map_err(|e| vec![e])?;
     Ok(after)
 }

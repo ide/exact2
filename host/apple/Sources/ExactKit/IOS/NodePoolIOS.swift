@@ -198,10 +198,7 @@ final class NodePool {
     private func children(_ view: NodeView) -> [NodeView]? {
         guard view.scroll == nil, view.overlay == nil else { return nil }
         let container = view.container
-        func own(_ sub: UIView) -> Bool {
-            sub === view.symbolView || sub === view.materialView || sub === view.clipBox || sub === view.glassGroupView || sub === view.glassSlot
-                || sub === view.specs?.rasterBoxView
-        }
+        func own(_ sub: UIView) -> Bool { sub === view.symbolView || sub === view.materialView || sub === view.clipBox || sub === view.glassGroupView || sub === view.glassSlot || sub === view.specs?.rasterView }
         if container !== view {
             guard view.subviews.allSatisfy({ own($0) || ($0 === container) }) else { return nil }
         }
@@ -529,7 +526,7 @@ final class NodePool {
 
 extension NodeView {
     /// Parked (`NodePool`): what `forget` drops, except the view's presenter
-    /// and its symbol glyph view, which the next row reuses.
+    /// and its empty text hierarchy or symbol glyph view, which the next row reuses.
     func recycle() {
         holdGone() // a held state goes with its node, parked under its row (HeldState.swift)
         cancelPressContact()
@@ -539,7 +536,7 @@ extension NodeView {
         cancelSurfaceControls()
         invalidateText()
         cachedTextLayout = nil
-        dropTextRaster()
+        parkTextRaster()
         liveText = nil
         loadGeneration += 1
         presenter?.session?.rasters.cancel(id)

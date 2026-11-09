@@ -1795,6 +1795,12 @@
     },
     {
       "id": 299,
+      "name": "returnPresses",
+      "kind": "str",
+      "_comment": "@ref LLP 1115.000 D7.3: `-exact-return-presses` on a container, `descendants` or `none` (the default). Under `descendants` the Mac presses a focused pressable descendant on Return as on Space, before a dialog's default button, as Chromium presses a focused `<button>` on Enter. The web already does, and other hosts ignore it."
+    },
+    {
+      "id": 302,
       "name": "safeArea",
       "kind": "str",
       "_comment": "@ref LLP 1123 D4: -exact-safe-area on a route's authored root: auto (default), none, or the top/right/bottom/left edges whose local clearance is off. Not inherited. On iOS and tvOS the route's covers drop those edges and its primary scrollers cancel UIKit's automatic inset there."
@@ -2672,7 +2678,7 @@
       "default": "baseline"
     },
     "OutlineStyle": {
-      "_comment": "@ref LLP 1104 D6: CSS `outline-style`, bounded to `none`, CSS's initial value, which an author writes to take a text field's focus ring off. The other line styles are refused by name.",
+      "_comment": "@ref LLP 1104 D6: CSS `outline-style`, bounded to `none`, CSS's initial value, which an author writes to take the focus ring off an element that takes the focus. The other line styles are refused by name.",
       "values": [
         "none"
       ],
@@ -3930,7 +3936,7 @@
       "field": "press_scale",
       "codec": "f32",
       "default": 1,
-      "_comment": "@ref LLP 1061 D1: the uniform scale a node shows while a pointer holds it pressed, about `transform-origin`; 1 is none. Not CSS: the host owns the feedback (no runner round trip), eased in 120 ms, and keeps it under reduced motion. It composes with, never replaces, the `scale` row.",
+      "_comment": "@ref LLP 1061 D1: the uniform scale a node shows while a pointer holds it pressed, about `transform-origin`; 1 is none. Not CSS: the host owns the feedback without a runner round trip and keeps it under reduced motion. Custom nodes ease in 120 ms; native controls retain unwritten native feedback and add no Exact curve. It composes with, never replaces, the `scale` row.",
       "cold": true
     },
     {
@@ -4382,7 +4388,7 @@
       "field": "outline_style",
       "terminal": "admit",
       "codec": "enum:OutlineStyle",
-      "_comment": "@ref LLP 1104 D6: CSS `outline-style` on a text field (`input`, `textarea`). An unset mask is the platform's focus ring, as the UA sheet's `:focus-visible` outline is the browser's: the ring the OS draws for a native field, the one Exact draws for a bare one. `none` takes it off on every host, and Tab order and accessibility stay. A terminal draws no ring. Not inherited, as in CSS."
+      "_comment": "@ref LLP 1104 D6: CSS `outline-style` on any element that takes the focus (amended 2026-11-05: a field, a button, a link, a pressable or `tabindex` box, a native control). An unset mask is the platform's focus ring, as the UA sheet's `:focus-visible` outline is the browser's: the ring the OS draws for a native control, the one Exact draws for a bare one. `none` takes it off on every host but tvOS, whose focus effect is how a remote moves, and Tab order and accessibility stay. A terminal draws no ring. Not inherited, as in CSS."
     },
     {
       "bit": 204,
@@ -4456,7 +4462,7 @@
       "field": "press_opacity",
       "codec": "f32",
       "default": 1,
-      "_comment": "@ref LLP 1061 D7: not CSS. The opacity a node shows, as a fraction of its own, while a pointer holds it pressed; 1 is none. Host-owned as `-exact-press-scale` is (no runner round trip; eased in 120 ms, at once under the agent's clock), and any written value replaces the platform's unsaid press. Not a motion target; paint only.",
+      "_comment": "@ref LLP 1061 D7: not CSS. The opacity a node shows, as a fraction of its own, while a pointer holds it pressed; 1 is none. Host-owned without a runner round trip. Custom nodes ease in 120 ms and replace the platform's unsaid press; native controls replace only opacity and add no Exact curve. The agent applies the target at once. Not a motion target; paint only.",
       "cold": true
     },
     {
@@ -4464,7 +4470,7 @@
       "field": "press_background_color",
       "codec": "color",
       "default": 0,
-      "_comment": "@ref LLP 1061 D7: not CSS. The background colour a node shows in place of its own while a pointer holds it pressed; unset is none. Host-owned as `-exact-press-scale` is, and it replaces the platform's unsaid press. Paint only.",
+      "_comment": "@ref LLP 1061 D7, LLP 1121 D8: compiler representation of `:active background-color`. The background colour a node shows in place of its own while a pointer holds it pressed; unset is none. Host-owned as `-exact-press-scale` is. Custom nodes replace the platform's unsaid press; native controls replace only the background. Paint only.",
       "cold": true
     },
     {
@@ -4472,7 +4478,7 @@
       "field": "press_color",
       "codec": "color",
       "default": 0,
-      "_comment": "@ref LLP 1061 D7: not CSS. The text colour a node shows while a pointer holds it pressed, given to its subtree as `color` is (a descendant that writes its own `color` keeps it); unset is none. Host-owned as `-exact-press-scale` is, and it replaces the platform's unsaid press. Paint only.",
+      "_comment": "@ref LLP 1061 D7, LLP 1121 D8: compiler representation of `:active color`. The text colour a node shows while a pointer holds it pressed, given to its subtree as `color` is (a descendant that writes its own `color` keeps it); unset is none. Host-owned as `-exact-press-scale` is. Custom nodes replace the platform's unsaid press; native controls replace only inherited ink. Paint only.",
       "cold": true
     },
     {
@@ -4480,7 +4486,7 @@
       "field": "press_opacity_to",
       "codec": "f32",
       "default": 1,
-      "_comment": "@ref LLP 1121 D8 (stage 8 B): not CSS, and lowering's alone (an author's is refused): an `:active` part's `opacity`, the absolute opacity a node shows while a pointer holds it pressed, eased from the opacity shown at the press (a hover or focus look's included). Replaces `-exact-press-opacity`'s share for the node; it replaces the platform's unsaid press as the pressed paint does. Not a motion target; paint only.",
+      "_comment": "@ref LLP 1121 D8 (stage 8 B): not CSS, and lowering's alone (an author's is refused): an `:active` part's `opacity`, the absolute opacity a node shows while a pointer holds it pressed. Custom nodes ease from the shown opacity (a hover or focus look's included) and replace the platform's unsaid press. Native controls replace only opacity and add no Exact curve. Replaces `-exact-press-opacity`'s share for the node. Not a motion target; paint only.",
       "cold": true
     },
     {

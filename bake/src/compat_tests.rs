@@ -1,4 +1,4 @@
-use super::{compatibility_with_trust, Manifest};
+use super::{compatibility_with_trust, stored_module, Manifest};
 use std::path::{Path, PathBuf};
 
 #[test]
@@ -927,4 +927,61 @@ fn a_bundle_needs_the_runtime_of_the_newest_option_it_names() {
         needs(b"return Response.json({a: 1})"),
         super::TYPESCRIPT_RUNTIME
     );
+}
+
+/// A module client with a store pins its compiled module into the id:
+/// the same module is the same cohort, any other module another.
+#[test]
+fn a_stored_module_client_pins_its_module_into_the_id() {
+    let dir = app("pinned-module");
+    let manifest = Manifest::read(&dir).unwrap();
+    let id = |module| {
+        super::compatibility_id_pinned(
+            &dir,
+            "ios",
+            "aarch64-apple-ios",
+            &manifest,
+            Some(""),
+            None,
+            None,
+            module,
+        )
+        .unwrap()
+    };
+    let plain = id(None);
+    let a = id(Some("aa"));
+    assert!(plain.inputs["typescriptModule"].is_null());
+    assert_eq!(a.inputs["typescriptModule"], "aa");
+    assert_ne!(a.id, plain.id, "the module is in the id");
+    assert_eq!(id(Some("aa")).id, a.id, "the same module, the same cohort");
+    assert_ne!(id(Some("bb")).id, a.id, "another module, another cohort");
+    assert_eq!(
+        a.id,
+        super::compatibility_digest(&a.inputs),
+        "the id digests the inputs it reports"
+    );
+}
+
+#[test]
+fn a_store_pins_the_compiled_module_and_its_hash_is_required_without_one_too() {
+    let dir = app("stored-module");
+    let mut manifest = Manifest::read(&dir).unwrap();
+    let meta = serde_json::json!({"module": {"sha256": "abc"}});
+    // A native platform has an update store by default; the web has none
+    assert_eq!(stored_module(&meta, &manifest, "ios"), Ok(Some("abc")));
+    assert_eq!(stored_module(&meta, &manifest, "web"), Ok(None));
+    for bad in [
+        serde_json::json!({}),
+        serde_json::json!({"module": {"sha256": 7}}),
+    ] {
+        for platform in ["ios", "web"] {
+            assert_eq!(
+                stored_module(&bad, &manifest, platform),
+                Err("missing module hash".to_string())
+            );
+        }
+    }
+    manifest.json["deploy"] = serde_json::json!({"store": {"ios": "0"}});
+    assert_eq!(stored_module(&meta, &manifest, "ios"), Ok(None));
+    std::fs::remove_dir_all(dir).unwrap();
 }
