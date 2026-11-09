@@ -291,7 +291,7 @@ class Collection {
     if (this.o.keep) this.keepKeys = keepIdents(this.o.keep());
     Remount.delete(this);
     let anchor = this.anchor();
-    const dropAnchor = this.dropAnchor?.(), last = this.index.order.at(-1), count = this.index.len;
+    const dropAnchor = this.dropAnchor?.(), first = this.index.order[0], last = this.index.order.at(-1), count = this.index.len;
     const rekeyed = resetMeasurements || idents.length !== this.idents.length || idents.some((k, i) => k !== this.idents[i]);
     const positions = resetMeasurements ? [] : this.changedPositions(items, idents);
     if (rekeyed) { this.index.replace(idents); this.idents = idents; this.dups = dups; }
@@ -320,6 +320,9 @@ class Collection {
     // that slid past it re-arm nothing.
     const kept = last === undefined ? undefined : this.index.pos.get(last);
     if (kept !== undefined && (kept < this.index.len - 1 || this.index.len > count)) this.edgeArmed[1] = true;
+    // The same at the start (extended 2026-11-09): rows before the old first row, which stays, are a new start.
+    const keptFirst = first === undefined ? undefined : this.index.pos.get(first);
+    if (keptFirst !== undefined && keptFirst > 0) this.edgeArmed[0] = true;
     // The request's row left the items: it ends now, where the reader is (into_view.rs `cancel_if_row_left`).
     if (this.target && !this.index.pos.has(this.target.key)) this.end("cancelled");
     if (this.portUnknown) this.correction = null; else this.restore(anchor);

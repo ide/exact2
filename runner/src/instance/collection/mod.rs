@@ -567,7 +567,7 @@ impl Collection {
         // Items that changed in place: the same keys in the same order, and
         // no input of the rows' bodies or keys changed (a live tick's prices).
         let mut in_place: Option<Vec<usize>> = None;
-        let (last, count) = (self.last_key(), self.index.len());
+        let (first, last, count) = (self.first_key(), self.last_key(), self.index.len());
         if data_changed {
             let descriptor = u.env.plan.region(self.region);
             let Value::List(items) = u.eval(descriptor.subject, frames)? else {
@@ -636,6 +636,14 @@ impl Collection {
             let kept = last.as_deref().and_then(|key| self.index.position(key));
             if kept.is_some_and(|p| p + 1 < self.index.len() || self.index.len() > count) {
                 self.edge_armed[1] = true;
+            }
+            // The same at the start (extended 2026-11-09): rows put before
+            // the old first row, which is still here, are a new start, so a
+            // reader still there when an earlier page lands (a chat's history
+            // under a fling that met its top) is offered the next one. A
+            // window that slid past it re-arms nothing.
+            if (first.as_deref().and_then(|key| self.index.position(key))).is_some_and(|p| p > 0) {
+                self.edge_armed[0] = true;
             }
             let anchor = self.committed_anchor(anchor, drop_anchor);
             self.cancel_if_row_left();
@@ -764,6 +772,10 @@ impl Collection {
             .iter()
             .find(|row| row.wrapper == view || super::find::contains(&row.row.roots, view))
             .and_then(|row| super::ident(&row.row.key, row.row.dup))
+    }
+    /// The first supplied row's key, if any.
+    fn first_key(&self) -> Option<String> {
+        self.index.key(0).map(str::to_owned)
     }
     /// The last supplied row's key, if any.
     fn last_key(&self) -> Option<String> {
