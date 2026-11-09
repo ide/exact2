@@ -48,18 +48,34 @@ struct PressPath {
 }
 
 extension Presenter {
-    /// Whether `view` is mounted in this session: in its document, or in a
-    /// presentation beside it.
-    func mounts(_ view: UIView) -> Bool {
-        inDocument(view) || surface(containing: view).map { $0.kind != .document } == true
-    }
-
+    /// The view editing with the keyboard: the editor whose keys stand down
+    /// for a card (PopoverKeysIOS.swift), else the first responder that takes
+    /// keys and is mounted here or is the session's prompt.
     var keyboardEditor: UIView? {
+        #if os(iOS)
+        if let editor = heldKeyboardEditor { return editor }
+        #endif
         guard let responder = FirstResponder.current as? UIView, responder is UIKeyInput,
               mounts(responder) || responder === keyboardPrompt else { return nil }
         return responder
     }
     var hasKeyboardEditor: Bool { keyboardEditor != nil }
+
+    /// A route's content or its projected search field currently owns text input.
+    func ownsKeyboard(in container: UIView) -> Bool { edits(in: container) || editsInBar(of: container) }
+    /// Whether the keyboard's editor is in `container`'s content.
+    func edits(in container: UIView) -> Bool { keyboardEditor?.isDescendant(of: container) == true }
+    /// Whether the keyboard's editor is the search field of the bar over `container`'s route.
+    func editsInBar(of container: UIView) -> Bool {
+        guard let editor = keyboardEditor else { return false }
+        return (ViewPresentation.controller(for: container) as? RouteController)?.search?.field?.headerField === editor
+    }
+
+    /// Whether `view` is mounted in this session: in its document, or in a
+    /// presentation beside it.
+    func mounts(_ view: UIView) -> Bool {
+        inDocument(view) || surface(containing: view).map { $0.kind != .document } == true
+    }
 
     /// Where a finger reaches `view`, in viewport points (the viewport's
     /// coordinates less its scrolling, as the agent's boxes are): the

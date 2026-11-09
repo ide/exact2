@@ -50,9 +50,13 @@ extension NodeView {
                     pixels.image = gradient.image(size: effect.bounds.size, scale: traitCollection.displayScale, dark: drawsDark).map { UIImage(cgImage: $0) }
                     view = pixels
                 } else {
-                    let g = (effect.mask as? GradientMaskView) ?? GradientMaskView()
+                    let previous = effect.mask as? GradientMaskView
+                    let g = previous ?? GradientMaskView()
+                    // Carry the mask's geometry and fractional stops on the material's animation
+                    CATransaction.setDisableActions(previous == nil || UIView.inheritedAnimationDuration <= 0 || ExactEnv.agentFreezes)
                     if g.frame != effect.bounds { g.frame = effect.bounds }
                     gradient.apply(g.gradient, bounds: g.bounds, box: g.bounds, dark: drawsDark)
+                    CATransaction.setDisableActions(true)
                     view = g
                 }
                 view.layer.mask = ClipPath.mask(effectOutline)
@@ -117,5 +121,18 @@ extension NodeView {
 final class GradientMaskView: UIView {
     override class var layerClass: AnyClass { CAGradientLayer.self }
     var gradient: CAGradientLayer { layer as! CAGradientLayer }
+
+    override func action(for layer: CALayer, forKey event: String) -> CAAction? {
+        if ["locations", "startPoint", "endPoint", "colors"].contains(event),
+           let inherited = super.action(for: layer, forKey: "bounds") as? CABasicAnimation,
+           let animation = inherited.copy() as? CABasicAnimation {
+            animation.keyPath = event
+            animation.fromValue = (layer.presentation() ?? layer).value(forKey: event)
+            animation.toValue = nil
+            animation.byValue = nil
+            return animation
+        }
+        return super.action(for: layer, forKey: event)
+    }
 }
 #endif

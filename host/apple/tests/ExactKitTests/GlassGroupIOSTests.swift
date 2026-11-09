@@ -332,6 +332,69 @@ final class GlassGroupIOSTests: XCTestCase {
         XCTAssertTrue(field.isFirstResponder, "removed")
     }
 
+    func testAFieldsGlassTracksDisableHideRemovalAndReplacementWithoutAGroup() throws {
+        guard #available(iOS 26.0, *) else { return }
+        let p = presenter(box(1, ["backgroundMaterial": "glass"], w: 240)
+            + box(2, ["value": "Draft", "id": "draft"], kind: "textarea", w: 180)
+            + [["op": "children", "id": 1, "ids": [2]], ["op": "roots", "ids": [1]]])
+        defer { p.reset() }
+        let glass = try XCTUnwrap(p.views[1]), field = try XCTUnwrap(p.views[2]?.textArea)
+        func interactive() throws -> Bool { try XCTUnwrap(glass.materialView?.effect as? UIGlassEffect).isInteractive }
+        XCTAssertTrue(try interactive())
+        p.apply(wireBatch([["op": "props", "id": 1, "set": ["disabled": "true"]]]))
+        XCTAssertFalse(try interactive(), "the glass itself can be disabled")
+        p.apply(wireBatch([["op": "props", "id": 1, "set": [:], "clear": ["disabled"]]]))
+        XCTAssertTrue(try interactive())
+        XCTAssertTrue(field.becomeFirstResponder())
+        field.selectedRange = NSRange(location: 1, length: 2)
+        p.apply(wireBatch([["op": "props", "id": 1, "set": ["testId": "changed"]]]))
+        XCTAssertTrue(field.isFirstResponder)
+        XCTAssertEqual(field.selectedRange, NSRange(location: 1, length: 2))
+        p.apply(wireBatch([["op": "props", "id": 2, "set": ["disabled": "true"]]]))
+        XCTAssertFalse(try interactive(), "the remaining field cannot take input")
+        p.apply(wireBatch([["op": "props", "id": 2, "set": [:], "clear": ["disabled"]]]))
+        XCTAssertTrue(try interactive())
+        p.apply(wireBatch([["op": "style", "id": 2, "style": ["display": "none"]]]))
+        XCTAssertFalse(try interactive())
+        p.apply(wireBatch([["op": "style", "id": 2, "style": [:]]]))
+        XCTAssertTrue(try interactive())
+        p.apply(wireBatch([["op": "children", "id": 1, "ids": []], ["op": "destroy", "id": 2]]))
+        XCTAssertFalse(try interactive(), "no field remains to make this glass interactive")
+        p.apply(wireBatch(box(3, kind: "input", w: 160) + [["op": "children", "id": 1, "ids": [3]]]))
+        XCTAssertTrue(try interactive(), "the replacement field supplies a surface again")
+        p.apply(wireBatch(box(4, kind: "input", x: 170) + [["op": "children", "id": 1, "ids": [3, 4]]]))
+        XCTAssertFalse(try interactive(), "a panel with two fields is not one field's surface")
+    }
+
+    func testGlassInvokersTrackTheirAuthoredCommandAndUseThePlatformsFeedback() throws {
+        guard #available(iOS 26.0, *) else { return }
+        let p = presenter(box(1, ["glassGroup": "12"], w: 240)
+            + box(2, ["backgroundMaterial": "glass", "popovertarget": "choices", "appearance": "none"], kind: "button")
+            + box(3, ["id": "choices", "popover": "auto"], w: 180)
+            + [["op": "children", "id": 1, "ids": [2, 3]], ["op": "roots", "ids": [1]]])
+        defer { p.reset() }
+        let button = try XCTUnwrap(p.views[2])
+        func interactive() throws -> Bool { try XCTUnwrap(button.materialView?.effect as? UIGlassEffect).isInteractive }
+        XCTAssertTrue(try interactive())
+        button.handlers = ["press"]
+        XCTAssertFalse(button.platformPressDims, "UIKit supplies the glass's own touch feedback")
+        button.handlers = []
+        p.apply(wireBatch([["op": "props", "id": 2, "set": [:], "clear": ["popovertarget"]]]))
+        XCTAssertFalse(try interactive())
+        p.apply(wireBatch([["op": "props", "id": 2, "set": ["commandfor": "choices", "command": "show-popover"]]]))
+        XCTAssertTrue(try interactive())
+        p.apply(wireBatch([["op": "props", "id": 2, "set": ["command": "hide-popover"]]]))
+        XCTAssertFalse(try interactive(), "a hide-only command does not open a popover")
+        p.apply(wireBatch([["op": "props", "id": 2, "set": ["command": "show-popover", "disabled": "true"]]]))
+        XCTAssertFalse(try interactive())
+        p.apply(wireBatch([["op": "props", "id": 2, "set": [:], "clear": ["disabled"]], ["op": "props", "id": 1, "set": ["inert": "true"]]]))
+        XCTAssertFalse(try interactive(), "an inert ancestor withdraws interaction")
+        p.apply(wireBatch([["op": "props", "id": 1, "set": [:], "clear": ["inert"]]]))
+        XCTAssertTrue(try interactive())
+        p.apply(wireBatch([["op": "props", "id": 3, "set": [:], "clear": ["popover"]]]))
+        XCTAssertFalse(try interactive(), "the command no longer resolves to a popover")
+    }
+
     /// Review fix: a clip box coming and going under a group moves the
     /// children through the focus helper too.
     func testFocusSurvivesAClipBoxComingAndGoing() throws {

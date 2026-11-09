@@ -167,6 +167,7 @@ extension NodeView {
         guard props["defaultSurface"] == "true", props["popover"] != nil, props["accessibilityRole"] != "menu",
               let radius = props["defaultSurfaceRadius"].flatMap(Double.init) else { return nil }
         #if os(iOS)
+        if PopoverLayer.containing(self)?.card != nil { return nil }
         if let id = props["id"], presenter?.carrying("contextPopover").contains(where: { $0.props["contextPopover"] == id }) == true { return nil }
         #endif
         return CGFloat(radius)

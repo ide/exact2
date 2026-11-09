@@ -131,5 +131,38 @@ final class FixedGradientIOSTests: XCTestCase {
         XCTAssertEqual(g.endPoint.y, 1, accuracy: 0.01)
         XCTAssertNil(p.fixedGradients.allObjects.first)
     }
+
+    func testAMaterialsMaskAnimatesItsFrameAndLengthStopsWithInheritedLayout() throws {
+        let p = presenter()
+        defer { p.reset() }
+        p.apply(wireBatch([
+            ["op": "create", "id": 1, "kind": "view", "props": ["backgroundMaterial": "thin"],
+             "style": ["mask_image": ["css": "linear-gradient(to bottom, transparent, black 20px)"]]],
+            ["op": "roots", "ids": [1]], ["op": "frame", "id": 1, "x": 0, "y": 0, "w": 200, "h": 100],
+        ]))
+        let node = try XCTUnwrap(p.views[1]), effect = try XCTUnwrap(node.materialView)
+        node.applyBoxMask()
+        let mask = try XCTUnwrap(effect.mask as? GradientMaskView), before = try XCTUnwrap(mask.gradient.locations)
+        XCTAssertNil(mask.layer.animationKeys(), "a first mask lands without motion")
+        UIView.animate(withDuration: 4, delay: 0, options: [.curveEaseInOut, .beginFromCurrentState], animations: {
+            p.apply(wireBatch([["op": "frame", "id": 1, "x": 0, "y": 0, "w": 200, "h": 200]]))
+            node.applyBoxMask()
+        })
+        XCTAssertTrue(effect.mask === mask)
+        XCTAssertEqual(mask.bounds.height, 200)
+        let resize = try XCTUnwrap((mask.layer.animationKeys() ?? []).filter { $0.hasPrefix("bounds") }.compactMap { mask.layer.animation(forKey: $0) }.first)
+        let stops = try XCTUnwrap(mask.layer.animation(forKey: "locations") as? CABasicAnimation, "pixel stops change fractions as the height changes")
+        XCTAssertEqual(stops.fromValue as? [NSNumber], before)
+        XCTAssertNotEqual(mask.gradient.locations, before)
+        XCTAssertEqual(stops.duration, resize.duration, accuracy: 0.001)
+        XCTAssertEqual(stops.timingFunction, resize.timingFunction)
+        mask.layer.removeAllAnimations(); effect.layer.removeAllAnimations(); node.layer.removeAllAnimations()
+        UIView.performWithoutAnimation {
+            p.apply(wireBatch([["op": "frame", "id": 1, "x": 0, "y": 0, "w": 200, "h": 120]]))
+            node.applyBoxMask()
+        }
+        XCTAssertNil(mask.layer.animationKeys(), "a nonanimated layout creates no mask motion")
+        XCTAssertEqual(mask.bounds.height, 120)
+    }
 }
 #endif

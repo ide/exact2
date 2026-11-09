@@ -59,6 +59,9 @@ enum ViewPresentation {
             .contains { $0 === ancestor }
     }
     static func controller(for view: UIView, fallbackToWindow: Bool = false) -> UIViewController? {
+        #if os(iOS)
+        if let card = PopoverLayer.containing(view)?.cardOwner { return card }
+        #endif
         if let sheet = PopoverLayer.containing(view)?.sheet { return sheet }
         var responder: UIResponder? = view
         while let current = responder {

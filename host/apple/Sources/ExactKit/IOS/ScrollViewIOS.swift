@@ -220,6 +220,7 @@ package class ScrollView: UIScrollView {
         while let view = target {
             if let node = view as? NodeView {
                 if node.presenter?.contextRetainsFocus(node) == true { return }
+                if node.presenter?.activationButton(from: node) != nil { return }
                 break
             }
             target = view.superview

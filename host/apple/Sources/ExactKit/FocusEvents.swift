@@ -24,6 +24,9 @@ extension Presenter {
         set { focusEvents.onEvent = newValue }
     }
     func focus(_ id: UInt32) {
+        #if os(iOS)
+        if let held = menus.cards.keys, held.node?.id != id { held.finish(restoring: false) }
+        #endif
         #if os(macOS)
         tabStart = nil
         #endif
@@ -34,6 +37,9 @@ extension Presenter {
         MainActor.assumeIsolated { HeldState.focusMoved(to: textHost(id)) } // the focus coming into a held focus's node or leaving it lets it go (HeldState.swift)
     }
     func blur(_ id: UInt32) {
+        #if os(iOS)
+        if keysNode?.id == id { return }
+        #endif
         #if os(iOS) || os(tvOS)
         if menus.preservesFocus(id) { return }
         #endif

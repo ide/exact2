@@ -1153,6 +1153,11 @@ component App
   `backgroundMaterial`, which wins when both are written.
 - A navigation bar's buttons share one glass capsule on iOS 26; `buttonStyle="glass"` on
   each gives it a capsule of its own (`contract vocab bar-buttons`).
+- On iOS 26, glass answers a finger on a pressable box, a popover invoker, or a box
+  framing one enabled text field. Removing or disabling the field withdraws that feedback.
+- A content popover opened from a glass `backgroundMaterial` uses UIKit's popover on
+  iOS 26 and stands down the software keyboard while keeping the field's focus. A
+  `popover="manual"` keeps its authored dismissal and shows over the current card.
 
 ## bar-buttons: the navigation bar's buttons, grouped or each in its own capsule
 names: bar button, bar-button, barbuttons, UIBarButtonItem, sharesBackground, headerRight, headerLeft, toolbarItem, ToolbarItem, ToolbarItemGroup
