@@ -531,7 +531,7 @@ final class ContextMenuHost: NSObject, UIContextMenuInteractionDelegate, UIEditM
         if parameters.visiblePath == nil, let node = shown as? NodeView, !Self.paintsGround(node), let grounds = Self.grounds(in: node) {
             parameters.visiblePath = grounds
         }
-        guard let target = Self.target(shown) else { return nil }
+        guard let target = Self.target(shown, showing: parameters.visiblePath?.bounds) else { return nil }
         return UITargetedPreview(view: shown, parameters: parameters, target: target)
     }
 
@@ -1276,7 +1276,12 @@ final class ContextMenuHost: NSObject, UIContextMenuInteractionDelegate, UIEditM
     /// UIKit's own target for a view carries it (`UITargetedPreview(view:parameters:)`),
     /// and each ancestor's scale and rotation; converting the center takes the
     /// translations.
-    private static func target(_ view: UIView) -> UIPreviewTarget? {
+    /// Where UIKit places the preview: the centre of what it shows (`visible`,
+    /// the preview's outline in `view`'s space, else its bounds), as it was,
+    /// so the lift starts where the node shows. UIKit centres the outline's
+    /// box there, not the view's: a balloon whose tail reaches below its box
+    /// rose by half the tail's depth.
+    private static func target(_ view: UIView, showing visible: CGRect? = nil) -> UIPreviewTarget? {
         guard let container = container(of: view), let parent = view.superview else { return nil }
         var transform = view.transform
         for ancestor in sequence(first: parent, next: { $0.superview }) {
@@ -1286,7 +1291,8 @@ final class ContextMenuHost: NSObject, UIContextMenuInteractionDelegate, UIEditM
         }
         transform.tx = 0
         transform.ty = 0
-        return UIPreviewTarget(container: container, center: view.convert(CGPoint(x: view.bounds.midX, y: view.bounds.midY), to: container), transform: transform)
+        let shown = visible.flatMap { $0.isEmpty || $0.isNull ? nil : $0 } ?? view.bounds
+        return UIPreviewTarget(container: container, center: view.convert(CGPoint(x: shown.midX, y: shown.midY), to: container), transform: transform)
     }
 
     func contextMenuInteraction(_ interaction: UIContextMenuInteraction, configuration: UIContextMenuConfiguration, highlightPreviewForItemWithIdentifier identifier: NSCopying) -> UITargetedPreview? {

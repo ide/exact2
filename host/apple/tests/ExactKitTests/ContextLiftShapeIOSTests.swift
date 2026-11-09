@@ -95,6 +95,19 @@ final class ContextLiftShapeIOSTests: XCTestCase {
         XCTAssertFalse(path.contains(CGPoint(x: 4, y: 44)), "beside the tail, under the body")
     }
 
+    /// UIKit centres the outline's box on the preview's target, so the
+    /// target is that box's centre, not the node's: the balloon lifts where
+    /// it shows, where it rose by half its tail's depth.
+    func testABalloonLiftsCentredOnItsBodyAndItsTail() throws {
+        if ExactEnv.agentPaints { throw XCTSkip("the agent paints the popover (D4)") }
+        let p = try balloon()
+        defer { p.menus.reset() }
+        let preview = try lifted(p), node = try XCTUnwrap(p.views[2])
+        let path = try XCTUnwrap(preview.parameters.visiblePath)
+        XCTAssertEqual(preview.target.center, node.convert(CGPoint(x: path.bounds.midX, y: path.bounds.midY), to: preview.target.container))
+        XCTAssertEqual(preview.target.center.y - node.convert(CGPoint(x: 60, y: 20), to: preview.target.container).y, 4, accuracy: 0.001, "half the tail's 8 points below the box")
+    }
+
     func testANodeWhoseTextLiesOffItsGroundsLiftsWhole() throws {
         if ExactEnv.agentPaints { throw XCTSkip("the agent paints the popover (D4)") }
         // The text beside the shapes, as a name beside an avatar
