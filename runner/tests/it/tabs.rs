@@ -365,3 +365,91 @@ component Editor
     assert!(shows(&r, "b:hello"), "{}", agent::tree(&r));
     assert!(shows(&r, "a:"));
 }
+
+/// A tab whose panel can hold more than one route draws a stack: a route in
+/// a `for`, or more than one route in its template. One fixed route is a tab
+/// with no stack navigator. Both are read from the plan, so a tab still
+/// waiting for its first selection answers too (LLP 1075.003 §3.7).
+#[test]
+fn a_panel_draws_a_stack_when_it_can_hold_more_than_one_route() {
+    let source = "component App
+  state selected = \"a\"
+  state pages = [\"a\"]
+  action pick(name: string)
+    selected = name
+  view
+    main navigationKey=selected navigationBack=\"back\"
+      row role=\"tablist\"
+        button \"A\" role=\"tab\" aria-controls=\"panel-a\" aria-selected=(selected == \"a\") press=pick(\"a\") testId=\"tab-a\"
+        button \"B\" role=\"tab\" aria-controls=\"panel-b\" aria-selected=(selected == \"b\") press=pick(\"b\") testId=\"tab-b\"
+        button \"C\" role=\"tab\" aria-controls=\"panel-c\" aria-selected=(selected == \"c\") press=pick(\"c\") testId=\"tab-c\"
+      column role=\"tabpanel\" id=\"panel-a\" testId=\"panel-a\"
+        for p in pages key=p
+          column navigationKey=p
+            text p
+      column role=\"tabpanel\" id=\"panel-b\" testId=\"panel-b\"
+        column navigationKey=\"b\"
+          text \"b\"
+      column role=\"tabpanel\" id=\"panel-c\" testId=\"panel-c\"
+        column navigationKey=\"c\"
+          text \"c\"
+        column navigationKey=\"c-detail\"
+          text \"c detail\"
+";
+    let r = boot(source, "/");
+    let tree = agent::tree(&r);
+    assert!(!unopened(&tree, "a") && unopened(&tree, "b") && unopened(&tree, "c"));
+    let id = |name: &str| -> u32 {
+        panel(&tree, name)
+            .split(',')
+            .next()
+            .unwrap()
+            .parse()
+            .unwrap()
+    };
+    let panels = [id("a"), id("b"), id("c")];
+    assert_eq!(r.panels_draw_stacks(&panels), [true, false, true]);
+    let tab: u32 = nodes(&tree)
+        .into_iter()
+        .find(|n| n.contains("\"testId\":\"tab-a\""))
+        .and_then(|n| n.split(',').next()?.parse().ok())
+        .unwrap();
+    let root: u32 = nodes(&tree)[0].split(',').next().unwrap().parse().unwrap();
+    // A view that is no tab panel draws no tab's stack, whatever routes it holds.
+    assert_eq!(
+        r.panels_draw_stacks(&[tab, root, panels[0]]),
+        [false, false, true]
+    );
+}
+
+/// A host builds a tab it lets a person pick before showing it (UIKit's More
+/// list): the panel is built and the selection stays where it was.
+#[test]
+fn a_host_builds_named_tabs_without_selecting_them() {
+    let mut r = boot(&source(ARIA), "/");
+    let tree = agent::tree(&r);
+    let id = |name: &str| -> u32 {
+        panel(&tree, name)
+            .split(',')
+            .next()
+            .unwrap()
+            .parse()
+            .unwrap()
+    };
+    let c = id("c");
+    // One template draws every tab's panel, so the panels share one plan site.
+    assert_eq!(
+        r.panels_draw_stacks(&[id("a"), id("b"), c]),
+        [true, true, true]
+    );
+    r.build_tabs(&[c]).unwrap();
+    let tree = agent::tree(&r);
+    assert!(unopened(&tree, "b") && !unopened(&tree, "c"), "{tree}");
+    assert!(has(&tree, "bump-c"));
+    assert_eq!(r.unopened_tabs().len(), 1);
+    let state = agent::state(&r);
+    assert!(state.contains("\"nav\":{\"tab\":\"a\""), "{state}");
+    // A built panel, or a view that is no waiting panel, is left as it is.
+    r.build_tabs(&[c, 0]).unwrap();
+    assert_eq!(r.unopened_tabs().len(), 1);
+}

@@ -63,9 +63,9 @@ extension NavigationHost {
             // a pop has taken it from its controller (`navigationController`
             // is nil), and a swipe back still shows it beside the one beneath.
             let nav = c.navigationController ?? leavingNavigation(of: c)
-            let held = nav.map {
+            let held = c.parent is PlainTab || nav.map {
                 $0.viewControllers.contains(c) || $0.transitionCoordinator?.viewController(forKey: .from) === c
-            } ?? (c.parent is HeldStack)
+            } == true
             guard held else { continue }
             // A presented route's controller takes its sheet's whole view (LLP 1123 D2), as the
             // containers take the session's: the route is covered on every edge
@@ -78,7 +78,8 @@ extension NavigationHost {
             // A collapsing title's scroller goes under the bar, which insets it;
             // its expanded inset is where CSS scrollTop 0 rests.
             // While the bar is not as the route wants it (mid-transition to or
-            // from a route without one, §9.10), its last cover stands.
+            // from a route without one, §9.10), or the route is off its window
+            // (a tab UIKit has yet to show), its last cover stands.
             // An active search's bar is UIKit's: the content follows it, as
             // UIKit's own does, but a title's insets are not sampled.
             c.safeArea.sync(c)
@@ -88,7 +89,7 @@ extension NavigationHost {
             let settled = search || (barNav?.isNavigationBarHidden ?? true) != routeShowsBar(c, in: nav)
             // A route showing no bar has no title: its inset is the status bar's, none in landscape (LLP 1130 D3).
             let barless = !routeShowsBar(c, in: nav)
-            if !c.ignoresSafeArea("top"), settled, !search, let node = c.collapseScroll, let sv = c.collapseScrollView, sv === node.scrollView, sv.adjustedContentInset.top > 0 || barless {
+            if !c.ignoresSafeArea("top"), settled, !search, let node = c.collapseScroll, let sv = c.collapseScrollView, sv === node.scrollView, sv.window != nil, sv.adjustedContentInset.top > 0 || barless {
                 let inset = sv.adjustedContentInset.top
                 if c.insetsBarless != barless { c.insetsBarless = barless; node.scrollCollapsed = 0 }
                 // tvOS has no large titles: every title is inline.
@@ -339,6 +340,7 @@ extension NavigationHost {
             let line = "\(what): \(property) changed outside Exact, which owns it"
             if ownedReported.insert(line).inserted { presenter.session?.log(line) }
         }
+        // (A tab's own stack UIKit emptied into More's is not one of them, `allNavigations`)
         for nav in allNavigations {
             guard let stack = stacks[ObjectIdentifier(nav)], stack.hatched else { continue }
             if nav.delegate !== stack.proxy { say("navigation \(stack.label)", "delegate") }

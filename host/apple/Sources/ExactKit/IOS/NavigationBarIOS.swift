@@ -621,10 +621,8 @@ extension NavigationHost {
             guard !node.disabled else { return ["error": "tab #\(id) is disabled"] }
             guard before(nil), !node.disabled, !node.inert, presenter.views[node.id] === node else { return ["error": "tab #\(id) changed during its pointer handlers"] }
             // As the bar's own tap: the selected tab at its root scrolls to the top
-            let root = reselectedRoot(index), requests = root == nil ? nil : presenter.collections.lastRequests()
-            presenter.press(node.id)
-            if let root { scrollToTop(root, since: requests) }
-            return ["tapped": id, "pressed": id, "delivery": "host-activation", "native": "tab-bar-item"]
+            pressTab(node, scrolling: reselectedRoot(index))
+            return ["tapped": id, "pressed": id, "delivery": "host-activation", "native": barHasItem(ofTab: index) ? "tab-bar-item" : "more-list-row"]
         }
         let shown = controllers.values.filter { c in
             guard let nav = c.navigationController, nav.topViewController === c, barShows(nav) else { return false }
@@ -705,9 +703,7 @@ extension NavigationHost {
         }
     }
 
-    /// `publish` records the controller where Exact keeps it before the
-    /// hatch runs, which may ask for it again (`HeldStackIOS`'s `realize`).
-    func makeNavigation(first: NodeView?, publish: (UINavigationController) -> Void = { _ in }) -> UINavigationController {
+    func makeNavigation(first: NodeView?) -> UINavigationController {
         let nav = UINavigationController()
         stackCount += 1
         let stack = NavigationStack(showsBar: true, order: stackCount)
@@ -718,7 +714,6 @@ extension NavigationHost {
         nav.navigationBar.prefersLargeTitles = true
         #endif
         titleInk(nav)
-        publish(nav)
         if presenter.session?.natives.hatchesConnected == true {
             stack.showsBar = hatching(nav) { presenter.session?.natives.navigationHatch(nav, built: true, showsBar: stack.showsBar, label: stack.label) } ?? stack.showsBar
             stack.hatched = true
@@ -734,7 +729,7 @@ extension NavigationHost {
     /// (a cold launch's), before any of its routes' hatches run. A changed
     /// `showsBar` moves the content once, journaled (LLP 1075.003 Q3 (c)).
     func hatchNavigation(_ nav: UINavigationController) {
-        guard let natives = presenter.session?.natives, natives.hatchesConnected,
+        guard nav !== more, let natives = presenter.session?.natives, natives.hatchesConnected,
               let stack = stacks[ObjectIdentifier(nav)], !stack.hatched else { return }
         let before = barShows(nav)
         stack.showsBar = hatching(nav) { natives.navigationHatch(nav, built: true, showsBar: stack.showsBar, label: stack.label) }
@@ -747,9 +742,8 @@ extension NavigationHost {
 
     /// Project each route of a stack into its navigation item when its
     /// authored source changed, then run the route hatch — before UIKit lays
-    /// the stack out (LLP 1075.003 §3.2, §3.5 "projected defaults"). A held
-    /// stack (HeldStackIOS) is projected as a navigation controller that
-    /// hides its bar would be; no `navigation` hatch has met it.
+    /// the stack out (LLP 1075.003 §3.2, §3.5 "projected defaults"). A plain
+    /// tab (PlainTabIOS) has no bar: its route's header is its content.
     func prepareRoutes(_ routes: [RouteController], in stack: UIViewController, firstPushed: Bool = false) {
         let nav = stack as? UINavigationController
         if let nav {
@@ -760,21 +754,23 @@ extension NavigationHost {
             projectBack(routes, in: nav)
         }
         followTablist(routes, in: stack)
-        let stackShows = nav.map(barShows) ?? !ExactEnv.authoredChrome
+        let stackShows = nav.map(barShows) ?? false
         let back = container?.props["navigationBack"]
+        // A tab's root under More is pushed over UIKit's list, whose Back it shows
+        let front = nav?.stackFront.count ?? 0
         for (index, c) in routes.enumerated() {
             // The bar is each route's (LLP 1115.000 D5.2, D5.3): its header,
             // the system Back alone on a pushed route with none of its own
             // (no header, a hidden one, one that is not a bar's), or no bar
             // where the route says so or has nothing to go back to.
             // A split's detail counts as pushed, its first route included (LLP 1127 D7).
-            let pushed = index > 0 || firstPushed
+            let pushed = index + front > 0 || firstPushed
             c.pushed = pushed
             let transparent = Self.transparentBar(c.node)
             let shape = stackShows ? HeaderShape.bar(of: c.node, back: back, backIsUIKits: pushed) : nil
             let bar = stackShows ? self.bar(of: c.node, pushed: pushed) : .hidden
             let shows = bar != .hidden
-            let canGoBack = pushed && canInvokeBack && shape?.authoredBack != true
+            let canGoBack = (index > 0 || firstPushed ? canInvokeBack : front > 0) && shape?.authoredBack != true // (a root under More: UIKit's Back to the list)
             let scroller = contentScroller(of: c), scroll = scroller?.scrollView
             let dataset = c.node.props["dataset"]
             func barSource(_ key: (HeaderShape.Item) -> String) -> BarSource {

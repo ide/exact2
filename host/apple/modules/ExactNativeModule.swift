@@ -322,9 +322,10 @@ open class ExactModule {
     /// from now on.
     open func routeEnded(_ route: ExactRoute) {}
     /// Exact's tab container (LLP 1075.003 §3.7): once, before its tabs are
-    /// laid out. Its appearance is the app's; its tabs and selection Exact's.
-    /// A tab whose stack shows no bar and has pushed nothing is a plain view
-    /// controller in it until the stack pushes or shows a bar.
+    /// laid out. Its appearance is the app's; its tabs Exact's; its selection
+    /// UIKit's, which Exact's router follows. A tab not built yet, or whose
+    /// stack shows no bar and has pushed nothing, is a plain view controller
+    /// in it until the stack pushes or shows a bar, or More shows it.
     open func tabs(_ tabs: ExactTabs) {}
     /// Own the tabs yourself: return a container holding each tab's
     /// controller (`contents.tabs`), which Exact keeps current, or nil to
@@ -565,9 +566,6 @@ final class ExactHatches {
     /// One of 168 or more: a package's call of the app's handler (LLP 1133.016 D15 item 1; ExactExtensions.swift).
     let invokeFn: Invocations.InvokeFn?
     #if os(iOS) || os(tvOS)
-    /// One of 112 or more: a held tab's navigation controller, built (`ExactTab.controller`).
-    typealias StackFn = @convention(c) (UnsafeMutableRawPointer?, UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer?
-    let stackFn: StackFn?
     var navigations: [ObjectIdentifier: ExactNavigation] = [:]
     var routes: [String: ExactRoute] = [:]
     var tabs: ExactTabs?
@@ -602,10 +600,6 @@ final class ExactHatches {
         partsFn = regions ? table.load(fromByteOffset: 88, as: UnsafeRawPointer?.self).map { unsafeBitCast($0, to: PartsFn.self) } : nil
         tamberFn = table.load(as: UInt32.self) >= 104
             ? table.load(fromByteOffset: 96, as: UnsafeRawPointer?.self).map { unsafeBitCast($0, to: TamberFn.self) } : nil
-        #if os(iOS) || os(tvOS)
-        stackFn = table.load(as: UInt32.self) >= 112
-            ? table.load(fromByteOffset: 104, as: UnsafeRawPointer?.self).map { unsafeBitCast($0, to: StackFn.self) } : nil
-        #endif
         onLineFn = table.load(as: UInt32.self) >= 120
             ? table.load(fromByteOffset: 112, as: UnsafeRawPointer?.self).map { unsafeBitCast($0, to: OnLineFn.self) } : nil
         let audio = table.load(as: UInt32.self) >= 136
@@ -768,26 +762,16 @@ public final class ExactTabs {
     init(controller: UITabBarController, hatches: ExactHatches) { self.controller = controller; self.hatches = hatches }
 }
 
-/// One tab, for a container the app owns: its name, the navigation
-/// controller Exact keeps its stack in, and the item its authored tab gives.
+/// One tab, for a container the app owns: its name, the controller Exact
+/// shows it in, and the item its authored tab gives.
 public struct ExactTab {
     public let name: String
-    /// The navigation controller Exact keeps the tab's stack in. A tab whose
-    /// stack shows no bar and has pushed nothing has none until this is
-    /// read: reading it builds it, and the tab keeps it.
-    public var controller: UINavigationController {
-        if let nav = shown as? UINavigationController { return nav }
-        guard let hatches, let stack = hatches.stackFn, let built = stack(hatches.host, Unmanaged.passUnretained(shown).toOpaque()) else {
-            preconditionFailure("tab \(name): the host built no navigation controller")
-        }
-        return Unmanaged<UINavigationController>.fromOpaque(built).takeUnretainedValue()
-    }
+    /// The controller Exact shows the tab in, for the tab's life: a
+    /// navigation controller for a tab whose panel draws its stack, a plain
+    /// view controller for one that shows a single route (LLP 1075.003 §3.7).
+    public let controller: UIViewController
     /// The tab's item, which Exact updates in place as the authored tab changes.
-    public var item: UITabBarItem { shown.tabBarItem }
-    /// What Exact shows the tab in: its navigation controller, or the plain
-    /// container of a tab that has none yet.
-    let shown: UIViewController
-    weak var hatches: ExactHatches?
+    public var item: UITabBarItem { controller.tabBarItem }
 }
 
 /// What a container the app owns holds (LLP 1075.003 §3.6): each tab's
@@ -1168,8 +1152,8 @@ private let moduleTabs: @convention(c) (UnsafeMutableRawPointer?, UInt32, Unsafe
 
 /// `tab_container(module, json, len, controllers, count) → controller`: the
 /// tabs (`{"names": […], "nodes": […], "selected": i}`) and their controllers
-/// (a navigation controller, or a held tab's container, `heldStacks`); a
-/// container the app owns, retained once for the host, or nil.
+/// (`ExactTab.controller`); a container the app owns, retained once for the
+/// host, or nil.
 private let moduleTabContainer: @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<UInt8>?, UInt32, UnsafePointer<UnsafeMutableRawPointer?>?, UInt32) -> UnsafeMutableRawPointer? = { raw, json, length, controllers, count in
     #if os(iOS) || os(tvOS)
     guard let m = module(raw), let hatches = m.hatches, let json, let controllers,
@@ -1177,7 +1161,7 @@ private let moduleTabContainer: @convention(c) (UnsafeMutableRawPointer?, Unsafe
           let names = object["names"] as? [String], let nodes = object["nodes"] as? [NSNumber], names.count == Int(count) else { return nil }
     let shown = (0..<Int(count)).compactMap { controllers[$0].map { Unmanaged<UIViewController>.fromOpaque($0).takeUnretainedValue() } }
     guard shown.count == names.count else { return nil }
-    let tabs = zip(names, shown).map { ExactTab(name: $0, shown: $1, hatches: hatches) }
+    let tabs = zip(names, shown).map { ExactTab(name: $0, controller: $1) }
     let contents = ExactTabContents(tabs: tabs, selected: object["selected"] as? Int ?? 0, tabNodes: nodes.map(\.uint32Value), hatches: hatches)
     guard let container = m.tabContainer(contents) else { return nil }
     hatches.contents = contents
@@ -1355,9 +1339,7 @@ private let table: UnsafeMutableRawPointer = {
     // Beside the tags, under a key no tag can take (a tag has a hyphen): the
     // hatch words this module was built to handle (LLP 1075.003.000.001
     // §4.3), so the host calls it with no word its code never compiled.
-    // `heldStacks`: `tabContainer` takes a tab Exact holds without a
-    // navigation controller, whose `ExactTab.controller` builds it.
-    let words = "\"hatches\":{\"heldStacks\":true,\"words\":[" + ExactHatchKey._words.map { "\"\($0)\"" }.joined(separator: ",") + "]}"
+    let words = "\"hatches\":{\"words\":[" + ExactHatchKey._words.map { "\"\($0)\"" }.joined(separator: ",") + "]}"
         + ",\"extensions\":{\"names\":[" + ExactExtensions.names.map { "\"\($0)\"" }.joined(separator: ",") + "]}"
         // `app.onLine` is asked of the host (`on_line`), not read from the facts.
         + ",\"facts\":{\"onLine\":\"asks\"}"

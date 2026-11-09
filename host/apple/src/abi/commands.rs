@@ -407,9 +407,11 @@ impl<D: DataSource> Bridge<D> {
 
     /// A navigation root's tabs (`exact_root_tabs`; `Kernel::root_tabs`, LLP
     /// 1115.001 D11), as JSON in the output buffer: `{"tablist":view,
-    /// "tabs":[view...],"panels":[view...],"unsaid":bool,"covered":bool}`, the tabs that
-    /// name a panel and those panels in tab order, or `null` for a root with
-    /// one stack. `unsaid`: the app left the bar's placement unsaid, by the
+    /// "tabs":[view...],"panels":[view...],"stacks":[bool...],"unsaid":bool,
+    /// "covered":bool}`, the tabs that name a panel and those panels in tab
+    /// order, or `null` for a root with one stack. `stacks`: whether each
+    /// panel draws its tab's stack (`Runner::panels_draw_stacks`), read from
+    /// the plan, so it is known for a tab not built yet. `unsaid`: the app left the bar's placement unsaid, by the
     /// web's rule for its own sidebar (`host/web/navigation.js` `unsaidBar`,
     /// LLP 1116.004 D1.1): the tablist is a direct child of the root, not
     /// vertical, in flow in the root's flex column, and itself a row. It is
@@ -437,8 +439,10 @@ impl<D: DataSource> Bridge<D> {
             let arena = kernel.arena();
             let covered = arena.slot_of(tabs.tablist).and_then(|s| arena.cover(s))
                 == Some(exact_kernel::HostCover::Whole);
+            let stacks = h.runner().panels_draw_stacks(&tabs.panels);
+            let stacks = stacks.iter().map(bool::to_string).collect::<Vec<_>>().join(",");
             Some(format!(
-                "{{\"tablist\":{},\"tabs\":[{}],\"panels\":[{}],\"unsaid\":{unsaid},\"covered\":{covered}}}",
+                "{{\"tablist\":{},\"tabs\":[{}],\"panels\":[{}],\"stacks\":[{stacks}],\"unsaid\":{unsaid},\"covered\":{covered}}}",
                 tabs.tablist,
                 list(&tabs.tabs),
                 list(&tabs.panels)

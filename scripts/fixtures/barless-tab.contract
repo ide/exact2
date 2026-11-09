@@ -1,13 +1,10 @@
-// LLP 1075.003 §3.7: a tab whose stack shows no bar and has pushed nothing
-// holds its route without a navigation controller, which is built when the
-// stack first pushes or its route first shows a bar (HeldStackIOSTests).
-// Plain's root has no header until `titled`, a level-1 heading whose large
-// title collapses with the scroller right after it; its field keeps the
-// focus as the route moves into the navigation controller. Open Two pushes
-// two routes in one batch. Titled starts with a bar. Bump changes a text no
-// tab shows, Rename the Titled tab's own: a tab's face is read again only
-// after the second (NavigationTabsIOSTests). Detail in Plain, from Titled,
-// selects Plain and pushes onto its held stack in one update.
+// LLP 1075.003 §3.7: both panels draw their tab's stack, so each tab is a
+// navigation controller from launch (TabStacksIOSTests). Plain's root shows
+// no bar until `titled` gives it a level-1 heading. Open Two pushes two
+// routes in one batch. Titled starts with a bar. Bump changes a text no tab
+// shows, Rename the Titled tab's own: a tab's face is read again only after
+// the second (NavigationTabsIOSTests). Detail in Plain, from Titled, selects
+// Plain and pushes onto it in one update.
 routes nav
   tab plain "/"
     detail "/detail"

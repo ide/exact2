@@ -14,6 +14,11 @@ import Foundation
 /// below, over its views.
 struct RootTabs: Equatable {
     let tablist: UInt32, tabs: [UInt32], panels: [UInt32]
+    /// Whether each panel draws its tab's stack, read from the plan, so known
+    /// for a tab not built yet (`Runner::panels_draw_stacks`, LLP 1075.003
+    /// §3.7): such a tab is a navigation controller, and one that shows a
+    /// single fixed route is a plain view controller.
+    let stacks: [Bool]
     /// The app left the bar's placement unsaid, by the web's rule for its
     /// own sidebar (LLP 1116.004 D1.1; `host/web/navigation.js` `unsaidBar`):
     /// read from the kernel's layout rows, which do not cross to the views.
@@ -22,15 +27,16 @@ struct RootTabs: Equatable {
     /// it for the tab bar that takes its place (host/apple/src/closed.rs).
     let covered: Bool
 
-    init(tablist: UInt32, tabs: [UInt32], panels: [UInt32], unsaid: Bool, covered: Bool = false) {
+    init(tablist: UInt32, tabs: [UInt32], panels: [UInt32], stacks: [Bool]? = nil, unsaid: Bool, covered: Bool = false) {
         (self.tablist, self.tabs, self.panels, self.unsaid, self.covered) = (tablist, tabs, panels, unsaid, covered)
+        self.stacks = stacks ?? panels.map { _ in true }
     }
 
     init?(json: Data) {
         guard let o = try? JSONSerialization.jsonObject(with: json) as? [String: Any],
               let tablist = o["tablist"] as? Int, let tabs = o["tabs"] as? [Int], let panels = o["panels"] as? [Int] else { return nil }
-        self.init(tablist: UInt32(tablist), tabs: tabs.map { UInt32($0) }, panels: panels.map { UInt32($0) }, unsaid: o["unsaid"] as? Bool ?? false,
-                  covered: o["covered"] as? Bool ?? false)
+        self.init(tablist: UInt32(tablist), tabs: tabs.map { UInt32($0) }, panels: panels.map { UInt32($0) }, stacks: o["stacks"] as? [Bool],
+                  unsaid: o["unsaid"] as? Bool ?? false, covered: o["covered"] as? Bool ?? false)
     }
 }
 

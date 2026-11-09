@@ -39,12 +39,6 @@ const READ: [PropId; 6] = [
 /// and the inliner makes their contents one arm (`contract_syntax::inline`),
 /// but for a virtualized list's, whose one `for` owns its rows' state.
 pub fn panel_sites(plan: &Plan) -> Vec<NodesId> {
-    let binds = |n: NodesId, prop: PropId| {
-        plan.node(n)
-            .bindings
-            .iter()
-            .any(|b| plan.binding(b).kind == BindingKind::Prop && plan.binding(b).id == prop as u16)
-    };
     // A prop's binding that is a literal: its opcode and first operand.
     let literal = |n: NodesId, prop: PropId| {
         plan.node(n).bindings.iter().find_map(|b| {
@@ -65,34 +59,88 @@ pub fn panel_sites(plan: &Plan) -> Vec<NodesId> {
         matches!(literal(n, PropId::AccessibilityRole), Some((exact_plan::Opcode::Str, s))
             if plan.str(exact_plan::StrId(s as u32)) == "tabpanel")
     };
-    // A site's enclosing node: its parent, else its arm's region's.
-    let up = |parent: Option<NodesId>, mut arm: Option<ArmsId>| {
-        if parent.is_some() {
-            return parent;
-        }
-        while let Some(a) = arm {
-            let region = plan.region(plan.arm(a).region);
-            if region.parent.is_some() {
-                return region.parent;
-            }
-            arm = region.arm;
-        }
-        None
-    };
     (0..plan.nodes.len() as u32)
         .map(NodesId)
         .filter(|&n| tabpanel(n))
         .filter(|&n| {
-            let mut at = up(plan.node(n).parent, plan.node(n).arm);
-            while let Some(a) = at {
-                if binds(a, PropId::NavigationKey) {
-                    return binds(a, PropId::NavigationBack);
+            let mut at = enclosing(plan, n);
+            while let Some((a, _)) = at {
+                if binds(plan, a, PropId::NavigationKey) {
+                    return binds(plan, a, PropId::NavigationBack);
                 }
-                at = up(plan.node(a).parent, plan.node(a).arm);
+                at = enclosing(plan, a);
             }
             false
         })
         .collect()
+}
+
+/// Whether each tab panel site in `panels` draws a stack: it can hold more
+/// than one route, because a route of its own (a node with a `navigationKey`
+/// and no route between it and the panel) stands inside a `for` below it, as
+/// `for e in t.stack` draws one per entry, or because its template holds more
+/// than one route. A panel with one route outside any `for` shows that route
+/// alone: a tab that uses no stack navigator, which a host shows without one
+/// (LLP 1075.003 §3.7). It is read from the plan, so it holds for a panel
+/// still waiting for its first selection. One template serves every tab a
+/// `for t in nav.tabs` draws, so a template that draws a stack for some tabs
+/// answers `true` for all of them: a stack can show one route, and a host
+/// without one cannot show a pushed route.
+pub fn panels_draw_stacks(plan: &Plan, panels: &[NodesId]) -> Vec<bool> {
+    let mut sites = panels.to_vec();
+    sites.sort_unstable();
+    sites.dedup();
+    let mut routes = vec![0usize; sites.len()];
+    let mut stacks = vec![false; sites.len()];
+    for route in (0..plan.nodes.len() as u32).map(NodesId) {
+        if !binds(plan, route, PropId::NavigationKey) {
+            continue;
+        }
+        let (mut at, mut each) = (enclosing(plan, route), false);
+        while let Some((a, crossed)) = at {
+            each |= crossed;
+            if let Ok(i) = sites.binary_search(&a) {
+                routes[i] += 1;
+                stacks[i] |= each || routes[i] > 1;
+                break;
+            }
+            if binds(plan, a, PropId::NavigationKey) {
+                break;
+            }
+            at = enclosing(plan, a);
+        }
+    }
+    panels
+        .iter()
+        .map(|p| sites.binary_search(p).is_ok_and(|i| stacks[i]))
+        .collect()
+}
+
+/// Whether node `n` binds `prop`.
+fn binds(plan: &Plan, n: NodesId, prop: PropId) -> bool {
+    plan.node(n)
+        .bindings
+        .iter()
+        .any(|b| plan.binding(b).kind == BindingKind::Prop && plan.binding(b).id == prop as u16)
+}
+
+/// A site's enclosing node, its parent, else its arm's region's, and
+/// whether a `for` lies between them.
+fn enclosing(plan: &Plan, n: NodesId) -> Option<(NodesId, bool)> {
+    let node = plan.node(n);
+    if let Some(parent) = node.parent {
+        return Some((parent, false));
+    }
+    let (mut arm, mut each) = (node.arm, false);
+    while let Some(a) = arm {
+        let region = plan.region(plan.arm(a).region);
+        each |= region.kind == RegionKind::Each;
+        if let Some(parent) = region.parent {
+            return Some((parent, each));
+        }
+        arm = region.arm;
+    }
+    None
 }
 
 /// The instance tree as the selection reads it: each node's [`READ`] props
@@ -242,6 +290,30 @@ impl Tree {
             tabs.panels.append(&mut tabs.made);
         }
         Ok(())
+    }
+
+    /// Build the waiting panels among `panels` now, selecting none; a panel
+    /// their contents make waits as any does, unless its root selects it.
+    pub(crate) fn open_panels(
+        &mut self,
+        u: &mut Update<'_>,
+        panels: &[ViewId],
+    ) -> Result<(), InstanceError> {
+        let tabs = &mut u.ids.tabs;
+        tabs.panels.append(&mut tabs.made);
+        let open: Vec<ViewId> = tabs
+            .panels
+            .iter()
+            .copied()
+            .filter(|w| panels.contains(w))
+            .collect();
+        if open.is_empty() {
+            return Ok(());
+        }
+        tabs.panels.retain(|w| !open.contains(w));
+        let mut left = open.len();
+        open_in(u, &mut self.children, &[], &open, &mut left)?;
+        self.open_tabs(u)
     }
 
     /// Make the contents of each waiting panel its root now selects, in
