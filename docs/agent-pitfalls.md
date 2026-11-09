@@ -228,7 +228,11 @@ This list holds what the [agent guide](contract-for-agents.md)'s rules don't mak
   (Chat2 and Workout DIARY, Gallery's `height`; reproduced on the web, 2026-10-04.)
   **Diagnosed:** the compiler warns (`lower-width-padding`) for a content-box
   container with `width="100%"` and horizontal padding or a border, and `check`
-  names the box that runs past its parent by its padding (LLP 1116.009 D5).
+  names the box that runs past its parent by its padding (LLP 1116.009 D5). On iOS
+  the host pads a route's root too, clear of the iPhone Duo's side strip and of a
+  split's list beside its detail (LLP 1123 D3, LLP 1127 Q3), so a route's root with
+  `width="100%"` runs past the screen by that much: place it with
+  `position="absolute" inset=0`, as the patterns' routes are.
 
 - **A one-edge border draws a frame, and a drawer closed to `height=0` stays open
   a few pixels.** `border-top-width=1 border-style="solid"` on a 60 × 20 box drew a
@@ -246,6 +250,23 @@ This list holds what the [agent guide](contract-for-agents.md)'s rules don't mak
   `<button>` is `inline-block`; `text-align` places inline content, not a block. Fix:
   `margin-left="auto"` on the button, as a block's auto margin places it. (The `site`
   pattern's sortable table, LLP 1153 D8; reproduced on the web, 2026-10-30.)
+
+- **Text stacked under a title sits higher than in a SwiftUI original.** In the
+  Landmarks port on iOS, the description under a 28-point bold title started 3 points
+  higher than in Apple's SwiftUI sample. Two causes, measured on the simulator. First,
+  the sample's `VStack` with no `spacing` puts SwiftUI's default distance between the
+  two texts, 2 points for this pair, where a Contract `column` has no `gap`: write it
+  (`gap=2`). Second, 1 point remains, from the text boxes. Exact lays author text out
+  in the web's line box for the system font, as Chrome's `system-ui` does
+  (`CSSLineBox`: the face's ascent and descent, 1980 and 432 per 2048 units, each
+  rounded to a point), so the title's box is 33 points with 6 below the baseline.
+  SwiftUI sizes a `Text` frame from UIKit's font metrics (ascender 26.66, descender
+  6.75, line height 33.41) and rounds it up to the device pixel: 33.67 points, about 7
+  below the baseline. The glyphs sit in the same place; only the boxes differ, so text
+  stacked under text sits that much higher. Exact keeps the web's line box, the layout
+  model every host shares. When a port must match its original to the pixel, compare
+  glyph positions on both (a screenshot's rows of ink) and add the difference under the
+  title, as the React Native entry below does with `-exact-hairline`.
 
 ## Lists and scrolling
 
@@ -588,10 +609,15 @@ This list holds what the [agent guide](contract-for-agents.md)'s rules don't mak
   `tabindex` is now an attribute on every element and module tag's box (LLP
   1088 D7.3), with no DOM-property alias. Fix: write `tabindex` (x2apps paint,
   2026-10-04).
-- **With `viewport-fit="cover"`, route content goes under the native bar.** Cause:
-  the bar's cover is added to the route's padding, but a cover-fit root has no top
-  safe area. Fix: put `env(safe-area-inset-top)` on the route column, not on each
-  authored header. (Signal Clone, build 5.)
+- **With `viewport-fit="cover"`, a route padded by `env(safe-area-inset-top)` starts
+  its content a status bar too low on iOS.** Cause: a route clears its own safe area,
+  the status bar and its bars, under either fit (LLP 1123 D3), and adds it to the
+  padding written on the route, so `env()` counts the status bar a second time
+  (lowering warns, `lower-env-in-owner`). Fix: leave the bars to the route. Where the
+  web needs the padding (a page under Safari's status bar), write
+  `var(--exact-safe-area-inset-top)`: on the web it is the root's `env()`, and on iOS
+  0 on an edge the route clears, or the inset on one it turns off (`-exact-safe-area`,
+  LLP 1123 D4). (Messages, 2026-10-27.)
 - **A banner at the root of a tabbed app stays under the status bar on iOS.** A
   root-level `position="absolute" top=0` box padded with `env(safe-area-inset-top)`
   is drawn at y 0, and one at `top="calc(env(safe-area-inset-top) + 8px)"` at y 8.
@@ -601,12 +627,25 @@ This list holds what the [agent guide](contract-for-agents.md)'s rules don't mak
   content of the status bar and its bars instead, by padding the route or by UIKit's
   inset on its scroller (LLP 1123 D1). The same `env()` padding inside a route only
   seems to work: it adds 0 to that clearance. A box outside every route has no inset
-  to read until LLP 1123 D9's `var(--exact-safe-area-inset-top)` is built. Until
-  then, put the banner in the route that shows it, where the host pads that route's
-  top: an absolutely positioned child at `top=0` then starts below the status bar and
-  any bar. A route whose scroller starts at its top or right under its header is
-  inset by UIKit instead, and a box at its `top=0` is under the bars. (euxy port's
-  "COPY SAVED" notice, 2026-10-21.)
+  to read either: there `var(--exact-safe-area-inset-top)` is the root's `env()`, 0
+  (LLP 1123 D9's values at the session root, the view's own insets, are not built).
+  Put the banner in the route that shows it, where the host pads that route's top:
+  an absolutely positioned child at `top=0` then starts below the status bar and any
+  bar. A route whose scroller starts at its top or right under its header is inset
+  by UIKit instead of padded, and such a child is still placed below the bar, open
+  or collapsed. Not under a large title whose control bars ride the bar (a segmented
+  filter over a list, LLP 1131): that route is covered nothing at the top, so a box
+  at its `top=0` is under the bars, and at `top="var(--exact-safe-area-inset-top)"`
+  it stays there, as that is 0 in a route whose content starts below the bar (D9).
+  (euxy port's "COPY SAVED" notice, 2026-10-21.)
+- **A bottom sheet or bar in a route stops above the home indicator on iOS, the
+  route's background showing below it.** Cause: a route clears its whole safe area
+  (LLP 1123 D3), and on an edge it clears, `var(--exact-safe-area-inset-bottom)` and
+  `var(--exact-safe-area-corners-inset-bottom)` are 0, so padding moved over from
+  `env(safe-area-inset-bottom)` adds nothing and the box ends where the clearance
+  begins. Take the edge on the route's root, `-exact-safe-area="bottom"` (LLP 1123
+  D4): the box reaches the bottom, and the same `var()` is then the inset to pad its
+  controls by. (Duo Lab's note sheet, 2026-10-27.)
 
 - **After a relaunch on iOS, a form opens with old values and ignores the fresh answer.**
   While the data module is not ready, a native host (and the wasm web target) can make

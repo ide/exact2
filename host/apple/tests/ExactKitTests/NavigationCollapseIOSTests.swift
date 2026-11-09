@@ -44,13 +44,14 @@ final class NavigationCollapseIOSTests: XCTestCase {
         let view = ExactView(session: session)
         let host = UIViewController()
         let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene
-        let window = scene.map { UIWindow(windowScene: $0) } ?? UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
-        window.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
+        let bounds = scene?.screen.bounds ?? UIScreen.main.bounds
+        let window = scene.map { UIWindow(windowScene: $0) } ?? UIWindow(frame: bounds)
+        window.frame = bounds
         window.rootViewController = host
         window.makeKeyAndVisible()
         host.view.addSubview(view)
         self.window = window
-        XCTAssertNil(session.boot(plan: plan, size: CGSize(width: 402, height: 874)).error)
+        XCTAssertNil(session.boot(plan: plan, size: bounds.size).error)
         view.frame = host.view.bounds
         view.layoutIfNeeded()
         spin(0.3)
@@ -89,18 +90,19 @@ final class NavigationCollapseIOSTests: XCTestCase {
         let view = ExactView(session: session)
         let host = UIViewController()
         let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene
-        let window = scene.map { UIWindow(windowScene: $0) } ?? UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
-        window.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
+        let bounds = scene?.screen.bounds ?? UIScreen.main.bounds
+        let window = scene.map { UIWindow(windowScene: $0) } ?? UIWindow(frame: bounds)
+        window.frame = bounds
         window.rootViewController = host
         self.window = window
         if beforeItsWindow {
-            XCTAssertNil(session.boot(plan: plan, size: CGSize(width: 402, height: 874)).error)
-            view.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
+            XCTAssertNil(session.boot(plan: plan, size: bounds.size).error)
+            view.frame = bounds
             view.layoutIfNeeded()
         }
         window.makeKeyAndVisible()
         host.view.addSubview(view)
-        if !beforeItsWindow { XCTAssertNil(session.boot(plan: plan, size: CGSize(width: 402, height: 874)).error) }
+        if !beforeItsWindow { XCTAssertNil(session.boot(plan: plan, size: bounds.size).error) }
         view.frame = host.view.bounds
         view.layoutIfNeeded()
         spin(0.3)
@@ -195,23 +197,26 @@ final class NavigationCollapseIOSTests: XCTestCase {
         home.more.nativeScrollView = scroll
         navigation.prepareRoutes([route], in: nav)
         XCTAssertTrue(route.contentScrollView(for: .top) === scroll)
+        scroll.writes = 0
         for transparent in [false, true, false] {
             route.node.props["navigationBar"] = transparent ? "transparent" : nil
             navigation.prepareRoutes([route], in: nav)
-            XCTAssertEqual(scroll.contentInsetAdjustmentBehavior, transparent ? .never : .automatic)
-            scroll.writes = 0
+            // A transparent bar turns off the top's clearance; UIKit still insets the scroller.
+            XCTAssertEqual(scroll.contentInsetAdjustmentBehavior, .automatic)
             navigation.prepareRoutes([route], in: nav)
             navigation.prepareRoutes([route], in: nav)
-            XCTAssertEqual(scroll.writes, 0, "unchanged projection leaves UIKit's scroll configuration alone")
+            XCTAssertEqual(scroll.writes, 0, "the bar's transparency and an unchanged projection leave UIKit's scroll configuration alone")
         }
     }
 
     /// `navigationBar="transparent"` over `scripts/fixtures/transparent-bar.contract`:
     /// the bar shows, clear at the top of the route's scroller, whose content
-    /// starts at the top edge under it (UIKit insets it nothing), as under a
-    /// fixed transparent header on the web; the route is covered nothing
-    /// at the top, so the hero picture bleeds to the edge.
-    func testATransparentBarInsetsNothingOfItsScroller() throws {
+    /// starts at the top edge under it (Exact cancels UIKit's inset there,
+    /// `RouteSafeArea`), as under a fixed transparent header on the web; the
+    /// route is covered nothing at the top, so the hero picture bleeds to the
+    /// edge. At the bottom the scroller runs under the home indicator, inset
+    /// there as any route's is.
+    func testATransparentBarInsetsNothingOfItsScrollerAtTheTop() throws {
         let session = try booted("EXACT_TRANSPARENT_BAR_PLAN", label: "transparent-bar", beforeItsWindow: true)
         let nav = try XCTUnwrap(session.presenter.navigation.primaryNavigation)
         let route = try XCTUnwrap(nav.topViewController as? RouteController)
@@ -219,11 +224,34 @@ final class NavigationCollapseIOSTests: XCTestCase {
         XCTAssertEqual(route.navigationItem.scrollEdgeAppearance, NavigationHost.clearScrollEdge, "clear at the scroller's top")
         let home = try node(session, "home-scroll"), sv = try XCTUnwrap(home.scroll)
         XCTAssertTrue(route.collapseScroll === home, "the bar follows the route's scroller")
-        XCTAssertEqual(sv.contentInsetAdjustmentBehavior, .never)
-        XCTAssertEqual(sv.adjustedContentInset.top, 0, "UIKit insets it nothing")
+        XCTAssertEqual(sv.adjustedContentInset.top, 0, "UIKit's inset at the top cancelled")
+        XCTAssertTrue(route.edgeScroll === home, "it runs to the bottom edge")
+        XCTAssertGreaterThan(route.view.safeAreaInsets.bottom, 0, "a screen with a home indicator")
+        XCTAssertEqual(sv.convert(sv.bounds, to: nil).maxY, route.view.convert(route.view.bounds, to: nil).maxY, accuracy: 0.5, "under the home indicator")
+        XCTAssertEqual(sv.adjustedContentInset.bottom, route.view.safeAreaInsets.bottom, accuracy: 0.5, "and inset there")
         let hero = try node(session, "hero")
         XCTAssertEqual(hero.convert(hero.bounds, to: nil).minY, 0, accuracy: 0.5, "the picture starts at the top edge, under the bar")
         XCTAssertEqual(home.scrollOrigin, 0, "CSS scrollTop 0 is the top edge")
+    }
+
+    /// A transparent bar turns the top's clearance off (LLP 1123 D4) over a
+    /// route with no scroller under it too (`detail` in
+    /// `scripts/fixtures/navigation-bars.contract`: a header, then a column):
+    /// the route is covered nothing at the top, so its content starts at the
+    /// top edge under the bar, and its values say the bar's inset there.
+    func testATransparentBarTurnsOffTheTopOfARouteWithNoScrollerUnderIt() throws {
+        let (session, _, route) = try pushed("detail")
+        let p = session.presenter, content = try node(session, "content-detail")
+        p.apply(wireBatch([["op": "props", "id": route.node.id, "set": ["navigationBar": "transparent"]]]))
+        XCTAssertNil(route.collapseScroll, "no scroller goes under the bar")
+        let top = route.view.safeAreaInsets.top
+        XCTAssertGreaterThan(top, 0, "a bar over the route")
+        func covered() -> CGFloat { if case .edges(let e)? = p.navigation.covers[route.node.id] { return e.top } else { return 0 } }
+        let edge = route.view.convert(CGPoint.zero, to: nil).y
+        until("the route is covered nothing at the top") { covered() < 0.5 && abs(content.convert(content.bounds, to: nil).minY - edge) < 0.5 }
+        XCTAssertEqual(covered(), 0, accuracy: 0.5, "the route is covered nothing at the top")
+        XCTAssertEqual(content.convert(content.bounds, to: nil).minY, edge, accuracy: 0.5, "its content starts at the top edge, under the bar")
+        XCTAssertEqual(p.navigation.ownerValues[route.node.id]?.safe[0] ?? -1, top, accuracy: 0.5, "and its values say the bar's inset")
     }
 
     /// LLP 1115.000 D11.1 over `scripts/fixtures/large-title.contract`: one
@@ -248,6 +276,35 @@ final class NavigationCollapseIOSTests: XCTestCase {
         home.applyPendingScroll()
         spin(0.3)
         XCTAssertLessThan(bar.frame.height, expanded, "and the title collapses as the content scrolls")
+    }
+
+    /// LLP 1123 C33b over `scripts/fixtures/large-title.contract`: a box
+    /// pinned 16 points from the top of a route whose scroller goes under its
+    /// large title rests 16 points below the bar, open and collapsed, as a
+    /// view pinned to the safe-area guide does, while the scroller starts
+    /// under the bar and its content just below it.
+    func testABoxPinnedToTheTopOfARouteRestsBelowItsCollapsingTitle() throws {
+        let session = try booted("EXACT_LARGE_TITLE_PLAN", label: "large-title-pinned", beforeItsWindow: true)
+        let route = try XCTUnwrap(session.presenter.navigation.primaryNavigation?.topViewController as? RouteController)
+        let home = try node(session, "home-scroll"), pinned = try node(session, "home-pinned"), top = try node(session, "home-top")
+        XCTAssertTrue(route.collapseScroll === home, "the title collapses with the scroller")
+        let bar = try XCTUnwrap(route.navigationController?.navigationBar), expanded = bar.frame.height
+        // UIKit shows no large title where it places a vertical bar (the iPhone Duo upright or closed)
+        let large = !bar.traitCollection.placesVerticalBar
+        if large { XCTAssertGreaterThan(expanded, 90, "the large title is open") }
+        func check(_ title: String) {
+            let below = bar.convert(bar.bounds, to: nil).maxY
+            until("\(title): the box rests 16 below the bar") { abs(pinned.convert(pinned.bounds, to: nil).minY - below - 16) < 0.5 }
+            XCTAssertEqual(pinned.convert(pinned.bounds, to: nil).minY, below + 16, accuracy: 0.5, "\(title): 16 below the bar")
+            XCTAssertEqual(home.convert(home.bounds, to: nil).minY, 0, accuracy: 0.5, "\(title): the scroller starts under the bar")
+        }
+        check("open")
+        XCTAssertEqual(top.convert(top.bounds, to: nil).minY, bar.convert(bar.bounds, to: nil).maxY, accuracy: 0.5, "its content just below the open title")
+        guard large else { return }
+        home.pendingScrollTop = 300
+        home.applyPendingScroll()
+        until("the title collapses") { bar.frame.height < expanded - 20 }
+        check("collapsed")
     }
 
     /// The agent's `tap <scroller> drag 0 -900` to the end under an expanded
@@ -396,10 +453,9 @@ final class NavigationCollapseIOSTests: XCTestCase {
         XCTAssertTrue(sv.scrollsToTop)
     }
 
-    /// Under a `viewport-fit="cover"` root a route's scroller spans the
-    /// window, side insets included. UIKit insets it at its top and bottom
-    /// only, so its content, as wide as it, has no sideways range (LLP 1123
-    /// D3); `.always` added the side inset too, and it scrolled sideways by it.
+    /// Safe-area design §4.2: the scroller spans the window, with its content
+    /// in the safe width. The composer supplies the cross-axis band UIKit
+    /// leaves, so a sidebar adds no sideways range, under `cover` too.
     func testUnderACoverRootTheBarsScrollerHasNoSidewaysRange() throws {
         let session = try booted("EXACT_COVER_SCROLL_PLAN", label: "cover-scroll")
         let sv = try XCTUnwrap(try node(session, "home-scroll").scroll)
@@ -408,7 +464,8 @@ final class NavigationCollapseIOSTests: XCTestCase {
         host.view.layoutIfNeeded()
         until("the scroller lies under the side inset") { sv.safeAreaInsets.right >= before + 83.5 }
         XCTAssertEqual(sv.adjustedContentInset.left, 0, accuracy: 0.5)
-        XCTAssertEqual(sv.adjustedContentInset.right, 0, accuracy: 0.5, "UIKit adds no side inset")
+        XCTAssertEqual(sv.adjustedContentInset.right - sv.contentInset.right, 0, accuracy: 0.5, "UIKit adds no side inset")
+        XCTAssertEqual(sv.contentInset.right, sv.safeAreaInsets.right, accuracy: 0.5, "the composer keeps content clear of the side band")
         XCTAssertLessThanOrEqual(sv.contentSize.width + sv.adjustedContentInset.left + sv.adjustedContentInset.right, sv.bounds.width + 0.5, "no sideways range")
         XCTAssertGreaterThan(sv.adjustedContentInset.top, 0, "inset under the bar")
     }
@@ -517,14 +574,7 @@ final class NavigationCollapseIOSTests: XCTestCase {
         XCTAssertEqual(row?["sy"] as? Double ?? -1, 30, accuracy: 0.5)
     }
 
-    /// A scroller replaced in place by a taller one, then a shorter one, as
-    /// a quiz's results replace its question (bake-off round 3: the results
-    /// opened scrolled by the bar, their score and Play Again under it).
-    /// UIKit insets a new scroller from the offset it had, 0, which leaves
-    /// its content's top under the bar; each opens at its top instead, just
-    /// below the bar. The bar stays as the page before left it, its title
-    /// collapsed, as UIKit keeps the bar of a hand-built screen whose scroll
-    /// view is replaced in place (measured on iOS 27); a pull opens it.
+    /// PROTO: open taller and shorter replacements at their start, keeping UIKit's collapsed title until a pull
     func testAScrollerReplacedInPlaceOpensAtItsTopBelowTheBarAsItWasLeft() throws {
         let (session, nav) = try second("collapse-replaced")
         let list = try node(session, "list-second")
@@ -547,5 +597,230 @@ final class NavigationCollapseIOSTests: XCTestCase {
             XCTAssertEqual(bar.frame.height, collapsed, accuracy: 0.5, "the title still collapsed, as UIKit leaves it")
         }
     }
+
+    /// Safe-area design §4.1 and LLP 1123 D9, D12 on the fixture's Second route, whose scroller goes
+    /// under the bar with its title and reaches the window's bottom under the
+    /// bars there: the route pads nothing at the top or the bottom. Its
+    /// values still describe its content root between the bars as they are:
+    /// `--exact-safe-area-inset-top` is 0, so a box padded by it gains
+    /// nothing, and `10cqh` is a tenth of the height between the bars. They
+    /// stay so as the large title collapses (where UIKit shows it large: the
+    /// iPhone Duo's cover screen shows it inline), under a bar over the
+    /// bottom, as an iPhone's tab bar is (the cover screen holds its tab bar
+    /// in the side strip), and as the route's safe area at the top grows, as
+    /// under a taller bar.
+    func testARoutesValuesLeaveOutItsBarsAsItsTitleCollapses() throws {
+        let mode = ExactSession.protoMode
+        ExactSession.protoMode = .live
+        defer { ExactSession.protoMode = mode }
+        let (session, nav) = try second("owner-values")
+        let route = try XCTUnwrap(nav.topViewController as? RouteController), host = try XCTUnwrap(window?.rootViewController)
+        let list = try node(session, "list-second")
+        XCTAssertTrue(route.collapseScroll === list, "the title collapses with the scroller")
+        XCTAssertTrue(route.edgeScroll === list, "which reaches the bottom edge")
+        let padded = try node(session, "owner-padded"), content = try node(session, "owner-padded-content")
+        func check(_ title: String) {
+            let safe = route.view.safeAreaInsets, box = route.node.convert(route.node.bounds, to: route.view)
+            let size = CGSize(width: box.width - safe.left - safe.right, height: box.height - safe.top - safe.bottom)
+            XCTAssertEqual(list.convert(list.bounds, to: route.view).maxY, route.view.bounds.maxY, accuracy: 0.5,
+                           "\(title): the scroller reaches under the bars at the bottom")
+            until("\(title): the values describe the content root between the bars") {
+                guard let values = session.presenter.navigation.ownerValues[route.node.id] else { return false }
+                return values.safe.allSatisfy { abs($0) < 0.5 }
+                    && abs(values.size.width - size.width) < 0.5 && abs(values.size.height - size.height) < 0.5
+            }
+            if let values = session.presenter.navigation.ownerValues[route.node.id] {
+                XCTAssertTrue(values.safe.allSatisfy { abs($0) < 0.5 }, "\(title): the safe area's insets, \(values.safe)")
+                XCTAssertEqual(values.size.width, size.width, accuracy: 0.5, "\(title): the content root's width")
+                XCTAssertEqual(values.size.height, size.height, accuracy: 0.5, "\(title): the content root's height")
+            }
+            until("\(title): the kernel lays out by them") {
+                abs(content.frame.minY) < 0.5 && abs(padded.bounds.height - size.height / 10) < 0.5
+            }
+            XCTAssertEqual(content.frame.minY, 0, accuracy: 0.5, "\(title): `var(--exact-safe-area-inset-top)` pads nothing")
+            XCTAssertEqual(padded.bounds.height, size.height / 10, accuracy: 0.5, "\(title): `10cqh`")
+        }
+        check("at rest")
+        // UIKit shows no large title where it places a vertical bar (the iPhone Duo upright or closed)
+        if !nav.traitCollection.placesVerticalBar {
+            let bar = nav.navigationBar, expanded = bar.frame.height
+            XCTAssertGreaterThan(expanded, 90, "the large title is expanded at rest")
+            list.pendingScrollTop = 300
+            list.applyPendingScroll()
+            until("the title collapses") { bar.frame.height < expanded - 20 }
+            check("collapsed")
+        }
+        let bottom = route.view.safeAreaInsets.bottom
+        host.additionalSafeAreaInsets.bottom += 49
+        until("a bar over the bottom") { route.view.safeAreaInsets.bottom >= bottom + 48.5 }
+        check("over a bottom bar")
+        let top = route.view.safeAreaInsets.top
+        route.additionalSafeAreaInsets.top += 52
+        until("a taller bar") { route.view.safeAreaInsets.top >= top + 51.5 }
+        check("under a taller bar")
+    }
+
+    func testSafeAreaEdgesKeepTheBarAndOtherInsetsAndCanBeReversed() throws {
+        let (_, nav, route) = try pushed("tall")
+        let scroll = try XCTUnwrap(route.collapseScrollView)
+        let bottom = scroll.adjustedContentInset.bottom
+        XCTAssertGreaterThan(scroll.adjustedContentInset.top, 0)
+        let authored = route.node.contentBox()
+        route.node.props["safeArea"] = "ignore top"
+        route.safeArea.sync(route)
+        nav.view.layoutIfNeeded()
+        route.safeArea.sync(route)
+        XCTAssertFalse(nav.isNavigationBarHidden)
+        XCTAssertEqual(scroll.adjustedContentInset.top, 0, accuracy: 0.5)
+        XCTAssertEqual(scroll.adjustedContentInset.bottom, bottom, accuracy: 0.5)
+        XCTAssertEqual(route.node.contentBox(), authored, "the executor changes no authored padding")
+        let inset = scroll.contentInset
+        route.safeArea.sync(route)
+        XCTAssertEqual(scroll.contentInset, inset, "repeated layout adds no inset")
+        // A keyboard/refresh contribution belongs to its executor, not this policy.
+        scroll.contentInset.bottom += 23
+        route.node.props["safeArea"] = "ignore"
+        route.safeArea.sync(route)
+        XCTAssertEqual(scroll.adjustedContentInset.top, 0, accuracy: 0.5)
+        XCTAssertEqual(scroll.adjustedContentInset.bottom, 23, accuracy: 0.5)
+        route.node.props["safeArea"] = "ignore bottom"
+        route.safeArea.sync(route)
+        XCTAssertGreaterThan(scroll.adjustedContentInset.top, 0)
+        XCTAssertEqual(scroll.adjustedContentInset.bottom, 23, accuracy: 0.5)
+        route.node.props["safeArea"] = "auto"
+        route.safeArea.sync(route)
+        XCTAssertEqual(scroll.contentInset.top, 0, accuracy: 0.5)
+        XCTAssertEqual(scroll.adjustedContentInset.bottom, bottom + 23, accuracy: 0.5)
+        XCTAssertGreaterThan(scroll.adjustedContentInset.top, 0)
+    }
+
+    func testSafeAreaOptOutMovesToAReplacementScrollerAndReleasesTheOldOne() throws {
+        let (_, nav, route) = try pushed("tall")
+        let node = try XCTUnwrap(route.collapseScroll)
+        let old = try XCTUnwrap(route.collapseScrollView)
+        route.node.props["safeArea"] = "ignore top bottom"
+        route.host?.reportCovers()
+        XCTAssertLessThan(old.contentInset.top, 0, "the old backend holds a real correction")
+        XCTAssertEqual(old.adjustedContentInset.bottom - old.contentInset.bottom + route.safeArea.insets(for: old).bottom, 0, accuracy: 0.5,
+                       "the bottom correction cancels UIKit's contribution, whatever the scene's")
+        node.groupedOwner = true
+        node.syncScroll()
+        let replacement = UIScrollView(frame: node.bounds)
+        replacement.contentSize = old.contentSize
+        replacement.alwaysBounceVertical = true
+        replacement.delegate = node
+        node.addSubview(replacement)
+        node.mountNativeScrollView(replacement)
+        route.host?.prepareRoutes(nav.viewControllers.compactMap { $0 as? RouteController }, in: nav)
+        nav.view.layoutIfNeeded()
+        route.host?.reportCovers()
+        XCTAssertTrue(route.collapseScrollView === replacement)
+        XCTAssertTrue(route.contentScrollView(for: .bottom) === replacement)
+        XCTAssertEqual(old.contentInset, .zero, "the old backend gives both corrections back")
+        XCTAssertLessThan(replacement.contentInset.top, 0, "the new backend takes the correction")
+        XCTAssertEqual(replacement.adjustedContentInset.top, 0, accuracy: 0.5)
+        XCTAssertEqual(replacement.adjustedContentInset.bottom, 0, accuracy: 0.5)
+        route.node.props["safeArea"] = "auto"
+        route.host?.reportCovers()
+        XCTAssertEqual(replacement.contentInset, .zero)
+    }
+
+    func testAnOptedOutTopStillCollapsesAndReexpandsTheLargeTitle() throws {
+        let (session, nav, route) = try pushed("tall")
+        let scroll = try XCTUnwrap(route.collapseScrollView)
+        route.node.props["safeArea"] = "ignore top"
+        route.host?.reportCovers()
+        nav.view.layoutIfNeeded()
+        route.host?.reportCovers()
+        let expanded = nav.navigationBar.frame.height
+        XCTAssertGreaterThan(expanded, 90)
+        XCTAssertEqual(scroll.adjustedContentInset.top, 0, accuracy: 0.5)
+        scroll.setContentOffset(CGPoint(x: 0, y: 240), animated: false)
+        until("the native large title collapses with top clearance disabled") {
+            nav.navigationBar.frame.height < expanded - 20
+        }
+        XCTAssertEqual(scroll.adjustedContentInset.top, 0, accuracy: 0.5, "the collapse's own safe-area change corrected the scroller")
+        XCTAssertEqual(scroll.contentOffset.y + scroll.adjustedContentInset.top, 240, accuracy: 0.5,
+                       "the anchor survives the collapse itself, not just a repeated cover report")
+        route.host?.reportCovers()
+        XCTAssertEqual(scroll.adjustedContentInset.top, 0, accuracy: 0.5)
+        let collapsed = nav.navigationBar.frame.height
+        let page = try XCTUnwrap(route.collapseScroll)
+        let pull = Agent(session: session).tap(["id": Int(page.id), "scrollDrag": [0.0, 1_000.0]])
+        XCTAssertNil(pull["error"], "\(pull)")
+        until("the native large title reexpands with top clearance disabled") {
+            nav.navigationBar.frame.height > collapsed + 20
+        }
+        route.host?.reportCovers()
+        XCTAssertEqual(scroll.adjustedContentInset.top, 0, accuracy: 0.5)
+        XCTAssertEqual(scroll.contentInsetAdjustmentBehavior, .automatic)
+    }
+
+    func testAnOptedOutEdgeIsNoCoverForTheRouteOrItsScroller() throws {
+        let (_, _, route) = try pushed("tall")
+        let host = try XCTUnwrap(route.host)
+        let node = try XCTUnwrap(route.collapseScroll)
+        let scroll = try XCTUnwrap(node.scrollView)
+        func top() -> CGFloat {
+            if case .edges(let e)? = host.covers[route.node.id] { return e.top }
+            return 0
+        }
+        host.reportCovers()
+        XCTAssertGreaterThan(top(), 0, "auto: the root's containing block clears the bar")
+        XCTAssertNil(host.covers[node.id], "reach changes native geometry without a scroller cover")
+        XCTAssertGreaterThan(scroll.adjustedContentInset.top, 0, "the content rests below the bar")
+        route.node.props["safeArea"] = "ignore top"
+        host.reportCovers()
+        XCTAssertEqual(top(), 0)
+        XCTAssertNil(host.covers[node.id])
+        XCTAssertEqual(scroll.adjustedContentInset.top, 0, accuracy: 0.5)
+        route.node.props["safeArea"] = "auto"
+        host.reportCovers()
+        XCTAssertGreaterThan(top(), 0)
+        XCTAssertNil(host.covers[node.id])
+        XCTAssertGreaterThan(scroll.adjustedContentInset.top, 0)
+    }
+
+    func testInvalidSafeAreaBindingsFallBackToAutoAndJournalOnce() throws {
+        let (session, _, route) = try pushed("tall")
+        let scroll = try XCTUnwrap(route.collapseScrollView)
+        for value in ["none bottom", "auto top", "top top"] {
+            route.node.props["safeArea"] = value
+            route.host?.reportCovers()
+            XCTAssertEqual(scroll.contentInset, .zero)
+            XCTAssertFalse(route.ignoresSafeArea("top"))
+        }
+        let logs = session.agent(#"{"op":"logs","since":0}"#)
+        XCTAssertEqual(logs.components(separatedBy: "invalid -exact-safe-area").count - 1, 1)
+    }
+
+    func testOwnershipAccountsForThePolicyAndStillDetectsForeignInsets() throws {
+        let (_, _, route) = try pushed("tall")
+        let node = try XCTUnwrap(route.collapseScroll)
+        let scroll = try XCTUnwrap(route.collapseScrollView)
+        route.node.props["safeArea"] = "ignore"
+        route.host?.reportCovers()
+        func changes() -> [String] {
+            NavigationHost.ownedChanges(scroll, of: node, insetByUIKit: true, safeArea: route.safeArea.insets(for: scroll))
+        }
+        XCTAssertFalse(changes().contains("contentInset"))
+        scroll.contentInset.bottom += 9
+        XCTAssertTrue(changes().contains("contentInset"))
+    }
+
+    func testEndingTheSessionReleasesTheRoutesCorrections() throws {
+        let (session, _, route) = try pushed("tall")
+        let scroll = try XCTUnwrap(route.collapseScrollView)
+        let before = scroll.contentInset
+        route.node.props["safeArea"] = "ignore"
+        route.host?.reportCovers()
+        XCTAssertLessThan(scroll.contentInset.top, before.top)
+        session.destroy()
+        sessions.removeLast()
+        XCTAssertEqual(scroll.contentInset, before)
+        route.safeArea.sync(route)
+        XCTAssertEqual(scroll.contentInset, before)
+    }
+
 }
 #endif

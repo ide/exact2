@@ -451,7 +451,7 @@ final class SegmentHost: NSObject, UIGestureRecognizerDelegate, UITabBarDelegate
         // as the web lays them out.
         let box = owner.contentBox(), origin = owner.grid?.origin ?? .zero, scale = presenter.gridScale(under: origin)
         let left = PixelGrid.length(box.minX, from: origin, vertical: false, scale: scale), right = PixelGrid.length(box.maxX, from: origin, vertical: false, scale: scale)
-        let frame = CGRect(x: left, y: owner.bounds.minY, width: right - left, height: owner.bounds.height)
+        let frame = CGRect(x: left, y: owner.boxBounds.minY, width: right - left, height: owner.boxBounds.height)
         if bar.frame != frame { bar.frame = frame }
         assign(bar, \.isUserInteractionEnabled, available(owner, forActivation: false))
         assign(bar, \.accessibilityLabel, owner.props["accessibilityLabel"])
@@ -519,7 +519,8 @@ final class SegmentHost: NSObject, UIGestureRecognizerDelegate, UITabBarDelegate
             adoptedList = adopted
         }
         let live = Set(owners.map(\.id))
-        for id in Array(controls.keys) + Array(bars.keys) where !live.contains(id) { restore(owner: id) }
+        // A tablist in the inspector's route keeps its control while the column slides it out.
+        for id in Array(controls.keys) + Array(bars.keys) where !live.contains(id) && !presenter.slidesOut(id) { restore(owner: id) }
         for id in Array(decisions.keys) where !live.contains(id) { decisions.removeValue(forKey: id) }
         for owner in owners {
             let tabs = tabs(in: owner)

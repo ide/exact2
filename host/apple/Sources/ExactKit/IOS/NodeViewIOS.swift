@@ -631,7 +631,7 @@ package final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, U
         raster = nil
         imageSource = nil
         clearSymbol()
-        image = nil
+        image = nil; removeBackgroundExtension()
         video?.invalidate(); video = nil
         destroyEmbedded()
         web = nil
@@ -692,7 +692,7 @@ package final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, U
 
     package override func didMoveToWindow() {
         super.didMoveToWindow()
-        if window == nil { pressEpoch &+= 1 }
+        if window == nil { pressEpoch &+= 1; removeBackgroundExtension() }
         // Focused by its autofocus and moved out of the window in the same
         // turn, which resigned it: a sheet's route going into the controller
         // UIKit presents, a grouped list's row into its cell. Its autofocus
@@ -718,6 +718,14 @@ package final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, U
     package var container: UIView { glassGroupView?.contentView ?? baseContainer }
     /// Where layout put this box and where it is drawn (`PixelGridIOS.swift`).
     package var grid: GridPlace?
+    /// PROTO (UIKit-first measurement): how far this box's native view reaches past its laid-out box on each side,
+    /// as overflow. Its bounds origin is shifted by as much, so its subviews stay where layout put them while
+    /// the view covers the band and UIKit's safe area reaches what is inside it.
+    package var reach: UIEdgeInsets = .zero
+    /// PROTO (UIKit-first measurement): the retained reach state for this box (`SafeReachIOS.swift`)
+    var safeReach = SafeReachState()
+    /// PROTO (UIKit-first measurement): how far a leaf taking its edges is laid out past its box, content and all, with its bounds origin kept
+    package var take: UIEdgeInsets = .zero
 
     /// Every canvas's overlay alive, and every node a surface placed. With
     /// none, no node is under a canvas (`canvasAbove`) or placed
@@ -1210,9 +1218,8 @@ package final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, U
         if scrolls { syncClipBox(false) }
         if scrolls && scroll == nil && !scrollWaits && !groupedOwner {
             if pageBand != .zero, extras?.nativeScrollView != nil { setPageBand(.zero) } // the list leaving keeps its scrollTop
-            let sv = ScrollView(frame: bounds)
+            let sv = ScrollView(frame: bounds) // PROTO: take UIKit's first inset with its default adjustment
             sv.backgroundColor = .clear
-            sv.contentInsetAdjustmentBehavior = .never
             sv.delegate = self
             sv.autoresizingMask = [.flexibleWidth, .flexibleHeight]
             GlassGroups.moving(in: self) {
@@ -1283,25 +1290,27 @@ package final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, U
         // Ending where its last edge is drawn, from this box's place on the
         // pixel grid, so the furthest offset is a whole pixel and reaches it (`PixelGridIOS.swift`).
         let s = presenter?.gridScale ?? 1, o = grid?.origin ?? .zero, content = presenter?.collections.scrollContent(self) ?? self.content
-        let size = CGSize(width: sv.scrollsX ? max(PixelGrid.length(content.width, from: o, vertical: false, scale: s), sv.bounds.width) : sv.bounds.width,
-                          height: sv.scrollsY ? max(PixelGrid.length(content.height, from: o, vertical: true, scale: s), scrollFloor(sv)) : sv.bounds.height)
-        if sv.contentSize != size { sv.contentSize = size }
+        // PROTO (safe-area design r2 §5.3): the logical port, the scroll view's bounds less the band it reaches into.
+        let portWidth = sv.bounds.width - reach.left - reach.right, portHeight = sv.bounds.height - reach.top - reach.bottom
+        let size = CGSize(width: sv.scrollsX ? max(PixelGrid.length(content.width, from: o, vertical: false, scale: s), portWidth) : portWidth,
+                          height: sv.scrollsY ? max(PixelGrid.length(content.height, from: o, vertical: true, scale: s), scrollFloor(sv)) : portHeight)
+        if !holdsSize(sv, for: size), sv.contentSize != size { sv.contentSize = size }
         // Forced bounce on a carousel's computed y traps Mac wheel input; one travels a quarter of its width or lays a
         // row (itself, or a child wider than the port), and a page a few points too wide keeps its bounce.
-        let travel = size.width - sv.bounds.width
+        let travel = size.width - portWidth
         let row = { (v: NodeView) in v.style["display"]?.string == "flex" || v.style["flex_direction"] != nil ? !(v.style["flex_direction"]?.string ?? "row").hasPrefix("column") : false }
-        let carousel = travel > 0.5 && (travel > sv.bounds.width / 4 || row(self) || sv.subviews.contains { ($0 as? NodeView).map { $0.frame.width > sv.bounds.width + 0.5 && row($0) } ?? false })
+        let carousel = travel > 0.5 && (travel > portWidth / 4 || row(self) || sv.subviews.contains { ($0 as? NodeView).map { $0.boxFrame.width > portWidth + 0.5 && row($0) } ?? false })
         // One that fits inside an author's scroller that scrolls down leaves
         // the drag to it, as a nested UIScrollView does (an `EmptyState` in a
         // page's `scroll`). The presenter's viewport is no author's.
-        let fits = size.height <= sv.bounds.height + 0.5
+        let fits = size.height <= portHeight + 0.5
         // Pull to refresh needs its own drag.
         var nested = false, up = fits && !handlers.contains("refresh") ? sv.superview : nil
         while let v = up, !nested {
             if let outer = v as? ScrollView, !(outer is Viewport) { nested = outer.scrollsY }
             up = v.superview
         }
-        sv.alwaysBounceVertical = sv.scrollsY && !nested && (!fits || !carousel)
+        assign(sv, \.alwaysBounceVertical, sv.scrollsY && !nested && (!fits || !carousel))
     }
 
     /// Its parts move with its frame: in an animation UIKit has open only if the last frame showed it (`Presenter.moveOrPlace`).
@@ -1326,17 +1335,6 @@ package final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, U
         layoutTextArea()
         layoutSymbol()
         layoutContent()
-    }
-
-    /// The reduced radii; the layer fast path additionally requires circles.
-    func cornerSizes(in rect: CGRect, inset: CGFloat = 0) -> [CGSize] {
-        BorderPaint.reduced(BorderPaint.radii(style, in: rect, inset: inset), in: rect)
-    }
-    func cornerRadii(in rect: CGRect, inset: CGFloat = 0) -> [CGFloat] {
-        cornerSizes(in: rect, inset: inset).map { $0.width }
-    }
-    func roundedPath(in rect: CGRect, inset: CGFloat = 0) -> UIBezierPath {
-        UIBezierPath(cgPath: BorderPaint.roundedRect(rect, cornerSizes(in: rect, inset: inset), shape: CornerShape(style["corner_shape"])))
     }
 
     package override func draw(_ rect: CGRect) {

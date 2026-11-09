@@ -174,13 +174,20 @@ extension NavigationHost {
         if #available(iOS 18.0, tvOS 18.0, *) { container.setTabBarHidden(true, animated: false) } else { container.tabBar.isHidden = true }
     }
 
-    /// Before installing: a root that gains, loses or changes its tabs gets
-    /// its containers again (the router's stacks are untouched).
-    func reshape(_ p: Projection) {
+    /// Before installing: a root that gains, loses or changes its tabs, or a
+    /// stack that starts or stops splitting (its list's rows came later, or
+    /// its root says `navigationSplit="none"` now; LLP 1127), gets its
+    /// containers again; the router's stacks are untouched. Whether they
+    /// were built again.
+    @discardableResult
+    func reshape(_ p: Projection) -> Bool {
         let panels = p.tabs?.panels.map(\.id) ?? []
-        guard primaryOwner != nil, panels != tabPanels else { return }
-        presenter.session?.log("navigation: the tabs changed; the containers are built again")
-        if tabOwner != nil { retireTabs() } else if let nav = primaryNavigation {
+        guard primaryOwner != nil else { return false }
+        let tabsChanged = panels != tabPanels
+        guard tabsChanged || (p.tabs == nil && wantsSplit(p.chosen.first) != (split != nil)) else { return false }
+        presenter.session?.log(tabsChanged ? "navigation: the tabs changed; the containers are built again"
+            : "navigation: the stack \(split == nil ? "splits" : "no longer splits"); its containers are built again")
+        if tabOwner != nil { retireTabs() } else if split != nil { retireSplit(releasing: true) } else if let nav = primaryNavigation {
             retireStack(nav)
             nav.delegate = nil
             // Its routes go into the new containers: they leave this one first.
@@ -190,6 +197,7 @@ extension NavigationHost {
             nav.removeFromParent()
         }
         primaryNavigation = nil
+        return true
     }
 
     /// Each batch: every other tab's stack, the selected tab, its items.
@@ -384,12 +392,15 @@ extension NavigationHost {
             if let requests, presenter.collections.lastRequest(node.id) != requests[node.id] ?? 0 { return }
             presenter.collections.readerMoves(node.id)
         }
-        // At its top under a collapsed title it goes on to the open title's
-        // inset, as UIKit's status-bar tap does, and opens it.
-        let inset = max(sv.adjustedContentInset.top, node != nil && node === c.collapseScroll ? node?.scrollOrigin ?? 0 : 0)
+        let inset = sv.adjustedContentInset.top
         guard sv.contentOffset.y > 0.5 - inset else { return restAtTop(sv, in: c) }
         guard scrollsToTopAnimated else { return restAtTop(sv, in: c) }
-        sv.setContentOffset(PixelGrid.offset(CGPoint(x: sv.contentOffset.x, y: -inset), in: sv, clamped: false), animated: true)
+        if node?.scrollView === sv { node?.scrollsToTop() }
+        // To the open title's top, as the status bar's tap goes: UIKit opens a large title only past the collapsed
+        // top, which is outside the range while it is collapsed. A view animation, because `setContentOffset(_:animated:)`
+        // is retargeted by the inset as the title opens and stops at the collapsed top (iOS 27).
+        let expanded = max(inset, node != nil && node === c.collapseScroll ? node?.scrollOrigin ?? 0 : 0)
+        UIView.animate(withDuration: 0.35, delay: 0, options: [.curveEaseInOut, .allowUserInteraction]) { sv.contentOffset = CGPoint(x: sv.contentOffset.x, y: -expanded) }
     }
 
     /// Where `scrollToTop` ends, in one turn, under the agent's frozen clock,
@@ -458,11 +469,13 @@ extension NavigationHost {
         measuredTablist = nil
     }
 
-    /// After a batch: the projection, unless the batch only moved a list's
-    /// rows and nothing is owed; then what presentations inherit and the
-    /// authored tablist's covers.
-    func batchApplied(_ batch: Batch, rowsOnly: Bool) {
-        if !rowsOnly || syncOwed { sync(batch) }
+    /// After a batch: the projection, unless the batch changed only geometry
+    /// (PROTO) or a list's rows and nothing is owed; then what presentations
+    /// inherit and the authored tablist's covers.
+    func batchApplied(_ batch: Batch, skipSync: Bool) {
+        if !skipSync || syncOwed || presenter.awaitingFrame.contains(where: { entry in
+            entry.view.map { $0.groupedOwner || insetByUIKit($0) } ?? false
+        }) { sync(batch) }
         presenter.modals.inheritFromAncestors()
         followAuthoredTablist()
     }
@@ -476,7 +489,7 @@ extension NavigationHost {
         if ExactEnv.authoredChrome, !syncing { fitOwner() }
         guard tablistAppearanceNone, !syncing, let view = presenter.session?.view,
               let list = adoptedTablist.flatMap({ presenter.views[$0] }) else { return }
-        if list.convert(list.bounds, to: view) != measuredTablist { reportCovers() }
+        if list.convert(list.boxBounds, to: view) != measuredTablist { reportCovers() }
     }
 
     /// A bar visible in its window, including every ancestor's visibility.

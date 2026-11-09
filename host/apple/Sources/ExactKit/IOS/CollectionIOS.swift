@@ -46,7 +46,10 @@ extension CollectionHost {
     package func geometry(_ id: UInt32) -> CollectionFacts? {
         guard let node = presenter?.views[id], let scroll = node.scroll, !hidden(node) else { return nil }
         // Layout's box, not the one drawn on the pixel grid (`PixelGridIOS.swift`): the runner lays rows to it.
-        let bounds = node.layoutBounds, insets = scroll.adjustedContentInset, band = node.pageBand
+        // A reached node includes the safe-area extent. Its scroll view also includes control bands,
+        // which the port calculation below adds separately.
+        let bounds = node.reach == .zero ? node.layoutBounds : node.bounds
+        let insets = scroll.adjustedContentInset, band = node.pageBand
         let content = node.contentBox()
         let portWidth = max(0, bounds.width - insets.left - insets.right)
         // The physical port includes the page bands. Their insets are
@@ -217,7 +220,9 @@ extension CollectionHost {
             if scroll.contentSize.width != width { scroll.contentSize.width = width }
         } else {
             let height = max(node.scrollFloor(scroll), PixelGrid.length(along, from: node.grid?.origin ?? .zero, vertical: true, scale: presenter?.gridScale ?? 1))
-            if scroll.contentSize.height != height { scroll.contentSize.height = height }
+            // A scroll to the top holds it back as it holds a scroller's
+            let size = CGSize(width: scroll.contentSize.width, height: height)
+            if !node.holdsSize(scroll, for: size), scroll.contentSize != size { scroll.contentSize = size }
         }
     }
     /// A list's scroll content along its axis: its rows' extent inside the

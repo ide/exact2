@@ -72,6 +72,7 @@ extension NodeView {
     /// canvas's capture (`render(in:)`) drops masks and would show the tint's
     /// whole rectangle, so the template is `draw(_:)`'s, from the same pixels.
     func applyImageLayer() {
+        defer { syncBackgroundExtension() }
         guard !cssVisibilityHidden, kind == "image", symbolView == nil, style["tint_color"] == nil, let bitmap = raster?.image ?? flightLook?.stand?.image else {
             imageLayer?.removeFromSuperlayer(); imageLayer = nil; return
         }
@@ -245,7 +246,7 @@ extension NodeView {
     /// where the overflow clips.
     func applyBoxLayer() {
         defer { syncEllipticalClip(); applyColorRanges() }
-        let authored = presenter?.segments.control(of: id) == nil && !groundIsSheets ? cgColor("background_color") : nil
+        let authored = presenter?.segments.control(of: id) == nil && !groundIsSheets && !groundIsColumns ? cgColor("background_color") : nil
         let ground = authored == nil ? fieldGround : nil
         let background = authored ?? ground
         let fill = background.flatMap { $0.alpha > 0 ? $0 : nil }

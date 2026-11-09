@@ -207,7 +207,7 @@ extension NodeView {
     /// box resolved against the box as it stands now, as CSS resolves them,
     /// so a box that changes size stays where `-50% -50%` puts it.
     package var translate: CGPoint {
-        CGPoint(x: translatePx.x + translatePercent.x / 100 * bounds.width, y: translatePx.y + translatePercent.y / 100 * bounds.height)
+        CGPoint(x: translatePx.x + translatePercent.x / 100 * boxBounds.width, y: translatePx.y + translatePercent.y / 100 * boxBounds.height)
     }
 
     #if os(iOS) || os(tvOS)
@@ -302,7 +302,7 @@ extension NodeView {
             if case .object(let o) = axes[i], let pct = o["pct"]?.number { return size * pct / 100 }
             return size / 2
         }
-        return CGPoint(x: bounds.minX + axis(0, bounds.width), y: bounds.minY + axis(1, bounds.height))
+        return CGPoint(x: boxBounds.minX + axis(0, boxBounds.width), y: boxBounds.minY + axis(1, boxBounds.height))
     }
 
     #if os(iOS) || os(tvOS)
@@ -345,8 +345,8 @@ extension NodeView {
     /// UIKit transforms a view about its center.
     func topLayerFrame(in viewport: UIScrollView, containingBlock: CGRect? = nil) -> CGRect {
         guard let parent = superview else { return .zero }
-        let box = (containingBlock ?? CGRect(origin: .zero, size: bounds.size))
-            .offsetBy(dx: -bounds.width / 2, dy: -bounds.height / 2)
+        let box = (containingBlock ?? boxBounds)
+            .offsetBy(dx: -bounds.midX, dy: -bounds.midY)
             .applying(hostPlacement).offsetBy(dx: center.x, dy: center.y)
         return NativeGeometry.convert(box, from: parent, to: viewport).offsetBy(dx: -viewport.pageOrigin.x, dy: -viewport.pageOrigin.y)
     }

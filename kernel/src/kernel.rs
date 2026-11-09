@@ -23,6 +23,7 @@ use crate::txn::{self, CommitReceipt, Target};
 use crate::wire::{self, Op};
 mod alert;
 mod block;
+pub use block::{take_trial_phases, ClearanceTrial}; // PROTO (rule 4)
 mod cover;
 mod document;
 mod environment;
@@ -37,12 +38,12 @@ mod trim;
 mod wide;
 
 pub(crate) use block::{apply as apply_block, publication_start, Blocks};
-pub use block::{BlockAxis, BlockMeasure, HostBlock};
+pub use block::{BlockAxis, BlockMeasure, BlockShown, HostBlock};
 pub use cover::HostCover;
 pub(crate) use cover::{
     applied_padding as cover_padding, apply as apply_cover, chain_changed as cover_chain_changed,
-    children_changed as cover_children_changed, published_extent,
-    style_changed as cover_style_changed,
+    children_changed as cover_children_changed, clearance, published_extent, settle_chain,
+    style_changed as cover_style_changed, Covers,
 };
 pub use sticky::StickyConstraint;
 

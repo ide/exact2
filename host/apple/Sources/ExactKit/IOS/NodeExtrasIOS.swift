@@ -161,7 +161,7 @@ final class NodeExtras {
     var lastScrollEvent: (offset: CGPoint, topInset: CGFloat) = (.zero, 0)
     var dispatchingScrollEvent: Bool = false
     var scrollEnd: ScrollEnd?
-    var beforeLayoutScroll: (offset: CGPoint, topInset: CGFloat)?
+    var beforeLayoutScroll: (offset: CGPoint, topInset: CGFloat, uikitTop: CGFloat)?
     /// Logical coordinates survive hiding and physical backend replacement.
     var hiddenScroll: CGPoint?
     var followedScroll: (top: CGFloat, end: Bool, start: Bool)?
@@ -169,6 +169,9 @@ final class NodeExtras {
     var followingEndAnimated = false
     var anchoredScrollTop: CGFloat?
     var retainedScrollTop: CGFloat?
+    /// A content size a scroll to the top holds back (`holdsSize`), and when the one that runs began.
+    var heldSize: CGSize?
+    var toTopBegan: CFTimeInterval?
     var materialKind: String?
     var materialInteractive: Bool = false
     var hiddenBeforePlacement = false
@@ -180,9 +183,10 @@ final class NodeExtras {
     var pendingScrollLeft: Double?
     var pendingScrollTop: Double?
     var pendingScrollTransfer = false
-    /// A collapsing title's scroller (LLP 1075.003 Stage 3): its expanded
-    /// title's inset, where `scrollTop` 0 rests; 0 for every other scroller.
     var controlRide: CGFloat = 0
+    /// A collapsing title's scroller (LLP 1075.003 Stage 3): its expanded
+    /// title's inset, where `scrollTop` 0 rests, or its adjusted inset while
+    /// the route turns the top off (LLP 1123 D4); 0 for every other scroller.
     var scrollOrigin: CGFloat = 0
     /// …and the smallest inset it has had: its title collapsed.
     var scrollCollapsed: CGFloat = 0
@@ -382,13 +386,15 @@ extension NodeView {
     var lastScrollEvent: (offset: CGPoint, topInset: CGFloat) { get { extras?.lastScrollEvent ?? (.zero, 0) } set { if newValue.offset != .zero || newValue.topInset != 0 || extras != nil { more.lastScrollEvent = newValue } } }
     var dispatchingScrollEvent: Bool { get { extras?.dispatchingScrollEvent ?? false } set { if newValue || extras != nil { more.dispatchingScrollEvent = newValue } } }
     var scrollEnd: ScrollEnd? { get { extras?.scrollEnd } set { if newValue != nil || extras != nil { more.scrollEnd = newValue } } }
-    var beforeLayoutScroll: (offset: CGPoint, topInset: CGFloat)? { get { extras?.beforeLayoutScroll } set { if newValue != nil || extras != nil { more.beforeLayoutScroll = newValue } } }
+    var beforeLayoutScroll: (offset: CGPoint, topInset: CGFloat, uikitTop: CGFloat)? { get { extras?.beforeLayoutScroll } set { if newValue != nil || extras != nil { more.beforeLayoutScroll = newValue } } }
     var hiddenScroll: CGPoint? { get { extras?.hiddenScroll } set { if newValue != nil || extras != nil { more.hiddenScroll = newValue } } }
     var followedScroll: (top: CGFloat, end: Bool, start: Bool)? { get { extras?.followedScroll } set { if newValue != nil || extras != nil { more.followedScroll = newValue } } }
     var followingEndAnimated: Bool { get { extras?.followingEndAnimated ?? false } set { if newValue || extras != nil { more.followingEndAnimated = newValue } } }
     var followsEndAfterInteraction: Bool { get { extras?.followsEndAfterInteraction ?? false } set { if newValue || extras != nil { more.followsEndAfterInteraction = newValue } } }
     var anchoredScrollTop: CGFloat? { get { extras?.anchoredScrollTop } set { if newValue != nil || extras != nil { more.anchoredScrollTop = newValue } } }
     var retainedScrollTop: CGFloat? { get { extras?.retainedScrollTop } set { if newValue != nil || extras != nil { more.retainedScrollTop = newValue } } }
+    var heldSize: CGSize? { get { extras?.heldSize } set { if newValue != nil || extras != nil { more.heldSize = newValue } } }
+    var toTopBegan: CFTimeInterval? { get { extras?.toTopBegan } set { if newValue != nil || extras != nil { more.toTopBegan = newValue } } }
     var materialKind: String? { get { extras?.materialKind } set { if newValue != nil || extras != nil { more.materialKind = newValue } } }
     var glassGroupView: GlassGroupView? { get { extras?.glassGroupView } set { if newValue != nil || extras != nil { more.glassGroupView = newValue } } }
     var glassSlot: GlassSlot? { get { extras?.glassSlot } set { if newValue != nil || extras != nil { more.glassSlot = newValue } } }
@@ -450,7 +456,7 @@ extension NodeView {
     /// out in (LLP 1116.000 D1.2), so a page shorter than that port does not
     /// scroll by the bar and the home indicator, as a table view's does not.
     func scrollFloor(_ sv: UIScrollView) -> CGFloat {
-        guard case .inset(let top, let bottom)? = presenter?.navigation.covers[id] else { return sv.bounds.height - pageBand.top - pageBand.bottom }
+        guard case .inset(let top, let bottom)? = presenter?.navigation.covers[id] else { return sv.bounds.height - reach.top - reach.bottom - pageBand.top - pageBand.bottom }
         return max(0, sv.bounds.height - top - bottom - pageBand.top - pageBand.bottom)
     }
 }
@@ -481,6 +487,25 @@ extension NodeView {
         #else
         return false
         #endif
+    }
+    /// Whether this is, in a split's sidebar or inspector, a grouped list or
+    /// its route on the ground the platform or the compiler gave it, its
+    /// author having said none, or a box on the page's ground
+    /// (`-exact-background` or `-exact-grouped-background`): there UIKit's
+    /// column paints that ground, as behind the rows (LLP 1127), where a
+    /// sheet is the system background.
+    var groundIsColumns: Bool {
+        #if os(iOS)
+        guard (kind == "list" || props["navigationKey"] != nil) && !wrote("background_color") || paintsPageGround else { return false }
+        return presenter?.onColumnGround(self) == true
+        #else
+        false
+        #endif
+    }
+    /// Whether this box's background is the page's ground, plain or grouped.
+    var paintsPageGround: Bool {
+        guard case .object(let o)? = style["background_color"], let role = o["sys"]?.string else { return false }
+        return role == "systemBackgroundColor" || role == "systemGroupedBackgroundColor"
     }
     /// LLP 1115.000 D2: whether the author wrote the row `key` on this node,
     /// as an attribute or a row of its class. The style says so row by row

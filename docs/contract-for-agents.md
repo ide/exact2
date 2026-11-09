@@ -1689,6 +1689,24 @@ lists any literal colour, font size or weight an app's `.contract` files still w
 | a pushed route with no such `header` | a bar holding the system Back button alone (LLP 1115.000 D5.2) |
 | a route with `navigationBar="none"` | no navigation bar: a full-bleed screen that draws its own way back; the edge swipe still goes back |
 | a route with `navigationPresentation="modal"` | a sheet |
+| a sheet route with `navigationInspector=true` | an expanded split's inspector column beside the detail, iOS 26 (LLP 1127 D14); a sheet at a compact width and on other hosts |
+
+On an iOS or tvOS route's root, `-exact-safe-area` turns off the route's own
+clearance on the edges it names (LLP 1123 D4). `"top"` lets the content and
+its primary scroller's content reach behind the navigation bar and status
+area, `"bottom"` past the tab bar and home indicator, `"left"` and `"right"`
+past a side strip or the overscan. A space-separated list combines edges,
+`"none"` names all four, and `"auto"` (the default) keeps the platform's
+clearance. The bars stay, and so do authored padding, the keyboard's inset and
+a refreshing control's room. To pad an edge by its inset, read
+`var(--exact-safe-area-inset-<edge>)`. The property is not inherited and is
+refused on the session root and on descendants; a computed value that is none
+of these is `auto`, journalled once. Other hosts keep their presentation.
+
+`-exact-background-extension="auto"` on an `image` that meets the safe area (a
+sidebar, an inspector, the iPhone Duo's side strip) fills that area with the
+image's mirrored, blurred edges, as SwiftUI's `backgroundExtensionEffect()`
+does (iOS 26; LLP 1123 D11). The image keeps its laid-out frame.
 
 On macOS, date, time, datetime-local and select controls are default Tab stops,
 independent of the system's Keyboard navigation setting. Their native control
@@ -1720,8 +1738,9 @@ so many visits), bind the root's `navigationHistory` to the ways it offers now (
 forward"`, the default, `"back"`, `"forward"` or `"none"`): on the Mac a way withheld is
 no swipe, menu item or mouse button (`contract vocab navigationHistory`). A route whose scroller opens
 with a full-bleed picture says `navigationBar="transparent"`: iOS draws its bar clear at
-the scroller's top and insets nothing, so the picture sits under the bar as under a fixed
-transparent header on the web, and the bar's material comes as the content scrolls. On a pushed iOS
+the scroller's top and insets nothing there, so the picture sits under the bar as under a fixed
+transparent header on the web, and the bar's material comes as the content scrolls; at the
+foot the scroller still runs under the home indicator, inset there. On a pushed iOS
 route under the platform bar, that control's text becomes the bar's back button title
 beside the bar's own chevron (no text shows the chevron alone), so label it `Recipes`,
 not `‹ Recipes`. With no such control the back button is UIKit's default, which since
@@ -4211,13 +4230,20 @@ The insets are the document's: on the web the browser's, and on a native host th
 device's under `viewport-fit="cover"` and 0 under `auto`, even on iOS when a root
 `tablist` or navigation stack takes the whole screen; there a box at the root that
 pads with them stays under the status bar
-([pitfall](agent-pitfalls.md#native-presentation-and-navigation-ios)).
+([pitfall](agent-pitfalls.md#native-presentation-and-navigation-ios)). A route has
+its own, measured from where its content starts below its bar:
+`var(--exact-safe-area-inset-<edge>)`, `var(--exact-<region>-inset-<edge>)` for the
+layout regions, and `var(--exact-viewport-segment-<field>-<x>-<y>)` for a fold's
+segments (LLP 1123 D9). Write those inside a route; lowering names an `env()` there
+(`lower-env-in-owner`). The container units `cqw`, `cqh`, `cqi`, `cqb`, `cqmin` and
+`cqmax` are a percent of a route's content box at any depth (`100cqh` is the route's
+content height), and of the small viewport outside every route (LLP 1123 D12).
 Sizes, padding and radii clamp negative results to zero; margins and insets keep
 them. `env(titlebar-area-x|y|width|height)` is the title bar beside a Mac window's
 traffic lights under `viewport-fit="cover"` (in the tall title row an app without routes
 gets from `"display_override": ["window-controls-overlay"]` in `app.json`) and is undefined
 elsewhere, so give it a fallback (`contract vocab titlebar-area`). Unsupported: `rem`/`em`, a unitless number where a length goes
-(write `0px`, not `0`), `var()`, more than 32 values or 32 levels (LLP 1001 §2,
+(write `0px`, not `0`), `var()` of anything but a route's values, more than 32 values or 32 levels (LLP 1001 §2,
 "Comparisons").
 
 `translate` takes one or two lengths, each in px or a percentage of the box's own
