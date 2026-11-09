@@ -621,10 +621,14 @@ final class NavigationBarIOSTests: XCTestCase {
         search.isActive = true
         XCTAssertTrue(search.searchBar.searchTextField.becomeFirstResponder())
         until("native search is presented") { search.isActive && !search.isBeingPresented }
+        let searchHeader = try XCTUnwrap(route.search), dismissal = try XCTUnwrap(searchHeader.swipeDown)
         p.apply(wireBatch([["op": "style", "id": Int(header.id), "style": ["appearance": "none", "written": ["appearance"]]]]))
         until("native search is retired") { !search.isActive && search.presentingViewController == nil }
         XCTAssertFalse(search.searchBar.searchTextField.isFirstResponder)
         XCTAssertNil(route.search)
+        XCTAssertNil(searchHeader.swipeDown)
+        XCTAssertNil(dismissal.view)
+        XCTAssertFalse(dismissal.eligible)
         XCTAssertNil(route.navigationItem.searchController)
         XCTAssertNil(route.navigationItem.titleView)
         XCTAssertTrue(nav.isNavigationBarHidden)

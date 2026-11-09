@@ -92,10 +92,11 @@ final class RouteController: UIViewController, UIScrollViewDelegate {
         appeared?()
     }
     required init?(coder: NSCoder) { nil }
-    // The bar's height changed (a push to an inline title, a rotation, a
-    // hatch): the route's content area follows (LLP 1075.003 §3.5).
+    // Refit keyboard room when UIKit moves its safe area, including when
+    // an iPhone's search bar rises above the keys (LLP 1075.003 §3.5).
     override func viewSafeAreaInsetsDidChange() {
         super.viewSafeAreaInsetsDidChange()
+        fitContentViewport()
         rideBars()
         host?.coversChanged()
     }

@@ -43,6 +43,9 @@ component PushedTitle
   state searchChanges = 0
   state committedQuery = ""
   state searching = false
+  state alternateSearch = false
+  state showSearch = true
+  state searchDisabled = false
   state swapped = false
   state failed = false
   state pageOverflow = false
@@ -81,6 +84,12 @@ component PushedTitle
   action searchCommitted(v: string)
     committedQuery = v
     searchChanges = searchChanges + 1
+  action replaceSearch
+    alternateSearch = not alternateSearch
+  action toggleSearch
+    showSearch = not showSearch
+  action disableSearch
+    searchDisabled = not searchDisabled
   action swapContent
     swapped = not swapped
   action fail
@@ -96,8 +105,11 @@ component PushedTitle
                   text (e.name.slice(0, 1).toUpperCase() + e.name.slice(1)) role="heading" aria-level=(e.name == "inline" or e.name == "seek" ? 2 : 1)
                   if e.name == "find"
                     input type="search" value=query input=search placeholder="Search" aria-label="Search" testId="find-search"
-                  else if e.name == "seek"
-                    input type="search" value=query input=search change=searchCommitted placeholder="Search" aria-label="Search" testId="seek-search" autofocus=true focus=searchBegan blur=searchEnded
+                  else if e.name == "seek" and showSearch
+                    if alternateSearch
+                      input type="search" value=query input=search change=searchCommitted placeholder="Search" aria-label="Search" testId="seek-search-replacement" autofocus=true focus=searchBegan blur=searchEnded disabled=searchDisabled
+                    else
+                      input type="search" value=query input=search change=searchCommitted placeholder="Search" aria-label="Search" testId="seek-search" autofocus=true focus=searchBegan blur=searchEnded disabled=searchDisabled
                 if e.name == "rows"
                   list appearance="auto" listStyle="inset-grouped" testId="rows-scroll" flex=1 min-height=0
                     section
@@ -170,6 +182,13 @@ component PushedTitle
                 else
                   scroll testId=`${e.name}-scroll` flex=1 min-height=0
                     text `${e.name} top` testId=`${e.name}-top`
+                    if e.name == "seek"
+                      button press=replaceSearch testId="seek-replace-search"
+                        text "Replace Search Field"
+                      button press=toggleSearch testId="seek-toggle-search"
+                        text "Toggle Search Field"
+                      button press=disableSearch testId="seek-disable-search"
+                        text "Toggle Search Disabled"
                     for l in ["long", "short", "inline", "rows", "plain", "find", "seek", "swap", "edit", "sheet"] key=l
                       button press=open(l) testId=`${e.name}-open-${l}`
                         text ("Open " + l.slice(0, 1).toUpperCase() + l.slice(1))
