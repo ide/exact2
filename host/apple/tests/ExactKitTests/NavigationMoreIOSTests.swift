@@ -194,8 +194,11 @@ final class NavigationMoreIOSTests: XCTestCase {
 
     /// A plain tab's row: More pushes the tab's own controller, empty, and
     /// its press builds the route into it. More's bar shows the tab's title
-    /// with UIKit's Back to the list, and More's swipe back is UIKit's.
+    /// with UIKit's Back to the list, the route's cover clears that bar, and
+    /// More's swipe back is UIKit's.
     func testAPlainTabUnderMoreShowsUnderMoresBar() throws {
+        // A hostless run gives the route no safe area under More, where its plain tab has one (iOS 27.0, measured)
+        guard hostedWindowScene() != nil else { throw missing("scene", "a controller's child under More gets its safe area only in a scene's window") }
         let (session, tabs, more) = try moreFixture("more-plain")
         let navigation = session.presenter.navigation
         let six = try XCTUnwrap(tabs.viewControllers?[5] as? PlainTab)
@@ -210,6 +213,13 @@ final class NavigationMoreIOSTests: XCTestCase {
         XCTAssertFalse(more.isNavigationBarHidden, "More's bar")
         XCTAssertEqual(more.navigationBar.topItem?.title, "Six")
         XCTAssertNotNil(more.navigationBar.backItem, "with UIKit's Back to the list")
+        // A route's cover is its safe area past the document's own insets (`routeEdges`)
+        let route = try XCTUnwrap(six.route)
+        let barBottom = more.navigationBar.convert(more.navigationBar.bounds, to: nil).maxY
+        waitFor("Six's route clears More's bar", facts: { "cover \(String(describing: navigation.covers[route.node.id])), safe area \(route.view.safeAreaInsets)" }) {
+            guard case .edges(let edges)? = navigation.covers[route.node.id] else { return false }
+            return edges.top + session.presenter.insets.top >= barBottom - 0.5
+        }
         let swipe = try XCTUnwrap(more.interactivePopGestureRecognizer)
         XCTAssertTrue(navigation.popMayBegin(swipe, from: nil, in: nil, velocity: .zero), "More's swipe to its list is UIKit's")
     }
