@@ -877,7 +877,15 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
         controllers = controllers.filter { routeIDs.contains($0.key) }
         presenter.modals.updatePermissions()
         if p.tabs != nil { replayTabs() }
-        if !presenter.awaitingFrame.isEmpty { window?.layoutIfNeeded() } // Lay out new views before reporting their geometry
+        if !presenter.awaitingFrame.isEmpty {
+            // Deliver the covers of routes this batch installed before UIKit first lays out their new views, not after
+            // the batch as a report during it waits to: the batch laid them out without their covers, and UIKit
+            // animates a native view it has laid out from that size to the covered one (a segmented control's
+            // selection slides). The batch's frames are all applied here.
+            reportCovers()
+            deliverCovers()
+            window?.layoutIfNeeded() // Lay out new views before reporting their geometry
+        }
         reportCovers()
         refitForBars()
         settled = true
