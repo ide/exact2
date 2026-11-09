@@ -6,9 +6,9 @@
 // (`var(--exact-viewport-segment-*)`, LLP 1123 D9), the fold band empty between them. Images is a virtualized list of a few
 // hundred image rows over four bundled PNGs (the raster budget's stress).
 // Reflow is one long Markdown document and a dense feed (the text caches'
-// stress from 951 to 466 points and back). Edges outlines the route's safe area and marks its
-// middle while its large title collapses and its bar minimizes, over 60 plain rows or 1,000
-// virtualized ones, with a Run. Combinations pushes a route with
+// stress from 951 to 466 points and back). Edges marks the route's safe area, a box capped at
+// 640 points in it and its middle while its large title collapses and its bar minimizes, over
+// 60 plain rows or 1,000 virtualized ones. Combinations pushes a route with
 // an absolutely positioned sheet holding a textarea, so keyboard + sheet +
 // pushed screen + fold is one sequence of taps. Keyboard adds physical-device
 // checks with an app-local geometry recorder and a native share sheet.
@@ -110,7 +110,6 @@ component DuoLab
   resource keyboardRows = keyboardRows() as shape KeyboardRow[]
   // Shared across the Fold screen's two layouts: a fold mid-reading keeps the item.
   state selected = 1
-  state safeAreaRun = 0
   state heavyEdges = false
   state title = ""
   state draft = ""
@@ -152,11 +151,9 @@ component DuoLab
     selected = id
   action selectTab(name: string)
     nav = select(nav, name)
-  action runEdges
-    safeAreaRun = safeAreaRun + 1
-  // PROTO (UIKit-first measurement): switch between 60 plain rows and 1,000 virtualized rows
-  action toggleEdgeRows
-    heavyEdges = not heavyEdges
+  // Edges' rows: 60 plain ones or 1,000 virtualized ones
+  action useRows(heavy: bool)
+    heavyEdges = heavy
   action openNote
     nav = push(nav, path("note"))
   action navigate(location: string)
@@ -206,7 +203,7 @@ component DuoLab
   action checkSearchBlur
     checkBlurs = checkBlurs + 1
   view
-    main testId="root" navigationKey=`${current.id}` navigationBack="back" navigate=navigate data-safe-area-mode="geometry" data-safe-area-run=`${safeAreaRun}` viewport-fit="cover" interactive-widget="resizes-content" width="100%" height="100%" display="flex" flex-direction="column" overflow="hidden" font-family="system-ui"
+    main testId="root" navigationKey=`${current.id}` navigationBack="back" navigate=navigate data-safe-area-mode="geometry" viewport-fit="cover" interactive-widget="resizes-content" width="100%" height="100%" display="flex" flex-direction="column" overflow="hidden" font-family="system-ui"
       column flex=1 min-height=0 position="relative"
         for t in nav.tabs key=t.name
           column role="tabpanel" id=`panel-${t.name}` position="absolute" inset=0
@@ -327,23 +324,37 @@ component DuoLab
                 column navigationKey=`${entry.id}` navigationScroll="edges-scroll" hatch="keyboard-route" data-minimize="scroll-down" class=Screen testId="screen-edges"
                   header
                     text "Edges" role="heading" aria-level=1 testId="edges-title"
+                    text "Scroll: the outline follows the bar" testId="edges-hint"
+                    button popovertarget="edges-rows" aria-label="Rows" testId="edges-rows-button"
+                      image "symbol:more"
                   // PROTO (UIKit-first measurement): keep the active scroller first in flow so UIKit collapses the title with it
                   if heavyEdges
                     list id="edges-scroll" appearance="none" virtualized=true estimated-item-height=44 flex=1 min-height=0 width="100%" overflow-x="hidden" testId="edges-scroll"
                       for index in range(1000) key=index
-                        EdgeRow(index=index, heavy=heavyEdges, run=runEdges, toggleRows=toggleEdgeRows)
+                        text `Row ${index + 1}` padding="12px 16px"
                   else
                     scroll id="edges-scroll" flex=1 min-height=0 testId="edges-scroll"
                       for index in range(60) key=index
-                        EdgeRow(index=index, heavy=heavyEdges, run=runEdges, toggleRows=toggleEdgeRows)
-                  // The safe area's outline (the route's content box), labelled at its corner
+                        text `Row ${index + 1}` padding="12px 16px"
+                  // The markers, labelled on the trailing side, clear of the rows' text. The outline is the
+                  // route's content box; the bar is as tall as it up to 640 points, so it stops short of the
+                  // bottom where the safe area is taller (the open Duo in portrait).
                   box testId="edges-outline" position="absolute" inset=0 border-width=2 border-style="solid" border-color="-exact-system-blue" pointer-events="none"
-                  box testId="edges-label" position="absolute" top=0 left=0 class=Tag border-color="-exact-system-blue" pointer-events="none"
+                  column testId="edges-capped" position="absolute" top=0 bottom=0 right=0 max-height=640 display="flex" align-items="flex-end" justify-content="flex-end" pointer-events="none"
+                    box position="absolute" top=0 bottom=0 right=2 width=6 background-color="-exact-system-green"
+                    box class=Tag border-color="-exact-system-green" margin-right=12 margin-bottom=6
+                      text "Up to 640 pt" font="-exact-caption1" font-weight=600 color="-exact-system-green"
+                  box testId="edges-label" position="absolute" top=0 right=0 class=Tag border-color="-exact-system-blue" pointer-events="none"
                     text "Safe area" font="-exact-caption1" font-weight=600 color="-exact-system-blue"
-                  // At the safe area's middle height, at its trailing side, clear of the rows' text
                   column testId="edges-centre" position="absolute" inset=0 display="flex" align-items="flex-end" justify-content="center" pointer-events="none"
-                    box class=Tag border-color="-exact-system-pink" margin-right=16
-                      text "Middle of the safe area" font="-exact-caption1" font-weight=600 color="-exact-system-pink"
+                    box class=Tag border-color="-exact-system-pink" margin-right=12
+                      text "Middle" font="-exact-caption1" font-weight=600 color="-exact-system-pink"
+                  column id="edges-rows" popover="auto" role="menu" aria-label="Rows"
+                    button role="menuitemradio" aria-checked=(not heavyEdges) press=useRows(false) popovertarget="edges-rows" popovertargetaction="hide" testId="edges-rows-60"
+                      text "60 rows"
+                    button role="menuitemradio" aria-checked=heavyEdges press=useRows(true) popovertarget="edges-rows" popovertargetaction="hide" testId="edges-rows-1000"
+                      text "1,000 rows"
+                      text "Virtualized"
               // The note screen takes its bottom edge (LLP 1123 D4): its sheet's surface reaches
               // the display's bottom, as a sheet's does, and pads its controls by the route's inset there.
               if entry.name != "images" and entry.name != "reflow" and entry.name != "edges" and t.name != "keyboard"
@@ -457,27 +468,6 @@ component Facts
       row gap=8 align-items="baseline"
         text "viewport" class=Note padding=0
         text `${viewport.width}×${viewport.height}` class=Fact testId="fact-size"
-
-// Edges' first row says what to check, with its controls; every row is its text, in both lists
-component EdgeRow
-  props
-    index: number
-    heavy: bool
-    run: action
-    toggleRows: action
-  view
-    column
-      if index == 0
-        // Below the outline's label
-        column padding-top=32 padding-left=16 padding-right=16 padding-bottom=12 gap=10
-          column class=Card gap=6 testId="edges-guide"
-            text "What to check" font="-exact-headline"
-            text "Scroll down, then up: the large title collapses, the bar hides, and both come back. The blue outline is the safe area, and the pink tag stays halfway down it. Both follow the bar in every frame, with no lag and no jump." font="-exact-subheadline"
-          button press=toggleRows testId="edges-list-toggle"
-            text (heavy ? "Use 60 plain rows" : "Use 1,000 virtualized rows")
-          button press=run testId="edges-run" padding=10 border-radius=10 background-color="-exact-secondary-background"
-            text "Run: move the top edge 106 points and back, twice" font-size=15 font-weight=600 color="AccentColor"
-      text `Row ${index + 1}` padding="12px 16px"
 
 component ItemList
   props
