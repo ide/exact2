@@ -336,18 +336,18 @@ component DuoLab
                     scroll id="edges-scroll" flex=1 min-height=0 testId="edges-scroll"
                       for index in range(60) key=index
                         text `Row ${index + 1}` padding="12px 16px"
-                  // The markers, labelled on the trailing side, clear of the rows' text. The outline is the
-                  // route's content box; the bar is as tall as it up to 640 points, so it stops short of the
-                  // bottom where the safe area is taller (the open Duo in portrait).
+                  // The markers, clear of the rows' text at the leading side. The outline is the route's content
+                  // box. The green box is as tall as it up to 640 points, so it stops short of the bottom where the
+                  // safe area is taller (the open Duo in portrait).
                   box testId="edges-outline" position="absolute" inset=0 border-width=2 border-style="solid" border-color="-exact-system-blue" pointer-events="none"
-                  column testId="edges-capped" position="absolute" top=0 bottom=0 right=0 max-height=640 display="flex" align-items="flex-end" justify-content="flex-end" pointer-events="none"
-                    box position="absolute" top=0 bottom=0 right=2 width=6 background-color="-exact-system-green"
-                    box class=Tag border-color="-exact-system-green" margin-right=12 margin-bottom=6
-                      text "Up to 640 pt" font="-exact-caption1" font-weight=600 color="-exact-system-green"
-                  box testId="edges-label" position="absolute" top=0 right=0 class=Tag border-color="-exact-system-blue" pointer-events="none"
-                    text "Safe area" font="-exact-caption1" font-weight=600 color="-exact-system-blue"
-                  column testId="edges-centre" position="absolute" inset=0 display="flex" align-items="flex-end" justify-content="center" pointer-events="none"
-                    box class=Tag border-color="-exact-system-pink" margin-right=12
+                  column testId="edges-capped" position="absolute" top=0 bottom=0 right=12 padding-left=10 padding-right=10 max-height=640 border-width=2 border-style="solid" border-color="-exact-system-green" display="flex" justify-content="flex-end" align-items="center" pointer-events="none"
+                    box position="absolute" inset=0 background-color="-exact-system-green" opacity=0.15
+                    text "Up to 640 pt" font="-exact-caption1" font-weight=600 color="-exact-system-green" margin-bottom=8
+                  column position="absolute" top=0 left=0 right=0 display="flex" align-items="center" pointer-events="none"
+                    box testId="edges-label" class=Tag border-color="-exact-system-blue"
+                      text "Safe area" font="-exact-caption1" font-weight=600 color="-exact-system-blue"
+                  column testId="edges-centre" position="absolute" inset=0 display="flex" align-items="center" justify-content="center" pointer-events="none"
+                    box class=Tag border-color="-exact-system-pink"
                       text "Middle" font="-exact-caption1" font-weight=600 color="-exact-system-pink"
                   column id="edges-rows" popover="auto" role="menu" aria-label="Rows"
                     button role="menuitemradio" aria-checked=(not heavyEdges) press=useRows(false) popovertarget="edges-rows" popovertargetaction="hide" testId="edges-rows-60"
