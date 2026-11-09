@@ -104,6 +104,7 @@ impl<D: DataSource> Host<D> {
         };
         let changed = kernel.set_env(env).map_err(|e| format!("insets: {e:?}"))? || moved;
         if changed {
+            self.presence.unauthored = true;
             self.height_targets_dirty = true;
             for id in self.preorder() {
                 self.update(id, batch);
@@ -186,6 +187,7 @@ impl<D: DataSource> Host<D> {
             Err(e) => return self.finish(batch, Some(format!("segments: {e:?}"))),
         };
         if restyled {
+            self.presence.unauthored = true;
             self.height_targets_dirty = true;
             for id in self.preorder() {
                 self.update(id, &mut batch);
@@ -239,6 +241,7 @@ impl<D: exact_runner::DataSource> crate::Host<D> {
             env.control_text_styles = Some(styles);
             env.button_fonts = button_fonts;
         }
+        self.presence.unauthored = true;
         self.height_targets_dirty = true;
         let mut batch = Batch::new();
         let error = match self.runner.kernel_mut().set_env(env) {

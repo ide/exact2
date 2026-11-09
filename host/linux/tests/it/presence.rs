@@ -108,6 +108,30 @@ fn a_resize_retires_running_layout_before_the_next_tick() {
     }
 }
 
+/// The text size and a picture's size move a box with no app commit: it
+/// takes its new place, as on the web, where a layout transition plays only
+/// what a commit moved; the next commit does not play it either.
+#[test]
+fn a_host_fact_takes_new_places_without_sliding() {
+    let mut h = boot(
+        "component App\n  state n = 0\n  action bump\n    n = n + 1\n  view\n    column\n      button press=bump testId=\"bump\"\n        text \"Bump\"\n      view height=\"2rem\"\n      image \"picture.png\" testId=\"picture\"\n      view testId=\"box\" height=20 -exact-layout-transition=\"1s linear\"\n",
+    );
+    let (box_id, picture, bump) = (view(&h, "box"), view(&h, "picture"), view(&h, "bump"));
+    let facts: [fn(&mut Host<()>, u32); 2] = [
+        |h, _| drop(h.set_root_font_size(24.)),
+        |h, picture| drop(h.set_intrinsic(picture, Some((10., 90.)))),
+    ];
+    for fact in facts {
+        let before = h.kernel().node(box_id).unwrap().frame;
+        fact(&mut h, picture);
+        assert_ne!(h.kernel().node(box_id).unwrap().frame, before);
+        assert_eq!(h.presented(box_id).layout, [0.0; 4]);
+        h.dispatch_at(bump, Event::Press, 100.);
+        assert_eq!(h.presented(box_id).layout, [0.0; 4]);
+        assert!(!h.motion());
+    }
+}
+
 /// Whether the pixel at `(x, y)` is mostly `channel` (0 red, 1 green, 2 blue).
 fn is(frame: &tiny_skia::Pixmap, x: f32, y: f32, channel: usize) -> bool {
     let c = frame.pixel(x as u32, y as u32).unwrap().demultiply();

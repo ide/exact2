@@ -51,13 +51,16 @@ impl<D: DataSource> Host<D> {
     /// commit, no resource asked again.
     pub fn set_root_font_size(&mut self, px: f64) -> Option<String> {
         match self.runner.set_root_font_size(px) {
-            Ok(Some(receipt)) => self.commit(
-                &[Timed {
-                    at_ms: self.now_ms,
-                    receipt,
-                }],
-                None,
-            ),
+            Ok(Some(receipt)) => {
+                self.presence.unauthored = true;
+                self.commit(
+                    &[Timed {
+                        at_ms: self.now_ms,
+                        receipt,
+                    }],
+                    None,
+                )
+            }
             Ok(None) => None,
             Err(e) => Some(format!("root font size: {e:?}")),
         }
@@ -67,13 +70,16 @@ impl<D: DataSource> Host<D> {
     /// row is a hairline, nothing where none is.
     pub fn set_display_scale(&mut self, scale: f64) -> Option<String> {
         match self.runner.set_display_scale(scale) {
-            Ok(Some(receipt)) => self.commit(
-                &[Timed {
-                    at_ms: self.now_ms,
-                    receipt,
-                }],
-                None,
-            ),
+            Ok(Some(receipt)) => {
+                self.presence.unauthored = true;
+                self.commit(
+                    &[Timed {
+                        at_ms: self.now_ms,
+                        receipt,
+                    }],
+                    None,
+                )
+            }
             Ok(None) => None,
             Err(e) => Some(format!("display scale: {e:?}")),
         }

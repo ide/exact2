@@ -1036,6 +1036,7 @@ impl<D: DataSource> Host<D> {
     /// or was cleared). Lays out again; the batch carries the frames that
     /// moved — the image's, and everything its size pushed.
     pub fn set_intrinsic(&mut self, view: ViewId, size: Option<(f32, f32)>) -> String {
+        self.presence.unauthored = true;
         self.height_targets_dirty = true;
         let mut batch = Batch::new();
         batch.controls = self.option_part(view);
@@ -1050,6 +1051,7 @@ impl<D: DataSource> Host<D> {
     /// created — under one layout. A refusal for one view (it is gone, or
     /// not an image) leaves the others set and is the batch's error.
     pub fn set_intrinsics(&mut self, sizes: &[(ViewId, Option<(f32, f32)>)]) -> String {
+        self.presence.unauthored = true;
         self.height_targets_dirty = true;
         let mut batch = Batch::new();
         let mut error = None;
@@ -1063,21 +1065,6 @@ impl<D: DataSource> Host<D> {
         if let Err(e) = self.layout(&mut batch) {
             error.get_or_insert(e);
         }
-        self.finish(batch, error)
-    }
-
-    /// Publish newly prepared native paragraph metrics through ordinary layout.
-    pub fn text_ready(&mut self, key: exact_kernel::NodeKey, revision: u64) -> String {
-        let mut batch = Batch::new();
-        let error = if self
-            .runner
-            .kernel_mut()
-            .invalidate_text_metrics(key, revision)
-        {
-            self.layout(&mut batch).err()
-        } else {
-            None
-        };
         self.finish(batch, error)
     }
 
@@ -1224,6 +1211,8 @@ impl<D: DataSource> Host<D> {
     }
 
     fn finish(&mut self, batch: Batch, error: Option<String>) -> String {
+        // Clear the mark first: the resize handlers below commit the app's own moves
+        self.presence.unauthored = false;
         let _roles = self.runner.bind_roles(); // Its own, crossing (LLP 1121 stage 5).
         crate::doc_watch::sync(&mut self.doc_watch, &mut self.runner);
         let (mut batch, error) = self.resize_rounds(batch, error);

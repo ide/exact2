@@ -81,11 +81,11 @@ impl LayoutMotion {
         self.observe_as(kernel, key, engine, snap, false)
     }
 
-    /// Observe a box a list moved for no author: its window or a
-    /// measurement placed rows before it (LLP 1010). An idle box takes its
-    /// place with no transition, as UIKit's self-sizing does; the list keeps
-    /// what shows still by its scroll offset. One already moving still
-    /// moves.
+    /// Observe a box moved for no author: a list's window or a measurement
+    /// placed rows before it (LLP 1010), or a host's fact such as the text
+    /// size laid it out again (LLP 1063 D6). An idle box takes its place with
+    /// no transition, as UIKit's self-sizing does; a list keeps what shows
+    /// still by its scroll offset. One already moving still moves.
     pub fn observe_unauthored(
         &mut self,
         kernel: &Kernel,
@@ -171,6 +171,15 @@ impl LayoutMotion {
         let keys: Vec<_> = self.tracked.iter().copied().collect();
         keys.into_iter()
             .flat_map(|key| self.observe(kernel, key, engine, snap))
+            .collect()
+    }
+
+    /// [`LayoutMotion::observe_all`] for a layout a host's fact caused, not an
+    /// app's commit: each box as [`LayoutMotion::observe_unauthored`] takes it.
+    pub fn observe_all_unauthored(&mut self, kernel: &Kernel, engine: &mut Engine) -> Vec<NodeKey> {
+        let keys: Vec<_> = self.tracked.iter().copied().collect();
+        keys.into_iter()
+            .flat_map(|key| self.observe_unauthored(kernel, key, engine))
             .collect()
     }
 }

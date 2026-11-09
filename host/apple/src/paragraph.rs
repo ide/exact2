@@ -97,6 +97,21 @@ impl<D: DataSource> Host<D> {
         }
     }
 
+    /// Publish newly prepared native paragraph metrics through ordinary layout.
+    pub fn text_ready(&mut self, key: exact_kernel::NodeKey, revision: u64) -> String {
+        let mut batch = Batch::new();
+        let error = if self
+            .runner
+            .kernel_mut()
+            .invalidate_text_metrics(key, revision)
+        {
+            self.layout(&mut batch).err()
+        } else {
+            None
+        };
+        self.finish(batch, error)
+    }
+
     /// Lay out again after `view` took a new natural size.
     pub(super) fn layout_resized(&mut self, view: ViewId, batch: &mut Batch) -> Result<(), String> {
         self.inline_image_resized(view, batch);

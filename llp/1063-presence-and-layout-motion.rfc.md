@@ -153,7 +153,16 @@ displacement and velocity in points, on the engine's 240 Hz grid and rest
 threshold, so both settle at the same time. A windowed list's row root is
 placed in the list content, not its wrapper (which only positions it), so
 rows slide when one leaves. A resize takes new boxes without animating
-(native and web alike: the web never measures a resize).
+(native and web alike: the web never measures a resize). So does a layout
+for any other fact the host reports rather than an app's commit: the safe
+area and layout regions, a fold's segments, the text size, the display
+scale, the measured size of an image, a video or a native view, and what a
+native container covers. Unlike a resize, it leaves a move under way
+running to the new box (`LayoutMotion::observe_unauthored`), and the web,
+which measures only around a batch, does the same. Natively, what the app
+commits in the same layout in answer to the fact, such as an
+`exactViewport` reader answered again at an accessibility text size or a
+new posture, takes its place with it, where the web would play it.
 
 **D7 — The web loads it after paint.** Rows travel as custom properties in
 the node's `cssText` (`--exact-exit-animation`, `--exact-layout-transition`);

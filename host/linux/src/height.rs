@@ -128,7 +128,7 @@ impl<D: DataSource> Host<D> {
             ..kernel.env().clone()
         };
         match kernel.set_env(env) {
-            Ok(true) => self.layout().map(|_| true),
+            Ok(true) => self.layout_unauthored().map(|_| true),
             Ok(false) => Ok(false),
             Err(e) => Err(format!("field font: {e:?}")),
         }

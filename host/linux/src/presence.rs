@@ -31,6 +31,11 @@ pub(super) struct Presence {
     refused_flights: bool,
     /// A resize lays out next: positions are taken, not animated.
     pub(super) snap: bool,
+    /// The next `observe_layout` is for a host's fact, not an app's commit
+    /// (an inset, the text size, a picture's size): a box it finds moved
+    /// takes its place unless it is moving already, as on the web, where a
+    /// layout transition plays only what a commit moved.
+    pub(super) unauthored: bool,
 }
 
 impl<D: DataSource> Host<D> {
@@ -83,13 +88,25 @@ impl<D: DataSource> Host<D> {
         error
     }
 
+    /// Lay out again for a host's fact and observe it: a box it moved takes
+    /// its place unless it is moving already.
+    pub(super) fn layout_unauthored(&mut self) -> Result<bool, String> {
+        self.presence.unauthored = true;
+        let laid = self.layout();
+        self.observe_layout();
+        laid
+    }
+
     /// Observe every tracked node's box, after a layout.
     pub(super) fn observe_layout(&mut self) {
         let snap = std::mem::take(&mut self.presence.snap);
-        let retired =
-            self.presence
-                .layout
-                .observe_all(self.runner.kernel(), &mut self.engine, snap);
+        let unauthored = std::mem::take(&mut self.presence.unauthored);
+        let (kernel, layout) = (self.runner.kernel(), &mut self.presence.layout);
+        let retired = if unauthored && !snap {
+            layout.observe_all_unauthored(kernel, &mut self.engine)
+        } else {
+            layout.observe_all(kernel, &mut self.engine, snap)
+        };
         self.retire_layout(retired);
     }
 

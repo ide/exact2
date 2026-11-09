@@ -992,7 +992,7 @@ impl<D: DataSource> Host<D> {
             ..kernel.env().clone()
         };
         match kernel.set_env(env) {
-            Ok(true) => self.layout().map(|_| true).map_err(|e| e.to_string()),
+            Ok(true) => self.layout_unauthored().map(|_| true),
             Ok(false) => Ok(false),
             Err(e) => Err(format!("safe area: {e:?}")),
         }
@@ -1018,7 +1018,7 @@ impl<D: DataSource> Host<D> {
             }
         }
         if changed {
-            error = error.or(self.layout().err());
+            error = error.or(self.layout_unauthored().err());
         }
         error
     }
@@ -1144,18 +1144,17 @@ impl<D: DataSource> Host<D> {
             rows,
         };
         match self.runner.set_fold(fold) {
-            Ok(Some(receipt)) => self.commit(
-                &[Timed {
-                    at_ms: self.now_ms,
-                    receipt,
-                }],
-                None,
-            ),
-            Ok(None) if restyled => {
-                let error = self.layout().err();
-                self.observe_layout();
-                error
+            Ok(Some(receipt)) => {
+                self.presence.unauthored = restyled;
+                self.commit(
+                    &[Timed {
+                        at_ms: self.now_ms,
+                        receipt,
+                    }],
+                    None,
+                )
             }
+            Ok(None) if restyled => self.layout_unauthored().err(),
             Ok(None) => None,
             Err(e) => Some(format!("segments: {e:?}")),
         }

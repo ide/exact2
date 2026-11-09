@@ -132,11 +132,12 @@ fn a_resize_takes_new_places_without_sliding() {
     );
 }
 
-/// A content owner's first values (LLP 1123 D9) end the layout its subtree
-/// had with the document's: a box they move takes its place, as on a resize.
-/// A later change of the values moves it.
+/// A content owner's values (LLP 1123 D9) are a host's fact: a box their
+/// first values or a later change of them move takes its place, as on a
+/// resize. On a device the route's regions trail its geometry, so the values
+/// can change more than once while the route first shows.
 #[test]
-fn an_owners_first_values_place_a_box_without_sliding() {
+fn an_owners_values_place_a_box_without_sliding() {
     let mut host = boot_source(
         "component App\n  view\n    column testId=\"owner\" width=\"100%\" height=\"100%\"\n      column padding-left=\"max(16px, var(--exact-layout-margins-inset-left))\"\n        view testId=\"box\" width=40 height=40 -exact-layout-transition=\"300ms ease-in-out\"\n",
     );
@@ -173,12 +174,12 @@ fn an_owners_first_values_place_a_box_without_sliding() {
         ..Claims::default()
     });
     assert_eq!(x(&host), 20.0, "{later}");
-    let moving = host.tick(250.0);
-    assert_ne!(
-        layout(&moving, box_id).unwrap(),
-        [0.0; 4],
-        "{later}\n{moving}"
+    let shown = host.tick(250.0);
+    assert!(
+        layout(&shown, box_id).is_none_or(|v| v == [0.0; 4]),
+        "{later}\n{shown}"
     );
+    assert!(host.engine().quiescent(), "{later}\n{shown}");
 }
 
 #[test]
@@ -208,6 +209,47 @@ fn a_resize_retires_running_layout_in_its_own_batch() {
         let moved = host.dispatch_at(move_id, Event::Press, 600.0);
         assert_ne!(layout(&moved, box_id).unwrap(), [0.0; 4]);
     }
+}
+
+/// The text size and the safe area move a box with no app commit: it takes
+/// its new place, as on the web, where a layout transition plays only what
+/// a commit moved.
+#[test]
+fn a_host_fact_takes_new_places_without_sliding() {
+    let mut host = boot_source(
+        "component App\n  view\n    column viewport-fit=\"cover\" padding-top=\"env(safe-area-inset-top)\"\n      view height=\"2rem\"\n      view testId=\"box\" height=20 -exact-layout-transition=\"1s linear\"\n",
+    );
+    let box_id = view(&host, "box").unwrap();
+    let facts: [fn(&mut Host<NoData>) -> String; 2] = [
+        |host| host.set_root_font_size(24.0),
+        |host| host.set_insets(40.0, 0.0, 0.0, 0.0),
+    ];
+    for fact in facts {
+        let before = host.runner().kernel().node(box_id).unwrap().frame;
+        let batch = fact(&mut host);
+        assert_ne!(host.runner().kernel().node(box_id).unwrap().frame, before);
+        assert!(
+            layout(&batch, box_id).is_none_or(|v| v == [0.0; 4]),
+            "{batch}"
+        );
+        assert!(batch.contains("\"motion\":false"), "{batch}");
+    }
+}
+
+/// A host fact during a commit's move: the move carries on to the box's
+/// new place, where a resize would end it.
+#[test]
+fn a_host_fact_keeps_a_move_under_way() {
+    let mut host = boot_source(
+        "component App\n  state moved = false\n  action move\n    moved = not moved\n  view\n    column\n      button \"Move\" press=move testId=\"move\"\n      view height=(moved ? \"5rem\" : \"1rem\")\n      view testId=\"box\" height=20 -exact-layout-transition=\"1s linear\"\n",
+    );
+    let (box_id, move_id) = (view(&host, "box").unwrap(), view(&host, "move").unwrap());
+    host.dispatch_at(move_id, Event::Press, 0.0);
+    assert_ne!(layout(&host.tick(500.0), box_id).unwrap()[1], 0.0);
+    host.set_root_font_size(24.0);
+    let [_, dy, ..] = layout(&host.tick(600.0), box_id).unwrap();
+    assert!(dy < 0.0, "still moving down to its place: {dy}");
+    assert_eq!(layout(&host.tick(2000.0), box_id), Some([0.0; 4]));
 }
 
 /// The last `present` of `layout` for `id`: offset and size difference,

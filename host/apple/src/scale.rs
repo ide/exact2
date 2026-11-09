@@ -26,6 +26,7 @@ impl<D: DataSource> Host<D> {
     /// The root font size `rem` follows (LLP 1069.000 D3): a relayout in
     /// one commit, no resource asked again; the same size commits nothing.
     pub fn set_root_font_size(&mut self, px: f64) -> String {
+        self.presence.unauthored = true;
         match self.runner.set_root_font_size(px) {
             Ok(Some(receipt)) => self.commit(
                 &[Timed {
@@ -58,6 +59,7 @@ impl<D: DataSource> Host<D> {
     /// Tell the runner the display's scale: a relayout in one commit where a
     /// hairline or snapped border can move, nothing where none can.
     pub fn set_display_scale(&mut self, scale: f64) -> String {
+        self.presence.unauthored = true;
         match self.runner.set_display_scale(scale) {
             Ok(Some(receipt)) => self.commit(
                 &[Timed {
