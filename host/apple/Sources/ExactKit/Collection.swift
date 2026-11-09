@@ -274,6 +274,10 @@ package final class CollectionHost {
         /// Row positions before the batch, relative to the port (`rideBatch`).
         var batchRows: [UInt32: CGFloat] = [:]
         #endif
+        /// This batch's report puts rows before the rows the last one built,
+        /// or takes rows from before them: its shift moves the list's start
+        /// (a page of history landing), not rows measured (`shift`).
+        var startMoved = false
         init(_ snapshot: CollectionSnapshot) { self.snapshot = snapshot }
     }
     weak var presenter: Presenter?
@@ -283,6 +287,15 @@ package final class CollectionHost {
     static func acknowledges(_ row: CollectionSnapshot.Row, _ m: CollectionMeasurement) -> Bool {
         guard row.measured, row.epoch == m.epoch, let height = row.size else { return false }
         return (height == 0) == (m.size == 0) && abs(height - m.size) <= 0.01
+    }
+    /// Whether rows came or went before the rows both snapshots built: a row
+    /// built in both sits at another index.
+    static func startMoved(from old: CollectionSnapshot, to new: CollectionSnapshot) -> Bool {
+        let was = Dictionary(old.rows.lazy.filter { $0.index >= 0 }.map { ($0.view, $0) }, uniquingKeysWith: { a, _ in a })
+        return new.rows.contains { row in
+            guard row.index >= 0, let before = was[row.view] else { return false }
+            return before.root == row.root && before.index != row.index
+        }
     }
     var entries: [UInt32: Entry] = [:]
     var interaction: UInt32?
@@ -554,6 +567,7 @@ package final class CollectionHost {
                             entry.requestAt = ProcessInfo.processInfo.systemUptime
                             stopAnimation(snapshot.view)
                         } else if !snapshot.underWay { entry.gesture = false }
+                        if snapshot.revision > entry.snapshot.revision, Self.startMoved(from: entry.snapshot, to: snapshot) { entry.startMoved = true }
                         entry.snapshot = snapshot
                     }
                 } else { entries[snapshot.view] = Entry(snapshot) }
@@ -637,6 +651,7 @@ package final class CollectionHost {
             if batchDepth == 1, riding.remove(view) != nil { rideBatch(view) }
             #endif
             entry.batchStart = nil
+            entry.startMoved = false
             dirty.insert(view)
         }
         #if os(iOS) || os(tvOS)

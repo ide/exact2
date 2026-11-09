@@ -71,6 +71,24 @@ final class CollectionTests: XCTestCase {
         XCTAssertNil(CollectionSnapshot(padded))
     }
 
+    func testAPageBeforeTheRowsMovesTheStartAndRowsMeasuredDoNot() {
+        func snapshot(_ revision: Int, _ rows: [(view: Int, root: Int, index: Int, epoch: Int)]) -> CollectionSnapshot {
+            let value: [String: Any] = ["view": 2, "revision": revision, "scrollSequence": 0, "count": 100, "totalExtent": 4000,
+                "rows": rows.map { ["view": $0.view, "root": $0.root, "index": $0.index, "epoch": $0.epoch, "size": 40, "measured": true] },
+                "correction": NSNull()]
+            return CollectionSnapshot(value)!
+        }
+        let shown = snapshot(1, [(3, 4, 10, 1), (5, 6, 11, 1)])
+        // A page put before them: the rows built in both sit 50 later, rebuilt at a new epoch
+        XCTAssertTrue(CollectionHost.startMoved(from: shown, to: snapshot(2, [(7, 8, 59, 2), (3, 4, 60, 2), (5, 6, 61, 2)])))
+        // Rows taken from before them
+        XCTAssertTrue(CollectionHost.startMoved(from: shown, to: snapshot(2, [(3, 4, 0, 1), (5, 6, 1, 1)])))
+        // Rows measured, or one more built before them, leave each row where it was
+        XCTAssertFalse(CollectionHost.startMoved(from: shown, to: snapshot(2, [(3, 4, 10, 2), (5, 6, 11, 1)])))
+        XCTAssertFalse(CollectionHost.startMoved(from: shown, to: snapshot(2, [(9, 10, 9, 2), (3, 4, 10, 1), (5, 6, 11, 1)])))
+        // A wrapper that holds another row now is not the row it held
+        XCTAssertFalse(CollectionHost.startMoved(from: shown, to: snapshot(2, [(3, 12, 40, 2)])))
+    }
 
     func testDecimalJSONCountersRetainAllSixtyFourBits() throws {
         let bytes = Data(#"{"view":2,"revision":"18446744073709551614","scrollSequence":"18446744073709551613","totalExtent":4000,"rows":[],"correction":{"scrollSequence":"18446744073709551613","offset":90}}"#.utf8)

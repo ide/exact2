@@ -207,7 +207,22 @@ extension CollectionHost {
         target = PixelGrid.offset(target, in: scroll, clamped: !(scroll.isTracking || scroll.isDragging || scroll.isDecelerating))
         guard scroll.contentOffset != target else { return }
         let moved = horizontal ? target.x - scroll.contentOffset.x : target.y - scroll.contentOffset.y
+        let startMoved = entries[id]?.startMoved ?? false
         scroll.contentOffset = target
+        if startMoved, scroll.isDecelerating, !scroll.isTracking {
+            // Rows came or went before the reader under a fling (a page of a
+            // chat's history landed): the fling ends where they put the
+            // reader. A deceleration that will meet an edge computes each
+            // frame from the last offset it set itself, not this one, and
+            // would carry the reader back by the page to the new first row,
+            // where the start edge that just fired waits for the reader to
+            // leave before it fires again. Rows measured under a fling move
+            // the offset and the fling goes on.
+            if #available(iOS 17.4, tvOS 17.4, *) { scroll.stopScrollingAndZooming() }
+            else { scroll.setContentOffset(target, animated: false) }
+            presenter?.scrollPump.forgetTravel(id)
+            return
+        }
         // Not the reader's travel: the fill's velocity reads on from here.
         presenter?.scrollPump.shifted(id, by: moved)
     }
