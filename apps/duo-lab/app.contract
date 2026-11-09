@@ -6,9 +6,9 @@
 // (`var(--exact-viewport-segment-*)`, LLP 1123 D9), the fold band empty between them. Images is a virtualized list of a few
 // hundred image rows over four bundled PNGs (the raster budget's stress).
 // Reflow is one long Markdown document and a dense feed (the text caches'
-// stress from 951 to 466 points and back). Edges marks the route's safe area (its outline,
-// a tag below its top, a box capped at 640 points, its middle) while its large title collapses
-// and its bar minimizes, over 60 plain rows or 1,000 virtualized ones, with a Run. Combinations pushes a route with
+// stress from 951 to 466 points and back). Edges outlines the route's safe area and marks its
+// middle while its large title collapses and its bar minimizes, over 60 plain rows or 1,000
+// virtualized ones, with a Run. Combinations pushes a route with
 // an absolutely positioned sheet holding a textarea, so keyboard + sheet +
 // pushed screen + fold is one sequence of taps. Keyboard adds physical-device
 // checks with an app-local geometry recorder and a native share sheet.
@@ -336,18 +336,13 @@ component DuoLab
                     scroll id="edges-scroll" flex=1 min-height=0 testId="edges-scroll"
                       for index in range(60) key=index
                         EdgeRow(index=index, heavy=heavyEdges, run=runEdges, toggleRows=toggleEdgeRows)
-                  // The safe area's outline: the route's content box
+                  // The safe area's outline (the route's content box), labelled at its corner
                   box testId="edges-outline" position="absolute" inset=0 border-width=2 border-style="solid" border-color="-exact-system-blue" pointer-events="none"
-                  box testId="edges-chip" position="absolute" top=12 left=12 class=Tag border-color="-exact-system-blue" pointer-events="none"
-                    text "12 pt below the safe area's top" font="-exact-caption1" font-weight=600 color="-exact-system-blue"
-                  // As tall as the safe area, but no taller than 640 points: its tag rides its foot
-                  column testId="edges-capped" position="absolute" top=0 bottom=0 right=12 max-height=640 display="flex" align-items="flex-end" justify-content="flex-end" pointer-events="none"
-                    box position="absolute" top=0 bottom=0 right=0 width=4 background-color="-exact-system-green"
-                    box class=Tag border-color="-exact-system-green" margin-right=10 margin-bottom=8
-                      text "640 pt at most" font="-exact-caption1" font-weight=600 color="-exact-system-green"
-                  // At the safe area's middle height, beside the capped line, clear of the rows' text
+                  box testId="edges-label" position="absolute" top=0 left=0 class=Tag border-color="-exact-system-blue" pointer-events="none"
+                    text "Safe area" font="-exact-caption1" font-weight=600 color="-exact-system-blue"
+                  // At the safe area's middle height, at its trailing side, clear of the rows' text
                   column testId="edges-centre" position="absolute" inset=0 display="flex" align-items="flex-end" justify-content="center" pointer-events="none"
-                    box class=Tag border-color="-exact-system-pink" margin-right=28
+                    box class=Tag border-color="-exact-system-pink" margin-right=16
                       text "Middle of the safe area" font="-exact-caption1" font-weight=600 color="-exact-system-pink"
               // The note screen takes its bottom edge (LLP 1123 D4): its sheet's surface reaches
               // the display's bottom, as a sheet's does, and pads its controls by the route's inset there.
@@ -473,14 +468,11 @@ component EdgeRow
   view
     column
       if index == 0
-        // Below the tag at the top and clear of the capped box's line at the trailing side
-        column padding-top=48 padding-left=16 padding-right=32 padding-bottom=12 gap=10
+        // Below the outline's label
+        column padding-top=32 padding-left=16 padding-right=16 padding-bottom=12 gap=10
           column class=Card gap=6 testId="edges-guide"
             text "What to check" font="-exact-headline"
-            text "Scroll down, then up: the large title collapses, the bar hides, and both come back. Each marker stays on its edge in every frame, with no lag and no jump." font="-exact-subheadline"
-            text "Blue outline: the safe area, which UIKit moves as the bar changes. Its tag sits 12 pt below its top." font="-exact-footnote" color="-exact-secondary-label"
-            text "Green line: as tall as the safe area, but 640 pt at most." font="-exact-footnote" color="-exact-secondary-label"
-            text "Pink tag: halfway down the safe area." font="-exact-footnote" color="-exact-secondary-label"
+            text "Scroll down, then up: the large title collapses, the bar hides, and both come back. The blue outline is the safe area, and the pink tag stays halfway down it. Both follow the bar in every frame, with no lag and no jump." font="-exact-subheadline"
           button press=toggleRows testId="edges-list-toggle"
             text (heavy ? "Use 60 plain rows" : "Use 1,000 virtualized rows")
           button press=run testId="edges-run" padding=10 border-radius=10 background-color="-exact-secondary-background"
