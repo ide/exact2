@@ -61,17 +61,21 @@ extension GroupedListView {
         for op in ops {
             if [.roots, .flight, .land, .exit].contains(op.op) { return restore() }
             if carried[op.id] != nil {
-                if op.op != .frame, let row = host.presenter.views[op.id] { alone.append(row) }
+                // Retire a destroyed row's contact before taking it home.
+                if let row = host.presenter.views[op.id] {
+                    if op.op == .destroy { sendHome(row) }
+                    else if op.op != .frame { alone.append(row) }
+                }
                 continue
             }
             guard above.contains(op.id) else { continue }
             switch op.op {
             case .frame, .content, .children: continue
             case .props where op.props["inert"] == nil && !op.clear.contains("inert"): continue
-            default: return restore()
+            default: return restore(preservingPress: op.op != .destroy)
             }
         }
-        for row in alone where carried[row.id] != nil { sendHome(row) }
+        for row in alone where carried[row.id] != nil { sendHome(row, preservingPress: true) }
     }
 
     /// A `children` op places `want` in `container`: a row this list
@@ -132,24 +136,31 @@ extension GroupedListView {
     /// the screen or now holds another row. It goes between the siblings
     /// its parent's last `children` op put either side of it, in the box
     /// layout last gave it there, which a batch may have changed while it
-    /// was carried.
-    func sendHome(_ row: NodeView) {
+    /// was carried. Maintenance moves preserve its contact; a cell leaving
+    /// the screen or taking another row cancels it.
+    func sendHome(_ row: NodeView, preservingPress: Bool = false) {
         guard host.presenter.views[row.id] === row, let place = carried[row.id] else {
             row.removeFromSuperview()
             return
         }
         let parent = place.parent, order = homes[ObjectIdentifier(parent)] ?? []
+        if !preservingPress { _ = highlight(row.id, false) }
         forget(row.id)
         let views = host.presenter.views
         let home = { (id: UInt32) in views[id].flatMap { $0.superview === parent ? $0 : nil } }
-        if let i = order.firstIndex(of: row.id), let next = order[(i + 1)...].lazy.compactMap(home).first {
-            parent.insertSubview(row, belowSubview: next)
-        } else if let i = order.firstIndex(of: row.id), let previous = order[..<i].reversed().lazy.compactMap(home).first {
-            parent.insertSubview(row, aboveSubview: previous)
-        } else {
-            parent.insertSubview(row, at: 0)
+        let move = {
+            if let i = order.firstIndex(of: row.id), let next = order[(i + 1)...].lazy.compactMap(home).first {
+                parent.insertSubview(row, belowSubview: next)
+            } else if let i = order.firstIndex(of: row.id), let previous = order[..<i].reversed().lazy.compactMap(home).first {
+                parent.insertSubview(row, aboveSubview: previous)
+            } else {
+                parent.insertSubview(row, at: 0)
+            }
         }
+        if preservingPress { NodeView.containerMove(move) } else { move() }
+        row.transform = .identity
         row.frame = row.grid?.drawn ?? place.frame
+        row.applyTransform()
     }
 }
 extension GroupedListView {

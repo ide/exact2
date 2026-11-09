@@ -219,8 +219,9 @@ final class GroupedListHost: GroupedLists {
         #endif
     }
 
-    /// Before a batch: every carried row back where the presenter put it.
-    func prepare() { for list in lists.values { list.restore() } }
+    /// Before an out-of-batch geometry write: carried rows go home with
+    /// their held contacts.
+    func prepare() { for list in lists.values { list.restore(preservingPress: true) } }
 
     /// After a batch. `changed` is the touched views and their ancestors; a
     /// list outside it keeps its model and only carries its rows again.
@@ -1307,14 +1308,17 @@ final class GroupedListView: NSObject, UICollectionViewDelegate {
         if height > 0 { unsized.remove(id) } else { unsized.insert(id) }
         cell.contentView.clipsToBounds = true
         if row.superview !== cell.contentView {
-            cell.contentView.addSubview(row)
+            NodeView.containerMove { cell.contentView.addSubview(row) }
             // A paragraph drawn while its row was home, under the hidden
             // scroll, painted nothing and may have found no room for a
             // worker; it shows now, outside any batch's refresh when a
             // cell comes back, so the pump paints it (`refreshVisibleText`).
             host.presenter.requestTextPublication()
         }
+        row.transform = .identity
         row.frame = drawn
+        row.applyTransform()
+        row.refreshGroupedPress()
     }
 
     /// A row whose cell was sized to nothing and that has a box now (the
@@ -1337,10 +1341,11 @@ final class GroupedListView: NSObject, UICollectionViewDelegate {
         source.apply(snapshot, animatingDifferences: false)
     }
 
-    /// Every carried row back in its authored place.
-    func restore() {
+    /// Every carried row back in its authored place. Maintenance keeps
+    /// held contacts; retiring lists cancel them.
+    func restore(preservingPress: Bool = false) {
         for id in Array(carried.keys) {
-            if let row = host.presenter.views[id], carried[id] != nil { sendHome(row) }
+            if let row = host.presenter.views[id], carried[id] != nil { sendHome(row, preservingPress: preservingPress) }
             forget(id)
         }
         for root in hiddenRoots.values { root.node.isHidden = root.hidden }
@@ -1366,14 +1371,6 @@ final class GroupedListView: NSObject, UICollectionViewDelegate {
     func scrollViewDidEndScrollingAnimation(_ scrollView: UIScrollView) { owner.scrollViewDidEndScrollingAnimation(scrollView) }
     func scrollViewWillEndDragging(_ scrollView: UIScrollView, withVelocity velocity: CGPoint, targetContentOffset: UnsafeMutablePointer<CGPoint>) {
         owner.scrollViewWillEndDragging(scrollView, withVelocity: velocity, targetContentOffset: targetContentOffset)
-    }
-
-    /// A tap: UIKit's highlight, then the row's press.
-    func select(_ id: UInt32) -> Bool {
-        guard pressable(id), let path = source.indexPath(for: id) else { return false }
-        collection.selectItem(at: path, animated: false, scrollPosition: [])
-        collectionView(collection, didSelectItemAt: path)
-        return true
     }
 
     func collectionView(_ view: UICollectionView, willDisplay cell: UICollectionViewCell, forItemAt path: IndexPath) {

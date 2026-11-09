@@ -38,8 +38,9 @@
 // - `bare` has no header: its scroller runs under the bar that holds the
 //   system Back alone.
 //
-// LLP 1115.000 D11.3 (GroupedListIOSTests): `rows` is a grouped list. One
-// row pushes `detail` and stays selected under it; one presses and stays.
+// LLP 1115.000 D11.3 (GroupedListIOSTests, GroupedCustomRowsIOSTests):
+// standard and custom rows retain selection under a pushed screen and
+// release it after an action that stays on the list.
 routes nav
   start "/"
     detail "/detail"
@@ -133,6 +134,15 @@ component NavigationBars
                   image "symbol:forward-chevron"
                 button press=stay testId="rows-stay"
                   text `Stayed ${stays}`
+                button press=stay testId="rows-custom-stay"
+                  row
+                    text `Custom stayed ${stays}`
+                button press=open("detail") testId="rows-custom-open"
+                  row
+                    text "Custom detail"
+                link href="/detail" testId="rows-custom-link"
+                  row
+                    text "Linked detail"
           else
             if e.name == "detail"
               header testId="header-detail" display="flex" align-items="center" padding="8px 16px"

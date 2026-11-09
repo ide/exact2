@@ -702,7 +702,11 @@ package final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, U
             presenter.autofocusedThisTurn = nil
             presenter.autofocusProcessed.remove(ObjectIdentifier(self))
         }
-        if window == nil, pressContact?.routesBubbledPress == true { cancelPressContact() }
+        // Retire contacts on window loss unless a host move preserves them or their terminal delivery already owns the resolved hit
+        if window == nil, let contact = pressContact,
+           contact.routesBubbledPress || (Self.containerMoves == 0 && !contact.ending) {
+            cancelPressContact()
+        }
         presenter?.transformGeometry.changed()
         presenter?.videoVisibility?.changed(); presenter?.unshown(self)
         if window != nil { presenter?.flushPendingFocus(); presenter?.elementScrolls.flush(); materializeJoiningGlass() }
@@ -1145,9 +1149,14 @@ package final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, U
         }
     }
 
-    /// Inside `GlassGroups.moving`: a container comes or goes under the
-    /// same authored parent, which is no reparenting.
-    static var containerMoves = 0
+    /// Moves views between host containers under the same authored parent,
+    /// keeping a held contact. Authored moves and removals cancel normally.
+    package static func containerMove(_ move: () -> Void) {
+        containerMoves += 1
+        defer { containerMoves -= 1 }
+        move()
+    }
+    private static var containerMoves = 0
     package override func didMoveToSuperview() {
         if Self.containerMoves == 0 { pressEpoch &+= 1; cancelPressContact(reparenting: true); presenter?.unshown(self) } // a new parent: shown elsewhere
         super.didMoveToSuperview()

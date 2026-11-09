@@ -4,7 +4,48 @@
 import ExactKit
 import UIKit
 
+extension GroupedListHost {
+    private func list(carrying node: NodeView) -> GroupedListView? {
+        guard presenter.views[node.id] === node else { return nil }
+        return lists.values.first { $0.rows[node.id]?.custom == true }
+    }
+
+    func select(carried node: NodeView, press: @escaping () -> Void) -> Bool {
+        list(carrying: node)?.select(node.id, press: press) ?? false
+    }
+
+    func highlight(carried node: NodeView, _ down: Bool) -> Bool {
+        list(carrying: node)?.highlight(node.id, down) ?? false
+    }
+}
+
 extension GroupedListView {
+    /// Keeps the cell that showed the press so a release also clears it
+    /// after the row went home or UIKit stopped displaying that cell.
+    func highlight(_ id: UInt32, _ down: Bool) -> Bool {
+        let previous = customLooks[id]?.highlight
+        guard down else {
+            previous?.isHighlighted = false
+            customLooks[id]?.highlight = nil
+            return true
+        }
+        guard pressable(id), let cell = cell(id) as? GroupedCell, cell.row == id else { return false }
+        if previous !== cell { previous?.isHighlighted = false }
+        if !cell.isHighlighted { cell.isHighlighted = true }
+        customLooks[id]?.highlight = cell
+        return true
+    }
+
+    /// A carried row keeps its own focus and menu activation. A row UIKit
+    /// draws uses the collection delegate's activation instead.
+    func select(_ id: UInt32, press: (() -> Void)? = nil) -> Bool {
+        guard pressable(id), let path = source.indexPath(for: id) else { return false }
+        collection.selectItem(at: path, animated: false, scrollPosition: [])
+        if let press { chose(path, endingEdits: false) { _ in press() } }
+        else { collectionView(collection, didSelectItemAt: path) }
+        return true
+    }
+
     func collectionView(_ view: UICollectionView, shouldSelectItemAt path: IndexPath) -> Bool {
         collectionView(view, shouldHighlightItemAt: path)
     }
@@ -14,9 +55,14 @@ extension GroupedListView {
     /// (`clearsSelectionOnViewWillAppear`; LLP 1115.000 D11.3). A row that
     /// pushed nothing, or opened a sheet, lets go once its press has run.
     func collectionView(_ view: UICollectionView, didSelectItemAt path: IndexPath) {
+        chose(path, endingEdits: true) { host.presenter.press($0) }
+    }
+
+    private func chose(_ path: IndexPath, endingEdits: Bool, press: (UInt32) -> Void) {
+        let view = collection
         let letGo = { for selected in view.indexPathsForSelectedItems ?? [] { view.deselectItem(at: selected, animated: !ExactEnv.agentFreezes) } }
         guard let id = source.itemIdentifier(for: path), pressable(id) else { return letGo() }
-        host.presenter.endEditing()
+        if endingEdits { host.presenter.endEditing() }
         // The screen the list is on, read before the press can change it.
         let screen = sequence(first: owner as UIResponder, next: { $0.next }).lazy.compactMap { $0 as? UIViewController }.first
         // A radio's row checks its radio, as a click on the radio does:
@@ -24,7 +70,7 @@ extension GroupedListView {
         // the bound `checked` (LLP 1115.000 D13.2).
         if let row = rows[id], let target = radio(row) { host.presenter.checkRadio(target) }
         guard rows[id]?.pressable == true else { return letGo() }
-        host.presenter.press(id)
+        press(id)
         if let screen, let stack = screen.navigationController, stack.viewControllers.contains(screen), stack.topViewController !== screen { return }
         letGo()
     }

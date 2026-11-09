@@ -8,7 +8,8 @@ import UIKit
 
 /// What the core asks of the grouped lists a presenter shows.
 package protocol GroupedLists: AnyObject {
-    /// Before a batch: every carried row back where the presenter put it.
+    /// Before an out-of-batch geometry write: carried rows go home with
+    /// their held contacts.
     func prepare()
     /// Before a batch of `ops`: the carried rows it must read at home go
     /// back, every row of a list where it changes what they were carried
@@ -56,6 +57,11 @@ package protocol GroupedLists: AnyObject {
     func press(_ node: NodeView, down: Bool) -> Bool
     /// The agent's `tap` on a row UIKit draws.
     func activate(_ node: NodeView, before: (CGPoint?) -> Bool) -> [String: Any]?
+    /// Selects a custom row's cell and runs its own view's activation.
+    /// False for a nested control or a node no custom row represents.
+    func select(carried node: NodeView, press: @escaping () -> Void) -> Bool
+    /// Shows the custom row's cell highlight, or clears its previous one.
+    func highlight(carried node: NodeView, _ down: Bool) -> Bool
     /// `layout <id>`'s native fields for a list or a row it draws.
     func observation(_ node: NodeView) -> [String: Any]?
     // LLP 1080.001 D3: what the inspection walk accounts for.
