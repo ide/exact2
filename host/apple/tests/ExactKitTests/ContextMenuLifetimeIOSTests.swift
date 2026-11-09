@@ -148,6 +148,22 @@ final class ContextMenuLifetimeIOSTests: XCTestCase {
         }
     }
 
+    func testAReplacedConfigurationCannotCommitTheNextMenusPreview() throws {
+        try XCTSkipIf(ExactEnv.agentPaints, "UIKit owns these configurations")
+        let p = presenter()
+        defer { p.menus.reset(); window.isHidden = true }
+        let (interaction, old, _) = try opened(p)
+        let (_, current, _) = try opened(p)
+        var presses: [UInt32] = []
+        p.onPress = { presses.append($0) }
+        p.menus.context.contextMenuInteraction(interaction, willPerformPreviewActionForMenuWith: old, animator: Commit())
+        XCTAssertTrue(presses.isEmpty)
+        XCTAssertNotNil(p.menus.context.open)
+        p.menus.context.contextMenuInteraction(interaction, willPerformPreviewActionForMenuWith: current, animator: Commit())
+        XCTAssertEqual(presses, [3])
+        p.menus.context.contextMenuInteraction(interaction, willEndFor: current, animator: nil)
+    }
+
     func testLiftedPreviewKeepsAuthoredARIAUnavailableAndRefreshesItsButton() throws {
         let p = presenter()
         defer { p.menus.reset(); window.isHidden = true }

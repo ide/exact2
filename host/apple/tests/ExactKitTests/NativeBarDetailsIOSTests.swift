@@ -4,6 +4,40 @@ import XCTest
 @testable import ExactKit
 
 final class NativeBarDetailsIOSTests: XCTestCase {
+    func testAnAuthoredGroupNameReplacesOnlyItsAccessibilityWords() throws {
+        let p = Presenter()
+        let header = NodeView(id: 1, kind: "view", presenter: p)
+        let button = NodeView(id: 2, kind: "button", presenter: p)
+        let heading = NodeView(id: 3, kind: "text", presenter: p)
+        let status = NodeView(id: 4, kind: "text", presenter: p)
+        heading.props = ["text": "Alex", "accessibilityRole": "heading"]
+        status.props = ["text": "Online"]
+        header.addSubview(button); button.addSubview(heading); button.addSubview(status)
+        let view = HeaderTitleView(host: p.navigation)
+        func group() throws -> HeaderTitle { try XCTUnwrap(HeaderTitle(header: header, heading: heading, tap: button, apart: [])) }
+        let plain = try group()
+        view.update(plain, title: "Alex")
+        XCTAssertEqual(view.accessibilityLabel, "Alex")
+        XCTAssertEqual(view.accessibilityValue, "Online")
+        button.props["accessibilityLabel"] = "Contact details"
+        let labelled = try group()
+        XCTAssertNotEqual(plain, labelled)
+        view.update(labelled, title: "Alex")
+        XCTAssertEqual(view.title.text, "Alex")
+        XCTAssertEqual(view.subtitle.text, "Online")
+        XCTAssertEqual(view.accessibilityLabel, "Contact details")
+        XCTAssertNil(view.accessibilityValue)
+        XCTAssertTrue(view.accessibilityTraits.contains(.button))
+        button.props["accessibilityLabel"] = ""
+        view.update(try group(), title: "Alex")
+        XCTAssertEqual(view.accessibilityLabel, "Alex")
+        XCTAssertEqual(view.accessibilityValue, "Online", "clearing the name restores the subtitle")
+        let headingOnly = try XCTUnwrap(HeaderTitle(header: header, heading: heading, tap: nil, apart: []))
+        view.update(headingOnly, title: "Alex")
+        XCTAssertTrue(view.accessibilityTraits.contains(.header))
+        XCTAssertEqual(view.accessibilityValue, "Online")
+    }
+
     func testTheSelectedTabsOwnTintOverridesTheTablistAccent() throws {
         let p = Presenter(), list = NodeView(id: 1, kind: "view", presenter: p)
         let first = NodeView(id: 2, kind: "button", presenter: p)

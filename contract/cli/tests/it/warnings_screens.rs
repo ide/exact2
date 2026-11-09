@@ -1,6 +1,6 @@
-//! Screen swaps that should use routes.
+//! Screen swaps and projected route titles.
 
-use super::warnings::warned;
+use super::warnings::{route, warned};
 
 const SCREEN: &str = "lower-screen-by-state";
 
@@ -335,4 +335,110 @@ fn a_swap_inside_a_route_is_named_and_the_routes_are_not() {
     );
     // Screens that are routes: quiet.
     assert_eq!(warned(&stack(LIST)), []);
+}
+
+#[test]
+fn a_title_wrapper_with_bar_controls_keeps_the_avatar_warning() {
+    let source = |header: &str| {
+        format!(
+            "style Avatar\n  background-color=\"-exact-system-blue\"\nstyle Hidden\n  display=\"none\"\nstyle Shown\n  display=\"flex\"\nstyle Dot\n  width=7\n  height=7\n  background-color=\"-exact-system-blue\"\nstyle Cleared\n  width=7\n  height=7\n  background-color=\"\"\n{}",
+            route(header)
+        )
+    };
+    let group = "  row\n    box class=Avatar\n      text \"AL\"\n    text \"Ada\" role=\"heading\"";
+    for control in [
+        "button press=go\n  text \"More\"",
+        "column\n  button press=go\n    text \"More\"",
+        "button class=Hidden display=\"flex\" press=go\n  text \"More\"",
+        "input type=\"search\" value=q",
+        "row role=\"tablist\"\n  button role=\"tab\" aria-selected=true press=go\n    text \"All\"",
+        "text \"Live\" role=\"status\"",
+        "text \" \" role=\"status\"",
+        "image \"symbol:checkmark\" role=\"status\"",
+        "view role=\"status\" class=Dot",
+        "view role=\"status\" class=(q == \"\" ? Dot : Dot)",
+        "view role=\"status\" class=Dot width=\"7px\" background-color=\"transparent\"",
+        "row role=\"status\"\n  view class=Dot",
+        "row role=\"status\" class=Cleared width=\"auto\"\n  text \"Live\"",
+        "row role=\"status\"\n  text \"Live\" class=Hidden display=\"flex\"",
+        "row role=\"status\"\n  text \"\"\n  view class=Dot",
+    ] {
+        let control: String = control
+            .lines()
+            .map(|line| format!("    {line}\n"))
+            .collect();
+        let src = source(&format!("{group}\n{control}"));
+        assert_eq!(
+            warned(&src),
+            [(
+                "lower-header-unplaced".into(),
+                line_of(&src, "box class=Avatar")
+            )],
+            "{src}"
+        );
+    }
+    for header in [
+        // A control outside the title's group does not disqualify it.
+        format!("{group}\n  button press=go\n    text \"More\""),
+        // An inner wrapper can qualify even when its ancestor contains a bar item.
+        format!("  row\n{}\n    button press=go\n      text \"More\"", group.lines().map(|line| format!("  {line}")).collect::<Vec<_>>().join("\n")),
+        // A tapped title chooses its pressable group directly.
+        format!("{}\n    button press=go\n      text \"More\"", group.replacen("  row", "  row press=go", 1)),
+        group.replacen("  row\n", "  row\n    view role=\"status\"\n", 1),
+        format!("{group}\n    button press=go display=\"none\"\n      text \"More\""),
+        format!("{group}\n    button class=Hidden press=go\n      text \"More\""),
+        // Conditional and computed controls retain the compiler's uncertainty.
+        format!("{group}\n    if q != \"\"\n      button press=go\n        text \"More\""),
+        format!("{group}\n    button press=go display=(q == \"\" ? \"none\" : \"flex\")\n      text \"More\""),
+        format!("{group}\n    button class=(q == \"\" ? Hidden : Shown) press=go\n      text \"More\""),
+        format!("{group}\n    text \"Live\" role=(q == \"\" ? \"status\" : \"note\")"),
+    ] {
+        let src = source(&header);
+        assert_eq!(warned(&src), [], "{src}");
+    }
+    // A status without a ChipFace is not apart from the title's wrapper.
+    for status in [
+        "view role=\"status\"",
+        "row role=\"status\"\n  view",
+        "row role=\"status\"\n  text \"\"\n  view class=Dot width=0",
+        "text \"\" role=\"status\"",
+        "view role=\"status\" class=Cleared",
+        "view role=\"status\" class=Dot background-color=\"unset\"",
+        "view role=\"status\" class=Dot background-color=\"\"",
+        "view role=\"status\" class=Avatar",
+        "view role=\"status\" class=Dot width=0",
+        "view role=\"status\" class=Dot height=0",
+        "view role=\"status\" class=Dot height=\"\"",
+        "view role=\"status\" class=Dot width=\"25%\"",
+        "view role=\"status\" width=7 height=7 background-image=\"linear-gradient(white, black)\"",
+        "image \"symbol:\" role=\"status\"",
+        "image \"symbol:sf/\" role=\"status\"",
+        "image \"assets/avatar.png\" role=\"status\"",
+        "row role=\"status\"\n  text \"Hidden\" display=\"none\"",
+        "row role=\"status\"\n  view class=Hidden\n    text \"Hidden\"",
+        "row role=\"status\"\n  image \"symbol:checkmark\" class=Hidden",
+        // Unresolved contents or paint cannot establish a separate readout.
+        "text q role=\"status\"",
+        "row role=\"status\"\n  if q != \"\"\n    text \"Live\"",
+        "view role=\"status\" class=(q == \"\" ? Dot : Cleared)",
+        "view role=\"status\" class=Dot background-color=(q == \"\" ? \"\" : \"-exact-system-blue\")",
+    ] {
+        let status: String = status.lines().map(|line| format!("    {line}\n")).collect();
+        let src = source(&format!("{group}\n{status}"));
+        assert_eq!(warned(&src), [], "{src}");
+    }
+    for title in [
+        "text \"No heading\"",
+        "text \"A\" role=\"heading\"\n    text \"B\" role=\"heading\"",
+    ] {
+        let src = source(&format!(
+            "  row\n    box class=Avatar\n      text \"AL\"\n    {title}\n    view role=\"status\""
+        ));
+        assert!(
+            warned(&src)
+                .iter()
+                .any(|(id, _)| id == "lower-header-no-bar"),
+            "{src}"
+        );
+    }
 }
