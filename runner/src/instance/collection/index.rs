@@ -113,6 +113,8 @@ pub(crate) struct SizeIndex {
     /// And before its first row: the range starts this far before the
     /// rows' start, so a short list's end can be there.
     leading: f64,
+    /// The platform's coverage at the port's start: anchor below this band.
+    covered_start: f64,
     #[cfg(test)]
     rebuilds: usize,
     #[cfg(test)]
@@ -142,6 +144,7 @@ impl SizeIndex {
             next_generation: 0,
             trailing: 0.0,
             leading: 0.0,
+            covered_start: 0.0,
             #[cfg(test)]
             rebuilds: 0,
             #[cfg(test)]
@@ -395,6 +398,11 @@ impl SizeIndex {
         self.leading
     }
 
+    /// Start coverage sanitized by `Tree::set_list_covered`.
+    pub(crate) fn set_covered_start(&mut self, covered: f64) {
+        self.covered_start = covered;
+    }
+
     /// First row whose bottom is strictly after `offset`; zero-height prefixes
     /// are skipped in O(log N). At/past total height there is no containing row.
     pub(crate) fn row_at(&self, offset: f64) -> Result<Option<usize>, IndexError> {
@@ -595,8 +603,8 @@ impl SizeIndex {
 
     /// O(log N), no key copy. `follow_end` opts into following only if the clamped
     /// offset is at the end of a nonzero scrollport within host rounding tolerance.
-    /// Otherwise preserve the first visible key's top relative to the scrollport
-    /// (even if it shrinks), unless the offset is at the start: there, as CSS
+    /// Otherwise preserve the first key clear of the platform's start band,
+    /// relative to the scrollport (even if it shrinks), unless at the start: as CSS
     /// scroll anchoring selects no anchor at a zero offset (Chrome's
     /// `ScrollAnchor`), the list stays at its start and rows inserted above
     /// show (mail F8: a mail list's newest message, a row Undo puts back).
@@ -625,20 +633,25 @@ impl SizeIndex {
         let max = self.max_offset(viewport);
         let at = raw.min(max).max(-self.leading);
         let follows_end = follow_end && viewport > 0.0 && max - at < END_SLACK;
+        // Only scrollTop 0, at the start of the leading padding, suppresses
+        // anchoring. Else choose the first row clear of the platform's band;
+        // keep the old row when the band reaches past the rows' end.
         // An end it follows wins: a short transcript is at both edges.
-        let mut row = if offset <= 0.0 && !follows_end {
+        let mut row = if at <= -self.leading && !follows_end {
             None
         } else {
-            self.tree.find(offset, false)
+            self.tree
+                .find((at + self.covered_start).max(0.0), false)
+                .or_else(|| self.tree.find(offset, false))
         };
-        let mut within = row.map_or(0.0, |i| (offset - self.tree.prefix(i)).max(0.0));
+        let mut within = row.map_or(0.0, |i| at - self.tree.prefix(i));
         if !follows_end && row.is_some_and(|i| self.key(i) == excluded) {
             let next = self.tree.prefix(row.unwrap() + 1);
             row = self
                 .tree
                 .find(next, false)
-                .filter(|&i| self.tree.prefix(i) < offset + viewport);
-            within = row.map_or(offset, |i| offset - self.tree.prefix(i));
+                .filter(|&i| self.tree.prefix(i) < at + viewport);
+            within = row.map_or(at, |i| at - self.tree.prefix(i));
         }
         Ok(Anchor {
             order: Rc::clone(&self.order),

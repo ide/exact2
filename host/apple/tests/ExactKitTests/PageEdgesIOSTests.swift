@@ -236,6 +236,60 @@ final class PageEdgesIOSTests: XCTestCase {
         }
     }
 
+    func testCheckClipsCardsAtTheListsOwnControlBars() throws {
+        guard UIApplication.shared.connectedScenes.first is UIWindowScene else { throw missing("scene", "control bars require a scene window") }
+        guard #available(iOS 26.0, *) else { throw XCTSkip("control bars require iOS 26") }
+        let (session, _) = try fixture("CONTROL_BARS")
+        let agent = Agent(session: session)
+        func cards() throws -> [[String: Any]] {
+            let items = try XCTUnwrap(agent.check([:])["items"] as? [[String: Any]])
+            return items.filter { ($0["text"] as? String)?.hasPrefix("Card ") == true }
+        }
+        func box(_ item: [String: Any]) throws -> CGRect {
+            CGRect(x: try XCTUnwrap(item["x"] as? Double), y: try XCTUnwrap(item["y"] as? Double),
+                   width: try XCTUnwrap(item["w"] as? Double), height: try XCTUnwrap(item["h"] as? Double))
+        }
+        for (shape, top) in [("board", true), ("chat", false)] {
+            session.presenter.press(try node(session, "pick-\(shape)").id)
+            let list = try node(session, "list"), sv = try XCTUnwrap(list.scrollView)
+            until("the control bar covers the list") { top ? list.pageBand.top > 0 : list.pageBand.bottom > 0 }
+            let clear = sv.convert(sv.bounds.inset(by: list.pageBand), to: nil)
+            let edge = top ? clear.minY : clear.maxY
+            // Put a card across the band edge so partial clipping is exercised on every device.
+            let card = try XCTUnwrap(session.presenter.views.values.first {
+                $0.isDescendant(of: sv) && $0.isParagraph && $0.paragraphSpec().runs.map(\.text).joined().hasPrefix("Card 15:")
+            })
+            let b = card.convert(card.bounds, to: nil)
+            sv.contentOffset.y += (top ? b.minY + 1 : b.maxY - 1) - edge
+            let observed = try cards()
+            let physical = sv.convert(sv.bounds, to: nil)
+            // Check full visibility clear of UIKit's navigation bar as well as the list's own band
+            let content = clear.intersection(sv.convert(sv.bounds.inset(by: sv.adjustedContentInset), to: nil))
+            var hidden = 0, crossing = 0, uncovered = 0
+            for item in observed {
+                let b = try box(item)
+                // `vis` is omitted when the whole box is presented.
+                let shown = try box(item["vis"] as? [String: Any] ?? item)
+                if top ? b.maxY <= edge && b.minY >= physical.minY : b.minY >= edge && b.maxY <= physical.maxY {
+                    hidden += 1
+                    XCTAssertEqual(shown.height, 0, "a card wholly under the \(shape) bar: \(item)")
+                } else if b.minY < edge - 0.5 && b.maxY > edge + 0.5 {
+                    crossing += 1
+                    XCTAssertGreaterThan(shown.height, 0)
+                    XCTAssertLessThan(shown.height, b.height)
+                    XCTAssertEqual(top ? shown.minY : shown.maxY, edge, accuracy: 0.5)
+                } else if b.minY > content.minY && b.maxY < content.maxY {
+                    uncovered += 1
+                    XCTAssertEqual(shown.minY, b.minY, accuracy: 0.5)
+                    XCTAssertEqual(shown.height, b.height, accuracy: 0.5)
+                }
+            }
+            XCTAssertGreaterThan(hidden, 0, "a card inside the \(shape) band's physical port")
+            XCTAssertGreaterThan(crossing, 0, "a card crosses the \(shape) band's edge")
+            XCTAssertGreaterThan(uncovered, 0, "cards clear of the \(shape) bar remain visible")
+        }
+    }
+
     /// A transcript in a box over a composer its author filled: the composer is no bar, so
     /// the rows stop above it, and the top still runs under the inline bar, as a hand-built
     /// table under its navigation bar does whatever is pinned under it (bake-off r28's chat).

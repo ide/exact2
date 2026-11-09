@@ -110,6 +110,21 @@ extension CollectionHost {
         node.layoutIfNeeded()
         return [Double(scroll.adjustedContentInset.top - node.pageBand.top), Double(scroll.adjustedContentInset.left)]
     }
+    /// A fling the finger has left stops where it is, for a correction to
+    /// `top`. UIKit's spring back from past an edge to that same edge goes
+    /// on: a reader who pulled past the end a list follows is brought back
+    /// by the platform's rubber band, which lands where the correction does.
+    func stopMomentum(_ id: UInt32, toward top: Double) {
+        guard let node = presenter?.views[id], let scroll = node.scroll, scroll.isDecelerating, !scroll.isTracking else { return }
+        let horizontal = entries[id]?.snapshot.horizontal ?? false
+        let (target, reach) = destination(node, scroll, top: top, content: node.contentBox(), insets: scroll.adjustedContentInset, horizontal: horizontal)
+        let at = horizontal ? scroll.contentOffset.x : scroll.contentOffset.y, to = horizontal ? target.x : target.y
+        if at > reach.upperBound, to >= reach.upperBound - 0.5 { return }
+        if at < reach.lowerBound, to <= reach.lowerBound + 0.5 { return }
+        scroll.setContentOffset(scroll.contentOffset, animated: false)
+        // Reports after the stop must not carry the fling's sampled velocity.
+        presenter?.scrollPump.forgetTravel(id)
+    }
     /// The port back at `top` (`geometry`'s offset), within what it can
     /// reach, unless the reader or a smooth correction is moving it.
     func keepStart(_ id: UInt32, at top: Double) {
@@ -195,16 +210,30 @@ extension CollectionHost {
     }
     /// The content size the list's extent needs.
     private func fit(_ node: NodeView, _ scroll: UIScrollView, extent: Double) {
-        let content = node.contentBox()
-        if entries[node.id]?.snapshot.horizontal ?? false {
-            let right = node.layoutBounds.width - content.maxX
-            let width = max(scroll.bounds.width, PixelGrid.length(max(CGFloat(extent) + content.minX + right, node.content.width), from: node.grid?.origin ?? .zero, vertical: false, scale: presenter?.gridScale ?? 1))
+        let horizontal = entries[node.id]?.snapshot.horizontal ?? false
+        let along = length(node, extent: extent, horizontal: horizontal)
+        if horizontal {
+            let width = max(scroll.bounds.width, PixelGrid.length(along, from: node.grid?.origin ?? .zero, vertical: false, scale: presenter?.gridScale ?? 1))
             if scroll.contentSize.width != width { scroll.contentSize.width = width }
         } else {
-            let bottom = node.layoutBounds.height - content.maxY
-            let height = max(node.scrollFloor(scroll), PixelGrid.length(max(CGFloat(extent) + content.minY + bottom, node.content.height), from: node.grid?.origin ?? .zero, vertical: true, scale: presenter?.gridScale ?? 1))
+            let height = max(node.scrollFloor(scroll), PixelGrid.length(along, from: node.grid?.origin ?? .zero, vertical: true, scale: presenter?.gridScale ?? 1))
             if scroll.contentSize.height != height { scroll.contentSize.height = height }
         }
+    }
+    /// A list's scroll content along its axis: its rows' extent inside the
+    /// content box's padding, or what is laid out where that is longer.
+    private func length(_ node: NodeView, extent: Double, horizontal: Bool) -> CGFloat {
+        let content = node.contentBox()
+        if horizontal { return max(CGFloat(extent) + content.minX + node.layoutBounds.width - content.maxX, node.content.width) }
+        return max(CGFloat(extent) + content.minY + node.layoutBounds.height - content.maxY, node.content.height)
+    }
+    /// The content a list's scroller is sized by (`NodeView.fitScroll`), as
+    /// long as `fit` makes it: a geometry replay's shorter laid-out content
+    /// would otherwise cut the list's end, and the cut clamps a rubber band.
+    func scrollContent(_ node: NodeView) -> CGSize? {
+        guard let entry = entries[node.id] else { return nil }
+        let horizontal = entry.snapshot.horizontal, along = length(node, extent: entry.snapshot.extent, horizontal: horizontal)
+        return horizontal ? CGSize(width: along, height: node.content.height) : CGSize(width: node.content.width, height: along)
     }
     /// A smooth correction's target that arrived while one was animating.
     func landAnimation(_ id: UInt32) {
@@ -293,19 +322,20 @@ extension CollectionHost {
         offsetDrivers[id] = driver
         driver.start()
     }
-    /// UIKit's batch-update and scroll timing, which Signal's transcript rides.
+    /// UIKit's scroll animation timing, which Signal's transcript rides; a
+    /// batch update's motion is a spring (`batchMotion`).
     static let smoothDuration: TimeInterval = 0.3
-    func correct(_ id: UInt32, top: Double, extent: Double, smooth: Bool = false, authored: Bool = false) {
+    /// `start`: where the port was when the batch began (`geometry`'s offset).
+    func correct(_ id: UInt32, top: Double, extent: Double, smooth: Bool = false, authored: Bool = false, from start: Double? = nil) {
         guard let node = presenter?.views[id], let scroll = node.scroll else { return }
         let content = node.contentBox(), insets = scroll.adjustedContentInset
         let horizontal = entries[id]?.snapshot.horizontal ?? false
         fit(node, scroll, extent: extent)
-        // UIKit owns dragging/deceleration. An authored position is not
-        // permission to interrupt that animation with setContentOffset (an
-        // anchor's correction moves with it instead: `shift`). The next
-        // native offset notification supplies the continuing intent.
-        // A `scrollIntoView`'s correction is the exception, as UIKit's own
-        // `scrollToItem` is (LLP 1070.000 §2.6): `setContentOffset(_:animated:
+        // Ordinary corrections leave native motion to UIKit; an eligible
+        // absolute intent stops a fling first (`stopMomentum`), while an
+        // anchor moves with it (`shift`). A `scrollIntoView`'s correction is
+        // the exception, as UIKit's `scrollToItem` is (LLP 1070.000 §2.6):
+        // `setContentOffset(_:animated:
         // false)` ends a deceleration and lands, and a finger down drags on
         // from there.
         let moving = scroll.isTracking || scroll.isDragging || scroll.isDecelerating
@@ -333,17 +363,7 @@ extension CollectionHost {
                 else { scroll.setContentOffset(scroll.contentOffset, animated: false) }
             }
         }
-        var target: CGPoint
-        if horizontal {
-            let maximum = max(-insets.left, scroll.contentSize.width + insets.right - scroll.bounds.width)
-            target = CGPoint(x: min(maximum, max(-insets.left, CGFloat(top) + content.minX - insets.left)),
-                y: scroll.contentOffset.y)
-        } else {
-            let maximum = max(-insets.top, scroll.contentSize.height + insets.bottom - scroll.bounds.height)
-            target = CGPoint(x: scroll.contentOffset.x,
-                y: min(maximum, max(-insets.top, CGFloat(top) + content.minY - insets.top + node.pageBand.top)))
-        }
-        target = Self.reachable(target, in: scroll)
+        let target = destination(node, scroll, top: top, content: content, insets: insets, horizontal: horizontal).target
         // A smooth correction is UIKit's scroll animation (LLP 1070.000
         // §6.2): the window is already built at the destination; rows in
         // between are not (§11 declares it). Under the agent's frozen clock
@@ -354,6 +374,28 @@ extension CollectionHost {
             stopAnimation(id)
             scroll.setContentOffset(target, animated: false)
             return
+        }
+        if animate, !animating.contains(id), let start, UIView.inheritedAnimationDuration == 0 {
+            // Content that shrank under the port (a row removed at a followed
+            // end) had UIKit pull the offset in at once (`setContentSize:`).
+            // The port lands there, and its layer moves from where it showed
+            // as a collection view's batch update moves it: an additive
+            // animation of the difference, which later batches move under
+            // without stopping it. Animating the offset with `UIView.animate`
+            // would write the old model position again and report that write
+            // as reader travel. An exit moves its rows instead (`rideRemoval`).
+            // Inside an enclosing animation, such as the keyboard's, the
+            // offset already follows that animation.
+            var shown = target
+            if horizontal { shown.x = CGFloat(start) - insets.left + content.minX } else { shown.y = CGFloat(start) - insets.top + node.pageBand.top + content.minY }
+            let gap = horizontal ? shown.x - target.x : shown.y - target.y
+            if gap > 0.5, abs(scroll.contentOffset.x - target.x) + abs(scroll.contentOffset.y - target.y) < 0.5 {
+                if scroll.contentOffset != target { scroll.setContentOffset(target, animated: false) }
+                if riding.contains(id) { return }
+                // Its own key: one already running goes on, and the two add up
+                scroll.layer.add(Self.batchMotion(horizontal ? "bounds.origin.x" : "bounds.origin.y", from: gap), forKey: "followed-end-\(CACurrentMediaTime())")
+                return
+            }
         }
         if animate {
             // On its way or at rest: one motion from what shows, retargeted
@@ -369,6 +411,77 @@ extension CollectionHost {
         }
         guard scroll.contentOffset != target else { return }
         scroll.setContentOffset(target, animated: false)
+    }
+    /// Where a correction to `top` puts the port, and the offsets along the
+    /// list's axis it is clamped to.
+    private func destination(_ node: NodeView, _ scroll: UIScrollView, top: Double, content: CGRect, insets: UIEdgeInsets,
+                             horizontal: Bool) -> (target: CGPoint, reach: ClosedRange<CGFloat>) {
+        if horizontal {
+            let reach = -insets.left...max(-insets.left, scroll.contentSize.width + insets.right - scroll.bounds.width)
+            let x = min(reach.upperBound, max(reach.lowerBound, CGFloat(top) + content.minX - insets.left))
+            return (Self.reachable(CGPoint(x: x, y: scroll.contentOffset.y), in: scroll), reach)
+        }
+        let reach = -insets.top...max(-insets.top, scroll.contentSize.height + insets.bottom - scroll.bounds.height)
+        let y = min(reach.upperBound, max(reach.lowerBound, CGFloat(top) + content.minY - insets.top + node.pageBand.top))
+        return (Self.reachable(CGPoint(x: scroll.contentOffset.x, y: y), in: scroll), reach)
+    }
+    /// An additive displacement on the collection batch-update spring:
+    /// a response of 0.3 s and no bounce.
+    private static func batchMotion(_ keyPath: String, from gap: CGFloat) -> CAAnimation {
+        let motion = CASpringAnimation(perceptualDuration: 0.3, bounce: 0)
+        motion.keyPath = keyPath
+        motion.fromValue = gap; motion.toValue = 0; motion.isAdditive = true
+        motion.duration = motion.settlingDuration
+        return motion
+    }
+    /// Whether this batch began the exit of one of the list's rows (a
+    /// deleted message fading in place); `began`: the exits under way before it.
+    func removes(_ id: UInt32, began: Set<UInt32>) -> Bool {
+        guard let presenter, let rows = entries[id]?.batchRows else { return false }
+        return presenter.leaving.keys.contains { !began.contains($0) && rows[$0] != nil }
+    }
+    /// Moves each row a removal shifted on the screen, the leaving ones too,
+    /// from where it showed to where it is, additively, as a collection
+    /// view's batch update moves them: rows after a removal at a followed
+    /// end stay put, and the rows before it come down over the gap with the
+    /// leaving row as it fades. A row the batch mounted moves as the row it
+    /// is nearest to. Inside an animation (the keyboard's) the rows already
+    /// ride that one.
+    func rideRemoval(_ id: UInt32) {
+        guard !DisplayPreferences.reducedMotion, !ExactEnv.agentFreezes, UIView.inheritedAnimationDuration == 0,
+              let presenter, let entry = entries[id], let scroll = presenter.views[id]?.scroll else { return }
+        let horizontal = entry.snapshot.horizontal, key = "removal-\(CACurrentMediaTime())"
+        let offset = horizontal ? scroll.contentOffset.x : scroll.contentOffset.y
+        var shown = Set<UInt32>(), moves: [(at: CGFloat, by: CGFloat)] = [], mounted: [(view: UIView, at: CGFloat)] = []
+        for row in entry.batchRows.keys + entry.snapshot.rows.map(\.view) where shown.insert(row).inserted {
+            guard let view = presenter.views[row] ?? presenter.leaving[row]?.view, view.isDescendant(of: scroll) else { continue }
+            let at = span(view, in: scroll, horizontal: horizontal).lowerBound - offset
+            guard let showed = entry.batchRows[row] else { mounted.append((view, at)); continue }
+            moves.append((at, showed - at))
+            if abs(showed - at) > 0.5 { view.layer.add(Self.batchMotion(horizontal ? "position.x" : "position.y", from: showed - at), forKey: key) }
+        }
+        for (view, at) in mounted {
+            guard let nearest = moves.min(by: { abs($0.at - at) < abs($1.at - at) }), abs(nearest.by) > 0.5 else { continue }
+            view.layer.add(Self.batchMotion(horizontal ? "position.x" : "position.y", from: nearest.by), forKey: key)
+        }
+    }
+    /// Model positions relative to the port, including rows still leaving.
+    /// Existing additive animations stay on the layers, so the next batch's
+    /// displacements compose with them.
+    func rowStarts(_ id: UInt32) -> [UInt32: CGFloat] {
+        guard let presenter, let entry = entries[id], let scroll = presenter.views[id]?.scroll else { return [:] }
+        let horizontal = entry.snapshot.horizontal, offset = horizontal ? scroll.contentOffset.x : scroll.contentOffset.y
+        var starts: [UInt32: CGFloat] = [:], parent: UIView?
+        for row in entry.snapshot.rows {
+            guard let view = presenter.views[row.view] else { continue }
+            starts[row.view] = span(view, in: scroll, horizontal: horizontal).lowerBound - offset
+            parent = view.superview
+        }
+        // A row still leaving lies beside the mounted ones
+        for (row, leaving) in presenter.leaving where parent != nil && leaving.view.superview === parent {
+            starts[row] = span(leaving.view, in: scroll, horizontal: horizontal).lowerBound - offset
+        }
+        return starts
     }
     /// A row's frame in the scroll view, as a range along the list's axis.
     private func span(_ view: UIView, in scroll: UIScrollView, horizontal: Bool) -> ClosedRange<CGFloat> {

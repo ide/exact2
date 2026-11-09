@@ -861,6 +861,7 @@ impl Tree {
             return false;
         };
         list.covered = covered.map(|n| if n.is_finite() { n.max(0.0) } else { 0.0 });
+        list.index.set_covered_start(list.covered[0]);
         true
     }
 

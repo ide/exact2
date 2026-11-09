@@ -1180,6 +1180,75 @@ fn relative_anchor_corrections_include_boundaries_but_exclude_clamping() {
     }
     let end = i.capture_anchor(500., 100., true).unwrap();
     assert!(!i.kept_row(&end, 100.));
-    let start = i.capture_anchor(0., 100., false).unwrap();
+    let start = i.capture_anchor(-20., 100., false).unwrap();
     assert!(!i.kept_row(&start, 100.));
+}
+
+#[test]
+fn a_port_in_leading_padding_anchors_with_a_signed_offset() {
+    let mut i = index(&[20.; 30]);
+    i.set_leading(150.);
+    let anchor = i.capture_anchor(-60., 100., false).unwrap();
+    assert!(i.kept_row(&anchor, 100.));
+    near(anchor.within, -60.);
+    let earlier = (0..10).map(|n| (Rc::from(format!("h{n}")), None)).collect();
+    i.splice_keys(0, 0, earlier).unwrap();
+    near(i.restore_anchor(&anchor, 100.).unwrap(), 40.);
+    let start = i.capture_anchor(-150., 100., false).unwrap();
+    assert!(!i.kept_row(&start, 100.));
+    let corrected = i.restore_anchor(&start, 100.).unwrap();
+    assert!(super::super::start::at_target(&start, corrected, -150., 0.));
+}
+
+#[test]
+fn excluding_a_row_in_leading_padding_anchors_only_a_visible_successor() {
+    for (port, moved, expected) in [(100., false, -60.), (100., true, -80.), (80., true, 0.)] {
+        let mut i = index(&[20.; 30]);
+        i.set_leading(150.);
+        let anchor = i
+            .capture_anchor_excluding(-60., port, false, Some("k0"))
+            .unwrap();
+        let mut order = keys(30);
+        if moved {
+            let source = order.remove(0);
+            order.insert(1, source);
+        }
+        i.replace_keys(order).unwrap();
+        near(i.restore_anchor(&anchor, port).unwrap(), expected);
+        assert_eq!(i.kept_row(&anchor, port), port == 100.);
+    }
+}
+
+#[test]
+fn growth_under_the_top_band_keeps_the_first_uncovered_row_in_place() {
+    let mut i = index(&[20.; 30]);
+    i.set_covered_start(136.);
+    let anchor = i.capture_anchor(100., 300., false).unwrap();
+    assert_eq!(anchor.row, Some(11));
+    near(anchor.within, -120.);
+    for (key, height) in [("k6", 31.), ("k12", 40.)] {
+        let token = i.measurement_token(key).unwrap();
+        assert!(i.set_measured_height(key, token, height).unwrap());
+        near(i.restore_anchor(&anchor, 300.).unwrap(), 111.);
+    }
+    i.set_covered_start(0.);
+    let anchor = i.capture_anchor(111., 300., false).unwrap();
+    assert_eq!(anchor.row, Some(5));
+    near(i.restore_anchor(&anchor, 300.).unwrap(), 111.);
+}
+
+#[test]
+fn coverage_keeps_overshoot_and_a_followed_end_when_no_row_is_clear() {
+    for covered in [60., 1000.] {
+        let mut i = index(&[100.; 4]);
+        i.set_covered_start(covered);
+        for follow in [false, true] {
+            let anchor = i.capture_anchor(269., 150., follow).unwrap();
+            near(i.restore_anchor(&anchor, 150.).unwrap(), 269.);
+            let token = i.measurement_token("k0").unwrap();
+            let height = i.height(0).unwrap() + 10.;
+            assert!(i.set_measured_height("k0", token, height).unwrap());
+            near(i.restore_anchor(&anchor, 150.).unwrap(), 279.);
+        }
+    }
 }
