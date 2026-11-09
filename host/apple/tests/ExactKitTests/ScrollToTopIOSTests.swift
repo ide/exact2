@@ -162,6 +162,23 @@ final class ScrollToTopIOSTests: XCTestCase {
         until("the second scroll's bound sets the size") { sv.contentSize.height == 1300 }
     }
 
+    /// A list's correction while the status bar's scroll to the top runs
+    /// writes no offset: UIKit owns that scroll, as it owns a drag, and its
+    /// end is the content's start however the rows above the port were
+    /// estimated. An unanimated offset write stops UIKit's scroll animation
+    /// where it lands (a UIKit-only app, iOS 27.0), which left Duo Lab's
+    /// 1,000 rows at row 27, two screens from the top.
+    func testAListsCorrectionLeavesTheScrollToTheTopToUIKit() throws {
+        let p = try mounted(), node = try XCTUnwrap(p.views[4]), sv = try XCTUnwrap(node.scroll)
+        let top = -sv.adjustedContentInset.top
+        sv.contentOffset.y = top + 300
+        XCTAssertTrue(node.scrollViewShouldScrollToTop(sv), "the status bar's tap scrolls to the top")
+        // A row above the port measured taller than its estimate: the runner keeps the port on its row
+        p.collections.correct(4, top: 320, extent: 1220)
+        XCTAssertEqual(sv.contentOffset.y, top + 300, accuracy: 0.5, "the correction writes no offset over UIKit's scroll")
+        XCTAssertEqual(sv.contentSize.height, 1220, "the correction's extent is the list's")
+    }
+
     /// A list sets its own content size, from its rows' extent
     /// (`CollectionHost.fit`): it waits as a scroller's does.
     func testAListsNewSizeWaitsAsAScrollersDoes() throws {

@@ -114,9 +114,10 @@ extension CollectionHost {
         return [Double(scroll.adjustedContentInset.top - node.pageBand.top), Double(scroll.adjustedContentInset.left)]
     }
     /// The port back at `top` (`geometry`'s offset), within what it can
-    /// reach, unless the reader or a smooth correction is moving it.
+    /// reach, unless the reader, UIKit's scroll to the top or a smooth
+    /// correction is moving it.
     func keepStart(_ id: UInt32, at top: Double) {
-        guard let node = presenter?.views[id], let scroll = node.scroll, !animating.contains(id),
+        guard let node = presenter?.views[id], let scroll = node.scroll, !animating.contains(id), node.toTopBegan == nil,
               !scroll.isTracking, !scroll.isDragging, !scroll.isDecelerating else { return }
         let content = node.contentBox(), i = scroll.adjustedContentInset
         var target = scroll.contentOffset
@@ -305,15 +306,18 @@ extension CollectionHost {
         let content = node.contentBox(), insets = scroll.adjustedContentInset
         let horizontal = entries[id]?.snapshot.horizontal ?? false
         fit(node, scroll, extent: extent)
-        // UIKit owns dragging/deceleration. An authored position is not
-        // permission to interrupt that animation with setContentOffset (an
-        // anchor's correction moves with it instead: `shift`). The next
-        // native offset notification supplies the continuing intent.
+        // UIKit owns dragging/deceleration, and its scroll to the top (the
+        // status bar's tap, `toTopBegan`), whose end is the content's start
+        // however the rows above the port were estimated. An authored
+        // position is not permission to interrupt that animation with
+        // setContentOffset (an anchor's correction moves with it instead:
+        // `shift`). The next native offset notification supplies the
+        // continuing intent.
         // A `scrollIntoView`'s correction is the exception, as UIKit's own
         // `scrollToItem` is (LLP 1070.000 §2.6): `setContentOffset(_:animated:
         // false)` ends a deceleration and lands, and a finger down drags on
         // from there.
-        let moving = scroll.isTracking || scroll.isDragging || scroll.isDecelerating
+        let moving = scroll.isTracking || scroll.isDragging || scroll.isDecelerating || node.toTopBegan != nil
         guard authored || !moving else { return }
         // Under Reduce Motion a smooth correction lands at once, as an
         // element's reveal does (LLP 1070.000 §14)
