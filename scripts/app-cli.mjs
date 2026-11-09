@@ -23,6 +23,24 @@ export function compilerWarnings(text, cwd = process.cwd()) {
   return [...lines];
 }
 
+/** The failed web compiler's diagnostics. A Contract refusal keeps its related locations and excerpt intact. */
+export function webBuildFailure(text) {
+  const output = (text ?? '').trim().split('\n');
+  const refusal = output.findIndex(l => /^\S.*:\d+:\d+ \[[a-z][\w-]*\] /.test(l));
+  const before = refusal < 0 ? output : output.slice(0, refusal);
+  const compiler = compilerWarnings(before.join('\n'));
+  const ambientDiagnostic = l => /^.+:\d+:\d+: .+ is unavailable in data sources[;:]/.test(l);
+  const all = before.filter(l => ambientDiagnostic(l) || !/^\s*(Compiling|Finished|Running)/.test(l) && !compilerWarnings(l).length);
+  const warnings = all.filter(l => !ambientDiagnostic(l) && /^warning: /.test(l)), lines = all.filter(l => ambientDiagnostic(l) || !/^\s*warning/.test(l));
+  // Keep TypeScript, ambient, package and tool diagnostics ahead of Bun's trace.
+  const packageRefusal = l => / (?:imports Node's built-in|uses the DOM's|uses Node's|loads a module by a computed name|loads code from a string|uses the page's)|, (?:which is not installed|a native addon|which the checked capture did not resolve)|: not an npm package name and version| must be a constant the build reads without running|^(?:Error: )?two copies of /.test(l);
+  const message = lines.filter(l => /^(error|[A-Z]\w*Error|E[A-Z]+)\b:?/.test(l.trim()) || /\): error TS\d+:|^(?:Error: )?(?:tsconfig: |module outside captured app: |source links are not captured: )|^note: /.test(l) || ambientDiagnostic(l) || packageRefusal(l) || /\bunoptimized$|\bnot on PATH\b|import\.meta\.env/.test(l))
+    .map(l => l.replace(/^Error: (?=module outside captured app: )/, ''));
+  const reason = (refusal >= 0 ? [...message, ...output.slice(refusal)] : message.length ? message : lines.slice(-3)).join('\n');
+  const types = all.filter(l => /^app\.contract\.d\.ts: /.test(l));
+  return [...types, ...warnings, reason, ...compiler].join('\n');
+}
+
 /** A drive's lines for the compiler's `warnings` (`compilerWarnings`) of the app in `dir` built for `host`: the
  * warnings no build of it said before, each in full, then one line counting them all and naming the file that lists
  * them, `.exact/warnings-<host>.txt`, which this replaces. A drive repeated over unchanged warnings says the count

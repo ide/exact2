@@ -278,7 +278,7 @@ function fixedSize(value) {
   return sizes.length ? Math.max(...sizes) : null;
 }
 
-/** Each fixed font size in one `.contract` source: `{ line, column, tag, value, size, testId }`, `testId` the node's literal one. */
+/** Each fixed font size in one `.contract` source: `{ line, column, tag, value, size, testId }`. */
 export function fixedSizesIn(source) {
   const text = withoutTheme(uncomment(source)), rows = text.split('\n'), lines = source.split('\n'), heads = nodeHeads(rows), found = [];
   const lineStarts = [0];
@@ -290,18 +290,59 @@ export function fixedSizesIn(source) {
     if (/\/\/\s*no-tells:\s*\S/.test(lines[line - 1] ?? '') || CONTROL_TAGS.has(tag)) continue;
     const size = fixedSize(value);
     if (size == null) continue;
-    let testId = null;
-    for (let i = head; i < rows.length && (i === head || heads[i] === head) && testId == null; i++) testId = /(?:^|\s)testId=(?:"([^"]*)"|`([^`$]*)`)/.exec(rows[i])?.slice(1).find((v) => v != null) ?? null;
-    found.push({ line, column, tag, value, size, testId });
+    found.push({ line, column, tag, value, size, testId: testIdOf(rows, heads, head) });
   }
   return found;
 }
 
-/** A node's literal `testId`, read from its head line and the attribute lines under it. */
+/** A node's `testId`: a literal, or a template's nonempty literal prefix followed by `*` for `verify.accept`. */
 function testIdOf(rows, heads, head) {
   for (let i = head; i < rows.length && (i === head || heads[i] === head); i++) {
-    const id = /(?:^|\s)testId=(?:"([^"]*)"|`([^`$]*)`)/.exec(rows[i])?.slice(1).find((v) => v != null);
-    if (id != null) return id;
+    const tokens = /["`]|(?:^|\s)testId=(?=["`])/g;
+    let m;
+    while ((m = tokens.exec(rows[i]))) {
+      if (m[0].endsWith('=')) { return literalId(rows[i].slice(tokens.lastIndex)); }
+      tokens.lastIndex = quotedEnd(rows[i], m.index);
+    }
+  }
+  return null;
+}
+
+/** Skip strings and nested template expressions as contract/syntax/src/lexer.rs does. */
+function quotedEnd(text, start) {
+  const quote = text[start];
+  for (let i = start + 1; i < text.length; i++) {
+    if (text[i] === '\\') { i++; continue; }
+    if (text[i] === quote) { return i + 1; }
+    if (quote !== '`' || !text.startsWith('${', i)) { continue; }
+    let depth = 1;
+    for (i += 2; i < text.length && depth; i++) {
+      if (text[i] === '\\') { i++; }
+      else if (text[i] === '"' || text[i] === '`') { i = quotedEnd(text, i) - 1; }
+      else if (text[i] === '{') { depth++; }
+      else if (text[i] === '}') { depth--; }
+    }
+    i--;
+  }
+  return text.length;
+}
+
+/** A quoted ID's literal text up to its first interpolation, with Contract escapes decoded. */
+function literalId(value) {
+  let id = '';
+  for (let i = 1; i < value.length; i++) {
+    if (value[i] === value[0]) { return id; }
+    if (value[0] === '`' && value.startsWith('${', i)) { return id ? `${id}*` : null; }
+    if (value[i] !== '\\') { id += value[i]; continue; }
+    const m = /^\\(?:u(?:\{([\da-fA-F]{1,6})\}|([\da-fA-F]{4}))|([nt"\\`$]))/.exec(value.slice(i));
+    if (!m) { return null; }
+    const hex = m[1] ?? m[2];
+    if (hex != null) {
+      const code = parseInt(hex, 16);
+      if (code > 0x10ffff || code >= 0xd800 && code <= 0xdfff) { return null; }
+      id += String.fromCodePoint(code);
+    } else { id += m[3] === 'n' ? '\n' : m[3] === 't' ? '\t' : m[3]; }
+    i += m[0].length - 1;
   }
   return null;
 }
