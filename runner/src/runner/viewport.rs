@@ -84,12 +84,14 @@ impl<D: DataSource> Runner<D> {
         }
         let previous = self.viewport;
         self.viewport = viewport;
+        self.ids.bootstrap_extent = Some(viewport.width.max(viewport.height));
         let which = (0..self.plan.resources.len())
             .filter(|i| self.plan.str(self.plan.resources[*i].source) == SOURCE)
             .collect();
         let result = self.recommit(which, why);
         if result.is_err() {
             self.viewport = previous;
+            self.ids.bootstrap_extent = Some(previous.width.max(previous.height));
         }
         result
     }

@@ -387,7 +387,7 @@ fn tall_estimate_bounds_bootstrap_and_actual_measurements_replace_it() {
         "/",
     )
     .unwrap();
-    assert_eq!(r.collections()[0].rows.len(), 2);
+    assert_eq!(r.collections()[0].rows.len(), 3, "ceil(844 / 400)");
     assert_eq!(r.collections()[0].total_extent, 10_000_000.0);
     let queries = r.data_ref().queries;
     let initial = feedback(&r, 0.0);

@@ -39,7 +39,7 @@ impl<D: DataSource> Runner<D> {
         if self.poisoned {
             return Err(RunnerError::Poisoned);
         }
-        let mut ids = Ids::default();
+        let mut ids = Ids::for_viewport(self.viewport);
         let mut u = Update::new(self.env(&[], &[]), &self.sites, &mut ids);
         u.fonts = Some(self.fonts.clone());
         Ok(self

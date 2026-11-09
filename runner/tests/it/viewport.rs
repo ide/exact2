@@ -307,3 +307,174 @@ fn deferred_mutations_are_counted_when_the_source_activates() {
         "activation does not resend a settled write"
     );
 }
+
+const COLLECTION_SOURCE: &str = r#"component App
+  state showing = true
+  action toggle
+    showing = !showing
+  view
+    column
+      if showing
+        list virtualized=true height=900 estimated-item-height=100 scroll-start="end"
+          for row in range(1000) key=row
+            text `${row}` height=100 width=100 flex-shrink=0
+"#;
+
+fn boot_collection(source: &str, viewport: Viewport) -> Runner<()> {
+    Runner::boot(
+        contract::compile(source).unwrap(),
+        (),
+        Kernel::with_monospace(),
+        viewport,
+        "/",
+    )
+    .unwrap()
+}
+
+fn collection_rows(runner: &Runner<()>) -> Vec<usize> {
+    runner.collections()[0]
+        .rows
+        .iter()
+        .map(|row| row.index)
+        .collect()
+}
+
+#[test]
+fn collection_bootstrap_uses_each_runners_viewport_in_its_first_commit() {
+    for horizontal in [false, true] {
+        let source = if horizontal {
+            COLLECTION_SOURCE.replace(
+                "estimated-item-height=100",
+                "display=\"flex\" flex-direction=\"row\" estimated-item-width=100",
+            )
+        } else {
+            COLLECTION_SOURCE.to_string()
+        };
+        let mut small = boot_collection(&source, Viewport::sized(200., 300.));
+        let mut large = boot_collection(&source, Viewport::sized(900., 200.));
+        assert_eq!(collection_rows(&small), (997..1000).collect::<Vec<_>>());
+        assert_eq!(collection_rows(&large), (991..1000).collect::<Vec<_>>());
+        for runner in [&mut small, &mut large] {
+            assert_eq!(runner.kernel().epoch(), 1, "bootstrap must use one commit");
+            let snapshot = &runner.collections()[0];
+            assert_eq!(
+                snapshot.axis,
+                if horizontal {
+                    exact_runner::ListAxis::Horizontal
+                } else {
+                    exact_runner::ListAxis::Vertical
+                }
+            );
+            assert_eq!(snapshot.correction.unwrap().offset, 100_000.);
+            runner.act("toggle", vec![]).unwrap();
+            assert!(runner.collections().is_empty());
+        }
+        large.act("toggle", vec![]).unwrap();
+        small.act("toggle", vec![]).unwrap();
+        assert_eq!(collection_rows(&large), (991..1000).collect::<Vec<_>>());
+        assert_eq!(collection_rows(&small), (997..1000).collect::<Vec<_>>());
+    }
+}
+
+#[test]
+fn collection_bootstrap_keeps_its_bounds_and_authored_initial_count() {
+    for (extent, count) in [(1., 1), (901., 10), (50_000., 16)] {
+        let runner = boot_collection(COLLECTION_SOURCE, Viewport::sized(extent, extent));
+        assert_eq!(
+            collection_rows(&runner),
+            (1000 - count..1000).collect::<Vec<_>>()
+        );
+        assert!(runner.kernel().live_count() <= 2 + 2 * count + 2);
+    }
+    for count in [1, 23, 64] {
+        let source = COLLECTION_SOURCE.replace(
+            "virtualized=true",
+            &format!("virtualized=true initial-item-count={count}"),
+        );
+        let runner = boot_collection(&source, Viewport::sized(200., 900.));
+        assert_eq!(
+            collection_rows(&runner),
+            (1000 - count..1000).collect::<Vec<_>>()
+        );
+    }
+    let short = COLLECTION_SOURCE.replace("range(1000)", "range(2)");
+    let runner = boot_collection(&short, Viewport::sized(200., 900.));
+    assert_eq!(collection_rows(&runner), [0, 1]);
+}
+
+#[test]
+fn collection_bootstrap_resize_affects_new_lists_and_replacement_uses_its_own_viewport() {
+    let mut runner = boot_collection(COLLECTION_SOURCE, Viewport::sized(200., 300.));
+    let first = runner.collections();
+    assert!(runner.set_viewport(200., 900.).unwrap().is_none());
+    assert_eq!(
+        runner.collections(),
+        first,
+        "existing rows await port feedback"
+    );
+    runner.act("toggle", vec![]).unwrap();
+    runner.act("toggle", vec![]).unwrap();
+    assert_eq!(collection_rows(&runner), (991..1000).collect::<Vec<_>>());
+    for (width, height) in [(f64::NAN, 100.), (100., 0.), (f64::INFINITY, 100.)] {
+        assert!(runner.set_viewport(width, height).is_err());
+    }
+    runner.act("toggle", vec![]).unwrap();
+    runner.act("toggle", vec![]).unwrap();
+    assert_eq!(collection_rows(&runner), (991..1000).collect::<Vec<_>>());
+
+    let before = runner.collections();
+    let replacement = Runner::boot_carrying(
+        contract::compile(COLLECTION_SOURCE).unwrap(),
+        (),
+        Kernel::with_monospace(),
+        &runner.carry(),
+        Viewport::sized(200., 450.),
+        "/",
+    )
+    .unwrap();
+    assert_eq!(
+        collection_rows(&replacement),
+        (995..1000).collect::<Vec<_>>()
+    );
+    assert_eq!(replacement.kernel().epoch(), 1);
+    assert_eq!(runner.collections(), before);
+}
+
+#[test]
+fn collection_bootstrap_refreshes_before_a_viewport_commit_creates_the_list() {
+    let source = COLLECTION_SOURCE
+        .replace(
+            "component App",
+            "shape BootstrapViewport\n  height: number\ncomponent App",
+        )
+        .replace(
+            "  view",
+            "  resource viewport = exactViewport() as shape BootstrapViewport\n  view",
+        )
+        .replace("if showing", "if showing && viewport.height >= 500");
+    let mut runner = boot_collection(&source, Viewport::sized(200., 300.));
+    assert!(runner.collections().is_empty());
+    assert!(runner.set_viewport(200., 900.).unwrap().is_some());
+    assert_eq!(collection_rows(&runner), (991..1000).collect::<Vec<_>>());
+    assert_eq!(runner.kernel().epoch(), 2);
+}
+
+#[test]
+fn collection_bootstrap_rolls_back_with_a_refused_viewport_commit() {
+    let source = COLLECTION_SOURCE
+        .replace("component App", "shape BootstrapViewport\n  height: number\ncomponent App")
+        .replace(
+            "  view",
+            "  resource viewport = exactViewport() as shape BootstrapViewport\n  task guarded when true key=(viewport.height >= 500 ? 0 / 0 : 1)\n    after(100000, toggle)\n  view",
+        );
+    let viewport = Viewport::sized(200., 300.);
+    let mut runner = boot_collection(&source, viewport);
+    let before = runner.collections();
+    assert!(runner.set_viewport(200., 900.).is_err());
+    assert!(!runner.is_poisoned());
+    assert_eq!(runner.viewport(), viewport);
+    assert_eq!(runner.collections(), before);
+    runner.act("toggle", vec![]).unwrap();
+    runner.act("toggle", vec![]).unwrap();
+    assert_eq!(collection_rows(&runner), (997..1000).collect::<Vec<_>>());
+}
