@@ -385,6 +385,17 @@ impl Tree {
         self.last_work = u.work;
         Ok((changed || released, edge))
     }
+    /// [`Collection::take_measured`] for list `view`; its revision after,
+    /// none when no list is `view`.
+    pub(crate) fn measure_collection(
+        &mut self,
+        view: ViewId,
+        rows: &[(ViewId, f64, f64)],
+    ) -> Result<Option<u64>, InstanceError> {
+        find_collection_mut(&mut self.children, view)
+            .map(|collection| collection.take_measured(rows))
+            .transpose()
+    }
     /// [`Collection::reveal_at`] for list `view`.
     pub(crate) fn show_collection(&mut self, u: &mut Update<'_>, view: ViewId, offset: f64) {
         if let Some(collection) = find_collection_mut(&mut self.children, view) {
