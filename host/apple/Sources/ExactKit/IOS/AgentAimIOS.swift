@@ -75,9 +75,9 @@ extension Agent {
         let nav = presenter.navigation
         guard nav.tabBarShows, let tabs = nav.container.flatMap({ NavigationTabs.of($0, presenter) }),
               let index = tabs.tabs.firstIndex(where: { node === $0 || node.isDescendant(of: $0) }),
-              let controller = nav.tabController, let items = controller.tabBar.items else { return nil }
-        // The tab's own item, by its stack: one the bar does not show is a row of More's list
-        guard nav.tabPanels.indices.contains(index), let item = nav.tabStack(nav.tabPanels[index])?.tabBarItem, items.contains(where: { $0 === item }) else {
+              let controller = nav.tabController, controller.tabBar.items != nil else { return nil }
+        // Find the tab's item by its controller: a tab whose item the bar does not show is a row of More's list
+        guard let item = nav.barItem(ofTab: index) else {
             return .failure(AimRefusal(why: "its tab is a row of UIKit's More list, which the bar has no item for; tap More, then its row"))
         }
         // By the item's identifier (its tab's test id, `syncItems`), which

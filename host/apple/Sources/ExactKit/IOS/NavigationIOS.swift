@@ -320,8 +320,9 @@ final class RouteController: UIViewController, UIScrollViewDelegate {
         snapshot.setPaintForeground()
     }
 
-    /// The stack it is in: a plain tab (whose own navigation controller is
-    /// More's, under More), or its navigation controller.
+    /// The stack it is in: its plain tab, checked first because under More
+    /// the plain tab's `navigationController` is More's; else its navigation
+    /// controller.
     var stack: UIViewController? { (parent as? PlainTab) ?? navigationController }
 
     // A plain tab's tab bar follows the route's scroll views as a navigation controller's follows its top's.
@@ -399,16 +400,19 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
     /// `tabContainer` hatch returned (LLP 1075.003 §3.6).
     var tabOwner: UIViewController?
     var tabsHatched = false, tabContainerAsked = false, routerTab = -1
-    /// The root of the tab a tap reselected at its root, from `shouldSelect` to `didSelect`.
+    /// The router's tab's root route when a tap reselects it at that root,
+    /// kept from `shouldSelect` to `didSelect` to scroll it to its top.
     weak var reselected: RouteController?
-    /// The tab a tap on the bar is selecting, from UIKit's `shouldSelect` to its `didSelect`,
-    /// which UIKit sends in one call with its selection between them and no transition
-    /// coordinator: UIKit selects it, so `syncTabs` does not, and the safe areas UIKit lays
-    /// the tab out through are not reported (`coversChanged`) until `followUIKit`.
+    /// The tab UIKit is selecting for a person: a tap on the bar, from
+    /// UIKit's `shouldSelect` to its `didSelect`, which UIKit sends in one
+    /// call with its selection between them and no transition coordinator,
+    /// or a row of More's list, during More's `willShow`. UIKit selects it,
+    /// so `syncTabs` does not, and the safe areas UIKit lays the tab out
+    /// through are not reported (`coversChanged`) until `followUIKit`.
     weak var tapping: UIViewController?
-    var tabNavigations: [UInt32: UINavigationController] = [:]
-    /// The tabs that use no stack navigator (PlainTabIOS).
-    var plainTabs: [UInt32: PlainTab] = [:]
+    /// Each tab's controller by its panel id (PlainTabIOS): a navigation
+    /// controller, or a plain tab.
+    var tabStacks: [UInt32: UIViewController] = [:]
     var tabPanels: [UInt32] = []
     /// How many routes the selected stack declared at the last projection.
     private var selectedRouteCount = 0
@@ -421,9 +425,9 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
     weak var tablistRoot: RouteController?
     var tablistHidBar = false
     var tabItems: [String] = []
-    /// The tabs and stacks the items were last made from, made again when
-    /// the size class (a path glyph's size) changes.
-    var tabItemsSource: (NavigationTabs, [UIViewController])?
+    /// The tabs the items were last made from, made again when the size
+    /// class (a path glyph's size) changes.
+    var tabItemsSource: NavigationTabs?
     /// The bar's tint as last written as a value: the selected tab's own tint, light and dark; nil
     /// where the bar takes an accent as its tint.
     var tabTint: [[Double]]?
@@ -783,14 +787,10 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
         let common = zip(boundaries, mounted).prefix {
             $0.0 === $0.1.node && $0.0.props["navigationPresentation"] == $0.1.kind
         }.count
-        // The selected tab when it is a plain tab (PlainTabIOS).
-        if let plain = primaryPlain {
-            show(Array(wanted[parts[0]]), in: plain)
-            plain.view.layoutIfNeeded()
-        }
         // Mount the destination under a departing presentation before starting
         // dismissal, so its editor can accept the batch's focus handoff.
-        let owners: [UINavigationController?] = (primaryPlain != nil ? [nil] : [primaryNavigation].compactMap { $0 }) + presentedNavigations
+        let primary: UIViewController? = primaryPlain ?? primaryNavigation
+        let owners = [primary].compactMap { $0 } + presentedNavigations
         for index in 0...common where index < owners.count {
             if index == 0, let split, primaryPlain == nil {
                 // An inspector's column the stack no longer shows closes first: UIKit lays the
@@ -801,10 +801,15 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
                 split.controller.view.layoutIfNeeded()
                 continue
             }
-            guard let nav = owners[index] else { continue }
             let stack = Array(wanted[parts[index]])
+            // Show the router's tab's route when it is a plain tab (PlainTabIOS)
+            guard let nav = owners[index] as? UINavigationController else {
+                setRoutes(stack, in: owners[index])
+                owners[index].view.layoutIfNeeded()
+                continue
+            }
             prepareRoutes(stack, in: nav)
-            // (A tab under More: UIKit's list stays in front of its routes, `stackFront`.)
+            // Compare and write only the routes: under More, UIKit's list stays before them (`stackFront`)
             let routes = nav.stackRoutes
             if !routes.elementsEqual(stack, by: ===) {
                 // @ref LLP 1038 D6 — a tab change swaps immediately. A replacement within one stack
@@ -930,7 +935,7 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
         defer { replayingHatches = false }
         for nav in allNavigations { hatchNavigation(nav) }
         replayTabs()
-        // (Plain tabs too, whose routes' hatches have not run either.)
+        // Prepare plain tabs' routes too: their route hatches have not run either
         for stack in primaryStacks + presentedNavigations {
             prepareRoutes(stack.stackRoutes.compactMap { $0 as? RouteController }, in: stack)
             stack.view.layoutIfNeeded()
@@ -1255,7 +1260,7 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
             if #available(iOS 26.0, *) { return nav.interactiveContentPopGestureRecognizer === gestureRecognizer }
             return false
         }
-        // More showing a plain tab holds no route: its swipe back to its list is UIKit's own
+        // Let More's swipe back to its list from a plain tab begin: it is UIKit's own, and no route pops
         if let more, more.topViewController is PlainTab, pops(more) { return !changing && !presenter.modals.inTransition }
         let owner = (allNavigations + [split?.detail].compactMap { $0 }).first(where: pops)
         #endif
@@ -1266,7 +1271,7 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
         if let owner, let split, split.holds(owner),
            owner !== (split.controller.isCollapsed && split.detail.viewControllers.count < 2 ? split.list : split.detail) { return false }
         let depth = backBar?.depth ?? 0
-        // (More's swipe from a tab's root to its list is UIKit's own: no route pops)
+        // Let More's swipe from a tab's root to its list begin: it is UIKit's own, and no route pops
         let goes = back != nil || (navigation === more && navigation?.stackRoutes.count == 1)
         guard NavigationRules.popMayBegin(depth: depth, changing: changing, modalActive: presenter.modals.inTransition,
                                           hasBackControl: goes,
@@ -1345,13 +1350,9 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
     }
 
     func navigationController(_ navigationController: UINavigationController, didShow viewController: UIViewController, animated: Bool) {
-        if navigationController === more, let index = tabIndex(ofShown: viewController) {
-            // A row whose tab's press left the router on another tab is the app declining: UIKit shows the router's tab again
-            if index != routerTab, let tabs = tabController, tabPanels.indices.contains(routerTab), let stack = tabStack(tabPanels[routerTab]) {
-                tabs.selectedViewController = stack
-                presenter.session?.log("navigation: tab \(index)'s press left the router on tab \(routerTab), which UIKit shows again")
-                return
-            }
+        // Select the router's tab again when a row's press left the router on another tab: the app declined the row
+        if navigationController === more, let index = tabIndex(ofShown: viewController), index != routerTab, tabStack(routerTab) != nil {
+            return showRouterTab(declining: index)
         }
         guard follows(navigationController), navigationController.topViewController === viewController else {
             recordPop(navigationController)
@@ -1438,7 +1439,7 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
             #endif
         }
         // More went back to its list (its Back on the tab's root, or More tapped again): the list is no
-        // route, and the router keeps its tab. Routes above the root that went with it are a Back to it.
+        // route, and the router keeps its tab. Routes above the root that went with it count as a Back to the root.
         if navigationController === more, !(viewController is RouteController) {
             if let top = selectedKey, let root = shownKeys.first, top != root { goBack(from: top, to: root) }
             return
@@ -1471,6 +1472,27 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
             return
         }
         goBack()
+    }
+
+    /// Exact's record of `nav`, a stack it keeps, and its delegate. More is
+    /// one too (iOS), its list UIKit's.
+    @discardableResult
+    func registerStack(_ nav: UINavigationController) -> NavigationStack {
+        stackCount += 1
+        let stack = NavigationStack(showsBar: true, order: stackCount)
+        stack.proxy.host = self
+        stacks[ObjectIdentifier(nav)] = stack
+        nav.delegate = stack.proxy
+        return stack
+    }
+
+    /// `nav` leaves Exact: its record and its delegate go, and its routes
+    /// leave it, as they may go into the next containers (a remount, new
+    /// tabs); More keeps its list.
+    func release(_ nav: UINavigationController) {
+        retireStack(nav)
+        nav.delegate = nil
+        nav.setViewControllers(nav.stackFront, animated: false)
     }
 
     /// A stack Exact retired: its handle goes.

@@ -978,7 +978,8 @@ impl<D: DataSource> Host<D> {
         self.own_navigation(now_ms, |runner| runner.host_go(location))
     }
 
-    /// `navigate` the runner after the clock moves to `now_ms`, as one batch.
+    /// Advance the clock to `now_ms` and run `navigate` on the runner, as one
+    /// batch.
     pub(crate) fn own_navigation(
         &mut self,
         now_ms: f64,

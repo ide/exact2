@@ -75,21 +75,18 @@ pub fn panel_sites(plan: &Plan) -> Vec<NodesId> {
         .collect()
 }
 
-/// Whether each tab panel site in `panels` draws a stack: it can hold more
-/// than one route, because a route of its own (a node with a `navigationKey`
-/// and no route between it and the panel) stands inside a `for` below it, as
-/// `for e in t.stack` draws one per entry, or because its template holds more
-/// than one route. A panel with one route outside any `for` shows that route
-/// alone: a tab that uses no stack navigator, which a host shows without one
-/// (LLP 1075.003 §3.7). It is read from the plan, so it holds for a panel
-/// still waiting for its first selection. One template serves every tab a
-/// `for t in nav.tabs` draws, so a template that draws a stack for some tabs
-/// answers `true` for all of them: a stack can show one route, and a host
-/// without one cannot show a pushed route.
-pub fn panels_draw_stacks(plan: &Plan, panels: &[NodesId]) -> Vec<bool> {
-    let mut sites = panels.to_vec();
-    sites.sort_unstable();
-    sites.dedup();
+/// Whether each of `sites`, the plan's tab panels ([`panel_sites`]), draws a
+/// stack: it can hold more than one route, because a route of its own (a node
+/// with a `navigationKey` and no route between it and the panel) stands
+/// inside a `for` below it, as `for e in t.stack` draws one per entry, or
+/// because its template holds more than one route. A panel with one route
+/// outside any `for` shows one fixed route, which a host shows without a
+/// stack (LLP 1075.003 §3.7). It is read from the plan, so it holds for a
+/// panel still waiting for its first selection. One template serves every
+/// tab a `for t in nav.tabs` draws, so a template that draws a stack for
+/// some tabs answers `true` for all of them: a stack can show one route, and
+/// a host without one cannot show a pushed route.
+pub fn sites_draw_stacks(plan: &Plan, sites: &[NodesId]) -> Vec<bool> {
     let mut routes = vec![0usize; sites.len()];
     let mut stacks = vec![false; sites.len()];
     for route in (0..plan.nodes.len() as u32).map(NodesId) {
@@ -110,10 +107,7 @@ pub fn panels_draw_stacks(plan: &Plan, panels: &[NodesId]) -> Vec<bool> {
             at = enclosing(plan, a);
         }
     }
-    panels
-        .iter()
-        .map(|p| sites.binary_search(p).is_ok_and(|i| stacks[i]))
-        .collect()
+    stacks
 }
 
 /// Whether node `n` binds `prop`.
@@ -292,8 +286,9 @@ impl Tree {
         Ok(())
     }
 
-    /// Build the waiting panels among `panels` now, selecting none; a panel
-    /// their contents make waits as any does, unless its root selects it.
+    /// Build the waiting panels among `panels` now, selecting none; a tab
+    /// panel inside their contents waits like any other, unless its root
+    /// selects it.
     pub(crate) fn open_panels(
         &mut self,
         u: &mut Update<'_>,
@@ -301,16 +296,13 @@ impl Tree {
     ) -> Result<(), InstanceError> {
         let tabs = &mut u.ids.tabs;
         tabs.panels.append(&mut tabs.made);
-        let open: Vec<ViewId> = tabs
-            .panels
-            .iter()
-            .copied()
-            .filter(|w| panels.contains(w))
-            .collect();
+        let (open, waiting): (Vec<ViewId>, Vec<ViewId>) = std::mem::take(&mut tabs.panels)
+            .into_iter()
+            .partition(|w| panels.contains(w));
+        tabs.panels = waiting;
         if open.is_empty() {
             return Ok(());
         }
-        tabs.panels.retain(|w| !open.contains(w));
         let mut left = open.len();
         open_in(u, &mut self.children, &[], &open, &mut left)?;
         self.open_tabs(u)

@@ -323,9 +323,8 @@ open class ExactModule {
     open func routeEnded(_ route: ExactRoute) {}
     /// Exact's tab container (LLP 1075.003 §3.7): once, before its tabs are
     /// laid out. Its appearance is the app's; its tabs Exact's; its selection
-    /// UIKit's, which Exact's router follows. A tab not built yet, or whose
-    /// stack shows no bar and has pushed nothing, is a plain view controller
-    /// in it until the stack pushes or shows a bar, or More shows it.
+    /// UIKit's, which Exact's router follows. Each tab's controller is made
+    /// with the container and kept for the tab's life (`ExactTab.controller`).
     open func tabs(_ tabs: ExactTabs) {}
     /// Own the tabs yourself: return a container holding each tab's
     /// controller (`contents.tabs`), which Exact keeps current, or nil to
@@ -768,7 +767,8 @@ public struct ExactTab {
     public let name: String
     /// The controller Exact shows the tab in, for the tab's life: a
     /// navigation controller for a tab whose panel draws its stack, a plain
-    /// view controller for one that shows a single route (LLP 1075.003 §3.7).
+    /// view controller for one whose panel shows one fixed route (LLP
+    /// 1075.003 §3.7).
     public let controller: UIViewController
     /// The tab's item, which Exact updates in place as the authored tab changes.
     public var item: UITabBarItem { controller.tabBarItem }

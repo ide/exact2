@@ -367,9 +367,10 @@ component Editor
 }
 
 /// A tab whose panel can hold more than one route draws a stack: a route in
-/// a `for`, or more than one route in its template. One fixed route is a tab
-/// with no stack navigator. Both are read from the plan, so a tab still
-/// waiting for its first selection answers too (LLP 1075.003 §3.7).
+/// a `for`, or more than one route in its template. A panel with one route
+/// outside any `for` shows one fixed route. Both are read from the plan, so
+/// a tab still waiting for its first selection answers too (LLP 1075.003
+/// §3.7).
 #[test]
 fn a_panel_draws_a_stack_when_it_can_hold_more_than_one_route() {
     let source = "component App

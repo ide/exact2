@@ -622,7 +622,7 @@ extension NavigationHost {
             guard before(nil), !node.disabled, !node.inert, presenter.views[node.id] === node else { return ["error": "tab #\(id) changed during its pointer handlers"] }
             // As the bar's own tap: the selected tab at its root scrolls to the top
             pressTab(node, scrolling: reselectedRoot(index))
-            return ["tapped": id, "pressed": id, "delivery": "host-activation", "native": barHasItem(ofTab: index) ? "tab-bar-item" : "more-list-row"]
+            return ["tapped": id, "pressed": id, "delivery": "host-activation", "native": barItem(ofTab: index) != nil ? "tab-bar-item" : "more-list-row"]
         }
         let shown = controllers.values.filter { c in
             guard let nav = c.navigationController, nav.topViewController === c, barShows(nav) else { return false }
@@ -696,7 +696,8 @@ extension NavigationHost {
     /// title's subtitle.
     func retheme() {
         var seen = Set<ObjectIdentifier>()
-        for nav in [primaryNavigation].compactMap({ $0 }) + presentedNavigations + tabNavigations.values where seen.insert(ObjectIdentifier(nav)).inserted { titleInk(nav) }
+        for nav in [primaryNavigation].compactMap({ $0 }) + presentedNavigations + tabStacks.values.compactMap({ $0 as? UINavigationController })
+        where seen.insert(ObjectIdentifier(nav)).inserted { titleInk(nav) }
         for c in controllers.values {
             c.titleView?.retheme()
             c.search?.ink()
@@ -705,11 +706,7 @@ extension NavigationHost {
 
     func makeNavigation(first: NodeView?) -> UINavigationController {
         let nav = UINavigationController()
-        stackCount += 1
-        let stack = NavigationStack(showsBar: true, order: stackCount)
-        stack.proxy.host = self
-        stacks[ObjectIdentifier(nav)] = stack
-        nav.delegate = stack.proxy
+        let stack = registerStack(nav)
         #if !os(tvOS)
         nav.navigationBar.prefersLargeTitles = true
         #endif
@@ -756,7 +753,7 @@ extension NavigationHost {
         followTablist(routes, in: stack)
         let stackShows = nav.map(barShows) ?? false
         let back = container?.props["navigationBack"]
-        // A tab's root under More is pushed over UIKit's list, whose Back it shows
+        // Count UIKit's list before a tab's root under More: More pushes the root over it, with a Back to it
         let front = nav?.stackFront.count ?? 0
         for (index, c) in routes.enumerated() {
             // The bar is each route's (LLP 1115.000 D5.2, D5.3): its header,
@@ -770,7 +767,8 @@ extension NavigationHost {
             let shape = stackShows ? HeaderShape.bar(of: c.node, back: back, backIsUIKits: pushed) : nil
             let bar = stackShows ? self.bar(of: c.node, pushed: pushed) : .hidden
             let shows = bar != .hidden
-            let canGoBack = (index > 0 || firstPushed ? canInvokeBack : front > 0) && shape?.authoredBack != true // (a root under More: UIKit's Back to the list)
+            // Let a root under More go back: UIKit's Back returns to More's list
+            let canGoBack = (index > 0 || firstPushed ? canInvokeBack : front > 0) && shape?.authoredBack != true
             let scroller = contentScroller(of: c), scroll = scroller?.scrollView
             let dataset = c.node.props["dataset"]
             func barSource(_ key: (HeaderShape.Item) -> String) -> BarSource {

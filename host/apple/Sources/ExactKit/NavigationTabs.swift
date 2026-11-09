@@ -4,7 +4,7 @@
 // stack — its route rows — and every tab's stack stays mounted. A tablist or
 // a panel inside a route is that route's, never the root's. Shared by the AppKit
 // presenter (hidden and inert, LLP 1038 D6's rule) and the UIKit one (a
-// tab bar controller, one navigation controller a tab).
+// tab bar controller, one controller per tab).
 import Foundation
 
 /// A navigation root's tabs as the kernel finds them (`exact_root_tabs`;
@@ -16,8 +16,8 @@ struct RootTabs: Equatable {
     let tablist: UInt32, tabs: [UInt32], panels: [UInt32]
     /// Whether each panel draws its tab's stack, read from the plan, so known
     /// for a tab not built yet (`Runner::panels_draw_stacks`, LLP 1075.003
-    /// §3.7): such a tab is a navigation controller, and one that shows a
-    /// single fixed route is a plain view controller.
+    /// §3.7). A tab whose panel draws its stack is a navigation controller;
+    /// one whose panel shows one fixed route is a plain view controller.
     let stacks: [Bool]
     /// The app left the bar's placement unsaid, by the web's rule for its
     /// own sidebar (LLP 1116.004 D1.1; `host/web/navigation.js` `unsaidBar`):
@@ -27,15 +27,14 @@ struct RootTabs: Equatable {
     /// it for the tab bar that takes its place (host/apple/src/closed.rs).
     let covered: Bool
 
-    init(tablist: UInt32, tabs: [UInt32], panels: [UInt32], stacks: [Bool]? = nil, unsaid: Bool, covered: Bool = false) {
-        (self.tablist, self.tabs, self.panels, self.unsaid, self.covered) = (tablist, tabs, panels, unsaid, covered)
-        self.stacks = stacks ?? panels.map { _ in true }
+    init(tablist: UInt32, tabs: [UInt32], panels: [UInt32], stacks: [Bool] = [], unsaid: Bool, covered: Bool = false) {
+        (self.tablist, self.tabs, self.panels, self.stacks, self.unsaid, self.covered) = (tablist, tabs, panels, stacks, unsaid, covered)
     }
 
     init?(json: Data) {
         guard let o = try? JSONSerialization.jsonObject(with: json) as? [String: Any],
               let tablist = o["tablist"] as? Int, let tabs = o["tabs"] as? [Int], let panels = o["panels"] as? [Int] else { return nil }
-        self.init(tablist: UInt32(tablist), tabs: tabs.map { UInt32($0) }, panels: panels.map { UInt32($0) }, stacks: o["stacks"] as? [Bool],
+        self.init(tablist: UInt32(tablist), tabs: tabs.map { UInt32($0) }, panels: panels.map { UInt32($0) }, stacks: o["stacks"] as? [Bool] ?? [],
                   unsaid: o["unsaid"] as? Bool ?? false, covered: o["covered"] as? Bool ?? false)
     }
 }

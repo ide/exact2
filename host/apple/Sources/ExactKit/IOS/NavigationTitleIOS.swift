@@ -446,10 +446,9 @@ extension NavigationHost {
     }
 
     /// Whether a route shows the bar: its stack's routes may, and the route
-    /// has something to show in it. A held stack's (no `nav`) may, as no
-    /// hatch has said otherwise.
-    func routeShowsBar(_ c: RouteController, in nav: UINavigationController?) -> Bool {
-        (nav.map(barShows) ?? !ExactEnv.authoredChrome) && bar(of: c.node, pushed: c.pushed) != .hidden
+    /// has something to show in it.
+    func routeShowsBar(_ c: RouteController, in nav: UINavigationController) -> Bool {
+        barShows(nav) && bar(of: c.node, pushed: c.pushed) != .hidden
     }
 
     /// Whether the bar is UIKit's for now on a route's account: its header

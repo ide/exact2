@@ -63,10 +63,10 @@ extension NavigationHost {
             // a pop has taken it from its controller (`navigationController`
             // is nil), and a swipe back still shows it beside the one beneath.
             let nav = c.navigationController ?? leavingNavigation(of: c)
-            let held = c.parent is PlainTab || nav.map {
+            let stacked = c.parent is PlainTab || nav.map {
                 $0.viewControllers.contains(c) || $0.transitionCoordinator?.viewController(forKey: .from) === c
             } == true
-            guard held else { continue }
+            guard stacked else { continue }
             // A presented route's controller takes its sheet's whole view (LLP 1123 D2), as the
             // containers take the session's: the route is covered on every edge
             let whole = wantsWholeView || nav.map { nav in presentedNavigations.contains { $0 === nav } } ?? false
@@ -78,17 +78,20 @@ extension NavigationHost {
             // A collapsing title's scroller goes under the bar, which insets it;
             // its expanded inset is where CSS scrollTop 0 rests.
             // While the bar is not as the route wants it (mid-transition to or
-            // from a route without one, §9.10), or the route is off its window
+            // from a route without one, §9.10), or the route is not in a window
             // (a tab UIKit has yet to show), its last cover stands.
             // An active search's bar is UIKit's: the content follows it, as
             // UIKit's own does, but a title's insets are not sampled.
             c.safeArea.sync(c)
+            // A plain tab's route has no bar of its own: More's shows above it
+            // under More, and none on the tab bar.
             let search = searching(c)
             // Nested in the list's, the detail's routes are under the list's bar.
             let barNav = split.flatMap { $0.nested && nav === $0.detail ? $0.list : nil } ?? nav
-            let settled = search || (barNav?.isNavigationBarHidden ?? true) != routeShowsBar(c, in: nav)
+            let barAbove = nav.map { c.parent is PlainTab ? !$0.isNavigationBarHidden : routeShowsBar(c, in: $0) } ?? false
+            let settled = search || (barNav?.isNavigationBarHidden ?? true) != barAbove
             // A route showing no bar has no title: its inset is the status bar's, none in landscape (LLP 1130 D3).
-            let barless = !routeShowsBar(c, in: nav)
+            let barless = !barAbove
             if !c.ignoresSafeArea("top"), settled, !search, let node = c.collapseScroll, let sv = c.collapseScrollView, sv === node.scrollView, sv.window != nil, sv.adjustedContentInset.top > 0 || barless {
                 let inset = sv.adjustedContentInset.top
                 if c.insetsBarless != barless { c.insetsBarless = barless; node.scrollCollapsed = 0 }
@@ -340,7 +343,7 @@ extension NavigationHost {
             let line = "\(what): \(property) changed outside Exact, which owns it"
             if ownedReported.insert(line).inserted { presenter.session?.log(line) }
         }
-        // (A tab's own stack UIKit emptied into More's is not one of them, `allNavigations`)
+        // Check More in place of a tab's own navigation controller while UIKit holds that tab's routes there (`allNavigations`)
         for nav in allNavigations {
             guard let stack = stacks[ObjectIdentifier(nav)], stack.hatched else { continue }
             if nav.delegate !== stack.proxy { say("navigation \(stack.label)", "delegate") }

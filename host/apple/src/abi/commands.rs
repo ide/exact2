@@ -411,10 +411,11 @@ impl<D: DataSource> Bridge<D> {
     /// "covered":bool}`, the tabs that name a panel and those panels in tab
     /// order, or `null` for a root with one stack. `stacks`: whether each
     /// panel draws its tab's stack (`Runner::panels_draw_stacks`), read from
-    /// the plan, so it is known for a tab not built yet. `unsaid`: the app left the bar's placement unsaid, by the
-    /// web's rule for its own sidebar (`host/web/navigation.js` `unsaidBar`,
-    /// LLP 1116.004 D1.1): the tablist is a direct child of the root, not
-    /// vertical, in flow in the root's flex column, and itself a row. It is
+    /// the plan, so it is known for a tab not built yet. `unsaid`: the app
+    /// left the bar's placement unsaid, by the web's rule for its own sidebar
+    /// (`host/web/navigation.js` `unsaidBar`, LLP 1116.004 D1.1): the tablist
+    /// is a direct child of the root, not vertical, in flow in the root's flex
+    /// column, and itself a row. It is
     /// read here because the layout rows it asks of never cross to the
     /// presenter (`style::presenter_ignores`). `covered`: the tablist is
     /// covered whole, as the boot covers one a tab bar replaces

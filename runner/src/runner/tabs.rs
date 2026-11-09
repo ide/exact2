@@ -22,29 +22,25 @@ impl<D: DataSource> Runner<D> {
 
     /// Build the waiting tab panels among `panels` now, selecting none (LLP
     /// 1075.003 §9.14): a host whose container lets a person pick a tab it
-    /// cannot show unbuilt asks for that tab first, as UIKit's More list
-    /// does nothing for a row whose navigation controller is empty.
+    /// cannot show unbuilt asks for that tab first (UIKit's More list does
+    /// nothing for a row whose navigation controller is empty).
     pub fn build_tabs(&mut self, panels: &[ViewId]) -> Result<CommitReceipt, RunnerError> {
         self.update_tree(true, |tree, u| tree.open_panels(u, panels))
     }
 
-    /// Whether each of `panels`, tab panels, draws its tab's stack
-    /// ([`crate::instance::tabs::panels_draw_stacks`]); `false` for a view
-    /// that is no tab panel site.
+    /// Whether each tab panel in `panels` draws its tab's stack
+    /// ([`crate::instance::tabs::sites_draw_stacks`]); `false` for a view
+    /// that is no tab panel.
     pub fn panels_draw_stacks(&self, panels: &[ViewId]) -> Vec<bool> {
-        let all = crate::instance::tabs::panel_sites(&self.plan);
-        let sites: Vec<_> = panels
+        let sites = crate::instance::tabs::panel_sites(&self.plan);
+        let stacks = crate::instance::tabs::sites_draw_stacks(&self.plan, &sites);
+        panels
             .iter()
             .map(|p| {
                 self.plan_site_of(*p)
-                    .filter(|s| all.binary_search(s).is_ok())
+                    .and_then(|s| sites.binary_search(&s).ok())
+                    .is_some_and(|i| stacks[i])
             })
-            .collect();
-        let known: Vec<_> = sites.iter().flatten().copied().collect();
-        let mut stacks = crate::instance::tabs::panels_draw_stacks(&self.plan, &known).into_iter();
-        sites
-            .iter()
-            .map(|s| s.is_some() && stacks.next().unwrap_or(false))
             .collect()
     }
 

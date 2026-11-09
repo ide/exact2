@@ -1,17 +1,17 @@
 // @ref LLP 1075.003 §3.7 — each tab's controller, made with the tab container
 // and never replaced. "You can use navigation controllers or custom view
 // controllers as the root view controller for a tab" (UITabBarController): a
-// tab whose panel draws its stack is a navigation controller, its bar hidden
-// where its first route shows none; a tab whose panel shows one fixed route
-// uses no stack navigator and is a plain view controller, as a hand-built app
-// shows such a tab (`Runner::panels_draw_stacks` reads which from the plan, so
-// it is known for a tab not built yet). A plain tab has no navigation bar:
-// its route's header is its content. A tab the runner has not built yet
-// (§9.14) is its controller, empty, until its routes arrive.
+// tab whose panel draws a stack is a navigation controller, its bar hidden
+// where its first route shows none; a tab whose panel shows one fixed route is
+// a plain view controller, as a hand-built app shows such a tab
+// (`Runner::panels_draw_stacks` reads which from the plan, so it is known for
+// a tab not built yet). A plain tab has no navigation bar of its own: its
+// route's header is its content. A tab the runner has not built yet (§9.14)
+// has its controller from launch, empty until its routes arrive.
 #if os(iOS) || os(tvOS)
 import UIKit
 
-/// A tab that shows one route, with no navigation controller.
+/// A tab that shows one fixed route, with no navigation controller of its own.
 final class PlainTab: UIViewController {
     private(set) var route: RouteController?
 
@@ -48,49 +48,49 @@ final class PlainTab: UIViewController {
 
 extension UIViewController {
     /// The routes of a stack Exact built, its root first: a navigation
-    /// controller's, after what UIKit keeps in front of them (`stackFront`),
-    /// or the one a plain tab shows.
+    /// controller's, after what UIKit keeps before them (`stackFront`), or
+    /// the one a plain tab shows.
     var stackRoutes: [UIViewController] {
         if let nav = self as? UINavigationController { return Array(nav.viewControllers.drop { !($0 is RouteController) }) }
         return ((self as? PlainTab)?.route).map { [$0] } ?? []
     }
 
-    /// What UIKit keeps in front of a navigation controller's routes: More's
-    /// list (iOS). Every write of the routes keeps it.
+    /// What UIKit keeps before a navigation controller's routes in
+    /// `viewControllers`: More's list (iOS). Every write of the routes keeps it.
     var stackFront: [UIViewController] {
         (self as? UINavigationController).map { Array($0.viewControllers.prefix { !($0 is RouteController) }) } ?? []
     }
 }
 
 extension NavigationHost {
-    /// A tab's controller: its navigation controller, or its plain tab.
-    func tabStack(_ panel: UInt32) -> UIViewController? { tabNavigations[panel] ?? plainTabs[panel] }
+    /// Tab `index`'s controller.
+    func tabStack(_ index: Int) -> UIViewController? { tabPanels.indices.contains(index) ? tabStacks[tabPanels[index]] : nil }
 
-    /// The stacks under the root, in tab order (or the one): each tab's
-    /// where UIKit holds its routes (`routesStack`, More's for a tab under More).
+    /// Where UIKit holds each tab's routes, in tab order (`routesStack`), or
+    /// the one stack of a root without tabs.
     var primaryStacks: [UIViewController] {
-        tabPanels.isEmpty ? [primaryNavigation, split?.detail, split?.inspector].compactMap { $0 } : tabPanels.indices.compactMap(routesStack)
+        guard !tabPanels.isEmpty else { return [primaryNavigation, split?.detail, split?.inspector].compactMap { $0 } }
+        let held = moreTab
+        return tabPanels.indices.compactMap { $0 == held ? more : tabStack($0) }
     }
 
-    /// The selected tab, when it is a plain tab.
-    var primaryPlain: PlainTab? { tabPanels.indices.contains(routerTab) ? plainTabs[tabPanels[routerTab]] : nil }
+    /// The router's tab, when it is a plain tab.
+    var primaryPlain: PlainTab? { tabStack(routerTab) as? PlainTab }
 
-    /// The routes of each navigation controller whose routes may show the
-    /// bar, unless its hatch said otherwise; the primary stacks first, then
-    /// the sheets'.
+    /// The routes of each navigation controller whose hatch left its bar
+    /// shown (`showsBar`): the primary stacks first, then the sheets'.
     var barStackRoutes: [[UIViewController]] {
-        (primaryStacks + presentedNavigations).filter { stack in
-            (stack as? UINavigationController).map { stacks[ObjectIdentifier($0)]?.showsBar == true } ?? false
-        }.map(\.stackRoutes)
+        (primaryStacks + presentedNavigations).compactMap { $0 as? UINavigationController }
+            .filter { stacks[ObjectIdentifier($0)]?.showsBar == true }.map(\.stackRoutes)
     }
 
     /// A tab's controller, made once: a navigation controller for a tab
-    /// whose panel draws its stack (`drawsStack`), else a plain tab.
+    /// whose panel draws a stack (`drawsStack`), else a plain tab.
     func makeTabStack(_ panel: UInt32, _ routes: [RouteController], drawsStack: Bool) -> UIViewController {
         guard drawsStack else {
             let plain = PlainTab()
-            plainTabs[panel] = plain
-            show(routes, in: plain)
+            tabStacks[panel] = plain
+            setRoutes(routes, in: plain)
             return plain
         }
         let nav = makeNavigation(first: routes.first?.node)
@@ -98,14 +98,25 @@ extension NavigationHost {
         nav.setViewControllers(routes, animated: false)
         recordOwned(nav)
         watchPops(nav)
-        tabNavigations[panel] = nav
+        tabStacks[panel] = nav
         return nav
     }
 
-    /// A plain tab's route, projected and then shown.
-    func show(_ routes: [RouteController], in plain: PlainTab) {
-        prepareRoutes(routes, in: plain)
-        plain.show(routes.first)
+    /// Write a tab's routes, unanimated, where UIKit holds them
+    /// (`routesStack`). A plain tab shows its route. A navigation controller
+    /// keeps what UIKit holds before its routes (`stackFront`), and one
+    /// written for the first time shows its bar as its first route says, as
+    /// a stack built with them would (`makeNavigation`).
+    func setRoutes(_ routes: [RouteController], in stack: UIViewController) {
+        let nav = stack as? UINavigationController
+        if let nav, nav.stackRoutes.isEmpty, let first = routes.first {
+            nav.setNavigationBarHidden(!(barShows(nav) && bar(of: first.node, pushed: false) != .hidden), animated: false)
+        }
+        prepareRoutes(routes, in: stack)
+        if let plain = stack as? PlainTab { return plain.show(routes.first) }
+        guard let nav, !nav.stackRoutes.elementsEqual(routes, by: ===) else { return }
+        nav.setViewControllers(nav.stackFront + routes, animated: false)
+        recordOwned(nav)
     }
 
     /// Build the tabs More's list shows a row for that the runner has not
@@ -116,11 +127,9 @@ extension NavigationHost {
     func buildTabsUnderMore() {
         #if os(iOS)
         guard !syncing, tabController != nil, let session = presenter.session else { return }
+        // Read the panel's logical children, not its subviews: UIKit containment holds a built panel's route nodes
         let waiting = tabPanels.indices.filter { index in
-            let panel = tabPanels[index]
-            // (A built panel's children are its routes' nodes, which UIKit containment holds)
-            return !barHasItem(ofTab: index) && tabNavigations[panel]?.viewControllers.isEmpty == true
-                && logicalChildren[panel]?.isEmpty != false
+            barItem(ofTab: index) == nil && tabStack(index) is UINavigationController && logicalChildren[tabPanels[index]]?.isEmpty != false
         }.map { tabPanels[$0] }
         guard !waiting.isEmpty else { return }
         session.log("navigation: More's list shows tabs not built yet (panels \(waiting)); the runner builds them")
@@ -129,9 +138,9 @@ extension NavigationHost {
     }
 
     /// UIKit moved tabs between the bar and More, and their routes with
-    /// them (Edit, a width change; measured): a sync in the next turn writes
-    /// each tab's routes where UIKit now holds them and follows the selected
-    /// tab's, and More's list gets the tabs it now shows built.
+    /// them (More's Edit, a width change): a sync in the next turn writes
+    /// each tab's routes where UIKit now holds them and follows the router's
+    /// tab, and More's list gets the tabs it now shows built.
     func syncNextTurn() {
         DispatchQueue.main.async { [weak self] in
             guard let self, tabOwner != nil else { return }
