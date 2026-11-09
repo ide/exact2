@@ -175,8 +175,20 @@ private final class KeyboardCheck: NSObject, UINavigationControllerDelegate {
             "screen": top?.data[.keyboardScreen] ?? "", "stack": nav.viewControllers.compactMap { routes[ObjectIdentifier($0)]?.key },
             "interactive": nav.transitionCoordinator?.isInteractive ?? false,
             "percent": nav.transitionCoordinator?.percentComplete ?? 0]
+        // The navigation bar as UIKit shows it: whether it is hidden or faded, what it holds, and its parts
+        let bar = nav.navigationBar
+        var shown = geometry(bar)
+        shown["alpha"] = bar.alpha
+        shown["shownOpacity"] = bar.layer.presentation()?.opacity ?? -1
+        shown["navigationBarHidden"] = nav.isNavigationBarHidden
+        shown["title"] = bar.topItem?.title ?? ""
+        shown["items"] = (bar.topItem?.rightBarButtonItems ?? []).map { $0.accessibilityIdentifier ?? $0.title ?? "" }
+        shown["parts"] = bar.subviews.map { ["class": String(describing: type(of: $0)), "frame": rect($0.frame), "alpha": $0.alpha, "hidden": $0.isHidden] }
+        state["bar"] = shown
         if let top {
             state["route"] = geometry(top.controller.view)
+            state["routeSafeArea"] = insets(top.controller.view.safeAreaInsets)
+            state["additionalSafeArea"] = insets(top.controller.additionalSafeAreaInsets)
             if let root = roots["keyboard-route-\(top.key)"]?.view {
                 state["root"] = geometry(root)
                 state["ancestors"] = sequence(first: root.superview, next: { $0?.superview }).compactMap { $0 }.prefix(12).map(geometry)
