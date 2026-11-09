@@ -272,7 +272,7 @@ class ExactView(context: Context, private val live: Boolean, private val onFirst
         moduleTap = 0; moduleAwaiting = 0; moduleSerial++
         moduleReleased?.let { release ->
             moduleReleased = null
-            forward(if (replayRelease) 1 else 3, release.x, release.y, release.getToolType(0), -1L)
+            forward(if (replayRelease) 1 else 5, release.x, release.y, release.getToolType(0), -1L)
             release.recycle()
         }
     }
@@ -280,7 +280,7 @@ class ExactView(context: Context, private val live: Boolean, private val onFirst
     private fun releaseModuleTap(e: MotionEvent) {
         val clicked = moduleTap != 0 && natives?.click(moduleTap, moduleSlot, moduleGeneration, moduleX, moduleY) == true
         forgetModuleTap()
-        forward(if (clicked) 3 else 1, e.x, e.y, e.getToolType(0), -1L)
+        forward(if (clicked) 5 else 1, e.x, e.y, e.getToolType(0), -1L)
     }
 
     private fun answered() {
@@ -294,14 +294,29 @@ class ExactView(context: Context, private val live: Boolean, private val onFirst
 
     @SuppressLint("ClickableViewAccessibility")
     override fun onTouchEvent(e: MotionEvent): Boolean {
+        // The fling recognizer first, so that a fling reaches exact2 before the lift does
+        if (started) flings.touch(e)
+        deliver(e)
+        return true
+    }
+    private val flings = Flings(context, kept = {
+        val f = fields
+        when { scrolling.dragging -> Kept.SCROLLING; f?.owning == true -> Kept.FIELD; f?.holding == true -> Kept.ASKED; else -> Kept.NONE }
+    }, whenGiven = { fields?.whenGiven(it) }) { direction, pointers ->
+        val o = owner
+        if (o != null) o.call { Native.swipe(direction, pointers) } else { Native.swipe(direction, pointers); pump() }
+    }
+
+    /** A touch's event, to the reader and exact2. */
+    private fun deliver(e: MotionEvent) {
         val down = e.actionMasked == MotionEvent.ACTION_DOWN
         if (down) {
             // A new contact cannot borrow the previous contact's delayed hit answer.
             forgetModuleTap(replayRelease = true)
             moduleDownX = e.x; moduleDownY = e.y
         }
-        // A touch that scrolls is the reader's and exact2 hears no more of it; any other goes on to exact2.
-        if (started && scrolling.touch(e)) { forgetModuleTap(); hold(null); return true }
+        // Scrolling forwards its terminal after cancelling recognition; its moves stay in the reader.
+        if (started && scrolling.touch(e)) { forgetModuleTap(); hold(null); return }
         if (e.actionMasked == MotionEvent.ACTION_MOVE && (Math.abs(e.x - moduleDownX) > slop || Math.abs(e.y - moduleDownY) > slop)) {
             forgetModuleTap()
         }
@@ -312,7 +327,7 @@ class ExactView(context: Context, private val live: Boolean, private val onFirst
                 // As Fields does, keep a completed contact until exact2 identifies its target.
                 moduleReleased = MotionEvent.obtain(e)
             } else releaseModuleTap(e)
-            return true
+            return
         }
         if (e.actionMasked == MotionEvent.ACTION_CANCEL || e.actionMasked == MotionEvent.ACTION_UP ||
             e.actionMasked == MotionEvent.ACTION_POINTER_DOWN || e.actionMasked == MotionEvent.ACTION_POINTER_UP) forgetModuleTap()
@@ -322,11 +337,9 @@ class ExactView(context: Context, private val live: Boolean, private val onFirst
         if (started && hosted != null && hosted.touch(e)) {
             hold(null)
             if (down) { val touch = hosted.serial; under(e.x, e.y) { hosted.under(touch, it.getOrElse(2) { 0 }) } }
-            return true
+            return
         }
-        val action = when (e.actionMasked) {
-            MotionEvent.ACTION_DOWN -> 0; MotionEvent.ACTION_UP -> 1; MotionEvent.ACTION_MOVE -> 2; else -> 3
-        }
+        val action = pointerAction(e.actionMasked)
         when (action) {
             0 -> if (started) hold(e)
             2 -> if (Math.abs(e.x - heldX) > slop || Math.abs(e.y - heldY) > slop) hold(null)
@@ -349,7 +362,6 @@ class ExactView(context: Context, private val live: Boolean, private val onFirst
                 answered()
             }
         }
-        return true
     }
 
     /** What is under a touch's down ([Native.under]), asked behind the down itself: by the time the finger passes the
@@ -381,12 +393,12 @@ class ExactView(context: Context, private val live: Boolean, private val onFirst
     /** exact2 runs here (owner=0) and was told something of a field: what that changed is drawn. */
     internal fun turned() = pump()
 
-    /** A touch to exact2 (0 down, 1 up, 2 move, 3 cancel) at the view's pixels. [wait]: the ms the frame waits for
-     * exact2's answer, or negative for the action's own. [Scrolling] cancels a touch its scroll won with this, and
-     * waits for nothing. */
+    /** A touch to exact2 (0 down, 1 up, 2 move, 3 recognition cancel, 5 physical cancel) at the view's pixels.
+     * [wait] bounds exact2's answer in ms, or uses the action's own when negative. [Scrolling]'s cancel after it
+     * wins a touch waits for nothing. */
     internal fun forward(action: Int, x: Float, y: Float, tool: Int, wait: Long) {
         // A scroll that takes a hosted field's touch cancels it in the field: exact2 never heard of it.
-        if (action == 3 && fields?.cancel() == true) return
+        if ((action == 3 || action == 5) && fields?.cancel() == true) return
         val o = owner
         // A press or release waits for exact2's answer within this frame, as a click handler holds the main thread; a
         // drag's moves barely wait, so the drag keeps its frames.
@@ -402,9 +414,9 @@ class ExactView(context: Context, private val live: Boolean, private val onFirst
                 android.view.Choreographer.getInstance().removeFrameCallback(holder); hold()
                 o.held(true)
             }
-            if (action == 1 || action == 3) holdFrom = 0L
+            if (action == 1 || action == 3 || action == 5) holdFrom = 0L
             val answered = o.touch(action, x, y, tool, if (wait >= 0) wait else if (press) 0L else if (action == 2) 2L else releaseWait)
-            if (action == 1 || action == 3) o.held(false)
+            if (action == 1 || action == 3 || action == 5) o.held(false)
             if (answered) publish()
             return
         }
@@ -622,7 +634,7 @@ class ExactView(context: Context, private val live: Boolean, private val onFirst
      * the direction they are: 0 in view), the nearest, and how many are in view. */
     private fun traceNewRows() {
         val b = ops ?: return
-        val range = groupRange(b, feed) ?: return
+        val range = structure.groupRange(b, feed) ?: return
         val y = feedY()
         var nearest = Long.MAX_VALUE; var inView = 0; var n = 0
         var i = range[0]
@@ -677,7 +689,7 @@ class ExactView(context: Context, private val live: Boolean, private val onFirst
         feedCount = -1
         val n = natives ?: return
         if (!lazyOn) return
-        val range = ops?.let { groupRange(it, feedNext) }
+        val range = ops?.let { structure.groupRange(it, feedNext) }
         if (range == null) {
             // No feed to place rows in: every element has its view.
             n.everywhere()
@@ -745,7 +757,7 @@ class ExactView(context: Context, private val live: Boolean, private val onFirst
     private fun nearRows(stream: IntBuffer) {
         nearY.clear()
         if (!nearOn || !async || Math.abs(scrollV) * NEAR_S < height * 0.1f) return
-        val range = groupRange(stream, feed) ?: return
+        val range = structure.groupRange(stream, feed) ?: return
         var residual = 0f
         for ((_, d) in sent) residual += d
         var i = range[0]
@@ -791,7 +803,7 @@ class ExactView(context: Context, private val live: Boolean, private val onFirst
     private var reachUp = 0f
     private fun reach(): Boolean {
         val b = ops ?: return false
-        val range = groupRange(b, feed) ?: return false
+        val range = structure.groupRange(b, feed) ?: return false
         val y = feedY()
         val top = -y; val bottom = -y + height
         // The drawn rows, by top: a row still recording on the worker (nothing drawn in its place) ends the reach.
@@ -830,7 +842,7 @@ class ExactView(context: Context, private val live: Boolean, private val onFirst
      * node (p: that one has no drawing), M nothing to draw), and the stream's age. */
     fun tagState(): String {
         val b = ops ?: return "none"
-        val range = groupRange(b, feed) ?: return "nofeed"
+        val range = structure.groupRange(b, feed) ?: return "nofeed"
         val y = feedY()
         val sb = StringBuilder()
         sb.append("y=").append(y.toInt()).append(" h=").append(height).append(" age=").append((System.nanoTime() - tookAt) / 1000).append(" |")
@@ -857,21 +869,6 @@ class ExactView(context: Context, private val live: Boolean, private val onFirst
         return sb.toString()
     }
     private var tookAt = 0L
-
-    /** Group [id]'s body in [b] (after its GROUP_BEGIN, up to its GROUP_END), or null. */
-    private fun groupRange(b: IntBuffer, id: Int): IntArray? {
-        var i = 0
-        var from = -1
-        val n = b.limit()
-        while (i < n) {
-            val op = b.get(i)
-            val j = structure.end(b, i)
-            if (op == 20 && b.get(i + 1) == id) from = j
-            if (op == 21 && from >= 0) return intArrayOf(from, i)
-            i = j
-        }
-        return null
-    }
 
     /** New rows recorded on the worker that a group may draw (nothing drawn in their place until then), and those
      * done since the last frame. */
@@ -1087,9 +1084,9 @@ class ExactView(context: Context, private val live: Boolean, private val onFirst
             when (b.get(i)) {
                 1 -> i += 7
                 2 -> i += 14
-                3 -> i = skipPath(b, i + 3)
+                3 -> i = structure.skipPath(b, i + 3)
                 4 -> i += 13
-                5 -> i = skipPath(b, i + 2)
+                5 -> i = structure.skipPath(b, i + 2)
                 6 -> i += 1
                 7 -> i += 2
                 8 -> i += 6
@@ -1119,7 +1116,7 @@ class ExactView(context: Context, private val live: Boolean, private val onFirst
                     }
                     i += 2
                 }
-                13 -> i = skipPath(b, i + 5)
+                13 -> i = structure.skipPath(b, i + 5)
                 14 -> i += 18
                 25 -> i += 3 + b.get(i + 2)
                 43 -> i += 2 + b.get(i + 1)
@@ -1341,7 +1338,7 @@ class ExactView(context: Context, private val live: Boolean, private val onFirst
     private fun placeLater() {
         if (laterRows.isEmpty()) return
         val b = ops ?: return
-        val range = groupRange(b, feedNext) ?: return
+        val range = structure.groupRange(b, feedNext) ?: return
         var i = range[0]
         while (i < range[1]) {
             if (b.get(i) == 17) laterRows[b.get(i + 1)]?.let { it.top = f(b, i + 3) }
@@ -1476,14 +1473,6 @@ class ExactView(context: Context, private val live: Boolean, private val onFirst
         slotOwner = Slots.layer(b.get(at + 1))
         slots.again(slotOwner) { ingest(b, at + 19, at + 3 + len) }
         slotOwner = outer
-    }
-
-    private fun skipPath(b: IntBuffer, at: Int): Int {
-        var i = at + 1
-        repeat(b.get(at)) {
-            i += when (b.get(i)) { 0, 1 -> 3; 2 -> 7; else -> 1 }
-        }
-        return i
     }
 }
 

@@ -187,12 +187,6 @@ package final class Presenter {
     let pinnedRoom = PinnedRoom()
     /// A native prompt outside the session's mounts, associated by its creator.
     package weak var keyboardPrompt: UITextField?
-    var keyboardEditor: UIView? {
-        guard let responder = FirstResponder.current as? UIView, responder is UIKeyInput,
-              mounts(responder) || responder === keyboardPrompt else { return nil }
-        return responder
-    }
-    var hasKeyboardEditor: Bool { keyboardEditor != nil }
 
     /// A route's content or its projected search field currently owns text input.
     func ownsKeyboard(in container: UIView) -> Bool { edits(in: container) || editsInBar(of: container) }
@@ -590,6 +584,7 @@ package final class Presenter {
     /// A touch went down on a node (`true`) or came up (LLP 1005 §3).
     var onPointer: ((UInt32, PointerKind, PointerSample) -> Void)?
     var onSwiperight: ((UInt32) -> Void)?
+    var onSwipe: ((UInt32, String) -> Void)?
     var onRefresh: ((UInt32) -> Void)?
     var onPan: ((UInt32, Double, Double) -> Void)?
     /// A pan that began ended (LLP 1057 §10.6); the tracker below measures
@@ -715,6 +710,8 @@ package final class Presenter {
     func selectionChange(_ id: UInt32, _ text: String, _ start: Int, _ end: Int, rects: [CGRect] = []) { send(id) { [self] in onSelectionChange?(id, text, start, end, rects) } }
     func pointer(_ id: UInt32, _ kind: PointerKind, _ sample: PointerSample) { send(id) { [self] in onPointer?(id, kind, sample) } }
     func swiperight(_ id: UInt32) { send(id) { [self] in onSwiperight?(id) } }
+    /// A discrete swipe UIKit recognized, in `direction` (LLP 1057.001 §8).
+    func swipe(_ id: UInt32, _ direction: String) { send(id) { [self] in onSwipe?(id, direction) } }
     func refresh(_ id: UInt32) { send(id) { [self] in onRefresh?(id) } }
     func pan(_ id: UInt32, _ dx: Double, _ dy: Double) { send(id) { [self] in onPan?(id, dx, dy) } }
     /// Once per pan that began, after its last delta; only to a node that hears it.

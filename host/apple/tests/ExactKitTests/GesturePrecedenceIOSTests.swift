@@ -45,6 +45,36 @@ final class GesturePrecedenceIOSTests: XCTestCase {
         wait(for: [turn], timeout: 1)
     }
 
+    func testSwipePreflightUsesEachDragPansLiveTouchCountBounds() throws {
+        let p = host([
+            ["op": "create", "id": 1, "kind": "view", "props": ["reorderFor": "items"], "style": ["touch_action": "none"]],
+            ["op": "create", "id": 2, "kind": "view", "handlers": ["press"]],
+            ["op": "children", "id": 1, "ids": [2]], ["op": "roots", "ids": [1]],
+            ["op": "frame", "id": 1, "x": 0.0, "y": 0.0, "w": 300.0, "h": 200.0],
+            ["op": "frame", "id": 2, "x": 0.0, "y": 0.0, "w": 100.0, "h": 100.0],
+            ["op": "height-drag", "id": 1, "target": 2, "handleKey": "1", "targetKey": "2"],
+            ["op": "transform-drag", "id": 1, "target": 2, "clip": 1, "runtime": "1", "handleKey": "1", "targetKey": "2", "clipKey": "1"],
+        ])
+        let node = try XCTUnwrap(p.views[1]), capability = try XCTUnwrap(DragLink.installed)
+        let reorder = try XCTUnwrap(node.reorderPan), height = try XCTUnwrap(node.heightRecognizer), transform = try XCTUnwrap(node.transformRecognizer)
+        let pans = [(reorder, 1), (height, 1), (transform, 2)]
+        let start = node.convert(CGPoint(x: 150, y: 100), to: nil), travel = CGPoint(x: 0, y: 1)
+        for (pan, maximum) in pans {
+            for (other, _) in pans { other.isEnabled = false }
+            pan.isEnabled = true
+            XCTAssertEqual(pan.minimumNumberOfTouches, 1)
+            XCTAssertEqual(pan.maximumNumberOfTouches, maximum)
+            for count in 1...3 {
+                XCTAssertEqual(capability.blocksSwipe(node, touches: count, travel: travel, from: start, scrollBelow: false), count <= maximum,
+                    "\(type(of: pan)): \(count) touches, maximum \(maximum)")
+                XCTAssertEqual(capability.blocksSwipe(node, touches: count, travel: travel, from: start, scrollBelow: true), pan === reorder && count == 1,
+                    "height and transform leave a scroller below the handle its touch")
+            }
+            pan.isEnabled = false
+            XCTAssertFalse(capability.blocksSwipe(node, touches: 1, travel: travel, from: start, scrollBelow: false), "a disabled recognizer takes none")
+        }
+    }
+
     /// LLP 1005 §3: a node hearing `pointerdown`/`pointerup` carries an
     /// observer that never recognizes, so it takes nothing from a press or a
     /// scroll; its touch down and up are the two events.

@@ -1,6 +1,17 @@
 #if os(iOS) || os(tvOS)
 import UIKit
 
+extension UIPanGestureRecognizer {
+    /// UIKit's touch-count bounds, shared by swipe preflight and precedence.
+    package func admitsTouches(_ count: Int) -> Bool {
+        #if os(tvOS)
+        return isEnabled
+        #else
+        return isEnabled && count >= minimumNumberOfTouches && count <= maximumNumberOfTouches
+        #endif
+    }
+}
+
 // LLP 1057.001 §1 on UIKit, with UIKit's own relationships: rule 3's boundary
 // (a press handler or text input between the touch and a node keeps the touch
 // from that node's drags; a `pan` passes a press) and innermost-first (an
@@ -19,11 +30,15 @@ extension NodeView {
     /// A press handler or text input strictly between the touch and this node.
     /// A `pan` passes a press (`presses: false`): it takes the touch once it
     /// begins, cancelling the press, as a draggable element hears a drag that
-    /// starts on a button inside it (kanban F6).
-    func pressBoundary(_ touch: UITouch, presses: Bool = true) -> Bool {
-        var view = touch.view
+    /// starts on a button inside it (kanban F6). A finger's `swipe` passes a
+    /// text input (`editors: false`, LLP 1057.001 §8.4).
+    func pressBoundary(_ touch: UITouch, presses: Bool = true, editors: Bool = true) -> Bool {
+        pressBoundary(from: touch.view, presses: presses, editors: editors)
+    }
+    func pressBoundary(from hit: UIView?, presses: Bool = true, editors: Bool = true) -> Bool {
+        var view = hit
         while let current = view, current !== self {
-            if let node = current as? NodeView, (presses && node.handlers.contains("press")) || node.field != nil || node.textArea != nil { return true }
+            if let node = current as? NodeView, (presses && node.handlers.contains("press")) || (editors && (node.field != nil || node.textArea != nil)) { return true }
             view = current.superview
         }
         return false
@@ -32,11 +47,14 @@ extension NodeView {
         // A swipe waits for the screen-edge back gesture to fail, as UIKit's
         // own swipe actions and Signal's swipe to reply do: from the edge, back wins.
         #if os(iOS)
-        // Only the screen-edge one: iOS 26's content pop is the same class,
-        // and it waits for the swipe in turn, so waiting on it would leave neither.
-        if gesture === swipeRecognizer, let nav = other.view?.next as? UINavigationController,
+        // Only the screen-edge one: iOS 26's content pop is the same class.
+        // `swiperight`'s pan waiting on it would leave neither able to begin
+        // (LLP 1057.001 §7, measured); a `swipe` to the right gets its touch
+        // from the content pop's own gate (`NavigationHost.overRightSwipe`).
+        if gesture === swipeRecognizer || gesture is DiscreteSwipe, let nav = other.view?.next as? UINavigationController,
            nav.interactivePopGestureRecognizer === other { return true }
         #endif
+        if let swipe = gesture as? DiscreteSwipe { return swipeRequiresFailure(swipe, of: other) }
         guard dragRecognizers.contains(where: { $0 === gesture }), let owner = other.view as? NodeView,
               owner !== self, owner.isDescendant(of: self) else { return false }
         return owner.dragRecognizers.contains { $0 === other }

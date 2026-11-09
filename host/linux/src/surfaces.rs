@@ -1484,7 +1484,7 @@ mod tests;
 
 #[cfg(test)]
 #[path = "surface_controls_tests.rs"]
-mod control_tests;
+pub(crate) mod control_tests;
 
 #[path = "surfaces/tier.rs"]
 mod tier;

@@ -54,6 +54,13 @@ extension Presenter {
         inDocument(view) || surface(containing: view).map { $0.kind != .document } == true
     }
 
+    var keyboardEditor: UIView? {
+        guard let responder = FirstResponder.current as? UIView, responder is UIKeyInput,
+              mounts(responder) || responder === keyboardPrompt else { return nil }
+        return responder
+    }
+    var hasKeyboardEditor: Bool { keyboardEditor != nil }
+
     /// Where a finger reaches `view`, in viewport points (the viewport's
     /// coordinates less its scrolling, as the agent's boxes are): the
     /// viewport for the document; for a presentation's content, its

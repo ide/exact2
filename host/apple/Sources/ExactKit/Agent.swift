@@ -185,6 +185,15 @@ public final class Agent {
             Agent.reply(["error": "session \(session.label): destroyed (runtime \(session.runtime.rt): no such runtime)"])
             return
         }
+        // Shortcut routes below can act without reaching the platform's tap validator.
+        if op == "tap", req["swipe"] != nil {
+            #if os(macOS)
+            let bad = swipeMalformed(req, checking: false)
+            #else
+            let bad = swipeMalformed(req, checking: true)
+            #endif
+            if let bad { Agent.reply(bad); return }
+        }
         // The bounded recorder must not enable legacy samplers or wait for rendering work.
         if op == "perf", req["frames"] as? Bool == true {
             let selected = req["source"] as? String == "scroll" ? session.frameHealth.nativeHealth : session.frameHealth

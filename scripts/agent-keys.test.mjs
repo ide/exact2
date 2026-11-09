@@ -2,7 +2,25 @@
 // a keyboard does (#140), each repeat a keydown whose `repeat` is true.
 import { test, expect } from 'bun:test';
 import { chordKeys } from './agent-playwright.mjs';
-import { KEY_REPEAT, validateKey, typeFor, cdpKey, withHeldModifiers, browserKey, nativeKey, typeArguments, typeCommand, tapWords, intoArguments, MalformedOperation, clockSlices, padOp, postCommand, postInto, resizeArguments } from './agent-keys.mjs';
+import { KEY_REPEAT, validateKey, typeFor, cdpKey, withHeldModifiers, browserKey, nativeKey, typeArguments, typeCommand, tapWords, tapArguments, intoArguments, MalformedOperation, clockSlices, padOp, postCommand, postInto, resizeArguments } from './agent-keys.mjs';
+
+test('swipe takes a physical direction and an optional local point, and no other input form', () => {
+  for (const swipe of ['left', 'right', 'up', 'down']) {
+    expect(tapWords(['bar', 'swipe', swipe])).toEqual(['bar', { swipe }]);
+    const [, opts] = tapWords(['bar', 'swipe', swipe, 'at', '12.5', '20']);
+    expect(opts).toEqual({ swipe, at: [12.5, 20] });
+    expect(() => tapArguments(opts)).not.toThrow();
+  }
+  for (const tail of [[], ['sideways'], ['DOWN'], ['down', 'extra'], ['down', 'modifiers', 'Shift'], ['down', 'at', '1'], ['down', 'at', '1', 'Infinity']]) {
+    expect(() => tapWords(['bar', 'swipe', ...tail])).toThrow(MalformedOperation);
+  }
+  for (const swipe of [undefined, null, true, 1, '', 'sideways']) {
+    expect(() => tapArguments({ swipe })).toThrow(MalformedOperation);
+  }
+  for (const other of [{ mouse: true }, { modifiers: 'Shift' }, { down: true }, { wheel: [0, 1] }, { pinch: 2 }, { drag: {} }, { holdState: 'active' }, { at: [0, NaN] }]) {
+    expect(() => tapArguments({ swipe: 'down', ...other })).toThrow(MalformedOperation);
+  }
+});
 import { open } from './agent.mjs';
 import { launchFacts } from './agent-launch.mjs';
 

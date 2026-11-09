@@ -1,8 +1,61 @@
 // `drag`'s reply carries what the host journaled about a reorder during it (LLP 1102 §3.17), and
 // keeps every field of the carrier's reply. `bun test ./scripts/agent-drag.test.mjs`.
 import { test, expect } from 'bun:test';
-import { dragTap, heldDown, heldPhase, heldRead, heldTick, HELD_LEAD, HELD_READ, HELD_STEP, STROKES, TICK_STEP } from './agent-drag.mjs';
+import { dragTap, swipeTap, heldDown, heldPhase, heldRead, heldTick, HELD_LEAD, HELD_READ, HELD_STEP, STROKES, TICK_STEP } from './agent-drag.mjs';
 import { DRAG_BOUNDS, realTap, REACH_MS, TICK_MARGIN } from '../host/apple/touches.mjs';
+
+test('a swipe routes to its carrier and refuses pending contacts and unsupported hosts', async () => {
+  const calls = [], s = { contact: null, tagged: r => r, landed: r => r,
+    async reveal() { calls.push('reveal'); return null; } };
+  const carrier = { touches: true, async input(id, kind, opts) { calls.push([id, kind, opts]); return { delivery: kind === 'drag' ? 'platform' : 'recognized' }; } };
+  const context = { s, carrier, node: { id: 7 }, target: 'bar', host: 'ios', timing: 'agent', touch: 'agent', tapRefusal: async (_, __, e) => e };
+  expect((await swipeTap(context, { swipe: 'down' })).delivery).toBe('recognized');
+  expect(calls).toEqual(['reveal', [7, 'swipe', { swipe: 'down' }]]);
+  calls.length = 0;
+  carrier.input = async (id, kind, opts) => { calls.push([id, kind, opts]); return { delivery: 'platform' }; };
+  expect((await swipeTap({ ...context, touch: 'platform' }, { swipe: 'down', at: [25, 10] })).delivery).toBe('platform');
+  expect(calls).toEqual([[7, 'swipe', { swipe: 'down', at: [25, 10] }]]);
+  calls.length = 0;
+  s.contact = { x: 0, y: 0 };
+  await expect(swipeTap(context, { swipe: 'down' })).rejects.toThrow('already down');
+  expect(calls).toEqual([]);
+  s.contact = null;
+  for (const host of ['web', 'linux', 'windows', 'tvos']) {
+    expect((await swipeTap({ ...context, host }, { swipe: 'down' })).delivery).toBe('unsupported');
+  }
+  expect(calls).toEqual([]);
+  await expect(swipeTap({ ...context, touch: 'platform', carrier: { ...carrier, touches: null } }, { swipe: 'down' })).rejects.toThrow('touch runner');
+  await expect(swipeTap({ ...context, node: { id: 7, entity: 1 } }, { swipe: 'down' })).rejects.toThrow('view target');
+});
+
+test('a real swipe checks admission with each aim and uses its transformed point across the viewport edge', async () => {
+  const aim = { orientation: 'portrait', session: 'main', generation: 1, screen: { x: 0, y: 0, w: 400, h: 1000 }, point: [170, 750], viewport: [400, 800], at: [170, 750], window: [170, 750], seq: 4, hit: 7 };
+  const began = { seq: 5, touch: 1, phase: 'began', t: 1, at: [170, 750], node: 7, session: 'main', generation: 1 };
+  const checks = [], injected = [];
+  let reply = { checked: true, aim };
+  const ask = async req => {
+    if (req.swipe) { checks.push(req); return reply; }
+    return { log: [began, { ...began, seq: 6, phase: 'moved', at: [170, 870] }, { ...began, seq: 7, phase: 'ended', t: 1.1, at: [170, 870] }], truncated: false };
+  };
+  const touches = { async ask(req) {
+    if (req.op === 'foreground') {
+      return { state: 'runningForeground' };
+    }
+    injected.push(req); return { injected: {} };
+  } };
+  const r = await realTap({ ask, touches, id: 7, rel: [25, 10], swipe: 'down' });
+  expect(r.delivery).toBe('platform');
+  expect(checks).toEqual(Array(2).fill({ op: 'tap', id: 7, swipe: 'down', at: [25, 10], check: true }));
+  expect(injected).toEqual([{ op: 'drag', point: [170, 750], to: [170, 870], press: 0, hold: 0, velocity: 1200 }]);
+  injected.length = 0;
+  for (reply of [{ error: 'the scroll keeps it' }, { delivery: 'unsupported', reason: 'no swipe' }]) {
+    await expect(realTap({ ask, touches, id: 7, swipe: 'down' })).rejects.toThrow();
+  }
+  expect(injected).toEqual([]);
+  let aims = 0;
+  await expect(realTap({ id: 7, touches, swipe: 'down', ask: async () => ++aims === 1 ? { checked: true, aim } : { error: 'its path left the window' } })).rejects.toThrow('left the window');
+  expect(injected).toEqual([]);
+});
 
 /** A session and carrier whose journal says `lines` during the drag; replies settle a tick later. */
 function drive(lines, { touches = false, notes = {} } = {}) {

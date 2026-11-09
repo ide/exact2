@@ -128,17 +128,25 @@ package class ScrollView: UIScrollView {
     /// rule 2), so the drag it steps aside from is taken here.
     func admitsPan(velocity: CGPoint, translation: CGPoint, start: CGPoint) -> Bool {
         let direction = velocity == .zero ? translation : velocity
+        return touchActionAllows(direction, from: start) && !handsOff(direction)
+    }
+    /// `admitsPan` without its side effect on `bounces`, for another view's
+    /// recognizer that waits on this pan (a `swipe`, LLP 1057.001 §8.4).
+    func wouldPan(_ direction: CGPoint, from start: CGPoint) -> Bool {
+        touchActionAllows(direction, from: start) && !chains(direction)
+    }
+    /// Whether `touch-action`, intersected from the node hit at `start`
+    /// through this container as CSS does, leaves `direction` to the pan. It
+    /// governs the initial direction, not a reversal.
+    private func touchActionAllows(_ direction: CGPoint, from start: CGPoint) -> Bool {
         var view = hitTest(start, with: nil)
         if CanvasInputs.owns(view) { return false }
-        // CSS intersects touch-action from the hit element through the
-        // scroll container. It governs initial direction, not reversal.
         while let current = view {
             if let node = current as? NodeView, !node.allowsTouchPan(direction) { return false }
             if current === self { break }
             view = current.superview
         }
-        if let owner = scrollingNode, !owner.allowsTouchPan(direction) { return false }
-        return !handsOff(direction)
+        return scrollingNode?.allowsTouchPan(direction) ?? true
     }
     /// CSS's scroll chaining at a gesture's start (LLP 1070 G1, Q4 as ruled
     /// provisionally): under `overscroll-behavior: auto`, a drag that begins
@@ -509,5 +517,112 @@ extension NodeView {
         control.endRefreshing()
     }
     #endif
+}
+
+// The node's scroll view's `UIScrollViewDelegate` methods for a drag, its
+// deceleration, the end of an animated scroll, and the `scroll` events sent
+// as the offset changes; its snapping and scroll to top are in
+// `ScrollSnapIOS.swift` and `ScrollsToTopIOS.swift`.
+extension NodeView {
+    /// The end the reader was following moved during their interaction:
+    /// settle there when it ends, as a browser's scroll anchoring does.
+    package func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
+        if !decelerate { presenter?.session?.frameHealth.endScroll(scrollView) }
+        guard scrollView === self.scrollView else { return }
+        // A follow of the end that animates ends with its animation.
+        if !decelerate, !followEndIfOwed() { endScroll() }
+    }
+    package func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) { presenter?.session?.frameHealth.endScroll(scrollView); if scrollView === self.scrollView, !followEndIfOwed() { scrollMayHaveEnded(scrollView) } }
+    package func scrollViewDidEndScrollingAnimation(_ scrollView: UIScrollView) {
+        guard scrollView === self.scrollView, presenter?.elementScrolls.cutting !== scrollView else { return }
+        followingEndAnimated = false
+        presenter?.elementScrolls.revealEnded(scrollView)
+        // A smooth correction's driver ends its own motion (`OffsetDriver`);
+        // a UIKit animation's end is not its end.
+        if let c = presenter?.collections, c.offsetDrivers[id] != nil || c.startOwed.contains(id) { return }
+        presenter?.collections.animationEnded(id, atTarget: endedAtTarget(scrollView))
+        scrollMayHaveEnded(scrollView)
+    }
+    /// Whether it started an animation.
+    @discardableResult private func followEndIfOwed() -> Bool {
+        guard followsEndAfterInteraction, let sv = scrollView else { return false }
+        followsEndAfterInteraction = false
+        let maximum = max(-sv.adjustedContentInset.top, sv.contentSize.height + sv.adjustedContentInset.bottom - sv.bounds.height)
+        anchoredScrollTop = maximum
+        guard sv.contentOffset.y >= maximum - 80, abs(sv.contentOffset.y - maximum) > 0.5 else { return false }
+        sv.setContentOffset(PixelGrid.offset(CGPoint(x: sv.contentOffset.x, y: maximum), in: sv), animated: true)
+        return true
+    }
+
+    package func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
+        if let session = presenter?.session { session.frameHealth.beginScroll(scrollView, session: session) }
+        presenter?.elementScrolls.userScrolled(scrollView) // its own scroller, or a grouped list's collection
+        guard scrollView === self.scrollView else { return }
+        followingEndAnimated = false
+        presenter?.collections.animationEnded(id, dragging: true)
+        presenter?.collections.userIntent(id, travel: true)
+        retainedScrollTop = nil
+        #if os(iOS)
+        if #available(iOS 27.1, *) { presenter?.arrangements.cancelScrollHandoff(id) }
+        if swipeOwner { presenter?.swipeActions.painted.began(self) }
+        #endif
+    }
+
+    /// A scroll under a canvas repaints it (LLP 1014 D4 c).
+    package func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        guard scrollView === self.scrollView else { return }
+        let post = Presenter.signposts.beginInterval("scrolled"), phase = HostPhases.shared.begin(.scroll)
+        defer { Presenter.signposts.endInterval("scrolled", post); HostPhases.shared.end(phase) }
+        // The kernel's authored frames already include this content room.
+        // Keep the physical UI inset basis, but do not count native padding twice.
+        let room = extras?.nativeScrollContentInsets ?? .zero
+        presenter?.onScrolled?(id, Double(scrollView.contentOffset.x + room.left), Double(scrollView.contentOffset.y + room.top + pageBand.top))
+        presenter?.stickies.scrolled(id); presenter?.collections.changed(id, user: true)
+        #if os(iOS)
+        if swipeOwner, scrollView.isTracking { presenter?.swipeActions.painted.scrolled(self) }
+        #endif
+        presenter?.transformGeometry.changed()
+        presenter?.videoVisibility?.changed()
+        presenter?.reaimFixedGradients()
+        presenter?.scrollPump.scrolled(self)
+        FrameSampler.scrolled(scrollView, in: presenter?.session, person: false)
+        presenter?.session?.frameHealth.trackScrolled(scrollView)
+        repaintThrough()
+        scrollEndMoved(scrollView)
+        // User scrolling is already a coherent position. Deliver before the
+        // frame paints so authored scroll-linked geometry cannot lag a frame.
+        // Layout-generated offsets still coalesce after the batch completes.
+        if presenter?.applying == false && !dispatchingScrollEvent &&
+            (scrollView.isTracking || scrollView.isDecelerating) {
+            sendScrollEvent()
+        } else { queueScrollEvent() }
+    }
+    func sendScrollEvent() {
+        guard handlers.contains("scroll"), let sv = scrollView,
+              presenter?.views[id] === self, hasScrollLayoutBox else { return }
+        let point = sv.contentOffset, top = scrollTopInset(sv)
+        guard point != lastScrollEvent.offset || top != lastScrollEvent.topInset else { return }
+        lastScrollEvent = (point, top)
+        dispatchingScrollEvent = true
+        defer { dispatchingScrollEvent = false }
+        // CSS's extents (`ScrollEvent`): the port inside UI insets (native
+        // padding and footer room remain content), and the
+        // port plus the range UIKit clamps a settled offset to, so at the
+        // end `scrollHeight - scrollTop - clientHeight` is 0 (chat F4).
+        let inset = sv.adjustedContentInset, port = scrollPort(sv).size
+        let range = CGSize(width: max(0, sv.contentSize.width + inset.right - sv.bounds.width),
+                           height: max(0, sv.contentSize.height + inset.bottom - sv.bounds.height + top))
+        presenter?.scroll(id, [point.x, point.y + top, port.width + range.width, port.height + range.height,
+                               port.width, port.height].map(Double.init))
+    }
+    private func queueScrollEvent() {
+        guard handlers.contains("scroll"), !scrollEventQueued else { return }
+        scrollEventQueued = true
+        DispatchQueue.main.async { [weak self, token = incarnation] in
+            guard let self else { return }
+            self.scrollEventQueued = false
+            if self.incarnation == token { self.sendScrollEvent() }
+        }
+    }
 }
 #endif

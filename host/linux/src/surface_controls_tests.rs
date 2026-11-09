@@ -58,7 +58,7 @@ fn fixture_with_hud_removal(remove_hud: bool) -> (Presenter<()>, PathBuf) {
     boot(&source, &["a", "b", "raw"])
 }
 /// A presenter over `source` whose canvases named by testId are worlds of the probe module.
-fn boot(source: &str, canvases: &[&str]) -> (Presenter<()>, PathBuf) {
+pub(crate) fn boot(source: &str, canvases: &[&str]) -> (Presenter<()>, PathBuf) {
     let (path, compat) = super::tests::fixture();
     let plan = contract::compile(source).unwrap();
     let (mut p, _) = Presenter::boot(
@@ -104,7 +104,7 @@ fn restore(p: &mut Presenter<()>, name: &str, contacts: Value) {
     );
     p.restore_controls();
 }
-fn done(p: Presenter<()>, path: PathBuf) {
+pub(crate) fn done(p: Presenter<()>, path: PathBuf) {
     drop(p);
     std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
 }
@@ -711,7 +711,13 @@ fn blur_clears_raw_hold_without_focus() {
     done(p, path);
 }
 
-fn last_input(p: &Presenter<()>) -> (u32, u32, Value) {
+pub(crate) fn input_count(p: &Presenter<()>) -> u32 {
+    unsafe { p.surfaces.abis[""].symbol::<unsafe extern "C" fn() -> u32>(b"test_input_count")() }
+}
+pub(crate) fn set_canvas_probe(p: &mut Presenter<()>, view: u32, probe: u32) {
+    p.surfaces.canvases.get_mut(&view).unwrap().id = probe;
+}
+pub(crate) fn last_input(p: &Presenter<()>) -> (u32, u32, Value) {
     let abi = &p.surfaces.abis[""];
     unsafe {
         let text = std::ffi::CStr::from_ptr(abi

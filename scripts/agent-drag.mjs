@@ -7,6 +7,34 @@ import { layoutArgs, perfOp } from './agent-inspect.mjs';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { basename, resolve } from 'node:path';
 
+/** LLP 1057.001 §8.7: the host's discrete swipe, or one real finger under --touch platform. */
+export async function swipeTap({ s, carrier, node, target, host, timing, touch, tapRefusal }, opts) {
+  if (!['ios', 'host-ios', 'macos', 'mac', 'host', 'android'].includes(host)) {
+    return s.tagged({ tapped: node.id, target, swipe: opts.swipe, delivery: 'unsupported', reason: `${host} makes no swipe (LLP 1057.001 §8.2)`, carrier: host, mode: timing });
+  }
+  if (node.entity !== undefined) {
+    throw new Error('swipe needs a view target');
+  }
+  if (s.contact) {
+    throw new Error('a contact is already down; use `tap up` or `tap cancel` first');
+  }
+  const platform = ['ios', 'host-ios'].includes(host) && touch === 'platform';
+  if (platform && !carrier.touches) {
+    throw new Error('unsupported: --touch platform swipe needs the iOS touch runner');
+  }
+  const scrolled = opts.at ? null : await s.reveal(node.id);
+  let r;
+  try {
+    r = await carrier.input(node.id, 'swipe', opts);
+    if (r.error) {
+      throw new Error(r.error);
+    }
+  } catch (e) {
+    throw await tapRefusal(s, target, e);
+  }
+  return s.landed({ ...r, tapped: node.id, target, swipe: opts.swipe, ...(scrolled ? { scrolled } : {}), delivery: r.delivery ?? (platform || ['macos', 'mac', 'host'].includes(host) ? 'platform' : 'recognized'), carrier: host, mode: timing });
+}
+
 /** A drag's `during` op is a read or the clock, not a second finger (drums R8).
  * A filmed screenshot (`over … every`) loops on the clock, a comparison settles
  * first, and `perf … during` drives ops of its own. The test parser checks the
@@ -189,7 +217,9 @@ export async function dragTap({ s, carrier, node, target, host, timing, tapRefus
   const phase = async (name, opts) => {
     const r = await s.pointer(name, opts);
     if (r.error || r.delivery === 'unsupported') throw new Error(`drag: ${name}: ${r.error ?? r.reason ?? 'unsupported'}`);
+    if (name === 'up') { up = r; }
     if (r.landError) throw new Error(`drag: ${name} was delivered; landing what it started failed: ${r.landError}`);
+    if (r.cancelled === true) { throw new Error(`drag: ${name}: the contact was cancelled by the carrier; start a new drag`); }
     if (r.note) phaseNotes.push(r.note);
     return r;
   };
@@ -203,7 +233,7 @@ export async function dragTap({ s, carrier, node, target, host, timing, tapRefus
     catch (error) { throw await tapRefusal(s, target, error); }
     if (down.error) throw new Error(`drag: down: ${(await tapRefusal(s, target, new Error(down.error))).message}`);
     if (down.delivery !== 'unsupported') {
-      s.contact = down.contact === false ? null : { x: down.at[0], y: down.at[1] };
+      s.contact = { x: down.at[0], y: down.at[1] };
       if (Number.isFinite(down.clock)) s.now = down.clock;
     }
     if (down.delivery === 'unsupported' && ['ios', 'host-ios'].includes(host)) {
@@ -233,17 +263,23 @@ export async function dragTap({ s, carrier, node, target, host, timing, tapRefus
     }
     if (hold) await phase('hold', { ms: hold, ...seek });
     up = await phase('up');
-  } catch (error) {
-    // Never leave the finger down: cancel, else lift (AppKit has no cancel). If neither is confirmed the contact stays recorded, and says so.
-    // A `down` that threw may still have pressed: release at the carrier, whose own contact decides.
-    if (!down) for (const name of ['cancel', 'up']) await carrier.input(null, name, {}).catch(() => null);
-    for (const name of ['cancel', 'up']) {
-      if (!s.contact) break;
-      const r = await s.pointer(name).catch(() => null);
-      if (r && !r.error && r.delivery !== 'unsupported') s.contact = null;
+  } catch (e) {
+    // A down can fail after native input began. Keep its terminal reachable
+    // until the carrier acknowledges cancel or up.
+    if (!up && down?.delivery !== 'unsupported') {
+      if (!down || down.error) s.contact ??= { x: start[0], y: start[1] };
+      for (const name of ['cancel', 'up']) {
+        if (!s.contact) break;
+        const r = await carrier.input(null, name, {}).catch(() => null);
+        if (r && !r.error && r.delivery !== 'unsupported') {
+          s.contact = null;
+        }
+      }
+      if (s.contact) {
+        e.message += '; the contact could not be released (tap cancel, or close the session)';
+      }
     }
-    if (s.contact) error.message += '; the contact could not be released (tap cancel, or close the session)';
-    throw error;
+    throw e;
   }
   return noted(await s.tagged({ tapped: node.id, target, ...(scrolled ? { scrolled } : {}), at: down.at, drag: said, lifted: up.at, ...(done.length ? { during: done } : {}), delivery: down.delivery, carrier: host, mode: timing }), [...new Set(phaseNotes), ...await reorderNotes(s, mark)]);
 }

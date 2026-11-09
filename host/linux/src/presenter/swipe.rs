@@ -16,6 +16,17 @@ fn indicator(base: f64, caught: f64, progress: f64) -> f64 {
 }
 
 impl<D: DataSource> Presenter<D> {
+    /// Leftward motion closes only a row whose presentation is displaced right.
+    pub(super) fn swipe_admits_motion(&self, key: NodeKey, dx: f64) -> bool {
+        if dx < 0. {
+            let view = self.host.kernel().node_by_key(key).unwrap().id;
+            if self.host.presented(view).translate.0 <= 0. {
+                return false;
+            }
+        }
+        true
+    }
+
     pub(super) fn swipe_candidate(&self, hit: NodeKey) -> Option<NodeKey> {
         if self
             .host

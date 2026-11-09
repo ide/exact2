@@ -525,6 +525,7 @@ fn run<D: DataSource + Default>(
                         0 => p.pointer_down(x, y, now).map(|_| ()),
                         1 => p.pointer_up(x, y, now).map(|_| ()),
                         2 => p.pointer_move(x, y, now).map(|_| ()),
+                        5 => p.reader_touch(action, x, y, now),
                         _ => p.pointer_cancel(now),
                     }
                 }

@@ -26,6 +26,8 @@ package protocol DragCapability: AnyObject {
     /// Whether a drag's recognizer on `view` begins; nil when `gesture` is
     /// none of the drags'.
     func shouldBegin(_ view: NodeView, _ gesture: UIGestureRecognizer) -> Bool?
+    /// Whether a drag takes a swipe's count and travel, in window points.
+    func blocksSwipe(_ view: NodeView, touches: Int, travel: CGPoint, from start: CGPoint, scrollBelow: Bool) -> Bool
     /// The agent's pinch on a transform handle: why it was refused, or nil.
     func recognizedPinch(_ handle: NodeView, scale: Double, focal: CGPoint) -> String?
     #endif

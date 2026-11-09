@@ -168,7 +168,8 @@ extension Agent {
         let bottom = min(max(caret.maxY + inset.bottom - editor.bounds.height, minimum), maximum)
         let tolerance = 1 / max(editor.traitCollection.displayScale, 1)
         let offset = editor.contentOffset.y
-        if editor.bounds.height <= 0 || (offset >= min(top, bottom) - tolerance && offset <= max(top, bottom) + tolerance) {
+        // A textarea whose text fits, or that clips it, stays at the top (`TextArea.pinned`)
+        if editor.bounds.height <= 0 || editor.pinned || (offset >= min(top, bottom) - tolerance && offset <= max(top, bottom) + tolerance) {
             pendingTextReveal = nil
             return false
         }
@@ -507,6 +508,7 @@ extension Agent {
     }
 
     func tap(_ req: [String: Any]) -> [String: Any] {
+        if req["swipe"] != nil { return swipeTap(req) }
         if req["holdState"] != nil { return holdTap(req) } // a held state (LLP 1122 D8, HeldState.swift)
         // A drag of files from outside the app is the Mac's and the web's (FileDragMac.swift).
         if req["drop"] != nil || req["dragenter"] != nil || req["dragleave"] != nil { return ["delivery": "unsupported", "reason": "iOS has no drag of files from outside the app: no drop, dragenter or dragleave"] }

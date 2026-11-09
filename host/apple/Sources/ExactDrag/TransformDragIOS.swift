@@ -47,14 +47,18 @@ extension NodeView {
         guard gesture === transformRecognizer || gesture === transformContact?.pinch else { return nil }
         guard SwipeInput.allows(self), presenter?.transformBindings[id]?.target != nil else { return false }
         guard gesture === transformRecognizer else { return !allowsPinchZoom }
-        let action = style["touch_action"]?.string ?? "auto"
-        guard action != "auto", action != "manipulation", let pan = gesture as? UIPanGestureRecognizer else { return true }
-        if let pinch = transformContact?.pinch, pinch.state == .began || pinch.state == .changed { return true }
+        guard let pan = gesture as? UIPanGestureRecognizer else { return true }
         let velocity = pan.velocity(in: self), translation = pan.translation(in: self)
         let direction = velocity == .zero ? translation : velocity
-        guard direction != .zero else { return true }
         let location = pan.location(in: self)
-        return !platformPans(direction, from: CGPoint(x: location.x - translation.x, y: location.y - translation.y))
+        return transformPanMayBegin(direction, from: CGPoint(x: location.x - translation.x, y: location.y - translation.y))
+    }
+    func transformPanMayBegin(_ direction: CGPoint, from start: CGPoint) -> Bool {
+        guard SwipeInput.allows(self), presenter?.transformBindings[id]?.target != nil else { return false }
+        let action = style["touch_action"]?.string ?? "auto"
+        if action == "auto" || action == "manipulation" || direction == .zero { return true }
+        if let pinch = transformContact?.pinch, pinch.state == .began || pinch.state == .changed { return true }
+        return !platformPans(direction, from: start)
     }
     /// Whether the platform takes a drag in `direction` begun at `start`
     /// (this view's points): `touch-action` intersected from the node hit

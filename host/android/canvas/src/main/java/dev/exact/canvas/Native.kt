@@ -105,8 +105,13 @@ object Native {
      * ([android.view.MotionEvent.getToolType]). A finger is reported to the app as a touch that hovers nothing and
      * leaves no focus ring, a mouse as a mouse (LLP 1115.001 D7.4). Action 4 is no new touch: the one that is down
      * has been held still for the system's long-press time ([android.view.ViewConfiguration.getLongPressTimeout]).
-     * What names a context menu there opens it (D10), and that touch then presses nothing when it lifts. */
+     * What names a context menu there opens it (D10), and that touch then presses nothing when it lifts.
+     * Action 5 is a physical cancel: unlike recognition cancel 3, it also ends the touch's pending fling. */
     @JvmStatic external fun touch(action: Int, x: Float, y: Float, tool: Int)
+    /** The platform's fling of the touch that is lifting, before its lift ([Flings]): its direction, `left`,
+     * `right`, `up` or `down`, and the most pointers the touch had down at once. exact2 gives it to the swipe of a
+     * node under the touch's first down (LLP 1057.001 §8). */
+    @JvmStatic external fun swipe(direction: String, pointers: Int)
     /** What happened in the window the reader made for surface [serial] of the top layer ([Surfaces], LLP 1115.001
      * D10), on the host's thread: a touch ([what] 0 down, 1 up, 2 move, 3 cancel) at ([x], [y]), pixels from the
      * window's own top left; the system dismissed the window (8: a tap outside a menu, Back, Escape); the reader
