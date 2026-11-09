@@ -238,22 +238,3 @@ fn a_page_that_lands_within_a_flings_band_rearms_its_edge_by_the_band_at_rest() 
     send(&mut r, 300.);
     assert_eq!(hits(&r), [2., 0.]);
 }
-
-/// A reader at the start when an earlier page lands, as UIKit's rubber band
-/// leaves a fling that met the top: the page put before the first row
-/// re-arms `reachstart`, which fires for the next page (LLP 1010, extended
-/// 2026-11-09). Without it the edge stayed disarmed while the reader stayed.
-#[test]
-fn a_page_put_before_the_first_row_rearms_reachstart_for_a_reader_still_there() {
-    let mut r = boot("");
-    send(&mut r, 1000.);
-    send(&mut r, 0.);
-    assert_eq!(hits(&r), [1., 0.]);
-    r.act("prepend", vec![]).unwrap();
-    // The rubber band returns the reader to the new first row
-    send(&mut r, 0.);
-    assert_eq!(hits(&r), [2., 0.], "the next page");
-    // A window that slid past its first row re-arms nothing: the edge waits
-    send(&mut r, 0.);
-    assert_eq!(hits(&r), [2., 0.]);
-}

@@ -837,11 +837,7 @@ measured) is offered the next page instead of the edge staying disarmed until th
 reader leaves it. An empty page leaves the last key, and the edge, as they were, so
 an exhausted source still goes idle; a replaced last row or a window that slid past
 it (the old last row gone) re-arms nothing, so a fitting sliding window stays
-idle. `reachstart` was unchanged; **extended 2026-11-09** (pending Charlie's
-review), the start takes the same rule: rows put before the first supplied row,
-which stays, re-arm `reachstart`, so a chat's history loaded at its start keeps
-loading under a fling that met its top, where UIKit's rubber band returned the
-reader to the new first row and the edge stayed disarmed. Both runners keep it
+idle. `reachstart` is unchanged. Both runners keep it
 (`runner/src/instance/collection/mod.rs` `update`, `host/web-js/list.js`
 `update`); the JS target's `paging.contract` pins it. **Extended 2026-09-30**
 (the same rule's intent, for a list whose last row is a trailing row that

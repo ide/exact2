@@ -667,8 +667,7 @@ test('a fling toward the start fires reachstart as far ahead as the window leads
   ]);
 }, 60_000);
 
-// A page put before the first row re-arms reachstart (LLP 1010, extended 2026-11-09), as one after the last
-// re-arms reachend: within a fling's band it fires for the next page at once.
+// reach.rs `geometric_edges`: a page smaller than a fling's band re-arms its edge by the band at rest.
 test('a page that lands within a fling\'s band re-arms reachstart', async () => {
   const result = await evaluate(`(async () => {
     const el = document.createElement('div');
@@ -700,12 +699,12 @@ test('a page that lands within a fling\'s band re-arms reachstart', async () => 
     out.push(report(900, -4000), report(900, -4000), report(100, -4000));
     rt.commit(() => rt.W(rows, [...Array.from({length:20}, (_, i) => i - 20), ...rows()]));
     rt.settled();
-    // The page re-armed the edge: the first report fires it, and the next, at the same first row, does not
+    // The page's new overscan is mounted by the first report and measured by the next
     out.push(c.correction?.offset, report(740, -4000), report(740, -4000));
     rt.end(own); el.remove(); rt.settled();
     return out;
   })()`);
-  expect(result).toEqual([0, null, null, null, null, 740, 0, null]);
+  expect(result).toEqual([0, null, null, null, null, 740, null, 0]);
 }, 60_000);
 
 // into_view.rs: a request the port already satisfies is done and moves nothing; where the host's animation leaves the
