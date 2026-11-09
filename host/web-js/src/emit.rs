@@ -1113,9 +1113,9 @@ impl Em<'_> {
             self.out,
             "const {e}={h}({parent},\"{element}\",{class},{attrs_js},{text});"
         );
-        if !presence.is_empty() {
-            let pr = self.uses.rt("pr");
-            let _ = write!(self.out, "{pr}({e});");
+        if let Some(register) = self.presence_registration(i, !presence.is_empty()) {
+            let register = self.uses.rt(register);
+            let _ = write!(self.out, "{register}({e});");
         }
         self.element_extras(&parts.tag, &e, &attrs, &parts.props);
         // Its surface's inputs, named or positional (LLP 1009 D2).

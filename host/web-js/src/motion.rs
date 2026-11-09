@@ -9,6 +9,33 @@ use exact_plan::{BindingKind, EventKind, NodesId, Value};
 use std::fmt::Write as _;
 
 impl Em<'_> {
+    /// The runtime function that registers node `i` with presence, if any. A bound
+    /// exit takes `px`, which keeps its value from the start of each commit and
+    /// loads presence even when the first value is `none`; another node with a
+    /// declaration that `rows::presence_decls` moves inline (`declares`) takes `pr`.
+    pub(super) fn presence_registration(&self, i: u32, declares: bool) -> Option<&'static str> {
+        let bound_exit = self
+            .plan
+            .node(NodesId(i))
+            .bindings
+            .iter()
+            .map(|b| self.plan.binding(b))
+            .any(|b| {
+                b.kind == BindingKind::Style
+                    && b.id == StyleId::ExitAnimation as u16
+                    && style::literal(self.plan, self.plan.code(b.expr)).is_none()
+                    && crate::presence::exit_animations(self.plan, self.plan.code(b.expr), false)
+                        .held
+                        .values()
+                        .any(Option::is_some)
+            });
+        if bound_exit {
+            Some("px")
+        } else {
+            declares.then_some("pr")
+        }
+    }
+
     /// Whether the motion engine follows node `i`: one a swipe holds, a
     /// swipe's indicator, or one whose `transition` can be a spring (css.rs
     /// leaves springs to the engine).

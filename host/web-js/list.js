@@ -525,7 +525,7 @@ class Collection {
   // one the window scrolled away, at once.
   retire(m, left) {
     end(m.s);
-    if (!(left && exitView(m.wrapper, m.wrapper.firstElementChild?.style.getPropertyValue("--exact-exit-animation").trim()))) m.wrapper.remove();
+    if (!(left && exitView(m.wrapper, m.wrapper.firstElementChild))) m.wrapper.remove();
     Views.delete(m.view); Views.delete(m.root);
   }
   emit() {

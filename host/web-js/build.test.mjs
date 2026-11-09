@@ -223,7 +223,8 @@ test('web-build --out writes a site that serve.mjs serves by the hosting rule, r
     }
     expect(readFileSync(resolve(out, '.exact/install.json'), 'utf8')).toContain('"mode": "Release build"');
     expect(readFileSync(resolve(out, 'index.html'), 'utf8')).toContain('<link rel="manifest" href="./manifest.json">');
-    expect(readdirSync(app).filter((name) => name.startsWith('dist'))).toEqual(['dist']);
+    // Expect only the site and the persistent lock its swap takes beside it (build-lock.mjs)
+    expect(readdirSync(app).filter((name) => name.startsWith('dist'))).toEqual(['dist', 'dist.lock']);
     // As a static host serves it: a request or cached route gets the shell, which has none of the data.
     const { serveBuildTree } = await import('../web/serve.mjs');
     server = createServer((req, res) => serveBuildTree(out, req, res));
@@ -247,7 +248,7 @@ test('web-build --out writes a site that serve.mjs serves by the hosting rule, r
     const after = await generation(), kept = await fetch(url(`/.exact/gen/${before}/app.js`));
     expect([before === after, kept.status, Buffer.from(await kept.arrayBuffer()).equals(script)]).toEqual([false, 200, true]);
     expect(readFileSync(resolve(out, 'app.js')).equals(script)).toBe(false);
-    expect(readdirSync(app).filter((name) => name.startsWith('dist')).sort()).toEqual(['dist', 'dist.gen']);
+    expect(readdirSync(app).filter((name) => name.startsWith('dist')).sort()).toEqual(['dist', 'dist.gen', 'dist.lock']);
     // As `serve` serves it: each route's page rendered with its data, the live one per request, the cached one once.
     serve = await serving(root, out);
     const { get, renders, heard } = serve;
@@ -322,8 +323,30 @@ test.each(['request', 'cached'])('serve renders home "/" render=%s and a notfoun
     const home = await serve.get('/'), missing = await serve.get('/no/such/route'), item = await serve.get('/item/7');
     expect([home.status, home.body.includes('The note, rendered.'), generationIn(home.body) !== undefined]).toEqual([200, true, true]);
     expect(home.cache).toBe(policy === 'cached' ? 'public, max-age=0, s-maxage=60' : 'no-store');
+    expect([home.retryAfter, missing.retryAfter]).toEqual([null, null]);
     expect([missing.status, missing.body.includes('The note, rendered.'), missing.body.includes('/no/such/route')]).toEqual([404, true, true]);
     expect([item.status, item.body.includes('The note, rendered.')]).toEqual([200, false]);
+  } finally {
+    await serve?.stop();
+    rmSync(dir, { recursive: true, force: true });
+  }
+}, 60000);
+
+test('serve preserves the retry delay for unfinished pages, request and cached, GET and HEAD', async () => {
+  const root = resolve(import.meta.dir, '../..');
+  const dir = mkdtempSync(resolve(tmpdir(), 'exact-site-retry-')), app = resolve(dir, 'site'), out = resolve(app, 'dist');
+  let serve;
+  try {
+    site(app, 'shape Note\n  text: string\n\nroutes nav\n  home "/" render=request\n  feed "/feed" render=cached\n\ncomponent App\n  resource note = note("waiting") as shape Note\n  view\n    text note.text\n');
+    writeFileSync(resolve(app, 'app.ts'), "export const grants = '';\nexport const answer = () => new Promise<never>(() => {});\n");
+    const built = spawnSync(process.execPath, ['host/web/build.mjs', app, '--out', out], { cwd: root, env: { ...process.env, EXACT_APP_DIR: app }, encoding: 'utf8' });
+    expect(built.status, built.stdout + built.stderr).toBe(0);
+    serve = await serving(root, out);
+    // Each unfinished page waits out the render deadline, so each policy and each method is asked once
+    const page = await serve.get('/');
+    expect([page.status, page.cache, page.retryAfter]).toEqual([503, 'no-store', '1']);
+    const head = await fetch(`http://127.0.0.1:${serve.port}/feed`, { method: 'HEAD', headers: { accept: 'text/html', 'accept-encoding': 'gzip' } });
+    expect([head.status, head.headers.get('retry-after'), head.headers.get('content-encoding'), await head.text()]).toEqual([503, '1', 'gzip', '']);
   } finally {
     await serve?.stop();
     rmSync(dir, { recursive: true, force: true });
@@ -363,7 +386,7 @@ async function serving(root, out, { fromEnv = false } = {}) {
   await heard((text) => text.includes(`http://127.0.0.1:${port}/`));
   const get = async (path) => {
     const r = await fetch(`http://127.0.0.1:${port}${path}`, { headers: { accept: 'text/html' } });
-    return { status: r.status, cache: r.headers.get('cache-control'), body: await r.text() };
+    return { status: r.status, cache: r.headers.get('cache-control'), retryAfter: r.headers.get('retry-after'), body: await r.text() };
   };
   const renders = (path) => (said.match(new RegExp(`render ${path} 200 `, 'g')) ?? []).length;
   return { port, get, renders, heard, stop: () => child.stop(5_000) };

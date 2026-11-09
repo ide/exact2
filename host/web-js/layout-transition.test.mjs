@@ -131,6 +131,121 @@ test('removed motion views leave the registry after their exit and keep identity
   } finally { await browser?.close(); server.stop(true); }
 }, 30000);
 
+test.each(['chromium', 'webkit'])('computed exit animations follow reduced motion beside fixed and computed press scales on %s', async engine => {
+  const app = await exitApp(engine, `shape Media
+  prefersReducedMotion: bool
+
+keyframes leave
+  to opacity=0 scale=0.75
+
+component App
+  resource media = exactViewport() as shape Media
+  state shown = true
+  action toggle
+    shown = not shown
+  view
+    column
+      text (media.prefersReducedMotion ? "reduced" : "full") testId="mode"
+      button "Toggle" press=toggle testId="toggle"
+      if shown
+        box testId="fixed" width=40 height=40 background-color="#334455" press=toggle -exact-press-scale=0.97 -exact-exit-animation=(media.prefersReducedMotion ? "none" : "leave 2000ms linear both")
+        box testId="computed" width=40 height=40 background-color="#334455" press=toggle -exact-press-scale=(media.prefersReducedMotion ? 1 : 0.97) -exact-exit-animation=(media.prefersReducedMotion ? "none" : "leave 2000ms linear both")
+`, { reducedMotion: 'reduce' });
+  try {
+    const { page, drop } = app;
+    await page.waitForFunction(() => document.querySelector('[data-testid="mode"]')?.textContent === 'reduced');
+    expect(await drop('toggle')).toEqual({ ghosts: 0, scales: [], durations: [], remaining: 0 });
+    await page.locator('[data-testid="toggle"]').click();
+    await page.locator('[data-testid="computed"]').waitFor();
+    await page.emulateMedia({ reducedMotion: 'no-preference' });
+    await page.waitForFunction(() => document.querySelector('[data-testid="mode"]')?.textContent === 'full');
+    expect(await drop('toggle')).toEqual({ ghosts: 2, scales: [0.875, 0.875], durations: [2000, 2000], remaining: 0 });
+    await page.locator('[data-testid="toggle"]').click();
+    await page.locator('[data-testid="computed"]').waitFor();
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await page.waitForFunction(() => document.querySelector('[data-testid="mode"]')?.textContent === 'reduced');
+    expect(await drop('toggle')).toEqual({ ghosts: 0, scales: [], durations: [], remaining: 0 });
+  } finally { await app.close(); }
+}, 60000);
+
+// The runner ends an arm without updating its bindings, so a removed node plays the exit it had when the commit began
+test.each(['chromium', 'webkit'])('a removal plays the exit its commit began with, whichever write comes first, on %s', async engine => {
+  const app = await exitApp(engine, `keyframes leave
+  to opacity=0
+
+component App
+  state calm = true
+  state shown = true
+  action calmFirst
+    calm = not calm
+    shown = false
+  action dropFirst
+    shown = false
+    calm = not calm
+  action show
+    shown = true
+  view
+    column
+      button "Calm first" press=calmFirst testId="calm-first"
+      button "Drop first" press=dropFirst testId="drop-first"
+      button "Show" press=show testId="show"
+      if shown
+        text "Card" testId="card" -exact-exit-animation=(calm ? "none" : "leave 2000ms linear both")
+`);
+  try {
+    const leaving = async button => {
+      const { ghosts } = await app.drop(button);
+      await app.page.locator('[data-testid="show"]').click();
+      await app.page.locator('[data-testid="card"]').waitFor();
+      return ghosts;
+    };
+    // Each action flips `calm`, so the removals alternate between starting calm and starting with the exit
+    expect([await leaving('calm-first'), await leaving('calm-first'), await leaving('drop-first'), await leaving('drop-first')]).toEqual([0, 1, 0, 1]);
+  } finally { await app.close(); }
+}, 60000);
+
+/** `source` compiled to the JS target and opened in `engine` with presence loaded. `drop(button)` presses `button`,
+ * reports the exit animations that start, then finishes them; `close()` removes the page, server and app. */
+async function exitApp(engine, source, pageOptions) {
+  const root = resolve(import.meta.dir, '../..'), target = resolve(root, 'target');
+  const dir = mkdtempSync(resolve(target, 'exit-animation-'));
+  const style = withLook(readFileSync(resolve(root, 'host/web/index.html'), 'utf8')).match(/<style>([\s\S]*?)<\/style>/)[1];
+  let server, browser;
+  const close = async () => { await browser?.close(); server?.stop(true); rmSync(dir, { recursive: true, force: true }); };
+  try {
+    writeFileSync(resolve(dir, 'app.contract'), source);
+    const compiled = spawnSync(resolve(target, 'debug/exact-web-js'), ['js', resolve(dir, 'app.contract'), '-o', dir], { encoding: 'utf8' });
+    expect(compiled.status, compiled.stderr).toBe(0);
+    server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch(request) {
+      const path = new URL(request.url).pathname.slice(1);
+      if (!path) { return new Response(`<style>${style}</style><link rel="stylesheet" href="/app.css"><div id="exact-root"></div><script type="module">import app from '/app.js';app();</script>`, { headers: { 'content-type': 'text/html' } }); }
+      const bases = path.startsWith('web/') ? [resolve(root, 'host')] : [dir, import.meta.dir, resolve(root, 'host/web')];
+      const file = bases.map(base => resolve(base, path)).find(existsSync);
+      return file ? new Response(Bun.file(file)) : new Response(null, { status: 404 });
+    } });
+    browser = await suiteBrowser(engine);
+    const page = await browser.newPage(pageOptions);
+    await page.goto(server.url.href);
+    await page.evaluate(async () => { const { pieces } = await import('/rt.js'); await pieces(); });
+    await page.waitForFunction(() => globalThis.exact?.presenceLive);
+    const drop = button => page.evaluate(async button => {
+      document.querySelector(`[data-testid="${button}"]`).click();
+      await new Promise(resolve => setTimeout(resolve));
+      const ghosts = [...document.querySelectorAll('[data-exiting]')];
+      const animations = ghosts.flatMap(node => node.getAnimations({ subtree: true }));
+      await Promise.all(animations.map(async animation => { animation.pause(); await animation.ready; animation.currentTime = 1000; }));
+      const scales = ghosts.map(ghost => parseFloat(getComputedStyle(ghost).scale));
+      const result = { ghosts: ghosts.length, scales, durations: animations.map(animation => animation.effect.getTiming().duration) };
+      await Promise.all(animations.map(animation => (animation.finish(), animation.finished)));
+      return { ...result, remaining: document.querySelectorAll('[data-exiting]').length };
+    }, button);
+    return { page, drop, close };
+  } catch (e) {
+    await close();
+    throw e;
+  }
+}
+
 
 test('text selection scopes release removed nodes and the document listener has one owner', async () => {
   const root = resolve(import.meta.dir, '../..');
