@@ -57,7 +57,7 @@ final class NavigationBasicsIOSTests: XCTestCase {
 
     /// A session over the native fixture's plan, or over the one `plan`
     /// names: `EXACT_NAVIGATION_BARS_PLAN` is `scripts/fixtures/navigation-bars.contract`.
-    private func fixture(_ label: String, plan: String = "EXACT_FIXTURE_PLAN", launch: String? = nil) throws -> ExactSession {
+    func fixture(_ label: String, plan: String = "EXACT_FIXTURE_PLAN", launch: String? = nil) throws -> ExactSession {
         let env = ProcessInfo.processInfo.environment
         let plan = try Data(contentsOf: URL(fileURLWithPath: try XCTUnwrap(env[plan], "build.mjs --test --ios compiles the fixtures' plans")))
         ExactGroupedLists.install() // navigation-bars.contract's `rows` route is a grouped list
@@ -83,7 +83,7 @@ final class NavigationBasicsIOSTests: XCTestCase {
         return session
     }
 
-    private func node(_ session: ExactSession, _ testId: String) throws -> NodeView {
+    func node(_ session: ExactSession, _ testId: String) throws -> NodeView {
         try XCTUnwrap(session.presenter.views.values.first { $0.props["testId"] == testId }, "no \(testId)")
     }
 
@@ -135,30 +135,6 @@ final class NavigationBasicsIOSTests: XCTestCase {
         // UIKit places a container's bars only where no scroll view holds it (DocumentMountIOS.swift).
         XCTAssertTrue(p.documentFixed && !p.viewport.isScrollEnabled, "the native container's document is in its mount")
         XCTAssertFalse(sequence(first: owner, next: { $0.superview }).contains { $0 is UIScrollView }, "no scroll view holds the container")
-    }
-
-    func testTheDocumentLeavesItsMountWithTheNativeContainerUnderCover() throws {
-        guard hostedWindowScene() != nil else {
-            throw missing("scene", "the native container needs the hosted window")
-        }
-        let session = try fixture("mount-under-cover", plan: "EXACT_NAVIGATION_BARS_PLAN"), p = session.presenter
-        let app = try node(session, "app")
-        p.apply(wireBatch([["op": "props", "id": Int(app.id), "set": ["viewportFit": "cover"]]]))
-        let view = try XCTUnwrap(session.view)
-        view.setNeedsLayout()
-        view.layoutIfNeeded()
-        let hearsTouches = { (host: UIView) in host.gestureRecognizers?.contains { $0 is PopoverTouch } == true }
-        XCTAssertTrue(p.documentFixed)
-        XCTAssertTrue(hearsTouches(p.documentMount))
-        let frame = p.viewport.frame
-        // Every route leaves the root, which retires the container
-        p.apply(wireBatch([["op": "children", "id": Int(app.id), "ids": []]]))
-        view.layoutIfNeeded()
-        XCTAssertNil(p.navigation.primaryOwner)
-        XCTAssertEqual(p.viewport.frame, frame, "under cover the session's area is the same without the container")
-        XCTAssertFalse(p.documentFixed, "the document leaves its mount with the container")
-        XCTAssertTrue(p.viewport.isScrollEnabled)
-        XCTAssertTrue(hearsTouches(p.viewport) && !hearsTouches(p.documentMount), "light dismissal hears the document where it is")
     }
 
     func testPageScrollDoesNotChangeRouteClearance() throws {
