@@ -55,7 +55,9 @@ extension Presenter {
             $0.safeReach.route = view
         }
         _ = walk.visit(c.node, allowed: .all)
-        geometry.topReachers[c.node.id] = top // PROTO (UIKit-first measurement)
+        walk.write()
+        // Parents first, as the walk writes (`SafeReach.write`)
+        geometry.topReachers[c.node.id] = top.reversed() // PROTO (UIKit-first measurement)
     }
 
     /// PROTO (UIKit-first measurement): a moving top edge's reach (`GeometryOnlyIOS.swift`).
@@ -83,11 +85,29 @@ struct SafeReach {
     /// PROTO (UIKit-first measurement): the callback for each box that reaches or takes the top
     /// edge (`Presenter.reachMovingTops`)
     let reachesTop: (NodeView) -> Void
+    /// The outsets the walk decides, each box after the boxes it holds, since a box reaches an edge that
+    /// something inside it reaches.
+    private let decided = Decided()
+
+    private final class Decided { var outsets: [(view: NodeView, reach: UIEdgeInsets, take: UIEdgeInsets?)] = [] }
+
+    /// Writes the outsets the walk decided, each box before the boxes it holds, as UIKit lays out a superview
+    /// before its subviews. A view's content margins (private; an inset-grouped list places its cards by them)
+    /// follow its superview's as they are when the view's geometry changes, and a later change to the
+    /// superview's does not reach it: written children first, a list kept the margins of the shape before a
+    /// rotation and its cards ran to the window's edge (iOS 27.1, iPhone Duo). Each scroller's `reconcile` also
+    /// reads its safe area under its ancestors' current outsets.
+    func write() {
+        for outset in decided.outsets.reversed() {
+            if let take = outset.take { Self.take(take, to: outset.view) }
+            Self.apply(outset.reach, to: outset.view)
+        }
+    }
 
     /// The edges a box or something inside it reaches.
     @discardableResult
     func visit(_ v: NodeView, allowed: UIRectEdge, edge: CGRect? = nil) -> UIRectEdge {
-        guard !v.isHidden else { Self.apply(.zero, to: v); return [] }
+        guard !v.isHidden else { decided.outsets.append((v, .zero, nil)); return [] }
         let safe = edge ?? self.safe
         // Its laid-out box: its bounds less its reach (origin shifted) or less what it takes (origin kept).
         let r = v.convert(v.boxBounds.inset(by: v.take), to: view)
@@ -120,18 +140,19 @@ struct SafeReach {
             if inside.contains(.right) { inner.size.width = r.maxX - v.number("border_width_right", u) - v.number("padding_right") - inner.minX }
         }
         for child in v.container.subviews.compactMap({ $0 as? NodeView }) { below.formUnion(visit(child, allowed: inside, edge: inner)) }
+        var take: UIEdgeInsets?
         let leaf = v.container.subviews.allSatisfy { !($0 is NodeView) } && v.scroll == nil
         // A leaf that takes its edges (`-exact-safe-area="ignore …"`, §2.4) is laid out to the allocation's
         // edge with its content: its frame grows, its bounds origin stays, so what fills its bounds (a module's
         // view, its own layer) fills the band, and UIKit's safe area tells a native view where its controls go.
         if leaf {
             let taken = Self.ignored(v).intersection(touches)
-            var take = UIEdgeInsets.zero
-            if taken.contains(.top) { take.top = r.minY - allocation.minY }
-            if taken.contains(.left) { take.left = r.minX - allocation.minX }
-            if taken.contains(.bottom) { take.bottom = allocation.maxY - r.maxY }
-            if taken.contains(.right) { take.right = allocation.maxX - r.maxX }
-            Self.take(take, to: v)
+            var taking = UIEdgeInsets.zero
+            if taken.contains(.top) { taking.top = r.minY - allocation.minY }
+            if taken.contains(.left) { taking.left = r.minX - allocation.minX }
+            if taken.contains(.bottom) { taking.bottom = allocation.maxY - r.maxY }
+            if taken.contains(.right) { taking.right = allocation.maxX - r.maxX }
+            take = taking
             // Its ancestors cover what it takes, so UIKit's safe area reaches the view inside it.
             below.formUnion(taken)
         }
@@ -157,7 +178,7 @@ struct SafeReach {
         // What of the reach lies inside the safe area: an enclosing scroller's padding, crossed to reach its edge.
         v.safeReach.own = UIEdgeInsets(top: 0, left: reach.left > 0 ? max(0, safe.minX - self.safe.minX) : 0,
                                   bottom: 0, right: reach.right > 0 ? max(0, self.safe.maxX - safe.maxX) : 0)
-        Self.apply(reach, to: v)
+        decided.outsets.append((v, reach, take))
         var reached: UIRectEdge = below
         if reach.top > 0 { reached.insert(.top) }
         if reach.left > 0 { reached.insert(.left) }
