@@ -768,9 +768,9 @@ public final class ExactTabs {
 public struct ExactTab {
     public let name: String
     /// The controller Exact shows the tab in, for the tab's life: a
-    /// navigation controller for a tab whose panel draws its stack, a plain
-    /// view controller for one whose panel shows one fixed route (LLP
-    /// 1075.003 §3.7).
+    /// navigation controller for a tab that can push or show a header, a
+    /// plain view controller for one that shows one fixed route with no
+    /// header (LLP 1075.003 §3.7).
     public let controller: UIViewController
     /// The tab's item, which Exact updates in place as the authored tab changes.
     public var item: UITabBarItem { controller.tabBarItem }
@@ -1335,7 +1335,7 @@ private let moduleSessionView: @convention(c) (UnsafeMutableRawPointer?, UnsafeM
 }
 
 /// The ABI major this artifact was built against; the host refuses others.
-private let major: UInt32 = 3
+private let major: UInt32 = 4
 
 private let table: UnsafeMutableRawPointer = {
     // Beside the tags, under a key no tag can take (a tag has a hyphen): the

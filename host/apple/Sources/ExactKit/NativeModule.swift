@@ -109,7 +109,7 @@ private struct NativeFailure: Error { let state: String; let message: String }
 
 /// The loaded table: the roster and the entries, read once.
 private final class NativeTable {
-    static let major: UInt32 = 3
+    static let major: UInt32 = 4
     /// The hatch words the module handles, or nil for one that does not say.
     var hatchWords: Set<String>?
     /// The modules' extensions the artifact composes (LLP 1133.001 D4).

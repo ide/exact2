@@ -28,18 +28,20 @@ impl<D: DataSource> Runner<D> {
         self.update_tree(true, |tree, u| tree.open_panels(u, panels))
     }
 
-    /// Whether each tab panel in `panels` draws its tab's stack
-    /// ([`crate::instance::tabs::sites_draw_stacks`]); `false` for a view
-    /// that is no tab panel.
-    pub fn panels_draw_stacks(&self, panels: &[ViewId]) -> Vec<bool> {
+    /// Whether each tab panel in `panels` needs a navigation controller
+    /// ([`crate::instance::tabs::sites_need_navigation`]); `true` where the
+    /// plan cannot tell, for a view that is no panel site the plan names (a
+    /// panel whose `role` is computed): a navigation controller can show any
+    /// of its routes.
+    pub fn panels_need_navigation(&self, panels: &[ViewId]) -> Vec<bool> {
         let sites = crate::instance::tabs::panel_sites(&self.plan);
-        let stacks = crate::instance::tabs::sites_draw_stacks(&self.plan, &sites);
+        let navigation = crate::instance::tabs::sites_need_navigation(&self.plan, &sites);
         panels
             .iter()
             .map(|p| {
                 self.plan_site_of(*p)
                     .and_then(|s| sites.binary_search(&s).ok())
-                    .is_some_and(|i| stacks[i])
+                    .is_none_or(|i| navigation[i])
             })
             .collect()
     }

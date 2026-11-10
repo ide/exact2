@@ -1,11 +1,13 @@
 // LLP 1075.003 §3.7: more root tabs than an iPhone's tab bar shows, so UIKit
-// lists the last ones under its More item (NavigationMoreIOSTests). Every
-// panel but Six's draws its tab's stack, so its tab is a navigation
-// controller: Home, Three, Four and Five show a bar, and Barless shows none.
-// Six's panel shows one fixed route, so its tab is a plain view controller,
-// whose route's header is content.
-// Home and Five push a route. With Redirect on, Four's press selects Three: a
-// press that moves the router to a tab other than the one tapped.
+// lists the last ones under its More item (NavigationMoreIOSTests). Home,
+// Barless, Three and Five draw their tab's stack, so each tab is a navigation
+// controller: Home and Three show a bar; Barless and Five's root have no
+// header, and under More, Five's root shows More's Back to its list. Four's
+// panel shows one fixed route with a header, so its tab is a navigation
+// controller too, whose bar shows that header. Six's panel shows one fixed
+// route with no header, so its tab is a plain view controller. Home and Five
+// push a route. With Redirect on, Four's press selects Three: a press that
+// moves the router to a tab other than the one tapped.
 routes nav
   tab home "/"
     detail "/detail"
@@ -34,15 +36,19 @@ component MoreTabs
         for t in nav.tabs key=t.name
           if t.name == "six"
             column role="tabpanel" id="panel-six" position="absolute" inset=0
-              column navigationKey=(match first(t.stack) { case some(e) => `${e.id}`, case none => "" }) testId="route-six" position="absolute" inset=0 display="flex" flex-direction="column"
-                header display="flex" align-items="center" padding="8px 16px"
-                  text "Six" role="heading" aria-level=1
+              column navigationKey=(match first(t.stack) { case some(e) => `${e.id}`, case none => "" }) testId="route-six" position="absolute" inset=0
                 text "six" testId="text-six"
+          else if t.name == "four"
+            column role="tabpanel" id="panel-four" position="absolute" inset=0
+              column navigationKey=(match first(t.stack) { case some(e) => `${e.id}`, case none => "" }) testId="route-four" position="absolute" inset=0 display="flex" flex-direction="column"
+                header display="flex" align-items="center" padding="8px 16px"
+                  text "four" role="heading" aria-level=1
+                text "Four's page" testId="text-four"
           else
             column role="tabpanel" id=`panel-${t.name}` position="absolute" inset=0
               for e in t.stack key=e.id
                 column navigationKey=`${e.id}` testId=`route-${e.name}` position="absolute" inset=0 display="flex" flex-direction="column"
-                  if e.name != "barless"
+                  if e.name != "barless" and e.name != "five"
                     header display="flex" align-items="center" padding="8px 16px"
                       if e.name == "detail" or e.name == "deeper"
                         button id="back" press=back testId=`back-${e.name}` aria-label="Back"

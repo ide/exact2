@@ -620,11 +620,23 @@ extension NavigationHost {
         if tabBarShows, let root = container, let tabs = NavigationTabs.of(root, presenter), let index = tabs.tabs.firstIndex(where: { $0 === node }) {
             guard !node.disabled else { return ["error": "tab #\(id) is disabled"] }
             guard before(nil), !node.disabled, !node.inert, presenter.views[node.id] === node else { return ["error": "tab #\(id) changed during its pointer handlers"] }
-            // Refuse the selected tab above its root where Back does not go, as the bar's own tap pops only where it goes (`mayShow`)
-            if index == routerTab, (routesStack(index)?.stackRoutes.count ?? 0) > 1, !canInvokeBack { return ["error": "tab #\(id): \(backRefusal)"] }
-            // As the bar's own tap: the selected tab at its root scrolls to the top
+            let reply: [String: Any] = ["tapped": id, "pressed": id, "delivery": "host-activation", "native": barItem(ofTab: index) != nil ? "tab-bar-item" : "more-list-row"]
+            // Tap a tab whose item the bar shows as a person's tap runs: UIKit's sequence through Exact's delegate
+            // (`TabDelegateProxy`; the order measured with real touches, as `tapTab` replays it)
+            if let tabsController = tabController, let controller = tabStack(index), barItem(ofTab: index) != nil {
+                let reselect = controller === tabsController.selectedViewController
+                guard tabProxy.tabBarController(tabsController, shouldSelect: controller) else {
+                    // Above the selected tab's root, UIKit pops only where Back goes (`mayShow`)
+                    return reselect ? ["error": "tab #\(id): \(backRefusal)"] : reply
+                }
+                if reselect { (controller as? UINavigationController)?.popToRootViewController(animated: true) }
+                else { tabsController.selectedViewController = controller }
+                tabProxy.tabBarController(tabsController, didSelect: controller)
+                return reply
+            }
+            // Press a row of More's list's tab: the router selects it, which UIKit shows under More
             pressTab(node, scrolling: reselectedRoot(index))
-            return ["tapped": id, "pressed": id, "delivery": "host-activation", "native": barItem(ofTab: index) != nil ? "tab-bar-item" : "more-list-row"]
+            return reply
         }
         let shown = controllers.values.filter { c in
             guard let nav = c.navigationController, nav.topViewController === c, barShows(nav) else { return false }

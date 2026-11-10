@@ -320,6 +320,12 @@ final class RouteController: UIViewController, UIScrollViewDelegate {
         snapshot.setPaintForeground()
     }
 
+    // Follow UIKit moving this route into another controller (`NavigationHost.moved(into:)`)
+    override func willMove(toParent parent: UIViewController?) {
+        super.willMove(toParent: parent)
+        if let parent { host?.moved(into: parent) }
+    }
+
     /// The stack it is in: its plain tab, checked first because under More
     /// the plain tab's `navigationController` is More's; else its navigation
     /// controller.
@@ -403,16 +409,18 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
     /// The router's tab's root route when a tap reselects it at that root,
     /// kept from `shouldSelect` to `didSelect` to scroll it to its top.
     weak var reselected: RouteController?
-    /// The tab UIKit is selecting for a person: a tap on the bar, from
-    /// UIKit's `shouldSelect` to its `didSelect`, which UIKit sends in one
-    /// call with its selection between them and no transition coordinator,
-    /// or a row of More's list, during More's `willShow`. UIKit selects it,
-    /// so `syncTabs` does not, and the safe areas UIKit lays the tab out
-    /// through are not reported (`coversChanged`) until `followUIKit`.
+    /// The tab UIKit is selecting for a person: a tap on the bar, from UIKit's `shouldSelect` to its
+    /// `didSelect`, which UIKit sends in one call with its selection between them and no transition
+    /// coordinator, or a row of More's list, during More's `willShow`. UIKit selects it, so `syncTabs`
+    /// does not, and the safe areas UIKit lays it out through are not reported until `followUIKit`.
     weak var tapping: UIViewController?
     /// Each tab's controller by its panel id (PlainTabIOS): a navigation
     /// controller, or a plain tab.
     var tabStacks: [UInt32: UIViewController] = [:]
+    /// UIKit's More as Exact last adopted it (iOS) and its record's key, to retire that record
+    /// after UIKit lets it go; whether a sync is owed in the next turn (`syncNextTurn`).
+    weak var adoptedMore: UINavigationController?
+    var adoptedMoreID: ObjectIdentifier?, resyncOwed = false
     var tabPanels: [UInt32] = []
     /// How many routes the selected stack declared at the last projection.
     private var selectedRouteCount = 0
@@ -825,10 +833,11 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
                 }
                 #endif
                 nav.setViewControllers(nav.stackFront + stack, animated: (pushOrPop || arrives) && index == owners.count - 1 && mounted.count == boundaries.count && !ExactEnv.agentFreezes && !unanimated && nav.view.window != nil)
-                recordOwned(nav)
                 // A press that pushed may hand its control's focus to the arriving route's first autofocus (PressHandoffIOS).
                 if pushOrPop || arrives { presenter.pressShows((stack.last as? RouteController)?.node) }
             }
+            // Record what it holds even when unchanged: UIKit moves routes between More and a tab's own (`recordOwned`)
+            recordOwned(nav)
         }
         unanimated = false
         // As the split expands, the inspector's sheet gives its route to the
@@ -1305,7 +1314,7 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
     }
 
     func navigationController(_ navigationController: UINavigationController, willShow viewController: UIViewController, animated: Bool) {
-        if navigationController === more { followMore(viewController) }
+        if navigationController === more { followMore(viewController, animated: animated) }
         guard follows(navigationController) else { return }
         HostLog.note(presenter.session, {
             let by = navigationController.transitionCoordinator?.isInteractive == true ? "the edge swipe" : nativePopPending(on: navigationController) ? "UIKit's Back" : "the app"
@@ -1440,10 +1449,11 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
             presenter.resolveStatusBar(settled: true)
             #endif
         }
-        // More went back to its list (its Back on the tab's root, or More tapped again): the list is no
-        // route, and the router keeps its tab. Routes above the root that went with it count as a Back to the root.
+        // Count More's return to its list (its Back on a root, More tapped again) as a Back to the tab's root, unless UIKit
+        // moved the routes to their tab's own controller (a size class change, measured): the router keeps its tab.
         if navigationController === more, viewController === navigationController.viewControllers.first {
-            if let top = selectedKey, let root = shownKeys.first, top != root { goBack(from: top, to: root) }
+            let moved = controllers.values.contains { $0.key == selectedKey && $0.navigationController.map { $0 !== navigationController } == true }
+            if !moved, let top = selectedKey, let root = shownKeys.first, top != root { goBack(from: top, to: root) }
             return
         }
         let sourceKey = source.flatMap { presenter.views[$0.node.id] === $0.node ? $0.key : nil }

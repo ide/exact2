@@ -7,8 +7,8 @@ import XCTest
 /// with the tab container and never replaced. A tab whose panel draws its
 /// stack is a navigation controller from launch, built or not; where its
 /// root shows no bar the bar is hidden, and its first push animates in the
-/// same controller. The plain tab, whose panel shows one fixed route, is
-/// NavigationMoreIOSTests's Six.
+/// same controller. The plain tab, whose panel shows one fixed route with
+/// no header, is NavigationMoreIOSTests's Six.
 final class TabStacksIOSTests: XCTestCase {
     private var window: UIWindow?
     private var sessions: [ExactSession] = []

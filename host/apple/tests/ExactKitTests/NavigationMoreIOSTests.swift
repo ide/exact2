@@ -152,6 +152,7 @@ final class NavigationMoreIOSTests: XCTestCase {
         // Five picked again: UIKit moves its routes back into More, which navigation follows at once
         pickRow(tabs, 4)
         waitFor("More shows Five's root again") { more.topViewController is RouteController && more.transitionCoordinator == nil }
+        XCTAssertFalse(more.isNavigationBarHidden, "More's bar, with its Back to the list, for a root with no header")
         waitForMainQueue()
         XCTAssertTrue(navigation.primaryNavigation === more, "navigation follows More within its willShow")
         XCTAssertEqual(navigation.observation()["stack"] as? [String], five.map { [$0] })
@@ -166,6 +167,7 @@ final class NavigationMoreIOSTests: XCTestCase {
         tapTab(tabs, of: tabs.moreNavigationController)
         pickRow(tabs, 4)
         waitFor("the router follows Five, whose root More holds") { session.presenter.navigation.routerTab == 4 && more.stackRoutes.count == 1 && more.transitionCoordinator == nil }
+        let root = try XCTUnwrap(navigation.observation()["route"] as? String)
         try tapNode(session, "open-deeper")
         waitFor("Deeper pushed onto More") { more.stackRoutes.count == 2 && more.transitionCoordinator == nil && !navigation.changing }
         tabs.traitOverrides.horizontalSizeClass = .regular
@@ -174,9 +176,86 @@ final class NavigationMoreIOSTests: XCTestCase {
         let five = try XCTUnwrap(tabs.viewControllers?[4] as? UINavigationController)
         waitFor("Five's routes are in its own stack, which navigation follows") { five.viewControllers.count == 2 && navigation.primaryNavigation === five }
         five.popViewController(animated: false)
-        waitFor("the router popped Deeper") { (navigation.observation()["stack"] as? [String])?.count == 1 && !navigation.changing }
+        waitFor("the router is back on Five's root") { navigation.observation()["route"] as? String == root && !navigation.changing }
         waitForMainQueue()
         XCTAssertEqual(five.viewControllers.count, 1, "no batch pushes Deeper back")
+    }
+
+    /// UIKit makes a new More when it needs one again (iOS 27.1, measured): a
+    /// regular width moves Five's routes out of More, and a compact one moves
+    /// them into a More, which Exact adopts as the routes move. Its bar shows
+    /// Deeper's header once, with Back, and the router stays on Deeper.
+    func testATabUIKitMovesIntoAMoreAgainShowsItsHeaderOnce() throws {
+        let (session, tabs, first) = try moreFixture("more-again")
+        let navigation = session.presenter.navigation
+        tapTab(tabs, of: first)
+        pickRow(tabs, 4)
+        waitFor("the router follows Five, whose root More holds") { navigation.routerTab == 4 && first.stackRoutes.count == 1 && first.transitionCoordinator == nil }
+        try tapNode(session, "open-deeper")
+        waitFor("Deeper pushed onto More") { first.stackRoutes.count == 2 && first.transitionCoordinator == nil && !navigation.changing }
+        let deeper = try XCTUnwrap(first.topViewController as? RouteController)
+        let five = try XCTUnwrap(tabs.viewControllers?[4] as? UINavigationController)
+        setSizeClasses(tabs, horizontal: .regular)
+        waitFor("Five's routes are in its own stack") { deeper.navigationController === five && navigation.primaryNavigation === five && !navigation.changing }
+        setSizeClasses(tabs, horizontal: .compact)
+        try waitForAdoptedMore(navigation, holding: deeper, apart: five)
+    }
+
+    /// A height-only size class change at a compact width, as the folded
+    /// Duo's cover display turned sideways makes: where the bar shows every
+    /// tab at a regular height, a compact one moves the last ones into More,
+    /// a new More each time (M15). Exact adopts it as the routes move, and
+    /// its bar shows Deeper's header once, with Back.
+    func testAHeightChangeAtCompactWidthMovesATabIntoMoreWithOneHeader() throws {
+        guard hostedWindowScene() != nil else { throw missing("scene", "UIKit lays the iPhone Duo's side bar out only in a scene's window") }
+        let session = try fixture("more-height", wholeScreen: true)
+        let navigation = session.presenter.navigation
+        let tabs = try XCTUnwrap(navigation.tabController)
+        setSizeClasses(tabs, horizontal: .compact, vertical: .regular)
+        let items = tabs.tabBar.items?.count ?? 0
+        guard items == 6 else { throw XCTSkip("UIKit's bar shows \(items) items at a compact width and a regular height in a \(tabs.view.bounds.size) window here, not every tab (the iPhone Duo's shows them all)") }
+        tapTab(tabs, 4)
+        let five = try XCTUnwrap(tabs.viewControllers?[4] as? UINavigationController)
+        waitFor("Five selected and built") { navigation.routerTab == 4 && five.viewControllers.count == 1 }
+        try tapNode(session, "open-deeper")
+        waitFor("Deeper pushed onto Five") { five.viewControllers.count == 2 && five.transitionCoordinator == nil && !navigation.changing }
+        let deeper = try XCTUnwrap(five.topViewController as? RouteController)
+        setSizeClasses(tabs, horizontal: .compact, vertical: .compact)
+        let more = try waitForAdoptedMore(navigation, holding: deeper, apart: five)
+        setSizeClasses(tabs, horizontal: .compact, vertical: .regular)
+        waitFor("Five's routes are back in its own stack") { deeper.navigationController === five && navigation.primaryNavigation === five && !navigation.changing }
+        setSizeClasses(tabs, horizontal: .compact, vertical: .compact)
+        let again = try waitForAdoptedMore(navigation, holding: deeper, apart: five)
+        XCTAssertTrue(navigation.stacks[ObjectIdentifier(more)] == nil || more === again, "the More UIKit let go has no record")
+    }
+
+    /// Size classes as a rotation or a fold changes them, laid out at once.
+    private func setSizeClasses(_ tabs: UITabBarController, horizontal: UIUserInterfaceSizeClass, vertical: UIUserInterfaceSizeClass? = nil) {
+        tabs.traitOverrides.horizontalSizeClass = horizontal
+        if let vertical { tabs.traitOverrides.verticalSizeClass = vertical }
+        tabs.view.setNeedsLayout()
+        tabs.view.layoutIfNeeded()
+    }
+
+    /// The More UIKit moved `route`'s stack into, once Exact follows it: Exact
+    /// is its delegate, navigation follows it, its bar shows the route's
+    /// header as the title (lifted out of the content) with Back, and the
+    /// router stays on the route.
+    @discardableResult
+    private func waitForAdoptedMore(_ navigation: NavigationHost, holding route: RouteController, apart tab: UINavigationController) throws -> UINavigationController {
+        let key = route.key
+        waitFor("UIKit moves the routes into a More, which Exact adopts and follows", facts: { "parent \(String(describing: route.navigationController)), navigation \(String(describing: navigation.primaryNavigation)), adopted \(String(describing: navigation.adoptedMore)) holding \(navigation.adoptedMore?.viewControllers ?? []), its delegate Exact's \(navigation.adoptedMore.map(navigation.isAdopted) ?? false), the tab's own \(tab.viewControllers)" }) {
+            guard let more = route.navigationController, more !== tab, more.transitionCoordinator == nil else { return false }
+            return navigation.isAdopted(more) && navigation.primaryNavigation === more && !navigation.changing
+        }
+        let more = try XCTUnwrap(route.navigationController)
+        XCTAssertTrue(navigation.more === more, "Exact's More is the one UIKit shows")
+        XCTAssertFalse(more.isNavigationBarHidden, "More's bar")
+        XCTAssertTrue(more.navigationBar.topItem === route.navigationItem, "with the route's item")
+        XCTAssertTrue(route.lifted?.isHidden == true, "the route's header is the bar's title, not content")
+        XCTAssertFalse(route.navigationItem.hidesBackButton, "and UIKit's Back")
+        XCTAssertEqual(navigation.observation()["route"] as? String, key, "the router stays on the route")
+        return more
     }
 
     /// A row whose tab's press leaves the router where it was is the app
@@ -241,9 +320,26 @@ final class NavigationMoreIOSTests: XCTestCase {
         XCTAssertTrue(navigation.popMayBegin(swipe, from: nil, in: nil, velocity: .zero), "More's swipe to its list is UIKit's")
     }
 
-    /// A plain tab on the bar has no navigation bar: its route's header is
-    /// content, and the route's cover is its own safe area past the
-    /// document's insets, as a route under a hidden bar has (`routeEdges`).
+    /// A tab whose panel shows one fixed route with a header is a navigation
+    /// controller from launch, built or not, and its bar shows that header,
+    /// as the platform shows a screen's header (LLP 1075.003 §3.7).
+    func testAFixedRouteWithAHeaderShowsItInItsTabsNavigationBar() throws {
+        let session = try fixture("more-four")
+        let navigation = session.presenter.navigation
+        let tabs = try XCTUnwrap(navigation.tabController)
+        let four = try XCTUnwrap(tabs.viewControllers?[3] as? UINavigationController, "Four's route can show a header")
+        XCTAssertTrue(four.viewControllers.isEmpty, "Four is not built yet")
+        tapTab(tabs, 3)
+        waitFor("Four shows its route") { navigation.routerTab == 3 && four.viewControllers.count == 1 && four.viewIfLoaded?.window != nil }
+        let root = try XCTUnwrap(four.viewControllers.first as? RouteController)
+        XCTAssertTrue(tabs.viewControllers?[3] === four, "the tab keeps its controller")
+        XCTAssertFalse(four.isNavigationBarHidden, "the header is the bar")
+        XCTAssertEqual(root.navigationItem.title, "four")
+    }
+
+    /// A plain tab on the bar has no navigation bar: its route's cover is its
+    /// own safe area past the document's insets, as a route under a hidden
+    /// bar has (`routeEdges`).
     func testAPlainTabOnTheBarIsCoveredForItsSafeArea() throws {
         let session = try fixture("more-plain-bar")
         let navigation = session.presenter.navigation
@@ -259,7 +355,7 @@ final class NavigationMoreIOSTests: XCTestCase {
         let document = session.presenter.insets
         waitFor("Six's route is covered for its safe area", facts: { "cover \(String(describing: navigation.covers[route.node.id])), safe area \(route.view.safeAreaInsets), document \(document)" }) {
             guard case .edges(let edges)? = navigation.covers[route.node.id] else { return false }
-            return abs(edges.top - max(0, route.view.safeAreaInsets.top - document.top)) < 0.5 && edges.top > 0
+            return abs(edges.top - max(0, route.view.safeAreaInsets.top - document.top)) < 0.5 && (edges.top > 0 || edges.bottom > 0)
         }
     }
 
@@ -329,7 +425,10 @@ final class NavigationMoreIOSTests: XCTestCase {
         tabs.selectedViewController = tabs.viewControllers![index]
     }
 
-    private func fixture(_ label: String) throws -> ExactSession {
+    /// `wholeScreen`: the window is the device's screen, as an app's is,
+    /// which decides how many items UIKit's bar holds (the iPhone Duo's side
+    /// bar holds every tab at a regular height); else iPhone 17's size.
+    private func fixture(_ label: String, wholeScreen: Bool = false) throws -> ExactSession {
         let env = ProcessInfo.processInfo.environment
         let plan = try Data(contentsOf: URL(fileURLWithPath: try XCTUnwrap(env["EXACT_MORE_TABS_PLAN"], "build.mjs --test --ios compiles the more-tabs fixture")))
         let session = ExactApp.shared.makeSession(label: label)
@@ -338,8 +437,9 @@ final class NavigationMoreIOSTests: XCTestCase {
         let host = UIViewController()
         // In the test host's scene when it has one: UIKit presents only from a window a scene holds.
         let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene
-        let frame = CGRect(x: 0, y: 0, width: 402, height: 874)
-        let window = scene.map { UIWindow(windowScene: $0) } ?? UIWindow(frame: frame)
+        let iPhone17 = CGRect(x: 0, y: 0, width: 402, height: 874)
+        let window = scene.map { UIWindow(windowScene: $0) } ?? UIWindow(frame: iPhone17)
+        let frame = wholeScreen ? (window.windowScene?.coordinateSpace.bounds ?? iPhone17) : iPhone17
         window.frame = frame
         window.rootViewController = host
         window.makeKeyAndVisible()

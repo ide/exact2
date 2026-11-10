@@ -39,29 +39,9 @@ const READ: [PropId; 6] = [
 /// and the inliner makes their contents one arm (`contract_syntax::inline`),
 /// but for a virtualized list's, whose one `for` owns its rows' state.
 pub fn panel_sites(plan: &Plan) -> Vec<NodesId> {
-    // A prop's binding that is a literal: its opcode and first operand.
-    let literal = |n: NodesId, prop: PropId| {
-        plan.node(n).bindings.iter().find_map(|b| {
-            let b = plan.binding(b);
-            if b.kind != BindingKind::Prop || b.id != prop as u16 {
-                return None;
-            }
-            match crate::vm::instructions(plan.code(b.expr))
-                .collect::<Result<Vec<_>, _>>()
-                .as_deref()
-            {
-                Ok([v, r]) if r.op == exact_plan::Opcode::Return => Some((v.op, v.args[0])),
-                _ => None,
-            }
-        })
-    };
-    let tabpanel = |n: NodesId| {
-        matches!(literal(n, PropId::AccessibilityRole), Some((exact_plan::Opcode::Str, s))
-            if plan.str(exact_plan::StrId(s as u32)) == "tabpanel")
-    };
     (0..plan.nodes.len() as u32)
         .map(NodesId)
-        .filter(|&n| tabpanel(n))
+        .filter(|&n| literal_str(plan, n, PropId::AccessibilityRole) == Some("tabpanel"))
         .filter(|&n| {
             let mut at = enclosing(plan, n);
             while let Some((a, _)) = at {
@@ -75,20 +55,32 @@ pub fn panel_sites(plan: &Plan) -> Vec<NodesId> {
         .collect()
 }
 
-/// Whether each of `sites`, the plan's tab panels ([`panel_sites`]), draws a
-/// stack: it can hold more than one route, because a route of its own (a node
-/// with a `navigationKey` and no route between it and the panel) stands
-/// inside a `for` below it, as `for e in t.stack` draws one per entry, or
-/// because its template holds more than one route. A panel with one route
-/// outside any `for` shows one fixed route, which a host shows without a
-/// stack (LLP 1075.003 §3.7). It is read from the plan, so it holds for a
-/// panel still waiting for its first selection. One template serves every
-/// tab a `for t in nav.tabs` draws, so a template that draws a stack for
-/// some tabs answers `true` for all of them: a stack can show one route, and
-/// a host without one cannot show a pushed route.
-pub fn sites_draw_stacks(plan: &Plan, sites: &[NodesId]) -> Vec<bool> {
+/// Whether each of `sites`, the plan's tab panels ([`panel_sites`]), needs a
+/// navigation controller: its panel can hold more than one route, or its
+/// route can show a header, which the platform shows as its navigation bar
+/// (LLP 1115.000 D5.2). A panel holds more than one route when a route of
+/// its own (a node with a `navigationKey` and no route between it and the
+/// panel) stands inside a `for` below it, as `for e in t.stack` draws one
+/// per entry, or when its template holds more than one route. A route can
+/// show a header when a `header` is its child, shown or not. A panel with
+/// one route outside any `for` and no `header` shows one fixed route with
+/// no bar, which a host shows without a navigation controller (LLP 1075.003
+/// §3.7). It is read from the plan, so it holds for a panel still waiting
+/// for its first selection. One template serves every tab a `for t in
+/// nav.tabs` draws, so a template that needs one for some tabs answers
+/// `true` for all of them: a navigation controller can show one route with
+/// no bar, and a plain one shows no bar and no pushed route.
+pub fn sites_need_navigation(plan: &Plan, sites: &[NodesId]) -> Vec<bool> {
+    let mut headed: Vec<NodesId> = (0..plan.nodes.len() as u32)
+        .map(NodesId)
+        .filter(|&n| literal_str(plan, n, PropId::SemanticTag) == Some("header"))
+        .filter_map(|n| enclosing(plan, n).map(|(parent, _)| parent))
+        .filter(|&parent| binds(plan, parent, PropId::NavigationKey))
+        .collect();
+    headed.sort_unstable();
+    headed.dedup();
     let mut routes = vec![0usize; sites.len()];
-    let mut stacks = vec![false; sites.len()];
+    let mut navigation = vec![false; sites.len()];
     for route in (0..plan.nodes.len() as u32).map(NodesId) {
         if !binds(plan, route, PropId::NavigationKey) {
             continue;
@@ -98,7 +90,7 @@ pub fn sites_draw_stacks(plan: &Plan, sites: &[NodesId]) -> Vec<bool> {
             each |= crossed;
             if let Ok(i) = sites.binary_search(&a) {
                 routes[i] += 1;
-                stacks[i] |= each || routes[i] > 1;
+                navigation[i] |= each || routes[i] > 1 || headed.binary_search(&route).is_ok();
                 break;
             }
             if binds(plan, a, PropId::NavigationKey) {
@@ -107,7 +99,26 @@ pub fn sites_draw_stacks(plan: &Plan, sites: &[NodesId]) -> Vec<bool> {
             at = enclosing(plan, a);
         }
     }
-    stacks
+    navigation
+}
+
+/// The string node `n`'s `prop` is bound to, when that binding is a literal.
+fn literal_str(plan: &Plan, n: NodesId, prop: PropId) -> Option<&str> {
+    plan.node(n).bindings.iter().find_map(|b| {
+        let b = plan.binding(b);
+        if b.kind != BindingKind::Prop || b.id != prop as u16 {
+            return None;
+        }
+        match crate::vm::instructions(plan.code(b.expr))
+            .collect::<Result<Vec<_>, _>>()
+            .as_deref()
+        {
+            Ok([v, r]) if r.op == exact_plan::Opcode::Return && v.op == exact_plan::Opcode::Str => {
+                Some(plan.str(exact_plan::StrId(v.args[0] as u32)))
+            }
+            _ => None,
+        }
+    })
 }
 
 /// Whether node `n` binds `prop`.

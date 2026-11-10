@@ -1,21 +1,29 @@
 // @ref LLP 1075.003 §3.7 — each tab's controller, made with the tab container
 // and never replaced. "You can use navigation controllers or custom view
 // controllers as the root view controller for a tab" (UITabBarController): a
-// tab whose panel draws a stack is a navigation controller, its bar hidden
-// where its first route shows none; a tab whose panel shows one fixed route is
-// a plain view controller (`Runner::panels_draw_stacks` reads which from the
-// plan, so it is known for a tab not built yet). A plain tab has no
-// navigation bar of its own: its route's header is its content, never a bar.
-// A tab the runner has not built yet (§9.14) has its controller from launch,
-// empty until its routes arrive.
+// tab whose panel can hold more than one route, or whose route can show a
+// header, is a navigation controller, which shows that header as the
+// platform's navigation bar and hides the bar where its route shows none; a
+// tab whose panel shows one fixed route with no header is a plain view
+// controller (`Runner::panels_need_navigation` reads which from the plan, so
+// it is known for a tab not built yet). A tab the runner has not built yet
+// (§9.14) has its controller from launch, empty until its routes arrive.
 #if os(iOS) || os(tvOS)
 import UIKit
 
-/// A tab that shows one fixed route, with no navigation controller of its own.
+/// A tab that shows one fixed route with no header, with no navigation
+/// controller of its own.
 final class PlainTab: UIViewController {
     private(set) var route: RouteController?
+    weak var host: NavigationHost?
 
     override func loadView() { view = UIView() }
+
+    // Follow UIKit moving this tab into another controller (`NavigationHost.moved(into:)`): More pushes it for its row
+    override func willMove(toParent parent: UIViewController?) {
+        super.willMove(toParent: parent)
+        if let parent { host?.moved(into: parent) }
+    }
 
     /// Show `next` in place of the route shown now, unanimated.
     func show(_ next: RouteController?) {
@@ -85,11 +93,12 @@ extension NavigationHost {
             .filter { stacks[ObjectIdentifier($0)]?.showsBar == true }.map(\.stackRoutes)
     }
 
-    /// A tab's controller, made once: a navigation controller for a tab
-    /// whose panel draws a stack (`drawsStack`), else a plain tab.
-    func makeTabStack(_ panel: UInt32, _ routes: [RouteController], drawsStack: Bool) -> UIViewController {
-        guard drawsStack else {
+    /// A tab's controller, made once: a navigation controller for a tab that
+    /// needs one (`navigation`), else a plain tab.
+    func makeTabStack(_ panel: UInt32, _ routes: [RouteController], navigation: Bool) -> UIViewController {
+        guard navigation else {
             let plain = PlainTab()
+            plain.host = self
             tabStacks[panel] = plain
             setRoutes(routes, in: plain)
             return plain
@@ -115,8 +124,10 @@ extension NavigationHost {
         }
         prepareRoutes(routes, in: stack)
         if let plain = stack as? PlainTab { return plain.show(routes.first) }
-        guard let nav, !nav.stackRoutes.elementsEqual(routes, by: ===) else { return }
-        nav.setViewControllers(nav.stackFront + routes, animated: false)
+        guard let nav else { return }
+        if !nav.stackRoutes.elementsEqual(routes, by: ===) { nav.setViewControllers(nav.stackFront + routes, animated: false) }
+        // Record what it holds even when it already held them: UIKit moves routes between More and a tab's own
+        // controller, and a pop's Back is found from this record (`recordOwned`)
         recordOwned(nav)
     }
 
@@ -139,15 +150,72 @@ extension NavigationHost {
     }
 
     /// UIKit moved tabs between the bar and More, and their routes with
-    /// them (More's Edit, a width change): a sync in the next turn writes
-    /// each tab's routes where UIKit now holds them and follows the router's
-    /// tab, and More's list gets the tabs it now shows built.
+    /// them (More's Edit, a size class change): one sync in the next turn
+    /// writes each tab's routes where UIKit now holds them and follows the
+    /// router's tab, and More's list gets the tabs it now shows built.
     func syncNextTurn() {
+        guard !resyncOwed else { return }
+        resyncOwed = true
         DispatchQueue.main.async { [weak self] in
-            guard let self, tabOwner != nil else { return }
+            guard let self else { return }
+            resyncOwed = false
+            guard let owner = tabOwner else { return }
+            // Let UIKit first apply what it deferred to layout (a row's push onto More comes in a later turn, measured),
+            // so More's delegate calls and the press they make run before this sync, not inside it
+            owner.view.layoutIfNeeded()
             sync(Batch(ops: [], timers: false, motion: false, clock: nil, error: nil))
             buildTabsUnderMore()
         }
+    }
+
+    /// UIKit is moving a route or a plain tab into `parent`: `willMove(toParent:)`
+    /// comes as UIKit applies the move, before the navigation controller's
+    /// `willShow` for it (iOS 27.1, measured). UIKit makes a new More when it
+    /// needs one again (measured), and Exact adopts it here, so its delegate
+    /// hears this move: a navigation controller Exact has no record of, under
+    /// Exact's tab container, is More, since every tab's and sheet's has one.
+    /// It is not found by `moreNavigationController`, which can already name
+    /// another More while UIKit moves routes (measured). A move Exact did not
+    /// write (a size class change, a row of More's list, More's Edit) is
+    /// followed by a sync in the next turn.
+    func moved(into parent: UIViewController) {
+        #if os(iOS)
+        if let nav = parent as? UINavigationController, tabController != nil, !isAdopted(nav) { adoptMore(nav) }
+        #endif
+        if tabOwner != nil, !syncing { syncNextTurn() }
+    }
+
+    /// Adopt UIKit's More as one of Exact's stacks, its list left to UIKit,
+    /// in place of the More adopted before it, whose record and delegate go:
+    /// UIKit owns what that one holds.
+    func adoptMore(_ nav: UINavigationController) {
+        #if os(iOS)
+        if nav === adoptedMore, isAdopted(nav) { return }
+        if let old = adoptedMore, old !== nav {
+            retireStack(old)
+            if old.delegate is NavigationDelegateProxy { old.delegate = nil }
+        }
+        if let id = adoptedMoreID { stacks.removeValue(forKey: id) }
+        registerStack(nav)
+        watchPops(nav)
+        adoptedMore = nav
+        adoptedMoreID = ObjectIdentifier(nav)
+        #endif
+    }
+
+    /// Whether `nav` has Exact's record and holds its delegate: a controller
+    /// that reuses a released one's address has the record but not the delegate.
+    func isAdopted(_ nav: UINavigationController) -> Bool {
+        stacks[ObjectIdentifier(nav)].map { nav.delegate === $0.proxy } ?? false
+    }
+
+    /// The adopted More leaves Exact: its record goes, also when UIKit has
+    /// let it go already, and its routes leave it.
+    func releaseMore() {
+        if let more = adoptedMore { release(more) }
+        if let id = adoptedMoreID { stacks.removeValue(forKey: id) }
+        adoptedMore = nil
+        adoptedMoreID = nil
     }
 }
 

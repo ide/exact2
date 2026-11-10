@@ -598,11 +598,13 @@ final class NavigationTabsIOSTests: XCTestCase {
         XCTAssertEqual(css(), scrolled, accuracy: 0.5, "the scroll offset survived")
         XCTAssertTrue(try node(session, "list-second") === list, "the same views, retained")
         XCTAssertEqual(try node(session, "draft").field?.text, "kept", "the draft survived")
-        // Reselecting a tab pops it to its root.
+        // Reselecting a tab pops it to its root: UIKit's pop, which the router follows as a Back.
         tapTab(tabs, 0)
         XCTAssertEqual(tabs.selectedIndex, 0, "Home selected")
+        let homeRoot = try XCTUnwrap((home.viewControllers.first as? RouteController)?.key)
         tapTab(tabs, 0)
         until("Home popped to its root") { home.viewControllers.count == 1 && home.transitionCoordinator == nil }
+        until("the router is back on Home's root") { session.presenter.navigation.observation()["route"] as? String == homeRoot && !session.presenter.navigation.changing }
     }
 
     /// A tap on another tab is UIKit's selection (LLP 1075.003 §3.7), and the
@@ -950,8 +952,8 @@ final class NavigationTabsIOSTests: XCTestCase {
     /// expanding, as every tab bar app does. The scroller is the route's
     /// content scroller, the status bar's (D11.1), and it scrolls with
     /// UIKit's animation, which opens the title as it arrives. Another tab's
-    /// tap only selects it, and above the root the router pops (the test
-    /// above). The agent's frozen clock lands there unanimated
+    /// tap only selects it, and above the root UIKit pops (the test above).
+    /// The agent's frozen clock lands there unanimated
     /// (PushedTitleIOSTests).
     func testTheSelectedTabTappedAgainAtItsRootScrollsToTheTop() throws {
         guard UIApplication.shared.connectedScenes.contains(where: { $0 is UIWindowScene }) else {
